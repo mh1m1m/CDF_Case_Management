@@ -19,7 +19,8 @@ const q = (sql) =>
   execFileSync("psql", ["--no-psqlrc", "-At", "-F", FIELD_SEPARATOR, "-d", url, "-c", sql], {
     encoding: "utf8",
   }).trim();
-const cell = (value) => value.replace(/\|/g, "\\|").replace(/`/g, "'");
+// Backslashes are escaped first so an escaped pipe cannot be un-escaped by a preceding literal backslash.
+const cell = (value) => value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/`/g, "'");
 
 const sections = [
   [
