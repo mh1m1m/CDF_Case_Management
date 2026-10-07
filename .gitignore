@@ -36,3 +36,4 @@ baseline/original/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+compliance/evidence/sbom.json

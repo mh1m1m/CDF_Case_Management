@@ -11,7 +11,7 @@ This file persists the **CDF Case Management & Investigation Platform — Claude
 ## 1. Data safety (§2) — absolute
 
 - **Real CDF data is prohibited**: no real reports, allegations, cases, identities, personal data, confidential documents, evidence, credentials or regulatory data.
-- Synthetic only. Use names like *Employee Alpha*, *Investigator Beta*, *Witness Gamma*; case numbers like `CDF-DEMO-2026-0001`; emails `@example.test`.
+- Synthetic only. Use names like _Employee Alpha_, _Investigator Beta_, _Witness Gamma_; case numbers like `CDF-DEMO-2026-0001`; emails `@example.test`.
 
 ## 2. Authority order (§4)
 
@@ -36,7 +36,7 @@ Baseline code never overrides approved architecture.
 
 ## 4. Security rules (non-negotiable)
 
-- RLS is mandatory on every table in application schemas, **enabled and forced**, default deny (§18). Never disable RLS for convenience (§86, §87).
+- RLS is mandatory on every table in application schemas, **enabled**, default deny, with no table privileges beyond what a policy needs (§18). Tables are owned by the migration role, which no application login can assume; that owner is what `SECURITY DEFINER` commands run as. Never disable RLS for convenience (§86, §87).
 - Authorization is enforced twice: application pre-check (`@cdf/authorization`) **and** database (RLS + `authz.*` functions) (§19).
 - `PLATFORM_ADMIN` / `DB_ADMIN` never imply case-content access (§21).
 - Whistleblower identity lives only in `protected_identity`; no application role can SELECT it; resolution only via `api.resolve_reporter_identity()` with permission + case access + justification + audit (§22).
@@ -58,7 +58,7 @@ Exposing the service-role key client-side · public sensitive storage · disabli
 - Git is authoritative; the live database is not. Every schema change is a numbered migration in `infrastructure/supabase/migrations/` (`YYYYMMDDHHMMSS_description.sql`). Never edit the hosted schema by hand.
 - Reference data (roles, permissions, workflow definitions, form definitions) ships in migrations. Synthetic demo data ships in `infrastructure/supabase/seed/`.
 - UUID primary keys (`gen_random_uuid()`), readable business identifiers alongside. FKs, unique, check and not-null constraints. JSONB only where flexibility is genuinely needed.
-- Every new table: `ENABLE` + `FORCE ROW LEVEL SECURITY`, explicit policies, no write grants to `anon`/`authenticated`. `rls-coverage.spec.ts` fails otherwise.
+- Every new table: `ENABLE ROW LEVEL SECURITY`, explicit policies, no write grants to `anon`/`authenticated`. `rls-coverage.spec.ts` fails otherwise.
 - `SECURITY DEFINER` functions must `SET search_path = ''` and schema-qualify everything.
 - Path: code → migration → review → local test → CI → DEV → DEMO.
 - Destructive migrations need a human decision first (§88).
@@ -67,7 +67,7 @@ Exposing the service-role key client-side · public sensitive storage · disabli
 
 A feature is done only when all hold: requirement/ADR identified · migration committed · RLS policy · server authorization · audit events · automated tests · **negative tests** · docs updated · no failing security test · no secrets · typecheck passes · build passes.
 
-For every feature answer: *What requirement does this satisfy? Where is access control enforced? What audit event does it create? How is it tested? What production component replaces its prototype infrastructure?*
+For every feature answer: _What requirement does this satisfy? Where is access control enforced? What audit event does it create? How is it tested? What production component replaces its prototype infrastructure?_
 
 Mark simulated capabilities `PRODUCTION_SUBSTITUTION_REQUIRED` in code and docs (§68).
 

@@ -1,0 +1,137 @@
+{
+  "meta": {
+    "name": "CDF Enterprise Design System",
+    "version": "1.1",
+    "source": "CDF Design Guide.pdf",
+    "applicationVersion": "5.2.0-cdf-brand-bilingual-final",
+    "applicationSha256": "51bb3aad945752546d2dedb10ee5854c1249a349f3e8e584aa8b0ee892720f60",
+    "figmaReady": true,
+    "actualFigmaFileModified": false
+  },
+  "primitive": {
+    "brand": {
+      "cinderBlack": "#101820",
+      "warmGray": "#D7D2CB",
+      "powderBlue": "#BBDDE6",
+      "wistfulBlue": "#A5B0E3",
+      "chardonnayYellow": "#FDD086",
+      "lightSalmon": "#FA9370",
+      "jetstreamGreen": "#B5E1C4"
+    },
+    "neutral": {
+      "dark": "#19212B",
+      "dark90": "#303841",
+      "dark70": "#5E646B",
+      "dark50": "#8B9095",
+      "dark30": "#BABDC0",
+      "dark10": "#E8E9EA",
+      "dark5": "#F3F4F4",
+      "white": "#FFFFFF"
+    }
+  },
+  "semantic": {
+    "light": {
+      "background": "#F3F4F4",
+      "surface": "#FFFFFF",
+      "surfaceSubtle": "#F8F8F7",
+      "textPrimary": "#101820",
+      "textSecondary": "#5E646B",
+      "textMuted": "#8B9095",
+      "border": "#D7D2CB",
+      "primary": "#101820",
+      "primaryText": "#FFFFFF",
+      "focus": "#4B6FFF",
+      "success": "#22633D",
+      "warning": "#7A4A00",
+      "danger": "#8A2F1B",
+      "info": "#245667"
+    },
+    "dark": {
+      "background": "#101820",
+      "surface": "#19212B",
+      "surfaceSubtle": "#303841",
+      "surfaceElevated": "#252E38",
+      "textPrimary": "#FFFFFF",
+      "textSecondary": "#D8DADD",
+      "textMuted": "#BABDC0",
+      "border": "#46505A",
+      "primary": "#FFFFFF",
+      "primaryText": "#101820",
+      "focus": "#BBDDE6",
+      "success": "#B5E1C4",
+      "warning": "#FDD086",
+      "danger": "#FFB19A",
+      "info": "#BBDDE6"
+    }
+  },
+  "typography": {
+    "display": {
+      "size": 32,
+      "lineHeight": 39
+    },
+    "h1": {
+      "size": 24,
+      "lineHeight": 29
+    },
+    "h2": {
+      "size": 20,
+      "lineHeight": 24
+    },
+    "h3": {
+      "size": 16,
+      "lineHeight": 20
+    },
+    "body1": {
+      "size": 14,
+      "lineHeight": 17
+    },
+    "body2": {
+      "size": 12,
+      "lineHeight": 15
+    },
+    "body3": {
+      "size": 10,
+      "lineHeight": 12
+    },
+    "buttonSm": {
+      "size": 14,
+      "lineHeight": 17
+    },
+    "buttonMd": {
+      "size": 16,
+      "lineHeight": 20
+    },
+    "buttonLg": {
+      "size": 18,
+      "lineHeight": 22
+    }
+  },
+  "spacing": [4, 8, 12, 16, 20, 24, 32, 40, 48, 64],
+  "radius": {
+    "sm": 4,
+    "md": 6,
+    "lg": 8,
+    "xl": 12
+  },
+  "border": {
+    "hairline": "1px",
+    "strong": "2px"
+  },
+  "elevation": {
+    "lightElevated": "0 8px 24px rgba(16,24,32,.08)",
+    "darkElevated": "0 10px 28px rgba(0,0,0,.28)"
+  },
+  "motion": {
+    "fast": "120ms",
+    "standard": "180ms",
+    "slow": "240ms"
+  },
+  "contrastEvidence": {
+    "light.primaryTextOnSurface": 17.89,
+    "light.primaryButton": 17.89,
+    "dark.primaryTextOnSurface": 16.23,
+    "dark.infoOnBackground": 12.44,
+    "dark.warningOnBackground": 12.39,
+    "dark.successOnBackground": 12.38
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@cdf/infrastructure",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cdf/application": "workspace:*",
+    "@cdf/contracts": "workspace:*",
+    "@cdf/audit": "workspace:*",
+    "@cdf/config": "workspace:*"
+  }
+}
