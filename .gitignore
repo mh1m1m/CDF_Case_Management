@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# environment: never commit secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# local runtime data
+.local-storage/
+.local-db/
+infrastructure/supabase/.branches/
+infrastructure/supabase/.temp/
+supabase/.temp/
+
+# baseline originals are kept out of git (see BASELINE_ANALYSIS.md, archive manifest)
+baseline/original/
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea/
