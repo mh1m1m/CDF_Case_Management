@@ -15,6 +15,20 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Nothing here is a produ
 | TEST_AUTOMATION_PERCENT             | 45%   | Unit, DB security (81), integration, e2e (4), accessibility (4) in CI; Supabase-CLI CI job not yet run                                                                         |
 | BASELINE_MIGRATION_PERCENT          | 30%   | Baseline intake/triage/case/workflow features migrated; evidence and later modules pending                                                                                     |
 
+## Engineering status (CDF-CEOM)
+
+| Field                      | Value                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| Current phase              | 2–6 first secure vertical slice (code complete, not yet reviewed)            |
+| Current epic               | Not yet mapped (Linear CONNECTOR_UNAVAILABLE)                                |
+| Current issues             | Not yet created (see `CONNECTED_SYSTEMS_BASELINE.md`)                        |
+| Latest stable commit       | Local only; no remote CI run yet                                             |
+| Latest stable deployment   | None                                                                         |
+| Database migration version | `20261007000800_public_api`                                                  |
+| Known blockers             | GitHub repository not created; Linear/Supabase/Vercel connectors not enabled |
+| Critical security issues   | None known                                                                   |
+| Next work                  | Push and open PRs; reconcile Linear; security, data model and workflow docs  |
+
 ## Phases
 
 | Phase                     | Status                                                                                                                        |

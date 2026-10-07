@@ -1,6 +1,11 @@
 # CLAUDE.md — Governing Rules for this Repository
 
-This file persists the **CDF Case Management & Investigation Platform — Claude Code Full-Stack Reference Implementation Engine, v1.0** protocol. It is the highest authority for any work in this repository (protocol §4). Where this file summarises, the full protocol text governs; section numbers (§) refer to it.
+This file persists two governing protocols, which apply together:
+
+- the **CDF Case Management & Investigation Platform — Claude Code Full-Stack Reference Implementation Engine, v1.0** (section numbers `§` refer to it), and
+- the **CDF Connected Engineering Operating Model (CDF-CEOM), v1.0**, which governs how connected systems are used (summarised in §11 below).
+
+Together they are the highest authority for any work in this repository (protocol §4). Where this file summarises, the full protocol text governs.
 
 ## 0. What this repository is
 
@@ -99,3 +104,32 @@ pnpm test              # unit
 pnpm test:db           # integration + security against the database
 pnpm test:e2e          # Playwright
 ```
+
+## 11. Connected systems (CDF-CEOM)
+
+Use the right system at the right time, with one source of truth each. Do not invoke connectors mechanically; use each only when it materially contributes. Current reachability is recorded in `CONNECTED_SYSTEMS_BASELINE.md`; an unreachable system is reported as `CONNECTOR_UNAVAILABLE`, never guessed.
+
+| System       | System of record for                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------- |
+| GitHub       | Code, config, migrations, tests, CI, ADRs, architecture-as-code, repository compliance mappings, evidence |
+| Linear       | Backlog, epics, issues, dependencies, delivery status, priority, acceptance criteria, blockers            |
+| Google Drive | Formal CDF reference documents, policies, requirements, approved forms, reference packages                |
+| Supabase     | Prototype DB state as executed (GitHub migrations remain the intended-state authority)                    |
+| Vercel       | Prototype deployments, previews, build/deploy logs                                                        |
+| Sentry       | Runtime exceptions, regressions, performance                                                              |
+| Mixpanel     | Approved, non-sensitive synthetic UX telemetry only                                                       |
+| Slack        | Nothing. Communication only; decisions made there are formalised in an ADR, Linear or Drive               |
+
+Rules:
+
+- **Work items.** Before material work, find or create the Linear issue (no duplicates). Branches `feature|fix|security|refactor|docs/<LINEAR-ID>-description`; PR titles `[<LINEAR-ID>] …`. Ordinary tasks live in Linear only, not also in GitHub Issues. Discovered defects, gaps, debt and production substitutions get their own issue, with security severity (CRITICAL/HIGH/MEDIUM/LOW) and priority recorded separately. Substitutions are labelled `PRODUCTION_SUBSTITUTION_REQUIRED`.
+- **Status vocabulary.** BACKLOG · READY · IN_PROGRESS · IN_REVIEW · DEPLOYED_TO_PREVIEW · VALIDATING · BLOCKED · DONE (map to the workspace's own names). CODE_COMPLETE is not DONE.
+- **PR body sections.** Linear Issue · Summary · Why · Architecture Impact · Database Changes · Security Impact · Privacy/Data Impact · RLS Impact · Tests · Evidence · Deployment Impact · Production Substitution · Known Limitations.
+- **Done** additionally requires, where applicable: CI passed (record workflow, run ID, commit), PR reviewed, Vercel preview verified for web-facing work, Sentry checked, Linear acceptance criteria met.
+- **Supabase.** No undocumented live changes. On drift between live state and migrations, record EXPECTED / ACTUAL / DRIFT / CAUSE / REMEDIATION and raise an issue; never accept live state silently. No public evidence bucket, ever.
+- **Drive.** Search Drive before asking for a document again. When Drive conflicts with the repository, surface the conflict; do not silently pick one. Do not copy confidential documents into the repository.
+- **Sentry and Mixpanel data minimisation.** Never send reporter names, case narratives, evidence content, tokens, passwords or personal identifiers. Mixpanel events must be in an approved event catalogue (name, purpose, trigger, properties, classification, personal data?, owner, retention) before they are instrumented.
+- **No sensitive data crosses systems.** Engineering systems hold synthetic data, IDs and technical metadata only, labelled SYNTHETIC / DEMO / TEST where practical.
+- **Human decision** also required for: production-like environment resets, a new third-party processor, and merging a major security-sensitive change where governance requires approval.
+- **Session start.** Recover state from CLAUDE.md, Linear, GitHub, repository docs and, where needed, Supabase/Vercel/Sentry. Do not rely on conversational memory.
+- **Lock-in.** Every prototype service has a documented migration path (`architecture/PRODUCTION_MAPPING.md`): Supabase Auth → CDF OIDC, Storage → Alibaba OSS, Postgres → RDS PostgreSQL, Vercel → CDF Alibaba runtime, Sentry → approved SOC/observability, Mixpanel → approved analytics or removal.
