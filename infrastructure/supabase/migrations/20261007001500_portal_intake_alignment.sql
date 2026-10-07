@@ -12,8 +12,8 @@
 --
 -- Field 19 (reporter attachments) is not in this migration: evidence is case-bound (0900), so
 -- portal uploads need their own intake attachment design (CDF-72).
--- The vault keeps no grants and no policies; this migration adds columns and widens the output of
--- api.resolve_reporter_identity() only. Security review: AGENT-09 (CDF-62 thread).
+-- The vault keeps no grants and no policies; this migration only adds columns. The reveal command
+-- api.resolve_reporter_identity() is unchanged (CDF-76). Security review: AGENT-09 (CDF-62 thread).
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -295,49 +295,7 @@ grant execute on function
   public_api.submit_report(text, text, text, text, text, text, text, text, text, date, time, text, boolean, text, jsonb)
 to anon;
 
--- -----------------------------------------------------------------------------
--- api.resolve_reporter_identity: same checks, dual control and audit as 0700; returns the new
--- vault columns too. The output shape changes, so the function is dropped and recreated.
--- -----------------------------------------------------------------------------
-drop function api.resolve_reporter_identity(uuid, text);
-
-create function api.resolve_reporter_identity(p_case_id uuid, p_justification text)
-returns table (wb_id text, full_name text, email text, phone text, preferred_contact text,
-               given_name text, father_name text, grandfather_name text, family_name text, gender text,
-               birth_date text, birth_date_calendar text, id_type text, id_number text, city text, nationality text)
-language plpgsql security definer
-set search_path = ''
-as $$
-declare
-  v_actor uuid := api._actor();
-  v_case case_mgmt.case_record;
-  v_req protected_identity.reveal_request;
-  v_just text;
-begin
-  if not authz.can_view_case(p_case_id) then perform api._fail('NOT_FOUND'); end if;
-  if not authz.can_reveal_whistleblower_identity(p_case_id) then perform api._fail('FORBIDDEN'); end if;
-  v_just := api._require_text(p_justification, 'justification', 20, 2000);
-  select * into v_case from case_mgmt.case_record c where c.id = p_case_id;
-  if v_case.reporter_wb_id is null
-     or not exists (select 1 from protected_identity.reporter_identity i where i.wb_id = v_case.reporter_wb_id) then
-    perform api._fail('CONFLICT', 'NO_IDENTITY_ON_FILE');
-  end if;
-  if v_case.identity_reveal_requires_approval then
-    select * into v_req from protected_identity.reveal_request r
-     where r.case_id = p_case_id and r.requested_by = v_actor and r.status = 'APPROVED' and r.expires_at > now()
-     order by r.decided_at desc limit 1 for update;
-    if v_req.id is null then perform api._fail('CONFLICT', 'APPROVED_REVEAL_REQUEST_REQUIRED'); end if;
-    update protected_identity.reveal_request set status = 'USED', used_at = now() where id = v_req.id;
-  end if;
-  -- Audit first; identity values are never written to the ledger.
-  perform audit.record_event('REPORTER_IDENTITY_REVEALED', 'SECURITY', 'SUCCESS', p_case_id, 'reporter_identity',
-    v_case.reporter_wb_id, v_just, jsonb_build_object('reveal_request_id', v_req.id));
-  return query
-    select i.wb_id, i.full_name, i.email, i.phone, i.preferred_contact,
-           i.given_name, i.father_name, i.grandfather_name, i.family_name, i.gender,
-           i.birth_date, i.birth_date_calendar, i.id_type, i.id_number, i.city, i.nationality
-    from protected_identity.reporter_identity i where i.wb_id = v_case.reporter_wb_id;
-end;
-$$;
-
-grant execute on function api.resolve_reporter_identity(uuid, text) to authenticated;
+-- api.resolve_reporter_identity() is deliberately NOT changed (CDF-76, data-minimisation default,
+-- overridable by Fady): an approved reveal returns the composed full name and contact details only.
+-- Gender, date of birth, ID type/number, city and nationality stay in the vault; any later need gets
+-- a separate, separately authorised and audited command.

@@ -180,12 +180,13 @@ export function ReportForm({ locale }: { locale: Locale }) {
           <CDFField
             id="relationshipOther"
             label={t("portal.relationshipOther")}
+            hint={t("portal.otherTextHint")}
             optionalLabel={t("common.optional")}
             error={e.relationshipOther}
           >
             <textarea
               {...register("relationshipOther")}
-              {...fieldIds("relationshipOther", { error: e.relationshipOther })}
+              {...fieldIds("relationshipOther", { hint: "y", error: e.relationshipOther })}
               className={textareaClass}
               rows={3}
             />
@@ -214,12 +215,13 @@ export function ReportForm({ locale }: { locale: Locale }) {
           <CDFField
             id="categoryOther"
             label={t("portal.categoryOther")}
+            hint={t("portal.otherTextHint")}
             optionalLabel={t("common.optional")}
             error={e.categoryOther}
           >
             <textarea
               {...register("categoryOther")}
-              {...fieldIds("categoryOther", { error: e.categoryOther })}
+              {...fieldIds("categoryOther", { hint: "y", error: e.categoryOther })}
               className={textareaClass}
               rows={3}
             />

@@ -90,12 +90,13 @@ describe("identity vault", () => {
       await s.as("grcDirector");
       const identity = await s.tx`select * from api.resolve_reporter_identity(${caseB}, ${JUSTIFICATION})`;
       expect(identity).toHaveLength(1);
-      expect(identity[0]).toMatchObject({
+      // Data minimisation (CDF-76): name and contact details only; ID document and birth date stay in the vault.
+      expect(identity[0]).toEqual({
+        wb_id: expect.stringMatching(/^WBID-/),
         full_name: "Reporter Gamma Synthetic Example",
         email: "reporter.gamma@example.test",
-        id_type: "NATIONAL_ID",
-        id_number: "1000000001",
-        birth_date_calendar: "GREGORIAN",
+        phone: "+966 500000001",
+        preferred_contact: "EMAIL",
       });
 
       // Single use: a second resolution needs a new approval.

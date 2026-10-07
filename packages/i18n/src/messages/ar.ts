@@ -243,6 +243,7 @@ export const ar: Messages = {
       OTHER: "أخرى",
     },
     relationshipOther: "وضّح علاقتك بالصندوق",
+    otherTextHint: "لا تذكر اسمك أو أي معلومات تكشف هويتك.",
     violationType: "نوع المخالفة",
     categoryOther: "وضّح نوع المخالفة",
     personsReported: "المُبلَّغ عنهم",

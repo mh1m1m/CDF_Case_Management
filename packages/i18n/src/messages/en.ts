@@ -241,6 +241,7 @@ export const en = {
       OTHER: "Other",
     },
     relationshipOther: "Describe your relationship",
+    otherTextHint: "Do not include your name or anything else that identifies you.",
     violationType: "Type of violation",
     categoryOther: "Describe the type of violation",
     personsReported: "Who is being reported?",
