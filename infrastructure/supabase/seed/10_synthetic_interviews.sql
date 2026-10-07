@@ -4,7 +4,8 @@
 -- application and leaves a valid audit hash chain. Every name and statement here is fictitious.
 -- =============================================================================
 
-create function pg_temp.act_as(p_email text)
+-- "or replace": the Supabase CLI runs all seed files in one session, where 02 already defined it.
+create or replace function pg_temp.act_as(p_email text)
 returns void
 language sql
 as $$
