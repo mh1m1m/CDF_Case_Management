@@ -1,0 +1,367 @@
+# Machine-readable traceability (protocol §50, §93).
+#
+# One entry per requirement the reference implementation claims to address.
+# `id` is this repository's own identifier. The CDF Compliance Master Workbook and
+# architecture-requirement IDs live in Google Drive, which was CONNECTOR_UNAVAILABLE
+# when this file was written (see CONNECTED_SYSTEMS_BASELINE.md); `external_ids`
+# is left empty until they can be reconciled.
+#
+# status: COMPLETE | IN_PROGRESS | NOT_STARTED | PRODUCTION_SUBSTITUTION_REQUIRED
+# Paths are repository-relative. Tests are the automated proof; "none" is stated, not omitted.
+# Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. "COMPLETE" means complete in the prototype.
+
+version: 1
+updated: 2026-10-07
+linear_issues: CONNECTOR_UNAVAILABLE
+
+requirements:
+  - id: CDF-ARCH-001
+    title: "Separate public whistleblowing app and authenticated investigation app"
+    source: [protocol §11, ADR-002]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        apps/whistleblowing-web,
+        apps/investigation-web,
+        infrastructure/supabase/migrations/20261007000100_foundation.sql,
+      ]
+    tests: [tests/security/rls-coverage.spec.ts, tests/security/public-portal.spec.ts]
+    production_substitution: "Two Alibaba workloads behind CDF ingress"
+
+  - id: CDF-ARCH-002
+    title: "Infrastructure behind ports; no Supabase or Vercel behaviour in domain rules"
+    source: [protocol §6, §7, §87, ADR-008, ADR-009]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/application/src/ports.ts, packages/infrastructure, eslint.config.mjs]
+    tests: [pnpm lint]
+
+  - id: CDF-ARCH-003
+    title: "Git-authoritative numbered migrations; reference data ships in migrations"
+    source: [protocol §12–§14]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [infrastructure/supabase/migrations, scripts/db/reset.mjs]
+    tests: [.github/workflows/ci.yml database job, tests/integration/mirrors.spec.ts]
+
+  - id: CDF-SEC-001
+    title: "Row-level security enabled on every application table, default deny"
+    source: [protocol §18, ADR-003]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [infrastructure/supabase/migrations, infrastructure/supabase/policies/policy-snapshot.md]
+    tests: [tests/security/rls-coverage.spec.ts]
+
+  - id: CDF-SEC-002
+    title: "No table write privileges for application roles; writes only through audited command functions"
+    source: [protocol §18, §29]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007000700_api_commands.sql,
+        infrastructure/supabase/migrations/20261007000800_public_api.sql,
+      ]
+    tests: [tests/security/rls-coverage.spec.ts, tests/security/case-isolation.spec.ts]
+
+  - id: CDF-SEC-003
+    title: "Authorization enforced in the application layer and again in the database"
+    source: [protocol §19, §87]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [packages/authorization, infrastructure/supabase/migrations/20261007000500_authz_case_and_policies.sql]
+    tests: [tests/security/case-isolation.spec.ts, tests/integration/mirrors.spec.ts]
+
+  - id: CDF-SEC-004
+    title: "Case-level access by assignment or grant, clearance (ABAC) and restricted flag"
+    source: [protocol §19, §21]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [authz.user_can_view_case, api.assign_case, api.grant_case_access, api.change_case_classification]
+    tests: [tests/security/case-isolation.spec.ts]
+
+  - id: CDF-SEC-005
+    title: "Administrative separation: platform and database administrators have no case content access"
+    source: [protocol §21]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [infrastructure/supabase/migrations/20261007000200_iam.sql]
+    tests: [tests/security/admin-separation.spec.ts]
+
+  - id: CDF-SEC-006
+    title: "Whistleblower identity vault with no application grants; controlled, dual-approved, audited reveal"
+    source: [protocol §22, ADR-004]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        protected_identity schema,
+        api.request_identity_reveal,
+        api.decide_identity_reveal,
+        api.resolve_reporter_identity,
+      ]
+    tests: [tests/security/whistleblower-vault.spec.ts]
+
+  - id: CDF-SEC-007
+    title: "Anonymous follow-up by Report ID and high-entropy secret; HMAC storage; no existence disclosure; lockout"
+    source: [protocol §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [packages/domain/src/index.ts, infrastructure/supabase/migrations/20261007000800_public_api.sql]
+    tests: [tests/security/public-portal.spec.ts, tests/e2e/first-slice.spec.ts]
+    production_substitution: "HMAC pepper from KMS/HSM instead of PrototypeKeyProvider"
+
+  - id: CDF-SEC-008
+    title: "Boundary rate limiting for the public portal and sign-in"
+    source: [protocol §23, threat T24]
+    external_ids: []
+    status: PRODUCTION_SUBSTITUTION_REQUIRED
+    enforcement:
+      [
+        core.consume_rate_limit,
+        packages/application/src/portal.ts,
+        apps/investigation-web/src/app/login/actions.ts,
+      ]
+    tests: [tests/integration/first-slice.spec.ts]
+    production_substitution: "WAF / API gateway rate limiting and bot protection"
+
+  - id: CDF-SEC-009
+    title: "Append-only, hash-chained audit ledger written in the same transaction as every command"
+    source: [protocol §29, §74, ADR-005]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007000300_authz_core_and_audit.sql,
+        audit.record_event,
+        api.verify_audit_chain,
+      ]
+    tests: [tests/security/audit-immutability.spec.ts]
+    production_substitution: "Forwarding to Alibaba SLS / CDF SIEM; external immutability"
+
+  - id: CDF-SEC-010
+    title: "Security events for denied access, forged context and portal failures, readable by SOC only"
+    source: [protocol §29, §83]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [api.record_security_event, audit_security_read policy, packages/audit]
+    tests:
+      [
+        tests/security/audit-immutability.spec.ts,
+        tests/security/case-isolation.spec.ts,
+        tests/security/authorization.spec.ts,
+      ]
+
+  - id: CDF-SEC-011
+    title: "Per-transaction security context; connections without context have no privileges; forged claims fail closed"
+    source: [protocol §18, threats T18, T19]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/infrastructure/src/db/security-context.ts, authz.current_subject]
+    tests: [tests/security/authorization.spec.ts]
+
+  - id: CDF-SEC-012
+    title: "Parameterised data access; hostile input treated as data"
+    source: [threat T13]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/infrastructure (postgres.js parameters), command function parameters]
+    tests: [tests/security/authorization.spec.ts]
+
+  - id: CDF-SEC-013
+    title: "Service-role key never in the browser or NEXT_PUBLIC_*; no secrets in Git"
+    source: [protocol §46–§48]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/config, .gitignore, .env.example]
+    tests: [packages/config unit tests, .github/workflows/ci.yml secret-scan]
+
+  - id: CDF-SEC-014
+    title: "Generic user-facing errors with correlation id; no SQL or stack traces to the client"
+    source: [protocol §82]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/application/src/errors.ts, apps/investigation-web/src/server/actions-helpers.ts]
+    tests: [packages/application unit tests]
+
+  - id: CDF-SEC-015
+    title: "Content Security Policy with per-request nonce and hardening headers on both apps"
+    source: [protocol §44]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/config/src/security-headers.ts, apps/*/src/proxy.ts]
+    tests: [tests/e2e/first-slice.spec.ts, packages/config unit tests]
+
+  - id: CDF-SEC-016
+    title: "Sessions: idle timeout, HttpOnly cookie, revoked users lose access immediately"
+    source: [protocol §19, ADR-010]
+    external_ids: []
+    status: PRODUCTION_SUBSTITUTION_REQUIRED
+    enforcement: [packages/infrastructure/src/identity, authz.current_user_id]
+    tests:
+      [
+        packages/infrastructure unit tests,
+        tests/e2e/first-slice.spec.ts,
+        tests/security/case-isolation.spec.ts,
+      ]
+    production_substitution: "CDF corporate IdP via OIDC with MFA; LocalDevIdentityProvider is development-only"
+
+  - id: CDF-SEC-017
+    title: "Separation of duties in workflow approvals and conflict decisions"
+    source: [protocol §31, §33]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [api.transition_case, api.available_transitions, api.decide_conflict]
+    tests: [tests/security/case-isolation.spec.ts]
+
+  - id: CDF-SEC-018
+    title: "Sequential business numbers are display-only; UUID keys; every lookup authorised"
+    source: [protocol §87]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [case_mgmt.case_record.case_number, api.open_case]
+    tests: [tests/security/authorization.spec.ts, tests/security/case-isolation.spec.ts]
+
+  - id: CDF-DATA-001
+    title: "Synthetic data only; constraints prevent non-synthetic users and case numbers"
+    source: [protocol §2]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        iam.user_profile constraints,
+        case_mgmt.case_number_counter,
+        packages/domain patterns,
+        CDFClassificationBanner,
+      ]
+    tests: [infrastructure/supabase/seed, tests/accessibility/a11y.spec.ts]
+
+  - id: CDF-WF-001
+    title: "Data-driven workflow engine with permission, condition and reason guards"
+    source: [protocol §30–§33, ADR-007]
+    external_ids: []
+    status: IN_PROGRESS
+    enforcement:
+      [infrastructure/supabase/migrations/20261007000600_workflow_definition.sql, api.transition_case]
+    tests: [tests/integration/first-slice.spec.ts, tests/integration/mirrors.spec.ts]
+    notes: "Transitions through INVESTIGATION are enabled and tested; later transitions are defined but disabled."
+
+  - id: CDF-INTAKE-001
+    title: "Intake and triage of portal reports with reporter messaging"
+    source: [protocol §34–§35]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [api.triage_report, api.reply_to_reporter, public_api.post_reporter_message]
+    tests: [tests/integration/first-slice.spec.ts, tests/security/public-portal.spec.ts]
+
+  - id: CDF-CASE-001
+    title: "Case master with classification, priority, assignment roles and access grants"
+    source: [protocol §36]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007000400_domain_tables.sql,
+        api.create_case_from_report,
+        api.update_case_details,
+        api.assign_case,
+      ]
+    tests: [tests/integration/first-slice.spec.ts, tests/security/case-isolation.spec.ts]
+
+  - id: CDF-UX-001
+    title: "Arabic RTL and English LTR from the start; all copy from the i18n catalogue"
+    source: [protocol §42]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/i18n, packages/ui, "apps/*/src/app/[locale]"]
+    tests: [tests/accessibility/a11y.spec.ts, tests/e2e/first-slice.spec.ts]
+
+  - id: CDF-UX-002
+    title: "Accessibility (WCAG 2.1 AA) checked automatically"
+    source: [protocol §43]
+    external_ids: []
+    status: IN_PROGRESS
+    enforcement: [packages/ui/src/components.tsx]
+    tests: [tests/accessibility/a11y.spec.ts]
+    notes: "axe-core passes on the slice pages; manual screen-reader review not yet done."
+
+  - id: CDF-DEVSECOPS-001
+    title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
+    source: [protocol §49]
+    external_ids: []
+    status: IN_PROGRESS
+    enforcement: [.github/workflows/ci.yml, .github/workflows/codeql.yml, .github/dependabot.yml]
+    tests: [CI]
+    notes: "First remote run pending on PR #1–#3; Supabase CLI job unverified."
+
+  - id: CDF-EVID-001
+    title: "Evidence storage with private buckets, immutable object keys, custody and malware scanning"
+    source: [protocol §24–§27, ADR-006]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    production_substitution: "Alibaba OSS with WORM, KMS SSE, approved scanner"
+
+  - id: CDF-INV-001
+    title: "Interviews, findings and investigation plan"
+    source: [protocol §37]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+
+  - id: CDF-COM-001
+    title: "Committee, quorum, votes, decisions and corrective actions"
+    source: [protocol §38]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    notes: "Quorum rule is SOURCE_REQUIRED in config.setting."
+
+  - id: CDF-REC-001
+    title: "Retention, legal hold and disposition"
+    source: [protocol §41]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: [case_mgmt.case_record reserved columns]
+    tests: []
+
+  - id: CDF-NOTIF-001
+    title: "Notifications carrying no investigation content"
+    source: [protocol §39]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+
+  - id: CDF-SEARCH-001
+    title: "Search applies authorization before results, counts, facets and snippets"
+    source: [protocol §40]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+
+  - id: CDF-OBS-001
+    title: "Runtime error monitoring with data minimisation"
+    source: [CDF-CEOM Sentry section]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    notes: "Requires a human decision (new third-party processor) before instrumentation."
+
+  - id: CDF-ANALYTICS-001
+    title: "Approved, non-sensitive product analytics with an event catalogue"
+    source: [CDF-CEOM Mixpanel section]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    notes: "Requires a human decision and an approved catalogue before instrumentation."

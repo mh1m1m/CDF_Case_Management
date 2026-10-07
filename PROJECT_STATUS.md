@@ -17,24 +17,24 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Nothing here is a produ
 
 ## Engineering status (CDF-CEOM)
 
-| Field                      | Value                                                                        |
-| -------------------------- | ---------------------------------------------------------------------------- |
-| Current phase              | 2–6 first secure vertical slice (code complete, not yet reviewed)            |
-| Current epic               | Not yet mapped (Linear CONNECTOR_UNAVAILABLE)                                |
-| Current issues             | Not yet created (see `CONNECTED_SYSTEMS_BASELINE.md`)                        |
-| Latest stable commit       | Local only; no remote CI run yet                                             |
-| Latest stable deployment   | None                                                                         |
-| Database migration version | `20261007000800_public_api`                                                  |
-| Known blockers             | GitHub repository not created; Linear/Supabase/Vercel connectors not enabled |
-| Critical security issues   | None known                                                                   |
-| Next work                  | Push and open PRs; reconcile Linear; security, data model and workflow docs  |
+| Field                      | Value                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Current phase              | 2–6 first secure vertical slice (code complete, not yet reviewed)                                                   |
+| Current epic               | Not yet mapped (Linear CONNECTOR_UNAVAILABLE)                                                                       |
+| Current issues             | Not yet created (see `CONNECTED_SYSTEMS_BASELINE.md`)                                                               |
+| Latest stable commit       | `phase-2-6/first-vertical-slice` on https://github.com/mh1m1m/CDF_Case_Management (PR #3); first CI run in progress |
+| Latest stable deployment   | None                                                                                                                |
+| Database migration version | `20261007000800_public_api`                                                                                         |
+| Known blockers             | Linear, Drive, Supabase, Vercel, Sentry, Mixpanel and Slack connector tools not enabled for Claude sessions         |
+| Critical security issues   | None known                                                                                                          |
+| Next work                  | Drive PRs #1–#3 to green; reconcile Linear once reachable; Phase 7 evidence after review                            |
 
 ## Phases
 
 | Phase                     | Status                                                                                                                        |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | 0 Baseline analysis       | COMPLETE (pending review)                                                                                                     |
-| 1 Repository + governance | COMPLETE (pending review; GitHub repository not yet created)                                                                  |
+| 1 Repository + governance | COMPLETE (pending review)                                                                                                     |
 | 2 DB/domain foundation    | COMPLETE for slice scope                                                                                                      |
 | 3 Identity, roles, RLS    | IN_PROGRESS (local-dev identity is PRODUCTION_SUBSTITUTION_REQUIRED; Supabase Auth adapter untested against a hosted project) |
 | 4 Case master + ACL       | COMPLETE for slice scope                                                                                                      |
@@ -44,6 +44,6 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Nothing here is a produ
 
 ## Open issues
 
-- The GitHub repository does not exist yet, so CI has never run remotely.
+- Repository: https://github.com/mh1m1m/CDF_Case_Management. PRs #1 (Phase 0), #2 (Phase 1), #3 (Phases 2–6) are stacked drafts; first CI run pending.
 - The Supabase CLI compatibility job in `ci.yml` is unverified until CI runs.
 - Hosted Supabase and Vercel environments are not provisioned (not needed until a DEMO deployment).
