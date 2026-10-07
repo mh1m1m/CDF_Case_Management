@@ -1,0 +1,2902 @@
+{
+  "appVersion": "5.2.0-cdf-brand-bilingual-final",
+  "forms": {
+    "order": [
+      "WB-FRM-01",
+      "WB-FRM-02",
+      "WB-FRM-03",
+      "WB-FRM-04",
+      "WB-FRM-05",
+      "WB-FRM-06",
+      "WB-FRM-07",
+      "WB-FRM-08",
+      "WB-FRM-09",
+      "WB-FRM-10",
+      "WB-FRM-11",
+      "WB-FRM-12",
+      "WB-FRM-13",
+      "WB-FRM-14",
+      "WB-FRM-15",
+      "WB-FRM-16",
+      "WB-FRM-17",
+      "WB-FRM-18",
+      "WB-FRM-19"
+    ],
+    "catalog": {
+      "WB-FRM-01": {
+        "name": "نموذج تسجيل بلاغ / إحالة",
+        "purpose": "تسجيل البلاغ أو الإحالة وإثبات مصدرها وبياناتها الأساسية.",
+        "source": "GOVERNING_PROCEDURE + BUSINESS_REQUIREMENTS",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": false,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "بيانات الاستلام",
+            "fields": [
+              {
+                "name": "intake_type",
+                "label": "نوع الاستلام",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "بلاغ عبر الموقع",
+                  "بلاغ عبر البريد الإلكتروني",
+                  "إحالة مباشرة من إدارة",
+                  "إحالة مباشرة من قطاع",
+                  "إحالة إلى أمين سر اللجنة",
+                  "إحالة من جهة مختصة",
+                  "مصدر رسمي آخر"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "intake_date",
+                "label": "تاريخ الاستلام",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "intake_time",
+                "label": "وقت الاستلام",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "source_reference",
+                "label": "المرجع/رقم البلاغ",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "channel",
+                "label": "القناة",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "بيانات المبلّغ أو المحيل",
+            "fields": [
+              {
+                "name": "reporter_mode",
+                "label": "نمط المبلّغ",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "معروف الهوية",
+                  "بريد إلكتروني فقط",
+                  "مجهول الهوية",
+                  "غير منطبق - إحالة مباشرة"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "reporter_reference",
+                "label": "مرجع المبلّغ",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "referring_department",
+                "label": "الإدارة/القطاع المحيل",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "referring_person",
+                "label": "اسم المحيل",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "referring_title",
+                "label": "المسمى الوظيفي للمحيل",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "موضوع البلاغ/الإحالة",
+            "fields": [
+              {
+                "name": "subject_name",
+                "label": "الشخص/الجهة محل البلاغ",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "violation_category",
+                "label": "نوع المخالفة",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "violation_date",
+                "label": "تاريخ الواقعة",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "violation_location",
+                "label": "مكان الواقعة",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "summary",
+                "label": "وصف موجز للبلاغ/الإحالة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "attachments_summary",
+                "label": "المرفقات المستلمة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-02": {
+        "name": "تصنيف السرية وحماية المبلّغ",
+        "purpose": "تحديد مستوى السرية وحماية هوية المبلّغ ومخاطر الإيذاء.",
+        "source": "WHISTLEBLOWING_POLICY",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "تصنيف السرية",
+            "fields": [
+              {
+                "name": "confidentiality",
+                "label": "تصنيف السرية",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "مقيد",
+                  "سري - عند اعتماده"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "identity_known",
+                "label": "هل الهوية معلومة؟",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "identity_protection_required",
+                "label": "هل يتطلب حماية هوية؟",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "need_to_know_scope",
+                "label": "نطاق الحاجة إلى المعرفة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "الحماية",
+            "fields": [
+              {
+                "name": "retaliation_risk",
+                "label": "مخاطر الإيذاء/الانتقام",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "منخفض",
+                  "متوسط",
+                  "مرتفع",
+                  "غير قابل للتحديد"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "protection_measures",
+                "label": "تدابير الحماية",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "authorized_identity_viewers",
+                "label": "المصرح لهم بالاطلاع على الهوية",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "sharing_restrictions",
+                "label": "قيود المشاركة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-03": {
+        "name": "فحص اكتمال البيانات",
+        "purpose": "التحقق من الحد الأدنى للمعلومات اللازمة للتقييم.",
+        "source": "GOVERNING_PROCEDURE + BUSINESS_REQUIREMENTS",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": false,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "قائمة تحقق",
+            "fields": [
+              {
+                "name": "clear_allegation",
+                "label": "وصف المخالفة واضح",
+                "type": "boolean",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "subject_identified",
+                "label": "تحديد الشخص/الجهة محل البلاغ",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "dates_available",
+                "label": "التواريخ/الفترة متاحة",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "location_available",
+                "label": "الموقع متاح",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "documents_available",
+                "label": "مستندات متاحة",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "witnesses_available",
+                "label": "شهود/مصادر معلومات متاحة",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "referral_reference_available",
+                "label": "مرجع الإحالة متاح",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "نتيجة الاكتمال",
+            "fields": [
+              {
+                "name": "completeness",
+                "label": "النتيجة",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "مكتمل",
+                  "مكتمل جزئياً",
+                  "غير كافٍ للتقييم"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "missing_items",
+                "label": "البيانات الناقصة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "request_date",
+                "label": "تاريخ طلب الاستكمال",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "response_due_date",
+                "label": "تاريخ الاستحقاق",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "response_received",
+                "label": "تاريخ الاستلام",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-04": {
+        "name": "قرار إلغاء بلاغ لعدم الاستكمال",
+        "purpose": "توثيق الإغلاق الإجرائي عند تعذر استكمال الحد الأدنى من البيانات.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "أساس الإلغاء",
+            "fields": [
+              {
+                "name": "missing_information",
+                "label": "المعلومات غير المستكملة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "completion_attempts",
+                "label": "محاولات الاستكمال",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "cancellation_basis",
+                "label": "مبرر الإلغاء",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "decision_date",
+                "label": "تاريخ القرار",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "decision_reference",
+                "label": "مرجع القرار",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-05": {
+        "name": "تحديد الاختصاص",
+        "purpose": "تحديد طبيعة الموضوع والجهة المختصة ومسار المعالجة.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "تحليل الاختصاص",
+            "fields": [
+              {
+                "name": "matter_type",
+                "label": "طبيعة الموضوع",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "تعدٍ سلوكي",
+                  "مخالفة إدارية",
+                  "تعارض مصالح",
+                  "احتيال/مخالفة مالية",
+                  "خصوصية/بيانات",
+                  "أمن سيبراني",
+                  "مشتريات",
+                  "رأس مال بشري",
+                  "شكوى خدمية",
+                  "خارج اختصاص الصندوق",
+                  "أخرى"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "jurisdiction",
+                "label": "الاختصاص",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "داخل اختصاص اللجنة",
+                  "إحالة لوحدة مختصة",
+                  "شكوى خدمية",
+                  "خارج الاختصاص"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "rationale",
+                "label": "مبررات تحديد الاختصاص",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "reference",
+                "label": "المرجع النظامي/السياساتي",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "referral_target",
+                "label": "الجهة المحال إليها عند الحاجة",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-06": {
+        "name": "تحويل شكوى خدمية",
+        "purpose": "توثيق إعادة تصنيف وإحالة الموضوع بوصفه شكوى خدمية.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": false,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "الإحالة",
+            "fields": [
+              {
+                "name": "service_complaint_reason",
+                "label": "سبب إعادة التصنيف",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "target_function",
+                "label": "الجهة المحال إليها",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "referral_date",
+                "label": "تاريخ الإحالة",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "referral_reference",
+                "label": "مرجع الإحالة",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "transferred_documents",
+                "label": "المستندات المحولة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-07": {
+        "name": "تقييم مبدئي",
+        "purpose": "تقدير الجدية والمخاطر والأدلة الأولية وتحديد المسار التالي.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "عوامل التقييم",
+            "fields": [
+              {
+                "name": "seriousness",
+                "label": "جسامة الادعاء",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "منخفض",
+                  "متوسط",
+                  "مرتفع",
+                  "حرج"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "credibility",
+                "label": "مصداقية المعلومات",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "ضعيفة",
+                  "متوسطة",
+                  "جيدة",
+                  "قوية"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "evidence_state",
+                "label": "حالة الأدلة الأولية",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "غير متاحة",
+                  "محدودة",
+                  "كافية مبدئياً",
+                  "قوية"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "financial_impact",
+                "label": "الأثر المالي المحتمل",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "regulatory_impact",
+                "label": "الأثر النظامي/الرقابي",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "reputational_impact",
+                "label": "الأثر على السمعة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "evidence_preservation_risk",
+                "label": "مخاطر العبث بالأدلة",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "منخفض",
+                  "متوسط",
+                  "مرتفع"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "retaliation_risk",
+                "label": "مخاطر الإيذاء",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "منخفض",
+                  "متوسط",
+                  "مرتفع"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "management_involvement",
+                "label": "احتمال تورط إداري",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "لا",
+                  "محتمل",
+                  "نعم",
+                  "غير معلوم"
+                ],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "التوصية",
+            "fields": [
+              {
+                "name": "initial_outcome",
+                "label": "نتيجة التقييم",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "فتح تحقيق أولي",
+                  "طلب معلومات",
+                  "إحالة",
+                  "إغلاق مسبب",
+                  "تصعيد للجنة"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "assessment_rationale",
+                "label": "مبررات النتيجة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "preservation_actions",
+                "label": "إجراءات حفظ الأدلة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-08": {
+        "name": "محضر إثبات تاريخ العلم بالمخالفة",
+        "purpose": "توثيق التاريخ الذي تحقق فيه العلم الكافي بالمخالفة وسنده.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "إثبات العلم",
+            "fields": [
+              {
+                "name": "information_first_received",
+                "label": "المعلومة الأولى المستلمة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "information_source",
+                "label": "مصدر المعلومة",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "initial_receipt_date",
+                "label": "تاريخ الاستلام الأول",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "knowledge_date",
+                "label": "تاريخ تحقق العلم الكافي",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "knowledge_holder",
+                "label": "الشخص/الجهة التي تحقق لديها العلم",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "basis",
+                "label": "أساس تحديد تاريخ العلم",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "supporting_reference",
+                "label": "المستند/المرجع المؤيد",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-09": {
+        "name": "قرار تصنيف نتيجة التقييم",
+        "purpose": "توثيق قرار الفرز النهائي والمسار الإجرائي التالي.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMPLIANCE_INTAKE",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "قرار التصنيف",
+            "fields": [
+              {
+                "name": "classification_outcome",
+                "label": "القرار",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "فتح تحقيق",
+                  "طلب معلومات إضافية",
+                  "إحالة لجهة أخرى",
+                  "شكوى خدمية",
+                  "إغلاق مسبب",
+                  "تصعيد للجنة",
+                  "مسار آخر معتمد"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "rationale",
+                "label": "التسبيب",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "supporting_evidence",
+                "label": "الأدلة/المراجع",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "next_step",
+                "label": "الخطوة التالية",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "decision_date",
+                "label": "تاريخ القرار",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-10": {
+        "name": "تكليف تحقيق",
+        "purpose": "تحديد المحقق ونطاق التحقيق ومدته ومتطلبات الاستقلالية.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "التكليف",
+            "fields": [
+              {
+                "name": "investigator",
+                "label": "المحقق/فريق التحقيق",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "scope",
+                "label": "نطاق التحقيق",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "in_scope_allegations",
+                "label": "الادعاءات داخل النطاق",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "out_of_scope",
+                "label": "الموضوعات خارج النطاق",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "authority_reference",
+                "label": "سند التكليف",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "start_date",
+                "label": "تاريخ البدء",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "target_date",
+                "label": "التاريخ المستهدف للانتهاء",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "conflict_declaration",
+                "label": "إقرار عدم تعارض المصالح",
+                "type": "boolean",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "evidence_instructions",
+                "label": "تعليمات التعامل مع الأدلة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "reporting_requirements",
+                "label": "متطلبات التقرير",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-11": {
+        "name": "سجل أدلة",
+        "purpose": "ملخص رقابي لسجل الأدلة الإلكتروني وسلامة سلسلة الحيازة.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "INVESTIGATOR",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "ملخص الأدلة",
+            "fields": [
+              {
+                "name": "evidence_count",
+                "label": "عدد الأدلة المسجلة",
+                "type": "number",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "evidence_scope",
+                "label": "نطاق الأدلة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "chain_of_custody_status",
+                "label": "حالة سلسلة الحيازة",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "مكتملة",
+                  "توجد ملاحظات",
+                  "غير مكتملة"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "integrity_exceptions",
+                "label": "استثناءات سلامة الأدلة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "storage_confirmation",
+                "label": "تأكيد الحفظ في المستودع المعتمد",
+                "type": "boolean",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "review_notes",
+                "label": "ملاحظات المراجعة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-12": {
+        "name": "تقرير تحقيق أولي",
+        "purpose": "عرض نتائج التحقيق الأولي والأدلة والنتائج والتوصية.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "INVESTIGATOR",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "نطاق التحقيق",
+            "fields": [
+              {
+                "name": "investigation_scope",
+                "label": "النطاق",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "work_performed",
+                "label": "الأعمال المنفذة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "interviews",
+                "label": "المقابلات/الجلسات",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "documents_reviewed",
+                "label": "المستندات التي تمت مراجعتها",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "النتائج",
+            "fields": [
+              {
+                "name": "established_facts",
+                "label": "الوقائع المثبتة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "contrary_evidence",
+                "label": "الأدلة النافية/المخالفة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "gaps",
+                "label": "الفجوات المتبقية",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "preliminary_findings",
+                "label": "النتائج الأولية",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "recommendation",
+                "label": "التوصية",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "إغلاق",
+                  "استكمال تحقيق",
+                  "تصعيد للجنة",
+                  "إحالة لجهة أخرى"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "rationale",
+                "label": "التسبيب",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-13": {
+        "name": "قرار تشكيل لجنة تحقيق",
+        "purpose": "توثيق قرار تشكيل اللجنة ونطاقها وأعضائها وإقرارات الاستقلال.",
+        "source": "GOVERNING_PROCEDURE + COMMITTEE_CHARTER",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "بيانات التشكيل",
+            "fields": [
+              {
+                "name": "formation_reference",
+                "label": "مرجع/قرار التشكيل",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "formation_date",
+                "label": "تاريخ التشكيل",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "chair",
+                "label": "الرئيس",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "members",
+                "label": "الأعضاء",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "secretary",
+                "label": "أمين اللجنة",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "scope",
+                "label": "نطاق عمل اللجنة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "target_completion",
+                "label": "المدة/التاريخ المستهدف",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "independence_confirmed",
+                "label": "تأكيد إقرارات الاستقلال وعدم التعارض",
+                "type": "boolean",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-14": {
+        "name": "محاضر جلسات لجنة التحقيق",
+        "purpose": "توثيق الجلسات والمداولات والحضور والقرارات والتعارضات.",
+        "source": "COMMITTEE_CHARTER + GOVERNING_PROCEDURE",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "بيانات الجلسة",
+            "fields": [
+              {
+                "name": "meeting_reference",
+                "label": "مرجع الجلسة",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "meeting_date",
+                "label": "تاريخ الجلسة",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "start_time",
+                "label": "وقت البدء",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "end_time",
+                "label": "وقت الانتهاء",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "location_mode",
+                "label": "المكان/وسيلة الانعقاد",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "attendees",
+                "label": "الحضور",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "invitees",
+                "label": "المدعوون",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "quorum",
+                "label": "حالة النصاب",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "متحقق",
+                  "غير متحقق",
+                  "غير مقيم - يحتاج إعداد"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "coi_disclosures",
+                "label": "إفصاحات تعارض المصالح",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "المحضر",
+            "fields": [
+              {
+                "name": "agenda_topics",
+                "label": "الموضوعات",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "deliberations",
+                "label": "ملخص المداولات",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "votes",
+                "label": "نتائج التصويت",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "recommendations",
+                "label": "القرارات/التوصيات/التكليفات",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "objections",
+                "label": "التحفظات/الاعتراضات",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "minutes_status",
+                "label": "حالة المحضر",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "مسودة",
+                  "لدى الرئيس للمراجعة",
+                  "أرسل للأعضاء",
+                  "معتمد"
+                ],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-15": {
+        "name": "إشعار بمخالفة وتمكين حق الدفاع",
+        "purpose": "إثبات إبلاغ الموظف وتمكينه من الرد وفق الضوابط.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "الإشعار",
+            "fields": [
+              {
+                "name": "notice_date",
+                "label": "تاريخ الإشعار",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "recipient",
+                "label": "المستلم",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "allegation_disclosed",
+                "label": "المخالفة المنسوبة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "facts_disclosed",
+                "label": "الوقائع المبلغة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "response_channel",
+                "label": "قناة الرد",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "response_due_date",
+                "label": "الموعد المحدد للرد",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "delivery_method",
+                "label": "طريقة التبليغ",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "delivery_evidence",
+                "label": "دليل التبليغ",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "الرد",
+            "fields": [
+              {
+                "name": "response_received_date",
+                "label": "تاريخ استلام الرد",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "response_summary",
+                "label": "ملخص رد الموظف",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "documents_submitted",
+                "label": "المستندات المقدمة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "extension_request",
+                "label": "طلب تمديد",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "extension_decision",
+                "label": "قرار التمديد",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-16": {
+        "name": "مسودة قرار تأديبي",
+        "purpose": "صياغة مسودة القرار/التوصية بعد استكمال التحقيق وحق الدفاع.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "التحليل",
+            "fields": [
+              {
+                "name": "background",
+                "label": "خلفية القضية",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "allegation",
+                "label": "المخالفة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "established_facts",
+                "label": "الوقائع الثابتة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "evidence",
+                "label": "الأدلة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "employee_response",
+                "label": "رد الموظف",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "analysis",
+                "label": "التحليل",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "applicable_rule",
+                "label": "المرجع/الحكم المنطبق",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "finding",
+                "label": "النتيجة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "aggravating_factors",
+                "label": "العوامل المشددة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "mitigating_factors",
+                "label": "العوامل المخففة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "proportionality",
+                "label": "تقييم التناسب",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "التوصية",
+            "fields": [
+              {
+                "name": "committee_recommendation",
+                "label": "توصية اللجنة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "proposed_outcome",
+                "label": "الجزاء/الإجراء المقترح وفق الصلاحية",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "required_approval",
+                "label": "صاحب الصلاحية المطلوب",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "implementation_actions",
+                "label": "إجراءات التنفيذ",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-17": {
+        "name": "إشعار قرار",
+        "purpose": "توثيق تبليغ القرار النهائي المعتمد.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "بيانات القرار",
+            "fields": [
+              {
+                "name": "decision_reference",
+                "label": "مرجع القرار",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "decision_date",
+                "label": "تاريخ القرار",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "approval_reference",
+                "label": "مرجع الاعتماد",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "recipient",
+                "label": "المستلم",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "notification_method",
+                "label": "طريقة التبليغ",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "notification_date",
+                "label": "تاريخ التبليغ",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "effective_date",
+                "label": "تاريخ النفاذ",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "acknowledgement",
+                "label": "إثبات الاستلام",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "grievance_right",
+                "label": "بيان حق التظلم عند انطباقه",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "grievance_deadline",
+                "label": "آخر موعد للتظلم",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-18": {
+        "name": "طلب تظلم",
+        "purpose": "تسجيل التظلم وفحصه والفصل فيه وفق المسار المعتمد.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": true,
+        "sections": [
+          {
+            "title": "طلب التظلم",
+            "fields": [
+              {
+                "name": "grievance_date",
+                "label": "تاريخ التظلم",
+                "type": "date",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "challenged_decision",
+                "label": "القرار محل التظلم",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "grounds",
+                "label": "أسباب التظلم",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "supporting_documents",
+                "label": "المستندات المؤيدة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "new_evidence",
+                "label": "أدلة جديدة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "requested_remedy",
+                "label": "الطلب",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          },
+          {
+            "title": "الفصل",
+            "fields": [
+              {
+                "name": "reviewer",
+                "label": "المراجع/الجهة",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "conflict_check",
+                "label": "فحص تعارض المصالح",
+                "type": "boolean",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "assessment",
+                "label": "تقييم التظلم",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "outcome",
+                "label": "النتيجة",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "outcome_date",
+                "label": "تاريخ النتيجة",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "notification",
+                "label": "بيانات التبليغ",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      },
+      "WB-FRM-19": {
+        "name": "متابعة تنفيذ قرار",
+        "purpose": "متابعة تنفيذ القرار والإجراءات التصحيحية والتحقق من الإقفال.",
+        "source": "GOVERNING_PROCEDURE",
+        "owner": "COMMITTEE_SECRETARY",
+        "review_required": true,
+        "approval_required": false,
+        "sections": [
+          {
+            "title": "التنفيذ",
+            "fields": [
+              {
+                "name": "decision_reference",
+                "label": "مرجع القرار",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "actions_summary",
+                "label": "ملخص الإجراءات المطلوبة",
+                "type": "textarea",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "action_owner",
+                "label": "مالك التنفيذ",
+                "type": "text",
+                "required": true,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "due_date",
+                "label": "تاريخ الاستحقاق",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "status",
+                "label": "حالة التنفيذ",
+                "type": "select",
+                "required": true,
+                "options": [
+                  "لم يبدأ",
+                  "قيد التنفيذ",
+                  "مكتمل",
+                  "متأخر",
+                  "منقول رسمياً"
+                ],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "completion_date",
+                "label": "تاريخ الإكمال",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "completion_evidence",
+                "label": "دليل التنفيذ",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "verified_by",
+                "label": "تم التحقق بواسطة",
+                "type": "text",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "verification_date",
+                "label": "تاريخ التحقق",
+                "type": "date",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              },
+              {
+                "name": "closure_notes",
+                "label": "ملاحظات الإقفال",
+                "type": "textarea",
+                "required": false,
+                "options": [],
+                "help": null,
+                "sensitive": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "workflow": [
+    {
+      "step": 1,
+      "code": "WB-FRM-01",
+      "stage": "REGISTRATION",
+      "name": "نموذج تسجيل بلاغ / إحالة"
+    },
+    {
+      "step": 2,
+      "code": "WB-FRM-02",
+      "stage": "CONFIDENTIALITY_AND_PROTECTION",
+      "name": "تصنيف السرية وحماية المبلّغ"
+    },
+    {
+      "step": 3,
+      "code": "WB-FRM-03",
+      "stage": "COMPLETENESS_CHECK",
+      "name": "فحص اكتمال البيانات"
+    },
+    {
+      "step": 4,
+      "code": "WB-FRM-04",
+      "stage": "COMPLETENESS_CHECK",
+      "name": "قرار إلغاء بلاغ لعدم الاستكمال"
+    },
+    {
+      "step": 5,
+      "code": "WB-FRM-05",
+      "stage": "JURISDICTION",
+      "name": "تحديد الاختصاص"
+    },
+    {
+      "step": 6,
+      "code": "WB-FRM-06",
+      "stage": "JURISDICTION",
+      "name": "تحويل شكوى خدمية"
+    },
+    {
+      "step": 7,
+      "code": "WB-FRM-07",
+      "stage": "INITIAL_ASSESSMENT",
+      "name": "تقييم مبدئي"
+    },
+    {
+      "step": 8,
+      "code": "WB-FRM-08",
+      "stage": "DATE_OF_KNOWLEDGE",
+      "name": "محضر إثبات تاريخ العلم بالمخالفة"
+    },
+    {
+      "step": 9,
+      "code": "WB-FRM-09",
+      "stage": "CLASSIFICATION",
+      "name": "قرار تصنيف نتيجة التقييم"
+    },
+    {
+      "step": 10,
+      "code": "WB-FRM-10",
+      "stage": "INVESTIGATION_ASSIGNMENT",
+      "name": "تكليف تحقيق"
+    },
+    {
+      "step": 11,
+      "code": "WB-FRM-11",
+      "stage": "EVIDENCE_COLLECTION",
+      "name": "سجل أدلة"
+    },
+    {
+      "step": 12,
+      "code": "WB-FRM-12",
+      "stage": "INITIAL_INVESTIGATION",
+      "name": "تقرير تحقيق أولي"
+    },
+    {
+      "step": 13,
+      "code": "WB-FRM-13",
+      "stage": "COMMITTEE_ESCALATION",
+      "name": "قرار تشكيل لجنة تحقيق"
+    },
+    {
+      "step": 14,
+      "code": "WB-FRM-14",
+      "stage": "COMMITTEE_INVESTIGATION",
+      "name": "محاضر جلسات لجنة التحقيق"
+    },
+    {
+      "step": 15,
+      "code": "WB-FRM-15",
+      "stage": "RIGHT_OF_DEFENSE",
+      "name": "إشعار بمخالفة وتمكين حق الدفاع"
+    },
+    {
+      "step": 16,
+      "code": "WB-FRM-16",
+      "stage": "RECOMMENDATION_OR_DECISION",
+      "name": "مسودة قرار تأديبي"
+    },
+    {
+      "step": 17,
+      "code": "WB-FRM-17",
+      "stage": "NOTIFICATION",
+      "name": "إشعار قرار"
+    },
+    {
+      "step": 18,
+      "code": "WB-FRM-18",
+      "stage": "GRIEVANCE",
+      "name": "طلب تظلم"
+    },
+    {
+      "step": 19,
+      "code": "WB-FRM-19",
+      "stage": "IMPLEMENTATION",
+      "name": "متابعة تنفيذ قرار"
+    }
+  ],
+  "sources": [
+    {
+      "id": "SRC-PROC",
+      "title": "إجراء الإبلاغ والتحقيق في المخالفات والتعديات السلوكية v1",
+      "type": "GOVERNING_PROCEDURE",
+      "status": "APPROVED_SOURCE"
+    },
+    {
+      "id": "SRC-POL",
+      "title": "سياسة الإبلاغ عن المخالفات المعتمدة",
+      "type": "GOVERNING_POLICY",
+      "status": "APPROVED_SOURCE"
+    },
+    {
+      "id": "SRC-CHARTER",
+      "title": "ميثاق عمل لجنة التحقيق في المخالفات والتعديات السلوكية",
+      "type": "COMMITTEE_GOVERNANCE",
+      "status": "APPROVED_SOURCE"
+    },
+    {
+      "id": "SRC-DECISION",
+      "title": "إعادة تشكيل لجنة التحقيق في المخالفات والتعديات السلوكية",
+      "type": "EFFECTIVE_ADMINISTRATIVE_DECISION",
+      "status": "APPROVED_SOURCE"
+    },
+    {
+      "id": "SRC-BRD",
+      "title": "وثيقة متطلبات الأعمال - البلاغات V.2",
+      "type": "BUSINESS_REQUIREMENTS",
+      "status": "SOURCE_REFERENCE"
+    },
+    {
+      "id": "SRC-SAMPLE-KNOWN",
+      "title": "نموذج بلاغ معروف الهوية",
+      "type": "REAL_WORLD_INPUT_SAMPLE",
+      "status": "TEST_REFERENCE"
+    },
+    {
+      "id": "SRC-SAMPLE-EMAIL",
+      "title": "نموذج بلاغ بريد إلكتروني فقط",
+      "type": "REAL_WORLD_INPUT_SAMPLE",
+      "status": "TEST_REFERENCE"
+    },
+    {
+      "id": "SRC-SAMPLE-ANON",
+      "title": "نموذج بلاغ مجهول الهوية",
+      "type": "REAL_WORLD_INPUT_SAMPLE",
+      "status": "TEST_REFERENCE"
+    }
+  ],
+  "emailTemplates": {
+    "INTAKE_ACKNOWLEDGEMENT": {
+      "ar_subject": "[مقيد] تأكيد استلام البلاغ/الإحالة - {{CASE_ID}}",
+      "ar_body": "تم استلام البلاغ/الإحالة وتسجيله بالمرجع {{CASE_ID}}. سيتم التعامل معه وفق الإجراءات المعتمدة."
+    },
+    "INFORMATION_REQUEST": {
+      "ar_subject": "[مقيد] طلب معلومات - {{CASE_ID}}",
+      "ar_body": "نأمل تزويدنا بالمعلومات المطلوبة للقضية {{CASE_ID}}. {{REQUIRED_ACTION}}"
+    },
+    "DOCUMENT_REQUEST": {
+      "ar_subject": "[مقيد] طلب مستندات - {{CASE_ID}}",
+      "ar_body": "نأمل تزويدنا بالمستندات المطلوبة للقضية {{CASE_ID}}. {{REQUIRED_ACTION}}"
+    },
+    "INVESTIGATION_MEETING_INVITATION": {
+      "ar_subject": "[مقيد] دعوة جلسة تحقيق - {{CASE_ID}}",
+      "ar_body": "ندعوكم لحضور جلسة متعلقة بالقضية {{CASE_ID}} بتاريخ {{MEETING_DATE}} الساعة {{MEETING_TIME}} في {{LOCATION}}."
+    },
+    "RIGHT_OF_DEFENSE_NOTICE": {
+      "ar_subject": "[مقيد] إشعار وتمكين حق الدفاع - {{CASE_ID}}",
+      "ar_body": "نحيطكم علماً بالوقائع محل المراجعة في القضية {{CASE_ID}}، ونأمل تقديم ردكم وفق المهلة والإجراء الموضحين في الإشعار المرفق."
+    },
+    "APPROVAL_REQUEST": {
+      "ar_subject": "[مقيد] طلب اعتماد - {{CASE_ID}}",
+      "ar_body": "نأمل مراجعة الطلب المتعلق بالقضية {{CASE_ID}} واتخاذ القرار وفق الصلاحية والمرجع ذي العلاقة."
+    },
+    "DECISION_NOTICE": {
+      "ar_subject": "[مقيد] إشعار بقرار - {{CASE_ID}}",
+      "ar_body": "نحيطكم علماً بالقرار المسجل للقضية {{CASE_ID}} وفق المرجع {{DECISION_REFERENCE}}."
+    },
+    "GRIEVANCE_OUTCOME": {
+      "ar_subject": "[مقيد] نتيجة تظلم - {{CASE_ID}}",
+      "ar_body": "نحيطكم علماً بنتيجة التظلم المتعلق بالقضية {{CASE_ID}}."
+    },
+    "IMPLEMENTATION_REMINDER": {
+      "ar_subject": "[مقيد] متابعة تنفيذ قرار - {{CASE_ID}}",
+      "ar_body": "نأمل استكمال الإجراء المطلوب للقضية {{CASE_ID}} قبل {{DUE_DATE}}."
+    },
+    "CASE_CLOSURE_NOTICE": {
+      "ar_subject": "[مقيد] إغلاق القضية - {{CASE_ID}}",
+      "ar_body": "تم إغلاق القضية {{CASE_ID}} وفق السجل والإجراءات المعتمدة."
+    }
+  },
+  "sourceRequired": [
+    "COMMITTEE_QUORUM",
+    "FINAL_DISCIPLINARY_AUTHORITY",
+    "RETENTION_PERIOD"
+  ],
+  "defaultConfig": {
+    "casePrefix": "CASE",
+    "ticketPrefix": "TKT",
+    "classification": "مقيد",
+    "quorumRule": "",
+    "disciplinaryAuthority": "",
+    "retentionPeriod": "",
+    "backupReminderDays": 7,
+    "autoLockMinutes": 30,
+    "departments": [
+      "الحوكمة والامتثال",
+      "رأس المال البشري",
+      "الشؤون القانونية",
+      "المالية",
+      "تقنية المعلومات",
+      "المشتريات والعقود"
+    ],
+    "sectors": [
+      "قطاع الأعمال",
+      "قطاع الاستراتيجية",
+      "القطاعات المساندة"
+    ]
+  },
+  "roles": {
+    "EMPLOYEE": {
+      "ar": "موظف",
+      "family": "EMPLOYEE",
+      "description": "الدور الأساسي لجميع موظفي الصندوق."
+    },
+    "DEPARTMENT_REFERRER": {
+      "ar": "محيل من إدارة",
+      "family": "EMPLOYEE",
+      "description": "رفع إحالات رسمية من الإدارة."
+    },
+    "SECTOR_REFERRER": {
+      "ar": "محيل من قطاع",
+      "family": "EMPLOYEE",
+      "description": "رفع إحالات رسمية من القطاع."
+    },
+    "COMPLIANCE_OFFICER": {
+      "ar": "موظف امتثال",
+      "family": "COMPLIANCE",
+      "description": "استقبال وفرز وتقييم البلاغات والإحالات."
+    },
+    "COMPLIANCE_MANAGER": {
+      "ar": "مدير الامتثال",
+      "family": "COMPLIANCE",
+      "description": "إشراف تشغيلي ورقابي على مسار المعالجة."
+    },
+    "CASE_OWNER": {
+      "ar": "مالك قضية",
+      "family": "COMPLIANCE",
+      "description": "مسؤول قضية محددة وفق تعيين صريح."
+    },
+    "INVESTIGATOR": {
+      "ar": "محقق",
+      "family": "INVESTIGATION",
+      "description": "التحقيق في القضايا المسندة فقط."
+    },
+    "SENIOR_INVESTIGATOR": {
+      "ar": "محقق أول",
+      "family": "INVESTIGATION",
+      "description": "تحقيق ومراجعة القضايا المسندة."
+    },
+    "INVESTIGATION_COMMITTEE_SECRETARY": {
+      "ar": "أمين سر لجنة التحقيق",
+      "family": "INVESTIGATION_COMMITTEE",
+      "description": "إدارة أعمال لجنة التحقيق دون حق تصويت تلقائي."
+    },
+    "INVESTIGATION_COMMITTEE_CHAIR": {
+      "ar": "رئيس لجنة التحقيق",
+      "family": "INVESTIGATION_COMMITTEE",
+      "description": "رئاسة أعمال اللجنة ضمن الصلاحيات والمصادر المعتمدة."
+    },
+    "INVESTIGATION_COMMITTEE_MEMBER": {
+      "ar": "عضو لجنة التحقيق",
+      "family": "INVESTIGATION_COMMITTEE",
+      "description": "عضو مصوت عند الأهلية وعدم تعارض المصالح."
+    },
+    "INVESTIGATION_COMMITTEE_ALTERNATE": {
+      "ar": "عضو احتياطي لجنة التحقيق",
+      "family": "INVESTIGATION_COMMITTEE",
+      "description": "عضو احتياطي وفق قرار التشكيل الفعّال."
+    },
+    "SUBJECT_EMPLOYEE": {
+      "ar": "الموظف محل المخالفة",
+      "family": "SUBJECT",
+      "description": "دور سياقي مرتبط بالقضية وليس دوراً عاماً."
+    },
+    "GRIEVANCE_COMMITTEE_SECRETARY": {
+      "ar": "أمين سر لجنة التظلم",
+      "family": "GRIEVANCE_COMMITTEE",
+      "description": "إدارة مسار لجنة التظلم دون حق تصويت تلقائي."
+    },
+    "GRIEVANCE_COMMITTEE_CHAIR": {
+      "ar": "رئيس لجنة التظلم",
+      "family": "GRIEVANCE_COMMITTEE",
+      "description": "رئاسة أعمال لجنة التظلم وفق مرجع معتمد."
+    },
+    "GRIEVANCE_COMMITTEE_MEMBER": {
+      "ar": "عضو لجنة التظلم",
+      "family": "GRIEVANCE_COMMITTEE",
+      "description": "عضو لجنة التظلم للقضايا المحالة إليه."
+    },
+    "GRIEVANCE_COMMITTEE_ALTERNATE": {
+      "ar": "عضو احتياطي لجنة التظلم",
+      "family": "GRIEVANCE_COMMITTEE",
+      "description": "عضو احتياطي وفق أداة التشكيل."
+    },
+    "DECISION_AUTHORITY": {
+      "ar": "صاحب صلاحية القرار",
+      "family": "DECISION",
+      "description": "صلاحية قرار مقيدة بمصدر وتعيين ونطاق."
+    },
+    "IMPLEMENTATION_OWNER": {
+      "ar": "مسؤول تنفيذ القرار",
+      "family": "IMPLEMENTATION",
+      "description": "متابعة تنفيذ الإجراء أو القرار المسند."
+    },
+    "PLATFORM_ADMINISTRATOR": {
+      "ar": "مدير المنصة",
+      "family": "ADMIN",
+      "description": "إدارة الهوية والأدوار والإعدادات؛ لا يمنح وصولاً تلقائياً لمحتوى القضايا."
+    },
+    "SECURITY_AUDITOR": {
+      "ar": "مدقق أمن وصلاحيات",
+      "family": "AUDIT",
+      "description": "مراجعة سجلات الوصول والتغييرات الأمنية."
+    },
+    "READ_ONLY_AUDITOR": {
+      "ar": "مدقق قراءة فقط",
+      "family": "AUDIT",
+      "description": "قراءة نطاق تدقيق مسند دون تعديل."
+    }
+  },
+  "rolePermissions": {
+    "EMPLOYEE": [
+      "REPORT_SUBMIT",
+      "REPORT_VIEW_OWN",
+      "GRIEVANCE_VIEW_OWN",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "DEPARTMENT_REFERRER": [
+      "INTERNAL_REFERRAL_SUBMIT",
+      "REFERRAL_VIEW_OWN",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "SECTOR_REFERRER": [
+      "INTERNAL_REFERRAL_SUBMIT",
+      "REFERRAL_VIEW_OWN",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "COMPLIANCE_OFFICER": [
+      "INTAKE_VIEW",
+      "INTAKE_PROCESS",
+      "CASE_CREATE",
+      "CASE_VIEW_GLOBAL",
+      "CASE_PROCESS",
+      "FORM_PROCESS",
+      "REPORTER_IDENTITY_VIEW",
+      "INVESTIGATOR_ASSIGN",
+      "COMMITTEE_REFER",
+      "GRIEVANCE_INTAKE",
+      "DOCUMENT_GENERATE",
+      "EVIDENCE_VIEW",
+      "EVIDENCE_ADD",
+      "TASK_MANAGE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "COMPLIANCE_MANAGER": [
+      "INTAKE_VIEW",
+      "INTAKE_PROCESS",
+      "CASE_CREATE",
+      "CASE_VIEW_GLOBAL",
+      "CASE_PROCESS",
+      "FORM_PROCESS",
+      "REPORTER_IDENTITY_VIEW",
+      "INVESTIGATOR_ASSIGN",
+      "COMMITTEE_REFER",
+      "GRIEVANCE_INTAKE",
+      "DOCUMENT_GENERATE",
+      "EVIDENCE_VIEW",
+      "EVIDENCE_ADD",
+      "TASK_MANAGE",
+      "REPORTS_VIEW",
+      "AUDIT_VIEW",
+      "CASE_ACCESS_MANAGE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "CASE_OWNER": [
+      "CASE_VIEW_ASSIGNED",
+      "CASE_PROCESS",
+      "FORM_PROCESS",
+      "DOCUMENT_GENERATE",
+      "EVIDENCE_VIEW",
+      "TASK_MANAGE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "INVESTIGATOR": [
+      "CASE_VIEW_ASSIGNED",
+      "INVESTIGATION_EDIT",
+      "FORM_INVESTIGATION",
+      "EVIDENCE_VIEW",
+      "EVIDENCE_ADD",
+      "TASK_MANAGE",
+      "DOCUMENT_GENERATE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "SENIOR_INVESTIGATOR": [
+      "CASE_VIEW_ASSIGNED",
+      "INVESTIGATION_EDIT",
+      "FORM_INVESTIGATION",
+      "EVIDENCE_VIEW",
+      "EVIDENCE_ADD",
+      "TASK_MANAGE",
+      "DOCUMENT_GENERATE",
+      "INVESTIGATION_REVIEW",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "INVESTIGATION_COMMITTEE_SECRETARY": [
+      "CASE_VIEW_ASSIGNED",
+      "INV_COMMITTEE_ADMIN",
+      "INV_COMMITTEE_VIEW",
+      "MEETING_MANAGE",
+      "MINUTES_MANAGE",
+      "COI_MANAGE",
+      "DOCUMENT_GENERATE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "INVESTIGATION_COMMITTEE_CHAIR": [
+      "CASE_VIEW_ASSIGNED",
+      "INV_COMMITTEE_VIEW",
+      "INV_COMMITTEE_CHAIR",
+      "COMMITTEE_VOTE",
+      "COI_DECLARE",
+      "MINUTES_REVIEW",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "INVESTIGATION_COMMITTEE_MEMBER": [
+      "CASE_VIEW_ASSIGNED",
+      "INV_COMMITTEE_VIEW",
+      "COMMITTEE_VOTE",
+      "COI_DECLARE",
+      "MINUTES_REVIEW",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "INVESTIGATION_COMMITTEE_ALTERNATE": [
+      "CASE_VIEW_ASSIGNED",
+      "INV_COMMITTEE_VIEW",
+      "COI_DECLARE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "SUBJECT_EMPLOYEE": [
+      "SUBJECT_CASE_VIEW",
+      "DEFENSE_SUBMIT_OWN",
+      "DECISION_VIEW_OWN",
+      "GRIEVANCE_SUBMIT_OWN",
+      "GRIEVANCE_VIEW_OWN",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "GRIEVANCE_COMMITTEE_SECRETARY": [
+      "GRIEVANCE_ADMIN",
+      "GRIEVANCE_VIEW_ASSIGNED",
+      "GRIEVANCE_MEETING_MANAGE",
+      "GRIEVANCE_MINUTES_MANAGE",
+      "COI_MANAGE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "GRIEVANCE_COMMITTEE_CHAIR": [
+      "GRIEVANCE_VIEW_ASSIGNED",
+      "GRIEVANCE_CHAIR",
+      "GRIEVANCE_VOTE",
+      "COI_DECLARE",
+      "MINUTES_REVIEW",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "GRIEVANCE_COMMITTEE_MEMBER": [
+      "GRIEVANCE_VIEW_ASSIGNED",
+      "GRIEVANCE_VOTE",
+      "COI_DECLARE",
+      "MINUTES_REVIEW",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "GRIEVANCE_COMMITTEE_ALTERNATE": [
+      "GRIEVANCE_VIEW_ASSIGNED",
+      "COI_DECLARE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "DECISION_AUTHORITY": [
+      "CASE_VIEW_ASSIGNED",
+      "DECISION_REVIEW",
+      "DECISION_APPROVE",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "IMPLEMENTATION_OWNER": [
+      "CASE_VIEW_ASSIGNED",
+      "IMPLEMENTATION_EDIT",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "PLATFORM_ADMINISTRATOR": [
+      "ADMIN_USERS",
+      "ADMIN_ROLES",
+      "ADMIN_COMMITTEES",
+      "ADMIN_CONFIG",
+      "ACCESS_REVIEW",
+      "AUDIT_SYSTEM_VIEW",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "SECURITY_AUDITOR": [
+      "AUDIT_VIEW",
+      "ACCESS_REVIEW",
+      "NOTIFICATIONS_VIEW"
+    ],
+    "READ_ONLY_AUDITOR": [
+      "CASE_VIEW_ASSIGNED",
+      "AUDIT_VIEW_ASSIGNED",
+      "NOTIFICATIONS_VIEW"
+    ]
+  },
+  "formEntitlements": {
+    "WB-FRM-01": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "CASE_OWNER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-02": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-03": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-04": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-05": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-06": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-07": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "CASE_OWNER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-08": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "CASE_OWNER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-09": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "CASE_OWNER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-10": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "INVESTIGATOR",
+        "SENIOR_INVESTIGATOR"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-11": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "INVESTIGATOR",
+        "SENIOR_INVESTIGATOR"
+      ],
+      "edit": [
+        "INVESTIGATOR",
+        "SENIOR_INVESTIGATOR",
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-12": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "INVESTIGATOR",
+        "SENIOR_INVESTIGATOR"
+      ],
+      "edit": [
+        "INVESTIGATOR",
+        "SENIOR_INVESTIGATOR"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-13": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "INVESTIGATION_COMMITTEE_SECRETARY",
+        "INVESTIGATION_COMMITTEE_CHAIR",
+        "INVESTIGATION_COMMITTEE_MEMBER"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "INVESTIGATION_COMMITTEE_SECRETARY"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-14": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "INVESTIGATION_COMMITTEE_SECRETARY",
+        "INVESTIGATION_COMMITTEE_CHAIR",
+        "INVESTIGATION_COMMITTEE_MEMBER"
+      ],
+      "edit": [
+        "INVESTIGATION_COMMITTEE_SECRETARY"
+      ],
+      "source": "COMMITTEE_CHARTER"
+    },
+    "WB-FRM-15": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "CASE_OWNER",
+        "SUBJECT_EMPLOYEE"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-16": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "DECISION_AUTHORITY"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "SOURCE_REQUIRED"
+    },
+    "WB-FRM-17": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "DECISION_AUTHORITY",
+        "SUBJECT_EMPLOYEE"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-18": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "SUBJECT_EMPLOYEE",
+        "GRIEVANCE_COMMITTEE_SECRETARY",
+        "GRIEVANCE_COMMITTEE_CHAIR",
+        "GRIEVANCE_COMMITTEE_MEMBER"
+      ],
+      "edit": [
+        "SUBJECT_EMPLOYEE",
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "GRIEVANCE_COMMITTEE_SECRETARY"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    },
+    "WB-FRM-19": {
+      "view": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "IMPLEMENTATION_OWNER",
+        "GRIEVANCE_COMMITTEE_SECRETARY"
+      ],
+      "edit": [
+        "COMPLIANCE_OFFICER",
+        "COMPLIANCE_MANAGER",
+        "IMPLEMENTATION_OWNER"
+      ],
+      "source": "GOVERNING_PROCEDURE"
+    }
+  }
+}
