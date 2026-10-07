@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
@@ -7,6 +8,11 @@ import { CDFBadge, CDFPageHeader, CDFTable, classificationTone } from "@cdf/ui";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../app-nav";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("intake.title") };
+}
 
 export default async function IntakePage() {
   const { actor, ctx } = await requireActor();

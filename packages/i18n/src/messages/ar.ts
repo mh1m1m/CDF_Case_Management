@@ -362,4 +362,9 @@ export const ar: Messages = {
     REJECTED: "رُفض",
     DOWNLOADED: "نُزّل",
   },
+  pageTitles: {
+    overview: "نظرة عامة",
+    caseDetail: "قضية",
+    intakeDetail: "بلاغ وارد",
+  },
 };

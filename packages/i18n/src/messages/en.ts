@@ -365,6 +365,12 @@ export const en = {
     REJECTED: "Rejected",
     DOWNLOADED: "Downloaded",
   },
+  /** Browser tab titles (WCAG 2.4.2); the layout appends the app name. Never a Report ID, secret or case content. */
+  pageTitles: {
+    overview: "Overview",
+    caseDetail: "Case",
+    intakeDetail: "Intake report",
+  },
 };
 
 type Widen<T> = { [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };
