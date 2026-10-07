@@ -7,6 +7,33 @@ Protocol §92. Updated at the end of every phase PR.
 Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Nothing here is a production control; see
 `architecture/PRODUCTION_MAPPING.md` for every `PRODUCTION_SUBSTITUTION_REQUIRED` item.
 
+## Last audit (CDF-DEV-AUDIT)
+
+Evidence-based audit of the live systems (GitHub, Linear, Supabase, Vercel, Sentry, Mixpanel, Drive, Slack). Percentages
+measure functioning, CI-tested implementation against prototype scope; the build-phase metrics further down use a narrower
+basis and are kept for continuity. Linear remains the backlog system of record.
+
+| Field                           | Value                                                                                                |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Last audit                      | 2026-10-07, first run, against `54786e4` (PR #7 head)                                                |
+| Current phase                   | 7 evidence and chain of custody: coded and CI-tested, awaiting human review                          |
+| Current release level           | Level 2 — Functional Prototype (maturity: FUNCTIONAL PROTOTYPE; not production ready)                |
+| Overall completion              | 41% (engine default weights)                                                                         |
+| Frontend                        | 32% (public portal 55%, internal platform 25%)                                                       |
+| Backend                         | 30%                                                                                                  |
+| Database                        | 40% (data model 45%; hosted Supabase 0%)                                                             |
+| Security                        | 50% (RLS 75%, whistleblower vault 70%, audit ledger 70%)                                             |
+| CI/CD                           | CI 70% (8/8 checks green, not required); CD 0%                                                       |
+| Testing                         | 40%                                                                                                  |
+| UAT                             | DESIGNED (partial), 15% readiness; no UAT executed (CDF-51)                                          |
+| Hosting                         | 0%                                                                                                   |
+| Known blockers                  | No deployment (CDF-33); hosted Supabase has 0 of 9 migrations (CDF-32); both wait on owner decisions |
+| Current Linear epic             | EPIC 08 Evidence (CDF-13), story CDF-44 In Review; next EPIC 09 (CDF-14, forms engine CDF-50)        |
+| Open critical issues            | None. High: repository public and `main` unprotected (CDF-49)                                        |
+| Latest stable Git SHA           | `54786e4` (CI run 37611302357, CodeQL run 37611302244 green); nothing merged to `main` yet           |
+| Latest stable Vercel deployment | None                                                                                                 |
+| Latest Supabase migration       | GitHub `20261007000900_evidence`; hosted project: none applied                                       |
+
 | Metric                              | Value | Basis                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | IMPLEMENTATION_COMPLETION_PERCENT   | 32%   | Slices: anonymous report → triage → case → assignment → investigation; evidence upload → scan → vault → versioned, audited download. Interviews, findings, committee, reporting, notifications, search not started                                                                                            |
