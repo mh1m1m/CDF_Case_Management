@@ -360,6 +360,73 @@ requirements:
     status: NOT_STARTED
     enforcement: [case_mgmt.case_record reserved columns]
     tests: []
+    notes: "Parent of CDF-REC-002..008. Design: ADR-013, architecture/data-model/RECORDS_RETENTION.md, architecture/threat-model/RECORDS_TEST_DEFINITIONS.md (CDF-61). BASELINE_ANALYSIS cites protocol §35–§36 for this area; source to be reconciled."
+
+  - id: CDF-REC-002
+    title: "Retention classes with an approved period, trigger, category and disposition action; no invented values"
+    source: [ADR-013 D2, D3, Drive architecture §24]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    notes: "Every period, trigger and action is SOURCE_REQUIRED (CDF Records & Archives Policy not in Drive). Test definitions REC-T25..T29."
+
+  - id: CDF-REC-003
+    title: "Legal hold placed only by authorised, non-conflicted users and audited"
+    source: [ADR-013 D4, IMPLEMENTATION_PLAN §7.4–7.5]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    notes: "Hold authority SOURCE_REQUIRED (Legal Policy / Delegation of Authority). Test definitions REC-T01..T09."
+
+  - id: CDF-REC-004
+    title: "Legal hold release requires two distinct authorised users; hold stays effective while release is pending"
+    source: [ADR-013 D4]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    notes: "Test definitions REC-T10..T16."
+
+  - id: CDF-REC-005
+    title: "Legal hold blocks disposition and any hard delete of protected records (cases, evidence, audit, identity vault)"
+    source: [ADR-013 D5, IMPLEMENTATION_PLAN Phase 11]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    notes: "Test definitions REC-T17..T24."
+
+  - id: CDF-REC-006
+    title: "Disposition requires an elapsed configured schedule, two-person approval and leaves an immutable certificate"
+    source: [ADR-013 D6, D7, Drive architecture §16]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    production_substitution: "Prototype disposition is logical only; physical destruction, OSS lifecycle deletion and archive transfer need a separate ADR and a human decision"
+    notes: "Test definitions REC-T30..T39."
+
+  - id: CDF-REC-007
+    title: "Every records operation is audited in the same transaction; the audit ledger is never disposed of by the application"
+    source: [ADR-013 D8, ADR-005]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    production_substitution: "Records events streamed to SLS / CDF SIEM; ledger retention governed there (CDF-39)"
+    notes: "Test definitions REC-T40..T44."
+
+  - id: CDF-REC-008
+    title: "Records staff see records metadata only, never case content; disposed cases are invisible to case roles"
+    source: [ADR-013 D9, CLAUDE.md §4]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: []
+    tests: []
+    production_substitution: "Hold and retention also enforced in Alibaba OSS retention/WORM (CDF-36); certificates signed with KMS/HSM keys (CDF-38)"
+    notes: "Test definitions REC-T45..T51."
 
   - id: CDF-NOTIF-001
     title: "Notifications carrying no investigation content"
