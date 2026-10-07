@@ -9,6 +9,7 @@ import {
   CDFField,
   CDFTable,
   classificationTone,
+  fieldIds,
   inputClass,
   textareaClass,
 } from "@cdf/ui";
@@ -312,8 +313,15 @@ export function EvidencePanel({
               id="collectedAt"
               label={t("evidence.collectedAtLabel")}
               optionalLabel={t("common.optional")}
+              hint={t("common.dateHint")}
             >
-              <input id="collectedAt" name="collectedAt" type="date" className={inputClass} dir="ltr" />
+              <input
+                {...fieldIds("collectedAt", { hint: t("common.dateHint") })}
+                name="collectedAt"
+                type="date"
+                className={inputClass}
+                dir="ltr"
+              />
             </CDFField>
             <CDFField
               id="evidenceDescription"

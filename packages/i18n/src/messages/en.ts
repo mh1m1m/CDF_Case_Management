@@ -19,6 +19,7 @@ export const en = {
     submit: "Submit",
     required: "Required",
     optional: "Optional",
+    dateHint: "Pick the date from the calendar. When typing, follow the order shown in the field.",
     yes: "Yes",
     no: "No",
     none: "None",

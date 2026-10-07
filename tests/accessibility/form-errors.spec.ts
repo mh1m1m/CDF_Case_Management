@@ -19,6 +19,9 @@ for (const locale of ["ar", "en"] as const) {
     for (const id of ["sourceDescription", "collectedAt", "evidenceDescription"]) {
       await expect(form.locator(`label[for="${id}"]`)).toContainText(words[locale].optional);
     }
+    // Date fields explain how to enter a date, since the native picker follows the browser's locale.
+    await expect(form.locator("#collectedAt")).toHaveAttribute("aria-describedby", /\bcollectedAt-hint\b/);
+    await expect(form.locator("#collectedAt-hint")).not.toBeEmpty();
     const assign = page.getByTestId("assign-form");
     await expect(assign.locator('label[for="userId"]')).toContainText(words[locale].required);
     await expect(assign.locator('label[for="assignReason"]')).toContainText(words[locale].required);
@@ -65,6 +68,8 @@ for (const locale of ["ar", "en"] as const) {
       await expect(page.locator(`#${id}`)).toHaveAttribute("aria-required", "true");
     }
     await expect(page.locator('input[name="acknowledgement"]')).toHaveAttribute("aria-required", "true");
+    await expect(page.locator("#incidentDate")).toHaveAttribute("aria-describedby", /\bincidentDate-hint\b/);
+    await expect(page.locator("#incidentDate-hint")).not.toBeEmpty();
     await page.context().close();
   });
 }

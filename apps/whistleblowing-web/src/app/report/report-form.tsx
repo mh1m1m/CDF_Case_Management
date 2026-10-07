@@ -121,12 +121,13 @@ export function ReportForm({ locale }: { locale: Locale }) {
             id="incidentDate"
             label={t("portal.incidentDate")}
             optionalLabel={t("common.optional")}
+            hint={t("common.dateHint")}
             error={e.incidentDate}
           >
             <input
               type="date"
               {...register("incidentDate")}
-              {...fieldIds("incidentDate", { error: e.incidentDate })}
+              {...fieldIds("incidentDate", { hint: "y", error: e.incidentDate })}
               className={inputClass}
             />
           </CDFField>
