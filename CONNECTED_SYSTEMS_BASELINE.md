@@ -20,14 +20,17 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Every value below was r
 ## GitHub
 
 - Repository: https://github.com/mh1m1m/CDF_Case_Management (default branch `main`, bootstrap commit only).
-- Open PRs, stacked, merge order 1 → 2 → 3 (Fady merges):
+- Open PRs. #1 → #2 → #3 are stacked and merge in that order; #5–#7 stack on #3 (Fady merges):
 
-  | PR  | Branch                           | Base                             | Linear                                                                               |
-  | --- | -------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------ |
-  | #1  | `phase-0/baseline-analysis`      | `main`                           | [CDF-28] (EPIC 00 [CDF-5])                                                           |
-  | #2  | `phase-1/engineering-foundation` | `phase-0/baseline-analysis`      | [CDF-29] (EPIC 01 [CDF-6])                                                           |
-  | #3  | `phase-2-6/first-vertical-slice` | `phase-1/engineering-foundation` | [CDF-30] (EPIC 04 [CDF-9]; related EPIC 02, 03, 05, 06, 07, 15)                      |
-  | #4  | `claude/stitch-skill-xdoq19`     | `main`                           | None. Adds Google Stitch skills/MCP config; not part of the CEOM roadmap (see below) |
+  | PR  | Branch                                   | Base                             | Linear                                                                               |
+  | --- | ---------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------ |
+  | #1  | `phase-0/baseline-analysis`              | `main`                           | [CDF-28] (EPIC 00 [CDF-5])                                                           |
+  | #2  | `phase-1/engineering-foundation`         | `phase-0/baseline-analysis`      | [CDF-29] (EPIC 01 [CDF-6])                                                           |
+  | #3  | `phase-2-6/first-vertical-slice`         | `phase-1/engineering-foundation` | [CDF-30] (EPIC 04 [CDF-9]; related EPIC 02, 03, 05, 06, 07, 15)                      |
+  | #4  | `claude/stitch-skill-xdoq19`             | `main`                           | None. Adds Google Stitch skills/MCP config; not part of the CEOM roadmap (see below) |
+  | #5  | `docs/connected-systems-baseline-2knkfy` | `phase-2-6/first-vertical-slice` | [CDF-31] (this document)                                                             |
+  | #6  | `claude/stitch-design-review-5w9w3x`     | `phase-2-6/first-vertical-slice` | Design review; findings tracked as [CDF-45] to [CDF-48] under EPIC 16 ([CDF-21])     |
+  | #7  | `feature/CDF-44-evidence-custody`        | `phase-2-6/first-vertical-slice` | [CDF-44] (EPIC 08 [CDF-13])                                                          |
 
 - The Linear GitHub integration is active: PR references in Linear issues resolve to the live PRs.
 - The GraphQL API is not reachable from Claude cloud sessions; REST (`gh api`) works.
@@ -73,7 +76,7 @@ Created:
   | 21   | [CDF-26] | Reference Implementation Release | In Progress |
   | 22   | [CDF-27] | Reference Implementation Release | Backlog     |
 
-- Stories: [CDF-28] to [CDF-30] record Phases 0–6 against PRs #1–#3; [CDF-31] is this activation; [CDF-32] to [CDF-34] are the gaps below; [CDF-35] to [CDF-43] are the `PRODUCTION_SUBSTITUTION_REQUIRED` rows of `architecture/PRODUCTION_MAPPING.md` (the Sentry and Mixpanel rows are covered by EPIC 18 and 19).
+- Stories: [CDF-28] to [CDF-30] record Phases 0–6 against PRs #1–#3; [CDF-31] is this activation; [CDF-32] to [CDF-34] are the gaps below; [CDF-35] to [CDF-43] are the `PRODUCTION_SUBSTITUTION_REQUIRED` rows of `architecture/PRODUCTION_MAPPING.md` (the Sentry and Mixpanel rows are covered by EPIC 18 and 19). Created after activation: [CDF-44] (Phase 7 evidence slice, PR #7) and [CDF-45] to [CDF-48] (design-review findings, PR #6).
 - Not created: the CEOM initiative "CDF Case Management & Investigation Platform". The Linear connector cannot create initiatives. The projects carry the platform name in their descriptions; the initiative can be added in the Linear UI and the projects attached to it.
 
 ## Google Drive
@@ -180,3 +183,8 @@ Only one project exists, where the CEOM expects `cdf-case-dev` and `cdf-case-dem
 [CDF-34]: https://linear.app/cdfcasemanagement/issue/CDF-34
 [CDF-35]: https://linear.app/cdfcasemanagement/issue/CDF-35
 [CDF-43]: https://linear.app/cdfcasemanagement/issue/CDF-43
+[CDF-44]: https://linear.app/cdfcasemanagement/issue/CDF-44
+[CDF-45]: https://linear.app/cdfcasemanagement/issue/CDF-45
+[CDF-46]: https://linear.app/cdfcasemanagement/issue/CDF-46
+[CDF-47]: https://linear.app/cdfcasemanagement/issue/CDF-47
+[CDF-48]: https://linear.app/cdfcasemanagement/issue/CDF-48
