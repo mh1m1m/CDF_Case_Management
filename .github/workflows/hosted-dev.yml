@@ -3,7 +3,9 @@ name: Hosted DEV (Supabase)
 # CDF-32 / CEOM §11: the hosted DEV database (Supabase project blycdqjphsxvyiuoommv, "cdf-case-dev")
 # changes only from Git. This workflow applies infrastructure/supabase/migrations with the Supabase
 # CLI, seeds the synthetic demo data once, and runs the database, RLS and security suites against
-# DEV. Manual trigger only. It never resets, drops or truncates anything on the hosted project.
+# DEV. It runs on pushes to the branch named below that touch the database or the tests, and manually
+# (workflow_dispatch) once the file exists on the default branch, because GitHub resolves manual
+# dispatch against main. It never resets, drops or truncates anything on the hosted project.
 #
 # Repository secrets (GitHub → Settings → Secrets and variables → Actions). Values never appear
 # in logs; every secret-derived value is masked.
@@ -14,6 +16,13 @@ name: Hosted DEV (Supabase)
 # Without the optional two, throwaway passwords are generated for the test run and set on the roles.
 
 on:
+  push:
+    branches: [feature/CDF-32-hosted-dev]
+    paths:
+      - .github/workflows/hosted-dev.yml
+      - infrastructure/supabase/**
+      - tests/**
+      - scripts/db/**
   workflow_dispatch:
     inputs:
       seed:
@@ -87,7 +96,7 @@ jobs:
           echo "CDF_ADMIN_DATABASE_URL=postgresql://postgres.${SUPABASE_PROJECT_REF}:${enc}@${host}:5432/postgres" >> "$GITHUB_ENV"
 
       - name: Seed synthetic data (only while iam.user_profile is empty)
-        if: ${{ inputs.seed }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
         run: |
           n=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -c "select count(*) from iam.user_profile")
           if [ "$n" != "0" ]; then echo "DEV already holds $n synthetic users; seed skipped"; exit 0; fi
@@ -97,7 +106,7 @@ jobs:
           done
 
       - name: Login-role passwords for the test run (stable from secrets, else throwaway)
-        if: ${{ inputs.test }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
           CDF_BFF_DB_PASSWORD: ${{ secrets.CDF_BFF_DB_PASSWORD }}
           CDF_PORTAL_DB_PASSWORD: ${{ secrets.CDF_PORTAL_DB_PASSWORD }}
@@ -118,10 +127,10 @@ jobs:
           done
 
       - run: pnpm install --frozen-lockfile
-        if: ${{ inputs.test }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
 
       - name: Database, RLS and security suites against DEV
-        if: ${{ inputs.test }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
           CDF_ENVIRONMENT: test
         run: pnpm test:db
@@ -134,7 +143,7 @@ jobs:
             echo "- Project: \`$SUPABASE_PROJECT_REF\` (cdf-case-dev)"
             echo "- Commit: \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`"
             echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo "- Seed requested: ${{ inputs.seed }} · Tests requested: ${{ inputs.test }}"
+            echo "- Trigger: ${{ github.event_name }} · Seed: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }} · Tests: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}"
             echo
             echo '```'
             supabase --workdir infrastructure migration list 2>&1 || true

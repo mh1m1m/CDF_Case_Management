@@ -57,7 +57,7 @@ The hosted history (`supabase_migrations.schema_migrations`) lists exactly `2026
 - ACTUAL: 7.
 - DRIFT: missing on DEV: the `public_api` schema (anonymous portal commands, `core.rate_limit` and `core.consume_rate_limit`, `usage` on `public_api` for `authenticated`), the `evidence` schema (items, versions, custody, content-type allow-list, the evidence `api.*` and `authz.*` functions), the `EVIDENCE_UPLOAD` and `EVIDENCE_DOWNLOAD` permissions with their twelve role grants, and the two storage buckets.
 - CAUSE: `0800_public_api` contains a `delete from core.rate_limit …` inside `core.consume_rate_limit()`. The connector classifies the statement as destructive and raises a confirmation prompt that expires after about a minute and never reached the requester (four attempts, 2026-10-07 12:20–12:27). The migration was not rewritten to avoid the check. DEV was verified unchanged after every attempt (last migration 0700, no `core.rate_limit` objects).
-- REMEDIATION: `.github/workflows/hosted-dev.yml` (`workflow_dispatch`, manual only) links the project with the Supabase CLI, runs `supabase db push` (exactly the pending Git files, in order), seeds the synthetic data while DEV is still empty, and runs `pnpm test:db` against DEV through the IPv4 session pooler on port 5432 (the direct database host is IPv6-only, which GitHub-hosted runners cannot reach). It needs the two repository secrets in §9. The run ID and commit are recorded here and in CDF-32 once it has run.
+- REMEDIATION: `.github/workflows/hosted-dev.yml` (runs on pushes to `feature/CDF-32-hosted-dev` that touch the database or the tests; manual `workflow_dispatch` works only once the file is on `main`, because GitHub resolves manual dispatch against the default branch, which has no workflows yet) links the project with the Supabase CLI, runs `supabase db push` (exactly the pending Git files, in order), seeds the synthetic data while DEV is still empty, and runs `pnpm test:db` against DEV through the IPv4 session pooler on port 5432 (the direct database host is IPv6-only, which GitHub-hosted runners cannot reach). It needs the two repository secrets in §9. The run ID and commit are recorded here and in CDF-32 once it has run.
 
 ## 5. Verification: no transcription drift in 0100–0700
 
@@ -130,7 +130,7 @@ None of these is ever `NEXT_PUBLIC_*` (§46, §47). Values are entered where the
 
 ## 12. How to re-run
 
-1. GitHub → Actions → "Hosted DEV (Supabase)" → Run workflow on `feature/CDF-32-hosted-dev` (inputs `seed` and `test`, both default true), or `gh workflow run hosted-dev.yml --ref feature/CDF-32-hosted-dev`.
+1. Push a commit to `feature/CDF-32-hosted-dev` that touches the workflow, a migration, a seed, a test or `scripts/db/` (the workflow runs on such pushes while `main` lacks the file). Once the file is on `main`: GitHub → Actions → "Hosted DEV (Supabase)" → Run workflow (inputs `seed` and `test`, both default true), or `gh workflow run hosted-dev.yml --ref <branch>`.
 2. Read the run summary: migration history before and after, seed result, suite results.
 3. Run `scripts/db/fingerprint-schema.sql` and `scripts/db/fingerprint-data.sql` on DEV (connector `execute_sql`) and locally (`psql -f`); every bucket must match, `evidence` and `public_api` included.
 4. Reread the advisors; update §3, §6 and §8 here and the evidence comment on CDF-32 with the run ID and commit.
