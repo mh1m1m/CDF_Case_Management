@@ -73,6 +73,7 @@ export function ReportForm({ locale }: { locale: Locale }) {
         <CDFField id="category" label={t("portal.category")} error={e.category}>
           <select
             {...register("category")}
+            aria-required="true"
             {...fieldIds("category", { error: e.category })}
             className={inputClass}
             defaultValue=""
@@ -109,6 +110,7 @@ export function ReportForm({ locale }: { locale: Locale }) {
         >
           <textarea
             {...register("description")}
+            aria-required="true"
             {...fieldIds("description", { hint: "y", error: e.description })}
             className={textareaClass}
             rows={8}
@@ -214,6 +216,7 @@ export function ReportForm({ locale }: { locale: Locale }) {
           <input
             type="checkbox"
             {...register("acknowledgement")}
+            aria-required="true"
             {...fieldIds("acknowledgement", { error: e.acknowledgement })}
             className="mt-1 size-5"
           />

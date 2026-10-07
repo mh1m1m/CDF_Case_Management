@@ -4,6 +4,7 @@
  * Layout uses logical properties (ps/pe/ms/me/start/end) so RTL and LTR both work.
  */
 import type { ReactNode } from "react";
+import { CDFFieldError } from "./field-errors";
 
 const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
 
@@ -117,15 +118,16 @@ export function CDFField(props: {
   hint?: string | undefined;
   error?: string | undefined;
   optionalLabel?: string | undefined;
+  /** Visible "(Required)" marker (WCAG 3.3.2); the control itself carries `required` for assistive technology. */
+  requiredLabel?: string | undefined;
   children: ReactNode;
 }) {
+  const marker = props.requiredLabel ?? props.optionalLabel;
   return (
     <div className="mb-4">
       <label htmlFor={props.id} className="mb-1 block font-semibold">
         {props.label}
-        {props.optionalLabel ? (
-          <span className="ms-2 text-sm font-normal text-cdf-text-secondary">({props.optionalLabel})</span>
-        ) : null}
+        {marker ? <span className="ms-2 text-sm font-normal text-cdf-text-secondary">({marker})</span> : null}
       </label>
       {props.hint ? (
         <p id={`${props.id}-hint`} className="mb-1 text-sm text-cdf-text-secondary">
@@ -137,7 +139,10 @@ export function CDFField(props: {
         <p id={`${props.id}-error`} className="mt-1 text-sm font-semibold text-cdf-danger">
           {props.error}
         </p>
-      ) : null}
+      ) : (
+        // Errors a server action reports for this control (see CDFFieldErrorsProvider).
+        <CDFFieldError id={props.id} />
+      )}
     </div>
   );
 }

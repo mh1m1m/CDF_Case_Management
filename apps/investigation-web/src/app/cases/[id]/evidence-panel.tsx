@@ -208,7 +208,11 @@ export function EvidencePanel({
                 testId={`new-version-form-${e.sequenceNo}`}
                 successMessage={t("evidence.uploaded", { sha: "{message}" })}
               >
-                <CDFField id={`file-${e.sequenceNo}`} label={t("evidence.fileLabel")}>
+                <CDFField
+                  id={`file-${e.sequenceNo}`}
+                  label={t("evidence.fileLabel")}
+                  requiredLabel={t("common.required")}
+                >
                   <input
                     id={`file-${e.sequenceNo}`}
                     name="file"
@@ -245,10 +249,14 @@ export function EvidencePanel({
             }}
             successMessage={t("evidence.uploaded", { sha: "{message}" })}
           >
-            <CDFField id="file" label={t("evidence.fileLabel")}>
+            <CDFField id="file" label={t("evidence.fileLabel")} requiredLabel={t("common.required")}>
               <input id="file" name="file" type="file" accept={ACCEPT} className={inputClass} required />
             </CDFField>
-            <CDFField id="evidenceTitle" label={t("evidence.titleLabel")}>
+            <CDFField
+              id="evidenceTitle"
+              label={t("evidence.titleLabel")}
+              requiredLabel={t("common.required")}
+            >
               <input
                 id="evidenceTitle"
                 name="title"
@@ -290,6 +298,7 @@ export function EvidencePanel({
               id="sourceDescription"
               label={t("evidence.sourceLabel")}
               hint={t("evidence.sourceHint")}
+              optionalLabel={t("common.optional")}
             >
               <input
                 id="sourceDescription"
@@ -299,10 +308,18 @@ export function EvidencePanel({
                 aria-describedby="sourceDescription-hint"
               />
             </CDFField>
-            <CDFField id="collectedAt" label={t("evidence.collectedAtLabel")}>
+            <CDFField
+              id="collectedAt"
+              label={t("evidence.collectedAtLabel")}
+              optionalLabel={t("common.optional")}
+            >
               <input id="collectedAt" name="collectedAt" type="date" className={inputClass} dir="ltr" />
             </CDFField>
-            <CDFField id="evidenceDescription" label={t("evidence.descriptionLabel")}>
+            <CDFField
+              id="evidenceDescription"
+              label={t("evidence.descriptionLabel")}
+              optionalLabel={t("common.optional")}
+            >
               <textarea
                 id="evidenceDescription"
                 name="description"
