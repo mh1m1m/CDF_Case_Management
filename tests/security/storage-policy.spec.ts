@@ -2,9 +2,24 @@
 // application roles; only the database reveals object keys, and only to server code after authorization.
 // Runs on the Supabase CLI stack and on plain PostgreSQL (where the compatibility shim provides storage.*).
 import { describe, expect, it } from "vitest";
-import { admin } from "../support/db";
+import type { Tx } from "@cdf/infrastructure";
+import { admin, scenario } from "../support/db";
 
 const APP_ROLES = ["anon", "authenticated", "cdf_bff", "cdf_portal"];
+
+async function visibleRows(tx: Tx, table: string): Promise<number | "denied"> {
+  let n = -1;
+  try {
+    await tx.savepoint(async (sp) => {
+      const [row] = await sp.unsafe(`select count(*)::int as n from ${table}`);
+      n = Number(row!.n);
+    });
+    return n;
+  } catch (error) {
+    if (/permission denied/.test((error as Error).message)) return "denied";
+    throw error;
+  }
+}
 
 describe("storage policy", () => {
   it("storage.objects and storage.buckets carry no policies for application roles", async () => {
@@ -14,11 +29,40 @@ describe("storage policy", () => {
     expect(offending).toEqual([]);
   });
 
-  it("application roles hold no table privileges in the storage schema", async () => {
-    const rows = await admin<{ grantee: string; table_name: string; privilege_type: string }[]>`
-      select grantee, table_name, privilege_type from information_schema.role_table_grants
-      where table_schema = 'storage' and grantee = any(${APP_ROLES})`;
-    expect(rows).toEqual([]);
+  it("RLS is enabled on storage.objects and storage.buckets, so the table grants Supabase ships are inert", async () => {
+    // Supabase grants anon/authenticated table privileges on storage.* by platform design and relies on RLS
+    // policies to open access; plain PostgreSQL (the shim, RDS) has no such grants. Either way, with RLS on
+    // and no policies for application roles, nothing is reachable.
+    const rows = await admin<{ relname: string; rls: boolean }[]>`
+      select c.relname, c.relrowsecurity as rls from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'storage' and c.relkind = 'r' and c.relname in ('objects', 'buckets') order by 1`;
+    expect(rows.map((r) => r.relname)).toEqual(["buckets", "objects"]);
+    expect(rows.every((r) => r.rls)).toBe(true);
+  });
+
+  it("application roles see no storage rows, whether the grants are absent or RLS denies them", async () => {
+    // Best effort: make sure at least one bucket row exists so "0 rows" means hidden, not empty.
+    const seeded = await admin`
+      insert into storage.buckets (id, name, public) values ('cdf-test-private', 'cdf-test-private', false)
+      on conflict do nothing`.then(
+      () => true,
+      () => false,
+    );
+    try {
+      await scenario(async (s) => {
+        for (const user of ["investigatorA", "lead", "platformAdmin", null] as const) {
+          await s.as(user);
+          for (const table of ["storage.objects", "storage.buckets"]) {
+            expect(await visibleRows(s.tx, table), `${user ?? "anon"} ${table}`).toSatisfy(
+              (v: number | "denied") => v === 0 || v === "denied",
+            );
+          }
+        }
+      });
+    } finally {
+      if (seeded)
+        await admin`delete from storage.buckets where id = 'cdf-test-private'`.catch(() => undefined);
+    }
   });
 
   it("no bucket is public, and evidence buckets (when present) are private", async () => {
