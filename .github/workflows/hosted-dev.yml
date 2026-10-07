@@ -78,17 +78,18 @@ jobs:
           pw="${SUPABASE_DB_PASSWORD%%[$'\r\n']*}"
           enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$pw")
           echo "::add-mask::$enc"
-          psql --version
+          # Diagnostics go out as annotations: job logs are not readable from the cloud session.
+          echo "::notice::$(psql --version 2>&1 || echo 'psql is not installed on the runner')"
           user="postgres.${SUPABASE_PROJECT_REF}"
           host=""
           for candidate in "${{ vars.SUPABASE_POOLER_HOST }}" "aws-1-${SUPABASE_REGION}.pooler.supabase.com" "aws-0-${SUPABASE_REGION}.pooler.supabase.com"; do
             [ -n "$candidate" ] || continue
-            getent hosts "$candidate" | head -1 || echo "$candidate does not resolve"
+            getent hosts "$candidate" >/dev/null || echo "::warning::$candidate does not resolve"
             # libpq error text names host, port and user, never the password (masked anyway).
             if err=$(PGCONNECT_TIMEOUT=15 psql "postgresql://${user}:${enc}@${candidate}:5432/postgres" --no-psqlrc -qtAX -c "select 1" 2>&1 >/dev/null); then
               host="$candidate"; break
             fi
-            echo "$candidate: $err"
+            echo "::warning::$candidate: $(printf '%s' "$err" | tr '\n' ' ')"
           done
           if [ -z "$host" ]; then
             echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the repository variable SUPABASE_POOLER_HOST from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
