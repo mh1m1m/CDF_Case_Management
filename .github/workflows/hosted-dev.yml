@@ -74,18 +74,26 @@ jobs:
       - name: Database connection string (session pooler, IPv4; values masked)
         run: |
           echo "::add-mask::$SUPABASE_DB_PASSWORD"
-          enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$SUPABASE_DB_PASSWORD")
+          # A pasted secret may carry a trailing line break; nothing else is altered.
+          pw="${SUPABASE_DB_PASSWORD%%[$'\r\n']*}"
+          enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$pw")
           echo "::add-mask::$enc"
+          psql --version
           user="postgres.${SUPABASE_PROJECT_REF}"
           host=""
           for candidate in "${{ vars.SUPABASE_POOLER_HOST }}" "aws-1-${SUPABASE_REGION}.pooler.supabase.com" "aws-0-${SUPABASE_REGION}.pooler.supabase.com"; do
             [ -n "$candidate" ] || continue
-            if PGCONNECT_TIMEOUT=15 psql "postgresql://${user}:${enc}@${candidate}:5432/postgres" --no-psqlrc -qtAX -c "select 1" >/dev/null 2>&1; then
+            getent hosts "$candidate" | head -1 || echo "$candidate does not resolve"
+            # libpq error text names host, port and user, never the password (masked anyway).
+            if err=$(PGCONNECT_TIMEOUT=15 psql "postgresql://${user}:${enc}@${candidate}:5432/postgres" --no-psqlrc -qtAX -c "select 1" 2>&1 >/dev/null); then
               host="$candidate"; break
             fi
-            echo "no session-pooler connection through $candidate"
+            echo "$candidate: $err"
           done
-          [ -n "$host" ] || { echo "::error::No pooler host accepted the connection. Set the repository variable SUPABASE_POOLER_HOST (Dashboard → Connect → Session pooler) or check SUPABASE_DB_PASSWORD."; exit 1; }
+          if [ -z "$host" ]; then
+            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the repository variable SUPABASE_POOLER_HOST from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
+            exit 1
+          fi
           echo "Session pooler: $host"
           echo "CDF_POOLER_HOST=$host" >> "$GITHUB_ENV"
           echo "CDF_ADMIN_DATABASE_URL=postgresql://${user}:${enc}@${host}:5432/postgres" >> "$GITHUB_ENV"
