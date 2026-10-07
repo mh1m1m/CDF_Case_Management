@@ -74,8 +74,23 @@ jobs:
       - name: Database connection string (session pooler, IPv4; values masked)
         run: |
           echo "::add-mask::$SUPABASE_DB_PASSWORD"
-          # A pasted secret may carry a trailing line break; nothing else is altered.
+          # Accept what people paste: the bare password, or the connection string from Dashboard → Connect
+          # (its password part is used). Line breaks and surrounding spaces are dropped; nothing else changes.
           pw="${SUPABASE_DB_PASSWORD%%[$'\r\n']*}"
+          pw="$(printf '%s' "$pw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          case "$pw" in
+            *YOUR-PASSWORD*)
+              echo "::error::SUPABASE_DB_PASSWORD still contains the [YOUR-PASSWORD] placeholder from the Connect dialog"; exit 1 ;;
+            postgres://*|postgresql://*)
+              pw=$(python3 -c 'import sys,urllib.parse;u=urllib.parse.urlsplit(sys.argv[1]);print(urllib.parse.unquote(u.password or ""))' "$pw")
+              echo "::notice::SUPABASE_DB_PASSWORD held a connection string; only its password part is used" ;;
+            eyJ*)
+              echo "::error::SUPABASE_DB_PASSWORD looks like an API key (JWT), not the database password"; exit 1 ;;
+            sbp_*)
+              echo "::error::SUPABASE_DB_PASSWORD looks like a personal access token, not the database password"; exit 1 ;;
+          esac
+          [ -n "$pw" ] || { echo "::error::SUPABASE_DB_PASSWORD is empty"; exit 1; }
+          echo "::add-mask::$pw"
           enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$pw")
           echo "::add-mask::$enc"
           # Diagnostics go out as annotations: job logs are not readable from the cloud session.
