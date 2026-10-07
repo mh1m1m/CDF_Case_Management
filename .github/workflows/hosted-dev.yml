@@ -1,0 +1,142 @@
+name: Hosted DEV (Supabase)
+
+# CDF-32 / CEOM §11: the hosted DEV database (Supabase project blycdqjphsxvyiuoommv, "cdf-case-dev")
+# changes only from Git. This workflow applies infrastructure/supabase/migrations with the Supabase
+# CLI, seeds the synthetic demo data once, and runs the database, RLS and security suites against
+# DEV. Manual trigger only. It never resets, drops or truncates anything on the hosted project.
+#
+# Repository secrets (GitHub → Settings → Secrets and variables → Actions). Values never appear
+# in logs; every secret-derived value is masked.
+#   SUPABASE_ACCESS_TOKEN   Supabase personal access token (Account → Access Tokens)
+#   SUPABASE_DB_PASSWORD    DEV project database password (Project Settings → Database)
+#   CDF_BFF_DB_PASSWORD     optional: stable password for the cdf_bff login role (same value as in Vercel)
+#   CDF_PORTAL_DB_PASSWORD  optional: stable password for the cdf_portal login role (same value as in Vercel)
+# Without the optional two, throwaway passwords are generated for the test run and set on the roles.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Seed synthetic data if the DEV database is still empty
+        type: boolean
+        default: true
+      test:
+        description: Run the database, RLS and security suites against DEV
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-dev
+  cancel-in-progress: false
+
+env:
+  SUPABASE_PROJECT_REF: blycdqjphsxvyiuoommv
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+jobs:
+  hosted-dev:
+    name: Migrate, seed and test DEV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Check the required secrets exist (values are never printed)
+        run: |
+          missing=0
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "::error::Repository secret $v is not set"; missing=1; fi
+          done
+          [ "$missing" = 0 ]
+
+      - name: Link the DEV project
+        run: supabase --workdir infrastructure link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Migration history before
+        run: supabase --workdir infrastructure migration list
+
+      - name: Apply pending Git migrations (supabase db push)
+        run: supabase --workdir infrastructure db push
+
+      - name: Migration history after
+        run: supabase --workdir infrastructure migration list
+
+      - name: Database connection strings (session pooler, IPv4; values masked)
+        run: |
+          host=""
+          if [ -f infrastructure/supabase/.temp/pooler-url ]; then
+            host=$(sed -E 's#^postgres(ql)?://[^@]+@([^:/]+).*#\2#' infrastructure/supabase/.temp/pooler-url)
+          fi
+          [ -n "$host" ] || host="${{ vars.SUPABASE_POOLER_HOST }}"
+          [ -n "$host" ] || { echo "::error::Pooler host unknown: supabase link wrote no pooler-url and the repository variable SUPABASE_POOLER_HOST is not set"; exit 1; }
+          echo "::add-mask::$SUPABASE_DB_PASSWORD"
+          enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$SUPABASE_DB_PASSWORD")
+          echo "::add-mask::$enc"
+          echo "CDF_POOLER_HOST=$host" >> "$GITHUB_ENV"
+          echo "CDF_ADMIN_DATABASE_URL=postgresql://postgres.${SUPABASE_PROJECT_REF}:${enc}@${host}:5432/postgres" >> "$GITHUB_ENV"
+
+      - name: Seed synthetic data (only while iam.user_profile is empty)
+        if: ${{ inputs.seed }}
+        run: |
+          n=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -c "select count(*) from iam.user_profile")
+          if [ "$n" != "0" ]; then echo "DEV already holds $n synthetic users; seed skipped"; exit 0; fi
+          for f in infrastructure/supabase/seed/*.sql; do
+            echo "→ $f"
+            psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 --single-transaction -f "$f"
+          done
+
+      - name: Login-role passwords for the test run (stable from secrets, else throwaway)
+        if: ${{ inputs.test }}
+        env:
+          CDF_BFF_DB_PASSWORD: ${{ secrets.CDF_BFF_DB_PASSWORD }}
+          CDF_PORTAL_DB_PASSWORD: ${{ secrets.CDF_PORTAL_DB_PASSWORD }}
+        run: |
+          for pair in cdf_bff:CDF_BFF_DB_PASSWORD cdf_portal:CDF_PORTAL_DB_PASSWORD; do
+            role=${pair%%:*}; var=${pair#*:}; p=${!var}
+            if [ -z "$p" ]; then
+              p=$(openssl rand -hex 24)
+              echo "$var is not a repository secret; a throwaway password is used for this run"
+            fi
+            echo "::add-mask::$p"
+            printf "alter role %s password :'pw';\n" "$role" \
+              | psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 -v pw="$p"
+            enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$p")
+            echo "::add-mask::$enc"
+            prefix=${var%_DB_PASSWORD}
+            echo "${prefix}_DATABASE_URL=postgresql://${role}.${SUPABASE_PROJECT_REF}:${enc}@${CDF_POOLER_HOST}:5432/postgres" >> "$GITHUB_ENV"
+          done
+
+      - run: pnpm install --frozen-lockfile
+        if: ${{ inputs.test }}
+
+      - name: Database, RLS and security suites against DEV
+        if: ${{ inputs.test }}
+        env:
+          CDF_ENVIRONMENT: test
+        run: pnpm test:db
+
+      - name: Evidence summary
+        if: always()
+        run: |
+          {
+            echo "## Hosted DEV run"
+            echo "- Project: \`$SUPABASE_PROJECT_REF\` (cdf-case-dev)"
+            echo "- Commit: \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- Seed requested: ${{ inputs.seed }} · Tests requested: ${{ inputs.test }}"
+            echo
+            echo '```'
+            supabase --workdir infrastructure migration list 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
