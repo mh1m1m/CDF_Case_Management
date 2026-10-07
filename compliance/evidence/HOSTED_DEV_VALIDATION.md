@@ -22,6 +22,7 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. This document carries i
 | PostgreSQL     | 17.11, release channel `ga`                                                                                                                                                             |
 | Collation      | `en_US.UTF-8` (the local reference database collates `C.UTF-8`; see §5)                                                                                                                 |
 | Status         | ACTIVE_HEALTHY, created 2026-10-07 07:09 UTC, empty at creation                                                                                                                         |
+| Session pooler | `aws-0-ap-northeast-1.pooler.supabase.com`, port 5432, user `postgres.blycdqjphsxvyiuoommv` (established by the probe in run 37649873035; `aws-1-…` answers "tenant not found")         |
 | Reachability   | The cloud session reaches the Supabase management API through the connector only; the database host and the pooler are not reachable from it, so suites run from GitHub Actions (§4.2)  |
 
 ## 3. Migration status (`list_migrations`, 2026-10-07)
@@ -49,7 +50,7 @@ The hosted history (`supabase_migrations.schema_migrations`) lists exactly `2026
 - ACTUAL: after `apply_migration`, the seven rows carried the connector's own run timestamps as `version`; the names were kept.
 - DRIFT: seven `version` values; the schema itself was unaffected.
 - CAUSE: `apply_migration` takes a name and generates the version at apply time.
-- REMEDIATION (done 2026-10-07 12:31 UTC): `update supabase_migrations.schema_migrations m set version = left(m.name, 14) where m.name ~ '^20261007000[1-9]00_' and m.version <> left(m.name, 14)` affected 7 rows; verified with `list_migrations`. Every further apply goes through the Supabase CLI from CI, which records Git versions natively.
+- REMEDIATION (done 2026-10-07, 12:31 on the project thread's clock): `update supabase_migrations.schema_migrations m set version = left(m.name, 14) where m.name ~ '^20261007000[1-9]00_' and m.version <> left(m.name, 14)` affected 7 rows; verified with `list_migrations`. Every further apply goes through the Supabase CLI from CI, which records Git versions natively.
 
 ### 4.2 Migrations 0800–1000 not applied — OPEN
 
@@ -70,7 +71,7 @@ Result (2026-10-07): every (kind, schema) bucket present on DEV has the same cou
 
 Observation: DEV collates `en_US.UTF-8`, the local database `C.UTF-8`. Text ordering inside `string_agg` therefore differs unless the sort uses `collate "C"`, which both scripts now do. Anything that orders text for a comparison or a stable hash must do the same.
 
-## 6. Advisors (`get_advisors`, 2026-10-07 12:46 UTC, 0100–0700 applied, tables empty)
+## 6. Advisors (`get_advisors`, 2026-10-07 12:46 on the project thread's clock, 0100–0700 applied, tables empty)
 
 | Advisor     | Level    | Finding                                                                                                                                 | Disposition                                                                                                                                      |
 | ----------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |

@@ -82,7 +82,8 @@ jobs:
           echo "::notice::$(psql --version 2>&1 || echo 'psql is not installed on the runner')"
           user="postgres.${SUPABASE_PROJECT_REF}"
           host=""
-          for candidate in "${{ vars.SUPABASE_POOLER_HOST }}" "aws-1-${SUPABASE_REGION}.pooler.supabase.com" "aws-0-${SUPABASE_REGION}.pooler.supabase.com"; do
+          # Run 37649873035 showed this project's tenant lives on aws-0 (aws-1 answers "tenant not found").
+          for candidate in "${{ vars.SUPABASE_POOLER_HOST }}" "aws-0-${SUPABASE_REGION}.pooler.supabase.com" "aws-1-${SUPABASE_REGION}.pooler.supabase.com"; do
             [ -n "$candidate" ] || continue
             getent hosts "$candidate" >/dev/null || echo "::warning::$candidate does not resolve"
             # libpq error text names host, port and user, never the password (masked anyway).
