@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -39,14 +39,20 @@ describe("LocalFilesystemEvidenceStorage", () => {
     expect(await storage.exists(KEY)).toBe(false);
     await storage.promoteToVault(KEY);
     expect(await storage.exists(KEY)).toBe(true);
-    const vaultPath = storage.vaultPathFor(KEY);
-    expect((await stat(vaultPath)).mode & 0o777).toBe(0o400);
-    expect(await readFile(vaultPath, "utf8")).toBe("synthetic body");
+    // One handle for mode and content, so the test itself has no check-then-use on the path.
+    const vault = await open(storage.vaultPathFor(KEY), "r");
+    try {
+      expect((await vault.stat()).mode & 0o777).toBe(0o400);
+      expect(await vault.readFile("utf8")).toBe("synthetic body");
+    } finally {
+      await vault.close();
+    }
     expect(await read(await storage.openReadStream(KEY))).toBe("synthetic body");
     // A second promotion attempt for the same key cannot replace the vault copy.
     await storage.putQuarantine(KEY, new TextEncoder().encode("replacement"), "text/plain");
     await expect(storage.promoteToVault(KEY)).rejects.toThrow(/EEXIST/);
-    expect(await readFile(vaultPath, "utf8")).toBe("synthetic body");
+    expect(await read(await storage.openReadStream(KEY))).toBe("synthetic body");
+    await expect(storage.openReadStream(`${KEY.slice(0, -1)}4`)).rejects.toThrow(/ENOENT/);
   });
 
   it("rejects anything that is not a canonical object key", async () => {

@@ -1,7 +1,6 @@
 // LocalFilesystemEvidenceStorage: private evidence storage on the local disk for development and CI
 // (ADR-006). Exclusive-create writes, read-only vault files, no overwrite and no delete API.
 // PRODUCTION_SUBSTITUTION_REQUIRED: never a production control; production uses Alibaba OSS (WORM + KMS).
-import { createReadStream } from "node:fs";
 import { access, chmod, link, mkdir, open, unlink } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
@@ -55,8 +54,10 @@ export class LocalFilesystemEvidenceStorage implements EvidenceStorage {
 
   async openReadStream(objectKey: string): Promise<ReadableStream<Uint8Array>> {
     const target = this.path(VAULT_BUCKET, objectKey);
-    await access(target);
-    return Readable.toWeb(createReadStream(target)) as ReadableStream<Uint8Array>;
+    // Open once and stream from the handle: no check-then-use on the path (CodeQL js/file-system-race).
+    // A missing object fails here with ENOENT; the handle closes with the stream.
+    const handle = await open(target, "r");
+    return Readable.toWeb(handle.createReadStream()) as ReadableStream<Uint8Array>;
   }
 
   async exists(objectKey: string): Promise<boolean> {
