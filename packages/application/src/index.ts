@@ -12,3 +12,5 @@ export type {
   EvidenceService,
   UploadedEvidence,
 } from "./evidence";
+export { createInterviewService } from "./interviews";
+export type { InterviewDeps, InterviewGateway, InterviewService, RecordedStatement } from "./interviews";

@@ -290,3 +290,6 @@ export type AppErrorKind = (typeof APP_ERROR_KINDS)[number];
 export type Result<T> =
   | { ok: true; value: T }
   | { ok: false; error: { kind: AppErrorKind; detail?: string; correlationId: string } };
+
+// ---- Interviews (EPIC 09, CDF-60) ----------------------------------------------------------------
+export * from "./interviews";

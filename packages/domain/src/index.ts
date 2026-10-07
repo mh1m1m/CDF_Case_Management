@@ -75,3 +75,6 @@ export {
   sanitizeFileName,
 } from "./evidence";
 export type { AllowedContentType, EvidenceFileCheck, EvidenceFileRejection } from "./evidence";
+
+// ---- Interviews (EPIC 09, CDF-60; ADR-012) ---------------------------------------------------------
+export * from "./interviews";

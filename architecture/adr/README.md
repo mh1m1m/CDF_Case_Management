@@ -12,5 +12,6 @@
 | [ADR-008](ADR-008-production-portability.md)            | Production portability strategy                         | Accepted |
 | [ADR-009](ADR-009-monorepo-and-adapter-packages.md)     | Monorepo layout and adapter package                     | Accepted |
 | [ADR-010](ADR-010-identity-and-sessions.md)             | Identity providers and session handling                 | Accepted |
+| [ADR-012](ADR-012-interviews.md)                        | Interviews domain                                       | Accepted |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.
