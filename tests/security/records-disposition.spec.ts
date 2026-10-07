@@ -138,6 +138,48 @@ describe("retention schedule", () => {
       );
     });
   });
+
+  it("CDF-74: an archived case gains no new assignment, access grant or identity-reveal request", async () => {
+    await scenario(async (s) => {
+      await closeAndArchive(s, caseB);
+      await s.expectError(
+        "CDF_CONFLICT:RECORDS_READ_ONLY",
+        (tx) =>
+          tx`select api.assign_case(${caseB}, ${USERS.investigatorA}, 'INVESTIGATOR', 'Synthetic: late assignment')`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:RECORDS_READ_ONLY",
+        (tx) =>
+          tx`select api.grant_case_access(${caseB}, ${USERS.legal}, 'REVIEW', 'Synthetic: late review')`,
+      );
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:RECORDS_READ_ONLY",
+        (tx) => tx`select api.request_identity_reveal(${caseB}, ${JUSTIFICATION})`,
+      );
+    });
+  });
+
+  it("CDF-75: case-linked tables reject DELETE and TRUNCATE for the owner too", async () => {
+    await ownerScenario(async (s) => {
+      await s.asOwner();
+      for (const table of [
+        "intake.report",
+        "intake.report_message",
+        "intake.report_triage",
+        "case_mgmt.allegation",
+        "case_mgmt.case_assignment",
+        "case_mgmt.case_access_grant",
+        "case_mgmt.conflict_check",
+        "workflow.workflow_instance",
+        "workflow.workflow_transition_event",
+        "protected_identity.reporter_identity",
+      ]) {
+        await s.expectError(`${table} is a protected record`, (tx) => tx.unsafe(`delete from ${table}`));
+        await s.expectError(`${table} is a protected record`, (tx) => tx.unsafe(`truncate ${table} cascade`));
+      }
+    });
+  });
 });
 
 describe("disposition", () => {
