@@ -267,6 +267,7 @@ export const en = {
     viewCase: "View case",
   },
   cases: {
+    homeTitle: "Overview",
     title: "Cases",
     intro: "Cases you are permitted to see.",
     empty: "No cases available to you.",
@@ -326,6 +327,7 @@ export const en = {
     addedBy: "Added by",
     addedAt: "Added",
     download: "Download",
+    tableCaption: "Evidence items",
     versions: "Versions and chain of custody",
     version: "Version {no}",
     custody: "Chain of custody",

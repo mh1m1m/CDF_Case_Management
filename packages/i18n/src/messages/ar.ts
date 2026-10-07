@@ -265,6 +265,7 @@ export const ar: Messages = {
     viewCase: "عرض القضية",
   },
   cases: {
+    homeTitle: "نظرة عامة",
     title: "القضايا",
     intro: "القضايا المصرح لك بالاطلاع عليها.",
     empty: "لا توجد قضايا متاحة لك.",
@@ -323,6 +324,7 @@ export const ar: Messages = {
     addedBy: "أضافه",
     addedAt: "تاريخ الإضافة",
     download: "تنزيل",
+    tableCaption: "قائمة الأدلة",
     versions: "الإصدارات وسلسلة الحيازة",
     version: "الإصدار {no}",
     custody: "سلسلة الحيازة",

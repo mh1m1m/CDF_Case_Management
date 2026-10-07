@@ -48,7 +48,7 @@ export function EvidencePanel({
     <CDFCard title={t("evidence.title")} testId="evidence-card">
       <p className="mb-3 text-sm text-cdf-text-secondary">{t("evidence.intro")}</p>
       <CDFTable<EvidenceItem>
-        caption={t("evidence.title")}
+        caption={t("evidence.tableCaption")}
         testId="evidence-table"
         rows={items}
         rowKey={(e) => e.id}
@@ -187,7 +187,7 @@ export function EvidencePanel({
               </li>
             ))}
           </ul>
-          <h4 className="mt-2 font-semibold">{t("evidence.custody")}</h4>
+          <h3 className="mt-2 font-semibold">{t("evidence.custody")}</h3>
           <ol className="list-decimal ps-5 text-sm" data-testid={`custody-${e.sequenceNo}`}>
             {e.custody.map((ev) => (
               <li key={ev.id}>
@@ -198,7 +198,7 @@ export function EvidencePanel({
           </ol>
           {canUpload ? (
             <div className="mt-3">
-              <h4 className="mb-2 font-semibold">{t("evidence.newVersionTitle")}</h4>
+              <h3 className="mb-2 font-semibold">{t("evidence.newVersionTitle")}</h3>
               <ActionForm
                 action={uploadEvidenceAction.bind(null, c.id, e.id)}
                 locale={t.locale}
