@@ -224,10 +224,8 @@ export interface MyCaseTask {
 /** Result of the controlled exact-match lookup (§6): identifies the target, nothing more. */
 export interface CaseDiscoveryResult {
   outcome: "MATCHED" | "NO_MATCH" | "RATE_LIMITED";
+  /** The hold request filed on a match. Nothing else about the case is returned (CDF-79). */
   requestId: string | null;
-  caseId: string | null;
-  caseNumber: string | null;
-  legalHoldStatus: string | null;
 }
 
 /** Records and legal dashboards: counts of the caller's own work only (§18), never all cases. */

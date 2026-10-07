@@ -159,7 +159,8 @@ describe("UI, API and database agree (CDF-73 §28.8)", () => {
       justification: "Synthetic: preservation required for a pending synthetic inquiry.",
       reasonCode: "LITIGATION",
     });
-    if (recent!.n < 5) expect(miss).toMatchObject({ ok: true, value: { outcome: "NO_MATCH", caseId: null } });
+    if (recent!.n < 5)
+      expect(miss).toMatchObject({ ok: true, value: { outcome: "NO_MATCH", requestId: null } });
     else expect(miss).toMatchObject({ ok: false, error: { kind: "RATE_LIMITED" } });
   });
 });

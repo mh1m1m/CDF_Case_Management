@@ -339,13 +339,13 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- Controlled case lookup (§6): exact case number + justification; rate limited; audited; no wildcard;
--- returns only what identifies the target and creates a hold request. No content, no task, no grant.
+-- returns only the outcome and the id of the hold request it files. No content, no task, no grant.
 -- A restricted, out-of-clearance, conflicted, disposed or missing case all return NO_MATCH.
 -- -----------------------------------------------------------------------------
 create function api.request_case_for_legal_hold(
   p_case_reference text, p_justification text, p_reason_code text default 'LITIGATION'
 )
-returns table (outcome text, request_id uuid, case_id uuid, case_number text, legal_hold_status text)
+returns table (outcome text, request_id uuid)
 language plpgsql security definer
 set search_path = ''
 as $$
@@ -373,7 +373,7 @@ begin
   if v_recent >= coalesce(v_limit, 5) then
     perform audit.record_event('CASE_DISCOVERY_REQUESTED', 'SECURITY', 'DENIED', null, 'case_record', null, 'LEGAL_HOLD',
       jsonb_build_object('purpose', 'LEGAL_HOLD', 'search_type', 'EXACT_CASE_NUMBER', 'outcome', 'RATE_LIMITED'));
-    return query select 'RATE_LIMITED'::text, null::uuid, null::uuid, null::text, null::text;
+    return query select 'RATE_LIMITED'::text, null::uuid;
     return;
   end if;
 
@@ -386,7 +386,7 @@ begin
   if v_case.id is null then
     perform audit.record_event('CASE_DISCOVERY_REQUESTED', 'SECURITY', 'SUCCESS', null, 'case_record', null, 'LEGAL_HOLD',
       jsonb_build_object('purpose', 'LEGAL_HOLD', 'search_type', 'EXACT_CASE_NUMBER', 'outcome', 'NO_MATCH'));
-    return query select 'NO_MATCH'::text, null::uuid, null::uuid, null::text, null::text;
+    return query select 'NO_MATCH'::text, null::uuid;
     return;
   end if;
 
@@ -395,7 +395,9 @@ begin
   perform audit.record_event('LEGAL_HOLD_CASE_DISCOVERED', 'BUSINESS', 'SUCCESS', v_case.id, 'case_record', v_case.id::text,
     'LEGAL_HOLD', jsonb_build_object('search_type', 'EXACT_CASE_NUMBER'));
   v_req := records.create_hold_request_internal(v_case.id, 'CONTROLLED_LOOKUP', p_reason_code, v_just, v_actor);
-  return query select 'MATCHED'::text, v_req, v_case.id, v_case.case_number, v_case.legal_hold_status;
+  -- Only the outcome and the request id (CDF-79): no case id, state or hold status, so a match confirms
+  -- nothing beyond "a request was filed" and the case stays invisible until a reviewer is assigned.
+  return query select 'MATCHED'::text, v_req;
 end;
 $$;
 
@@ -525,7 +527,8 @@ begin
 end;
 $$;
 
--- Post-event review by an approver other than the requester; every approved access must be reviewed.
+-- Post-event review by an approver who is neither the requester nor the approver (separation of duties,
+-- CDF-78); every approved access must be reviewed.
 create function api.review_break_glass(p_request_id uuid, p_outcome text, p_notes text)
 returns void
 language plpgsql security definer
@@ -537,7 +540,9 @@ declare
 begin
   select * into v_bg from case_mgmt.break_glass_access b where b.id = p_request_id for update;
   if v_bg.id is null or not authz.can_view_case(v_bg.case_id) then perform api._fail('NOT_FOUND'); end if;
-  if not authz.has_permission('BREAK_GLASS_APPROVE') or v_bg.requested_by = v_actor then perform api._fail('FORBIDDEN'); end if;
+  if not authz.has_permission('BREAK_GLASS_APPROVE') or v_actor in (v_bg.requested_by, v_bg.decided_by) then
+    perform api._fail('FORBIDDEN');
+  end if;
   if v_bg.review_status <> 'PENDING' then perform api._fail('CONFLICT', 'REVIEW_NOT_PENDING'); end if;
   if p_outcome is null or p_outcome not in ('APPROPRIATE', 'INAPPROPRIATE') then perform api._fail('INVALID', 'outcome'); end if;
   update case_mgmt.break_glass_access

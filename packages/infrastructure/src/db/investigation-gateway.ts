@@ -294,8 +294,7 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
   ): Promise<CaseDiscoveryResult> {
     return this.run(ctx, async (tx) => {
       const [row] = await tx<CaseDiscoveryResult[]>`
-        select outcome, request_id as "requestId", case_id as "caseId", case_number as "caseNumber",
-               legal_hold_status as "legalHoldStatus"
+        select outcome, request_id as "requestId"
         from api.request_case_for_legal_hold(${i.caseReference}, ${i.justification}, ${i.reasonCode})`;
       return row!;
     });

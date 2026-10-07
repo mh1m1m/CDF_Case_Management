@@ -104,9 +104,6 @@ async function lookup(tx: Tx, reference: string, justification = JUSTIFICATION) 
     {
       outcome: string;
       request_id: string | null;
-      case_id: string | null;
-      case_number: string | null;
-      legal_hold_status: string | null;
     }[]
   >`select * from api.request_case_for_legal_hold(${reference}, ${justification})`;
   return row!;
@@ -533,22 +530,14 @@ describe("§5, §6, §28.5: legal hold through a controlled, purpose-bound proce
       }
       await s.expectError("CDF_INVALID:justification", (tx) => lookup(tx, numberA, "too short"));
       const hit = await lookup(s.tx, numberA);
-      expect(Object.keys(hit).sort()).toEqual([
-        "case_id",
-        "case_number",
-        "legal_hold_status",
-        "outcome",
-        "request_id",
-      ]);
-      expect(hit).toMatchObject({
-        outcome: "MATCHED",
-        case_id: caseA,
-        case_number: numberA,
-        legal_hold_status: "NONE",
-      });
+      // CDF-79: a match returns the outcome and the filed request only, never the case id, state or hold status.
+      expect(Object.keys(hit).sort()).toEqual(["outcome", "request_id"]);
+      expect(hit.outcome).toBe("MATCHED");
+      expect(hit.request_id).toEqual(expect.any(String));
       // Missing, restricted and conflicted all look the same.
-      expect(await lookup(s.tx, "CDF-DEMO-2026-9999")).toMatchObject({ outcome: "NO_MATCH", case_id: null });
-      expect(await lookup(s.tx, numberExec)).toMatchObject({ outcome: "NO_MATCH", case_id: null });
+      const none = { outcome: "NO_MATCH", request_id: null };
+      expect(await lookup(s.tx, "CDF-DEMO-2026-9999")).toEqual(none);
+      expect(await lookup(s.tx, numberExec)).toEqual(none);
     });
   });
 
@@ -688,7 +677,13 @@ describe("§20: break-glass is exceptional, approved by someone else, time-bound
       );
       await s.tx`select api.end_break_glass(${bg!.id})`;
       expect(await opened(s.tx, "open_case", caseA)).toBe(false);
-      await s.as("grcDirector");
+      await s.as("grcDirector"); // CDF-78: the approver cannot review their own approval
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) =>
+          tx`select api.review_break_glass(${bg!.id}, 'APPROPRIATE', 'Synthetic: approver self review.')`,
+      );
+      await s.as("grcDeputy"); // an independent reviewer
       await s.tx`select api.review_break_glass(${bg!.id}, 'APPROPRIATE', 'Synthetic: access matched the reason.')`;
       const audit = await actions(s, caseA, "BREAK_GLASS_%");
       expect(audit).toEqual([

@@ -241,7 +241,8 @@ create table case_mgmt.break_glass_access (
   review_outcome    text check (review_outcome in ('APPROPRIATE', 'INAPPROPRIATE')),
   review_notes      text check (length(review_notes) <= 2000),
   check (decided_by is null or decided_by <> requested_by),
-  check (reviewed_by is null or reviewed_by <> requested_by),
+  -- Post-event review is independent of both the requester and the approver (CDF-78).
+  check (reviewed_by is null or (reviewed_by <> requested_by and reviewed_by is distinct from decided_by)),
   check ((status = 'ACTIVE') <= (access_expires_at is not null)),
   check ((review_status = 'REVIEWED') = (reviewed_at is not null and review_outcome is not null))
 );
