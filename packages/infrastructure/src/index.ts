@@ -9,3 +9,9 @@ export { LocalDevIdentityProvider, LOCAL_DEV_USERS, SESSION_COOKIE } from "./ide
 export type { LocalDevOptions } from "./identity/local-dev";
 export { SupabaseIdentityProvider } from "./identity/supabase";
 export type { CookieJar, CookieOptions } from "./identity/cookies";
+export { PostgresEvidenceGateway } from "./db/evidence-gateway";
+export { LocalFilesystemEvidenceStorage } from "./storage/local-fs";
+export type { LocalFilesystemOptions } from "./storage/local-fs";
+export { SupabaseEvidenceStorage } from "./storage/supabase";
+export { OBJECT_KEY_PATTERN, QUARANTINE_BUCKET, VAULT_BUCKET, assertObjectKey } from "./storage/object-key";
+export { MockMalwareScanner, EICAR_TEST_SIGNATURE } from "./scanning/mock-scanner";

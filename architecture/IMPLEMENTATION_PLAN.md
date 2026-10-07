@@ -236,4 +236,4 @@ Each phase is one or more PRs from a feature branch. No phase merges to `main` w
 | e2e           | `first-slice.e2e.ts`                      | Steps 1–10 through both UIs                                                                                       |
 | accessibility | `portal.a11y.ts`, `investigation.a11y.ts` | axe checks, Arabic RTL and English LTR                                                                            |
 
-Section 61 also names `evidence-access.spec.ts`, `storage-policy.spec.ts` and `export.spec.ts`. These belong to Phases 7 and 12 and are tracked as NOT_STARTED in [`PROJECT_STATUS.md`](../PROJECT_STATUS.md), not stubbed with passing placeholders.
+Section 61 also names `evidence-access.spec.ts` and `storage-policy.spec.ts` (delivered in Phase 7) and `export.spec.ts` (Phase 12, tracked as NOT_STARTED in [`PROJECT_STATUS.md`](../PROJECT_STATUS.md), not stubbed with a passing placeholder).

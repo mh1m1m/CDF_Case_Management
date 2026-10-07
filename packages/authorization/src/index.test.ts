@@ -27,6 +27,8 @@ describe("role permission mirror", () => {
     expect(permissionsForRoles(["INVESTIGATOR", "LEAD_INVESTIGATOR"])).toEqual([
       "CASE_ASSIGN",
       "CONFLICT_DECLARE",
+      "EVIDENCE_DOWNLOAD",
+      "EVIDENCE_UPLOAD",
       "WORKFLOW_ADVANCE",
     ]);
   });

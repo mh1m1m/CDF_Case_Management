@@ -6,6 +6,8 @@ import type {
   AuditTimelineEntry,
   CaseDetail,
   CaseListItem,
+  EvidenceItem,
+  EvidenceRejectionCode,
   IntakeReportItem,
   PublicReportStatus,
   ReportDetail,
@@ -52,24 +54,80 @@ export interface RateLimiter {
   consume(bucket: string, limit: number, windowSeconds: number): Promise<boolean>;
 }
 
-/** Phase 7. PRODUCTION_SUBSTITUTION_REQUIRED: Alibaba OSS with KMS encryption. */
+/**
+ * Private object storage for evidence content (ADR-006). Keys are random and immutable; there is no
+ * overwrite and no delete on this port. Content is always streamed through the server after
+ * authorization, never fetched by the browser (CLAUDE.md §3).
+ * PRODUCTION_SUBSTITUTION_REQUIRED: Alibaba OSS with WORM retention and KMS server-side encryption.
+ */
 export interface EvidenceStorage {
-  createUploadTarget(input: {
-    caseId: string;
-    fileName: string;
-    contentType: string;
-    size: number;
-  }): Promise<{
-    objectKey: string;
-    uploadUrl: string;
-    expiresAt: string;
-  }>;
-  createDownloadUrl(objectKey: string): Promise<string>;
+  readonly kind: "local-fs" | "supabase";
+  /** Exclusive create in the quarantine area; fails if the key already exists. */
+  putQuarantine(objectKey: string, body: Uint8Array, contentType: string): Promise<void>;
+  /** Moves a scanned object from quarantine to the vault; fails if the vault key already exists. */
+  promoteToVault(objectKey: string): Promise<void>;
+  /** Streams a vault object. */
+  openReadStream(objectKey: string): Promise<ReadableStream<Uint8Array>>;
+  exists(objectKey: string): Promise<boolean>;
 }
 
-/** Phase 7. PRODUCTION_SUBSTITUTION_REQUIRED: CDF-approved malware scanning service. */
+export interface ScanResult {
+  status: "CLEAN" | "INFECTED" | "UNSCANNED";
+  scanner: string;
+}
+
+/** PRODUCTION_SUBSTITUTION_REQUIRED: CDF-approved malware scanning service (threat T10). */
 export interface MalwareScanner {
-  scan(objectKey: string): Promise<"CLEAN" | "INFECTED" | "UNSCANNED">;
+  readonly name: string;
+  scan(content: Uint8Array, hint: { contentType: string; objectKey: string }): Promise<ScanResult>;
+}
+
+export interface RegisteredEvidenceVersion {
+  evidenceId: string;
+  versionId: string;
+  versionNo: number;
+  objectKey: string;
+}
+
+/** Storage facts for a version the caller may download. Never leaves the server. */
+export interface EvidenceDownloadRecord {
+  objectKey: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  evidenceId: string;
+  caseId: string;
+}
+
+export interface EvidenceGateway {
+  listEvidence(ctx: UserRequestContext, caseId: string): Promise<EvidenceItem[]>;
+  registerVersion(
+    ctx: UserRequestContext,
+    input: {
+      caseId: string;
+      evidenceId?: string;
+      title?: string;
+      description?: string;
+      evidenceType?: string;
+      sourceDescription?: string;
+      collectedAt?: string;
+      classification?: string;
+      fileName: string;
+      contentType: string;
+      sizeBytes: number;
+      sha256: string;
+    },
+  ): Promise<RegisteredEvidenceVersion>;
+  completeVersion(ctx: UserRequestContext, versionId: string, scanner: string): Promise<void>;
+  rejectVersion(
+    ctx: UserRequestContext,
+    versionId: string,
+    reasonCode: EvidenceRejectionCode,
+    scan?: { status: "INFECTED" | "UNSCANNED"; scanner: string },
+  ): Promise<void>;
+  /** Records the download (custody + audit) and returns the storage facts, or null when denied/missing. */
+  openVersion(ctx: UserRequestContext, versionId: string): Promise<EvidenceDownloadRecord | null>;
 }
 
 // ---- Data gateways (implemented over the per-transaction security context) --------------------
