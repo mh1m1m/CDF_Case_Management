@@ -34,7 +34,7 @@ describe("identity vault", () => {
   it("report and case rows carry only the opaque WB-ID, never identity fields", async () => {
     const columns = await admin<{ column_name: string }[]>`
       select column_name from information_schema.columns
-      where table_schema in ('intake', 'case_mgmt') and column_name ~ '(full_name|email|phone|national_id)'`;
+      where table_schema in ('intake', 'case_mgmt') and column_name ~ '(full_name|email|phone|national_id|id_number|birth|given_name|father_name|family_name|gender|nationality)'`;
     expect(columns).toEqual([]);
     const [c] = await admin<
       { reporter_wb_id: string }[]
@@ -91,8 +91,11 @@ describe("identity vault", () => {
       const identity = await s.tx`select * from api.resolve_reporter_identity(${caseB}, ${JUSTIFICATION})`;
       expect(identity).toHaveLength(1);
       expect(identity[0]).toMatchObject({
-        full_name: "Reporter Gamma (synthetic)",
+        full_name: "Reporter Gamma Synthetic Example",
         email: "reporter.gamma@example.test",
+        id_type: "NATIONAL_ID",
+        id_number: "1000000001",
+        birth_date_calendar: "GREGORIAN",
       });
 
       // Single use: a second resolution needs a new approval.
