@@ -7,13 +7,17 @@ name: Hosted DEV (Supabase)
 # (workflow_dispatch) once the file exists on the default branch, because GitHub resolves manual
 # dispatch against main. It never resets, drops or truncates anything on the hosted project.
 #
+# The CLI connects with --db-url through the Supavisor session pooler (IPv4; the direct database host
+# is IPv6-only, which GitHub-hosted runners cannot reach), so no Supabase access token is needed.
+#
 # Repository secrets (GitHub → Settings → Secrets and variables → Actions). Values never appear
 # in logs; every secret-derived value is masked.
-#   SUPABASE_ACCESS_TOKEN   Supabase personal access token (Account → Access Tokens)
 #   SUPABASE_DB_PASSWORD    DEV project database password (Project Settings → Database)
 #   CDF_BFF_DB_PASSWORD     optional: stable password for the cdf_bff login role (same value as in Vercel)
 #   CDF_PORTAL_DB_PASSWORD  optional: stable password for the cdf_portal login role (same value as in Vercel)
 # Without the optional two, throwaway passwords are generated for the test run and set on the roles.
+# Repository variable (optional): SUPABASE_POOLER_HOST, the session-pooler host shown under
+# Dashboard → Connect → Session pooler, if the probe of the two regional pooler hosts below fails.
 
 on:
   push:
@@ -43,7 +47,7 @@ concurrency:
 
 env:
   SUPABASE_PROJECT_REF: blycdqjphsxvyiuoommv
-  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_REGION: ap-northeast-1
   SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
 jobs:
@@ -61,39 +65,39 @@ jobs:
         with:
           version: latest
 
-      - name: Check the required secrets exist (values are never printed)
+      - name: Check the required secret exists (its value is never printed)
         run: |
-          missing=0
-          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD; do
-            if [ -z "${!v}" ]; then echo "::error::Repository secret $v is not set"; missing=1; fi
-          done
-          [ "$missing" = 0 ]
-
-      - name: Link the DEV project
-        run: supabase --workdir infrastructure link --project-ref "$SUPABASE_PROJECT_REF"
-
-      - name: Migration history before
-        run: supabase --workdir infrastructure migration list
-
-      - name: Apply pending Git migrations (supabase db push)
-        run: supabase --workdir infrastructure db push
-
-      - name: Migration history after
-        run: supabase --workdir infrastructure migration list
-
-      - name: Database connection strings (session pooler, IPv4; values masked)
-        run: |
-          host=""
-          if [ -f infrastructure/supabase/.temp/pooler-url ]; then
-            host=$(sed -E 's#^postgres(ql)?://[^@]+@([^:/]+).*#\2#' infrastructure/supabase/.temp/pooler-url)
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::error::Repository secret SUPABASE_DB_PASSWORD is not set"; exit 1
           fi
-          [ -n "$host" ] || host="${{ vars.SUPABASE_POOLER_HOST }}"
-          [ -n "$host" ] || { echo "::error::Pooler host unknown: supabase link wrote no pooler-url and the repository variable SUPABASE_POOLER_HOST is not set"; exit 1; }
+
+      - name: Database connection string (session pooler, IPv4; values masked)
+        run: |
           echo "::add-mask::$SUPABASE_DB_PASSWORD"
           enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$SUPABASE_DB_PASSWORD")
           echo "::add-mask::$enc"
+          user="postgres.${SUPABASE_PROJECT_REF}"
+          host=""
+          for candidate in "${{ vars.SUPABASE_POOLER_HOST }}" "aws-1-${SUPABASE_REGION}.pooler.supabase.com" "aws-0-${SUPABASE_REGION}.pooler.supabase.com"; do
+            [ -n "$candidate" ] || continue
+            if PGCONNECT_TIMEOUT=15 psql "postgresql://${user}:${enc}@${candidate}:5432/postgres" --no-psqlrc -qtAX -c "select 1" >/dev/null 2>&1; then
+              host="$candidate"; break
+            fi
+            echo "no session-pooler connection through $candidate"
+          done
+          [ -n "$host" ] || { echo "::error::No pooler host accepted the connection. Set the repository variable SUPABASE_POOLER_HOST (Dashboard → Connect → Session pooler) or check SUPABASE_DB_PASSWORD."; exit 1; }
+          echo "Session pooler: $host"
           echo "CDF_POOLER_HOST=$host" >> "$GITHUB_ENV"
-          echo "CDF_ADMIN_DATABASE_URL=postgresql://postgres.${SUPABASE_PROJECT_REF}:${enc}@${host}:5432/postgres" >> "$GITHUB_ENV"
+          echo "CDF_ADMIN_DATABASE_URL=postgresql://${user}:${enc}@${host}:5432/postgres" >> "$GITHUB_ENV"
+
+      - name: Migration history before
+        run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
+
+      - name: Apply pending Git migrations (supabase db push)
+        run: supabase --workdir infrastructure db push --db-url "$CDF_ADMIN_DATABASE_URL" --yes
+
+      - name: Migration history after
+        run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
 
       - name: Seed synthetic data (only while iam.user_profile is empty)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
@@ -146,6 +150,10 @@ jobs:
             echo "- Trigger: ${{ github.event_name }} · Seed: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }} · Tests: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}"
             echo
             echo '```'
-            supabase --workdir infrastructure migration list 2>&1 || true
+            if [ -n "$CDF_ADMIN_DATABASE_URL" ]; then
+              supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL" 2>&1 || true
+            else
+              echo "no database connection was established"
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
