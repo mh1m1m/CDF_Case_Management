@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
 import { ASSIGNMENT_ROLES, PRIORITIES } from "@cdf/contracts";
@@ -10,6 +11,7 @@ import {
   CDFPageHeader,
   CDFProgressTracker,
   CDFTimeline,
+  buttonClass,
   classificationTone,
   inputClass,
   textareaClass,
@@ -76,6 +78,29 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           label: t.locale === "ar" ? s.nameAr : s.nameEn,
         }))}
       />
+      {/* Entry points to the case's forms (CDF-50) and interviews (CDF-60); both pages enforce case access. */}
+      <nav aria-label={t("cases.workNav")} className="mb-6" data-testid="case-work-nav">
+        <ul className="flex flex-wrap gap-3">
+          <li>
+            <Link
+              href={`/cases/${c.id}/forms`}
+              className={buttonClass("secondary")}
+              data-testid="case-forms-link"
+            >
+              {t("cases.formsLink")}
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/cases/${c.id}/interviews`}
+              className={buttonClass("secondary")}
+              data-testid="case-interviews-link"
+            >
+              {t("cases.interviewsLink")}
+            </Link>
+          </li>
+        </ul>
+      </nav>
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div>
