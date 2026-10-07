@@ -1,7 +1,8 @@
 // LocalDevIdentityProvider: signs synthetic users in without an external identity service, for local
 // development and CI only (ADR-009). It refuses to load on Vercel or outside local/test environments.
 // PRODUCTION_SUBSTITUTION_REQUIRED: never a production control; production uses the CDF corporate IdP.
-import { timingSafeEqual, createHash } from "node:crypto";
+import { timingSafeEqual, scrypt } from "node:crypto";
+import { promisify } from "node:util";
 import { SignJWT, jwtVerify } from "jose";
 import type { IdentityProvider, IdentitySession } from "@cdf/application";
 import type { CookieJar } from "./cookies";
@@ -37,7 +38,8 @@ export interface LocalDevOptions {
   secureCookies: boolean;
 }
 
-const digest = (v: string) => createHash("sha256").update(v, "utf8").digest();
+// scrypt is memory-hard, so a leaked comparison key cannot be brute-forced cheaply (CodeQL js/insufficient-password-hash).
+const deriveKey = promisify(scrypt) as (password: string, salt: string, keylen: number) => Promise<Buffer>;
 
 export class LocalDevIdentityProvider implements IdentityProvider {
   readonly kind = "local-dev" as const;
@@ -53,8 +55,14 @@ export class LocalDevIdentityProvider implements IdentityProvider {
 
   async signIn(email: string, password: string): Promise<IdentitySession | null> {
     const subject = LOCAL_DEV_USERS[email.trim().toLowerCase()];
-    // Compare digests so timing does not reveal password length; always compare, even for unknown users.
-    const passwordOk = timingSafeEqual(digest(password), digest(this.options.password));
+    // Derive both sides with scrypt (salted by the deployment's identity secret) and compare in constant
+    // time. Always runs, even for unknown users, so timing reveals neither password length nor which
+    // accounts exist (T24).
+    const [submitted, expected] = await Promise.all([
+      deriveKey(password, this.options.secret, 32),
+      deriveKey(this.options.password, this.options.secret, 32),
+    ]);
+    const passwordOk = timingSafeEqual(submitted, expected);
     if (!subject || !passwordOk) return null;
     const now = Math.floor(Date.now() / 1000);
     await this.issue(subject, now, now);

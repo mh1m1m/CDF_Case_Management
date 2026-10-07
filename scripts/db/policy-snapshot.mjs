@@ -12,10 +12,14 @@ const url = process.env.CDF_ADMIN_DATABASE_URL ?? "postgresql://postgres@127.0.0
 const schemas =
   "'core','iam','authz','audit','case_mgmt','intake','protected_identity','workflow','config','api','public_api'";
 
+// Fields are separated by the ASCII unit separator so a literal "|" inside a policy expression can be
+// escaped for the Markdown table instead of being mistaken for a column boundary.
+const FIELD_SEPARATOR = "\u001f";
 const q = (sql) =>
-  execFileSync("psql", ["--no-psqlrc", "-At", "-F", " | ", "-d", url, "-c", sql], {
+  execFileSync("psql", ["--no-psqlrc", "-At", "-F", FIELD_SEPARATOR, "-d", url, "-c", sql], {
     encoding: "utf8",
   }).trim();
+const cell = (value) => value.replace(/\|/g, "\\|").replace(/`/g, "'");
 
 const sections = [
   [
@@ -68,7 +72,7 @@ for (const [title, header, sql] of sections) {
   const rows = q(sql).split("\n").filter(Boolean);
   const cols = header.split("|").length - 2;
   md += `\n## ${title}\n\n${header}\n|${" --- |".repeat(cols)}\n`;
-  for (const row of rows) md += `| ${row.replace(/\|(?= )/g, "|").replace(/`/g, "'")} |\n`;
+  for (const row of rows) md += `| ${row.split(FIELD_SEPARATOR).map(cell).join(" | ")} |\n`;
 }
 const out = join(root, "infrastructure", "supabase", "policies", "policy-snapshot.md");
 writeFileSync(out, md);
