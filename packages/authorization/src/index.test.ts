@@ -48,6 +48,7 @@ describe("role permission mirror", () => {
       "CONFLICT_DECLARE",
       "EVIDENCE_DOWNLOAD",
       "EVIDENCE_UPLOAD",
+      "LEGAL_HOLD_REQUEST",
       "WORKFLOW_ADVANCE",
     ]);
   });
@@ -57,6 +58,8 @@ describe("role permission mirror", () => {
       intake: false,
       cases: false,
       audit: false,
+      myWork: false,
+      recordsCatalogue: false,
       administration: true,
     });
   });

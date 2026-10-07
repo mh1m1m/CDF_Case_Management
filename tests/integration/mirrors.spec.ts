@@ -2,6 +2,7 @@
 // which are authoritative (ADR-006, ADR-007).
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
+import { CASE_TASK_TYPES, PERMISSIONS } from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES } from "@cdf/domain";
 import { STATES, TRANSITIONS } from "@cdf/workflow";
 import { admin } from "../support/db";
@@ -41,5 +42,18 @@ describe("mirrors", () => {
     const fromDb = Object.fromEntries(rows.map((r) => [r.role, r.perms]));
     const fromTs = Object.fromEntries(Object.entries(ROLE_PERMISSIONS).map(([k, v]) => [k, [...v].sort()]));
     expect(fromDb).toEqual(fromTs);
+  });
+
+  it("case task types match case_mgmt.case_task_type (ADR-014)", async () => {
+    const rows = await admin`
+      select code, category, allowed_capabilities as "allowedCapabilities", eligible_roles as "eligibleRoles",
+             requires_closed as "requiresClosed"
+      from case_mgmt.case_task_type order by code collate "C"`;
+    expect(rows).toEqual([...CASE_TASK_TYPES].map((t) => ({ ...t })));
+  });
+
+  it("permission codes match iam.permission", async () => {
+    const rows = await admin<{ code: string }[]>`select code from iam.permission order by code collate "C"`;
+    expect(rows.map((r) => r.code)).toEqual([...PERMISSIONS].sort());
   });
 });

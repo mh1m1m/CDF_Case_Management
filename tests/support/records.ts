@@ -1,10 +1,42 @@
 // Fixtures for the records, retention and legal hold suites (ADR-013).
 // Everything runs inside a rolled-back scenario; nothing persists in the seed.
 import type { Tx } from "@cdf/infrastructure";
-import type { OwnerScenario, Scenario } from "./db";
+import { USERS, type OwnerScenario, type Scenario, type UserKey } from "./db";
 
 export const JUSTIFICATION = "Synthetic: preservation required for a pending synthetic inquiry.";
 export const DECISION = "Synthetic decision reason.";
+
+export const PURPOSE = "Synthetic purpose for the records and legal suites.";
+
+/**
+ * Assigns a purpose-bound case task (ADR-014). Records and legal staff reach a case only through a task,
+ * a catalogue scope, a case relationship or break-glass, so the records suites set one up explicitly.
+ * Leaves the scenario acting as `by`.
+ */
+export async function giveTask(
+  s: Scenario,
+  caseId: string,
+  user: UserKey,
+  taskType: string,
+  opts: { by?: UserKey; scope?: string[] | null; expiresAt?: Date | null } = {},
+): Promise<string> {
+  await s.as(opts.by ?? "caseManager");
+  const [row] = await s.tx<{ id: string }[]>`
+    select api.create_case_task(${caseId}, ${taskType}, ${USERS[user]}, ${PURPOSE},
+      ${opts.scope ?? null}::text[], null, ${opts.expiresAt ?? null}::timestamptz) as id`;
+  return row!.id;
+}
+
+/** Legal-hold tasks on one case: legal may apply and release, legalB may decide the release. */
+export async function legalHoldTasks(
+  s: Scenario,
+  caseId: string,
+  by: UserKey = "caseManager",
+): Promise<void> {
+  await giveTask(s, caseId, "legal", "LEGAL_HOLD_APPLICATION", { by });
+  await giveTask(s, caseId, "legal", "LEGAL_HOLD_RELEASE", { by });
+  await giveTask(s, caseId, "legalB", "LEGAL_HOLD_RELEASE", { by });
+}
 
 /** Closes a case at screening and archives it (case manager), so it enters the records lifecycle. */
 export async function closeAndArchive(s: Scenario, caseId: string): Promise<void> {

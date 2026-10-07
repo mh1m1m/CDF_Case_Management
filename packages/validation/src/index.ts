@@ -9,6 +9,7 @@ import {
   CLASSIFICATION_LEVELS,
   EVIDENCE_TYPES,
   PRIORITIES,
+  RECORDS_STATES,
   REPORT_CATEGORIES,
   TRIAGE_OUTCOMES,
 } from "@cdf/contracts";
@@ -216,3 +217,29 @@ export function fieldErrors(error: z.ZodError): Record<string, string> {
   }
   return out;
 }
+
+// ---- Purpose-bound records and legal access (ADR-014) -----------------------------------------------
+/** Exact case number only (§6): no wildcard, prefix or partial value reaches the lookup. */
+export const caseDiscoverySchema = z.object({
+  caseReference: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^CDF-(CASE|DEMO)-[0-9]{4}-[0-9]{4,5}$/, { message: "validation.invalid" }),
+  justification: text(20, 2000),
+  reasonCode: z.enum(["LITIGATION", "REGULATORY_INQUIRY", "INTERNAL_INVESTIGATION", "AUDIT", "OTHER"]),
+});
+
+/** Catalogue search over authorised rows; the case-number filter is a plain prefix of allowed characters. */
+export const recordsCatalogueSearchSchema = z.object({
+  caseNumber: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9-]{0,20}$/, { message: "validation.invalid" })
+    .optional(),
+  archiveStatus: z.enum(RECORDS_STATES).optional(),
+  legalHoldStatus: z.enum(["NONE", "ACTIVE"]).optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+  offset: z.number().int().min(0).default(0),
+});
