@@ -78,8 +78,9 @@ The audit ledger has no class: the application never disposes of it (ADR-013 D8)
 ## 4. Records lifecycle (`case_record.records_state`)
 
 ```
-ACTIVE ──(workflow CLOSURE)──> CLOSED ──(workflow REOPEN_CASE)──> ACTIVE   [schedule superseded: REOPENED]
-CLOSED ──(workflow ARCHIVE_CASE)──> ARCHIVED                              [schedule computed from trigger]
+ACTIVE ──(workflow CLOSURE)──> CLOSED                                     [schedule computed from trigger]
+CLOSED ──(workflow REOPEN_CASE)──> ACTIVE                                  [schedule superseded: REOPENED]
+CLOSED ──(workflow ARCHIVE_CASE)──> ARCHIVED                              [recomputed only for CASE_ARCHIVED classes]
 ARCHIVED ──(api.assign_retention_class, class ≠ UNASSIGNED)──> RETENTION
 RETENTION ──(api.refresh_disposition_eligibility: retain_until ≤ now, CONFIGURED, no hold)──> DISPOSITION_ELIGIBLE
 DISPOSITION_ELIGIBLE ──(api.request_disposition)──> DISPOSITION_PENDING
@@ -90,7 +91,8 @@ DISPOSITION_ELIGIBLE | DISPOSITION_PENDING ──(api.place_legal_hold)──> R
 
 - `DISPOSED` is terminal. No transition leaves it.
 - Legal hold is not a state (ADR-013 D4); `legal_hold_status` is shown alongside the state.
-- `ARCHIVED` and later states are read-only for case content: existing `api.*` case commands already require `records_state = 'ACTIVE'` or a workflow state that allows them; the implementation adds an explicit guard to every case-content command (CDF-50 and CDF-60 commands included, by calling the shared predicate in §9).
+- `ARCHIVED` and later states are read-only for case content. Implemented as one guard trigger on `case_record` (`records.protect_case_record`, `CDF_CONFLICT:RECORDS_READ_ONLY`) rather than a check in every command, so no current or future command can bypass it; `DISPOSED` rejects every update (`CDF_CONFLICT:RECORDS_DISPOSED`). Case-linked modules (CDF-50, CDF-60) call the shared predicate in §9 for their own tables.
+- Implementation note (CDF-69): the schedule is computed when the case enters `CLOSED`, not at `ARCHIVED`, so that a reopen can supersede it (REC-T27) and the default trigger (`CASE_CLOSED`) has its timestamp. `ARCHIVE_CASE` is enabled without a class guard: the records officer confirms the class after archiving (§9 first option).
 
 ## 5. Legal hold rules
 

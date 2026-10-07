@@ -1,6 +1,6 @@
 # ADR-013: Records, retention, legal hold and disposition
 
-- **Status:** Proposed (2026-10-07). Design only; implementation is a follow-up story using migration prefixes `20261007001300`–`20261007001399`.
+- **Status:** Proposed (2026-10-07). Database layer implemented in CDF-69 (`20261007001300_records.sql`, `20261007001310_records_commands.sql`, logical disposition only); records UI and application services are a follow-up. Two implementation choices are recorded in RECORDS_RETENTION §4: the schedule is computed at closure, and `ARCHIVE_CASE` has no class guard.
 - **Linear:** CDF-61 (EPIC 13, CDF-18). Production substitutions: CDF-36 (Alibaba OSS WORM), CDF-38 (Alibaba KMS/HSM), CDF-39 (SLS → CDF SIEM).
 - **Protocol:** §24–§30, §35–§36 (records lifecycle, legal hold; see BASELINE_ANALYSIS gap table), §68, §87, §88. Implementation plan Phase 11 ("Legal hold blocks disposition").
 - **Detail:** [`RECORDS_RETENTION.md`](../data-model/RECORDS_RETENTION.md) (entities, states, RLS, audit events) and [`RECORDS_TEST_DEFINITIONS.md`](../threat-model/RECORDS_TEST_DEFINITIONS.md) (positive and negative test definitions).

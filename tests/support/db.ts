@@ -55,6 +55,10 @@ export const USERS = {
   dpo: "a0000000-0000-4000-8000-000000000012",
   revoked: "a0000000-0000-4000-8000-000000000013",
   grcDeputy: "a0000000-0000-4000-8000-000000000014",
+  records: "a0000000-0000-4000-8000-000000000015",
+  recordsB: "a0000000-0000-4000-8000-000000000016",
+  legal: "a0000000-0000-4000-8000-000000000017",
+  legalB: "a0000000-0000-4000-8000-000000000018",
 } as const;
 export type UserKey = keyof typeof USERS;
 
@@ -73,6 +77,23 @@ export async function reportId(ref: string): Promise<string> {
 }
 
 class Rollback extends Error {}
+
+function expectErrorIn(tx: Tx): Scenario["expectError"] {
+  return async (prefix, run) => {
+    let message: string | undefined;
+    try {
+      await tx.savepoint(async (sp) => {
+        await run(sp as unknown as Tx);
+      });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    if (message === undefined)
+      throw new Error(`expected an error starting with ${prefix}, but the statement succeeded`);
+    if (!message.startsWith(prefix))
+      throw new Error(`expected an error starting with ${prefix}, got: ${message}`);
+  };
+}
 
 export interface Scenario {
   tx: Tx;
@@ -97,20 +118,43 @@ export async function scenario(fn: (s: Scenario) => Promise<void>): Promise<void
           await tx`select set_config('request.jwt.claims', ${user ? JSON.stringify({ sub: USERS[user], role: "authenticated" }) : ""}, true)`;
           await tx.unsafe(user ? "set local role authenticated" : "set local role anon");
         },
-        async expectError(prefix, run) {
-          let message: string | undefined;
-          try {
-            await tx.savepoint(async (sp) => {
-              await run(sp as unknown as Tx);
-            });
-          } catch (error) {
-            message = (error as Error).message;
-          }
-          if (message === undefined)
-            throw new Error(`expected an error starting with ${prefix}, but the statement succeeded`);
-          if (!message.startsWith(prefix))
-            throw new Error(`expected an error starting with ${prefix}, got: ${message}`);
+        expectError: expectErrorIn(tx),
+      };
+      await fn(s);
+      throw new Rollback();
+    });
+  } catch (error) {
+    if (!(error instanceof Rollback)) throw error;
+  }
+}
+
+export interface OwnerScenario extends Scenario {
+  /** Return to the table owner, e.g. to add a fixture no application role may write or to probe triggers. */
+  asOwner(): Promise<void>;
+}
+
+/**
+ * Like scenario() but on the owner connection, for fixtures that no application role can create
+ * (a CONFIGURED retention class, a declared conflict). Statements after as(user) run with exactly the
+ * privileges of `authenticated`, as on the BFF connection. Always rolled back.
+ */
+export async function ownerScenario(fn: (s: OwnerScenario) => Promise<void>): Promise<void> {
+  try {
+    await admin.begin(async (raw) => {
+      const tx = raw as unknown as Tx;
+      await tx`select set_config('cdf.request_id', ${randomUUID()}, true)`;
+      const s: OwnerScenario = {
+        tx,
+        async as(user) {
+          await tx`reset role`;
+          await tx`select set_config('request.jwt.claims', ${user ? JSON.stringify({ sub: USERS[user], role: "authenticated" }) : ""}, true)`;
+          await tx.unsafe(user ? "set local role authenticated" : "set local role anon");
         },
+        async asOwner() {
+          await tx`reset role`;
+          await tx`select set_config('request.jwt.claims', '', true)`;
+        },
+        expectError: expectErrorIn(tx),
       };
       await fn(s);
       throw new Rollback();

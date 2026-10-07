@@ -72,6 +72,8 @@ Synthetic users (password = your `CDF_DEV_PASSWORD`, local-dev identity only):
 | `admin@example.test`                                          | Platform admin    | Users and roles, no case content                         |
 | `audit@example.test`, `soc@example.test`, `dpo@example.test`  | Oversight         | Audit or security events only                            |
 | `revoked@example.test`                                        | Revoked           | Cannot sign in or act                                    |
+| `records@example.test`, `records.b@example.test`              | Records officer   | Retention class, legal hold, disposition request         |
+| `legal@example.test`, `legal.b@example.test`                  | Legal reviewer    | Legal hold placement and dual-control release            |
 
 ## Tests
 

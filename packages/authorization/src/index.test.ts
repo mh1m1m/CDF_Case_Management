@@ -23,6 +23,25 @@ describe("role permission mirror", () => {
     expect(holders).toEqual(["GRC_DIRECTOR"]);
   });
 
+  it("never gives administrators or SOC records authority (ADR-013 D9)", () => {
+    const recordsAuthority = [
+      "RETENTION_CLASS_ASSIGN",
+      "LEGAL_HOLD_APPLY",
+      "LEGAL_HOLD_RELEASE",
+      "DISPOSITION_REQUEST",
+      "DISPOSITION_APPROVE",
+    ];
+    for (const role of ["PLATFORM_ADMIN", "DB_ADMIN", "SOC_ANALYST", "INTERNAL_AUDIT"] as const) {
+      expect(ROLE_PERMISSIONS[role].filter((p) => recordsAuthority.includes(p))).toEqual([]);
+    }
+  });
+
+  it("splits disposition request and approval across roles", () => {
+    for (const perms of Object.values(ROLE_PERMISSIONS)) {
+      expect(perms.includes("DISPOSITION_REQUEST") && perms.includes("DISPOSITION_APPROVE")).toBe(false);
+    }
+  });
+
   it("unions and de-duplicates permissions", () => {
     expect(permissionsForRoles(["INVESTIGATOR", "LEAD_INVESTIGATOR"])).toEqual([
       "CASE_ASSIGN",

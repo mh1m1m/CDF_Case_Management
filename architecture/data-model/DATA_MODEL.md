@@ -25,6 +25,7 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Every user row is const
 | `case_mgmt`          | Case master, persons, allegations, assignments, access grants, conflict checks, numbering, `case_overview` view | `SELECT` by policy                                        |
 | `workflow`           | Workflow definition, states, transitions, per-case instance, transition events                                  | `SELECT` by policy                                        |
 | `evidence`           | Evidence items, immutable file versions, content-type allow-list, chain of custody                              | `SELECT` by policy (column-limited on `evidence_version`) |
+| `records`            | Retention classes and schedules, legal holds, disposition requests and certificates (ADR-013)                   | `SELECT` by policy                                        |
 | `config`             | Settings whose authoritative source is still `SOURCE_REQUIRED`                                                  | `SELECT` for signed-in users                              |
 | `api`                | Authenticated command and query functions                                                                       | `EXECUTE` for `authenticated`                             |
 | `public_api`         | Anonymous portal functions                                                                                      | `EXECUTE` for `anon`                                      |
@@ -139,6 +140,10 @@ See [`../WORKFLOW.md`](../WORKFLOW.md) for the state machine.
 
 Writes happen only through `api.register_evidence_version`, `api.complete_evidence_version`, `api.reject_evidence_version` and `api.open_evidence_version`, each recording its custody event and audit event in the same transaction. The immutability triggers bind to the table owner too, so `SECURITY DEFINER` commands cannot overwrite history either.
 
+### 4.9 `records`
+
+Tables, constraints, lifecycle and audit events are specified in [`RECORDS_RETENTION.md`](RECORDS_RETENTION.md) and implemented by `…1300_records.sql` and `…1310_records_commands.sql`. Display numbers `CDF-HOLD-YYYY-NNNN` and `CDF-DISP-YYYY-NNNN` come from `records.number_counter`. `case_record.retention_class` references `records.retention_class`; `case_record` itself can no longer be deleted or truncated by any role.
+
 ## 5. Identifiers
 
 | Identifier      | Format                                | Purpose                                                   | Shown to               |
@@ -157,4 +162,4 @@ Writes happen only through `api.register_evidence_version`, `api.complete_eviden
 
 ## 7. Not yet modelled
 
-Interviews, findings, committee and decisions, corrective actions, retention and legal hold detail, document generation, notifications, and search are later phases (`NOT_STARTED`). Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.
+Interviews, findings, committee and decisions, corrective actions, document generation, notifications, and search are later phases (`NOT_STARTED`). Retention, legal hold and logical disposition are implemented (§4.9); physical destruction is not (ADR-013 D7).

@@ -23,6 +23,10 @@ export const LOCAL_DEV_USERS: Readonly<Record<string, string>> = {
   "dpo@example.test": "a0000000-0000-4000-8000-000000000012",
   "revoked@example.test": "a0000000-0000-4000-8000-000000000013",
   "grc.deputy@example.test": "a0000000-0000-4000-8000-000000000014",
+  "records@example.test": "a0000000-0000-4000-8000-000000000015",
+  "records.b@example.test": "a0000000-0000-4000-8000-000000000016",
+  "legal@example.test": "a0000000-0000-4000-8000-000000000017",
+  "legal.b@example.test": "a0000000-0000-4000-8000-000000000018",
 };
 
 export const SESSION_COOKIE = "cdf_session";
