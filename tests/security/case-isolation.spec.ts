@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { caseId, scenario, type UserKey } from "../support/db";
 
+const SEED_CASES = ["0001", "0002", "0003", "0004"];
 let caseA: string, caseB: string, caseExec: string, caseConflict: string;
 beforeAll(async () => {
   [caseA, caseB, caseExec, caseConflict] = await Promise.all([
@@ -21,7 +22,8 @@ const visible = async (user: UserKey) => {
     const rows = await s.tx<
       { case_number: string }[]
     >`select case_number from case_mgmt.case_record order by case_number`;
-    numbers = rows.map((r) => r.case_number.slice(-4));
+    // Only seed cases: integration tests may have committed further synthetic cases.
+    numbers = rows.map((r) => r.case_number.slice(-4)).filter((n) => SEED_CASES.includes(n));
   });
   return numbers;
 };

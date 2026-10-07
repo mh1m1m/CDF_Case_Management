@@ -79,7 +79,7 @@ describe("audit ledger immutability", () => {
       expect(await s.tx`select 1 from audit.audit_event where category = 'SECURITY'`).toEqual([]); // audit role: no SECURITY events
       await s.as("soc");
       const security =
-        await s.tx`select action, outcome from audit.audit_event where action = 'COMMAND_DENIED'`;
+        await s.tx`select action, outcome from audit.audit_event where action = 'COMMAND_DENIED' and object_id = 'synthetic'`;
       expect(security).toEqual([{ action: "COMMAND_DENIED", outcome: "DENIED" }]);
     });
   });

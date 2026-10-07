@@ -1,2 +1,11 @@
 export { createPool, withAnonContext, withUserContext } from "./db/security-context";
 export type { PoolOptions, Sql, Tx, UserContext } from "./db/security-context";
+export { PostgresInvestigationGateway } from "./db/investigation-gateway";
+export { PostgresPortalGateway } from "./db/portal-gateway";
+export { PostgresRateLimiter } from "./db/rate-limiter";
+export { PostgresSecurityEventSink } from "./db/security-event-sink";
+export { PrototypeKeyProvider } from "./keys/prototype-key-provider";
+export { LocalDevIdentityProvider, LOCAL_DEV_USERS, SESSION_COOKIE } from "./identity/local-dev";
+export type { LocalDevOptions } from "./identity/local-dev";
+export { SupabaseIdentityProvider } from "./identity/supabase";
+export type { CookieJar, CookieOptions } from "./identity/cookies";

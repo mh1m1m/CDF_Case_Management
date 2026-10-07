@@ -130,8 +130,11 @@ begin
     order by d.code
   loop
     v_reasons := '{}';
-    if not t.is_enabled then v_reasons := v_reasons || 'NOT_YET_AVAILABLE'; end if;
-    if not authz.has_permission(t.required_permission) then v_reasons := v_reasons || 'MISSING_PERMISSION'; end if;
+    if not t.is_enabled then v_reasons := v_reasons || 'NOT_YET_AVAILABLE'::text; end if;
+    if not authz.has_permission(t.required_permission) then v_reasons := v_reasons || 'MISSING_PERMISSION'::text; end if;
+    if t.approval_required and authz.has_active_assignment(p_case_id, v_actor, array['LEAD_INVESTIGATOR', 'INVESTIGATOR']) then
+      v_reasons := v_reasons || 'SEPARATION_OF_DUTIES'::text;
+    end if;
     foreach c in array t.required_conditions loop
       v_r := workflow.evaluate_condition(c, p_case_id, v_actor);
       if v_r is not null then v_reasons := v_reasons || v_r; end if;

@@ -7,7 +7,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@cdf/application": "workspace:*",
+    "@cdf/authorization": "workspace:*",
+    "@cdf/contracts": "workspace:*",
+    "@cdf/domain": "workspace:*",
     "@cdf/infrastructure": "workspace:*",
+    "@cdf/workflow": "workspace:*",
     "postgres": "3.4.9"
   }
 }
