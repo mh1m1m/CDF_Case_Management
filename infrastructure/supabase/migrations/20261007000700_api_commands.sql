@@ -277,6 +277,7 @@ declare
   v_actor uuid := api._actor();
   v_report intake.report;
   v_case_id uuid;
+  v_grant_id uuid;
   v_number text;
 begin
   if not authz.can_view_report(p_report_id) then perform api._fail('NOT_FOUND'); end if;
@@ -307,7 +308,8 @@ begin
   values (v_case_id, v_report.category, left(v_report.description, 8000), v_actor);
 
   insert into case_mgmt.case_access_grant (case_id, user_id, scope, reason, effective_to, granted_by)
-  values (v_case_id, v_actor, 'TRIAGE', 'Case opened from triaged report', now() + interval '30 days', v_actor);
+  values (v_case_id, v_actor, 'TRIAGE', 'Case opened from triaged report', now() + interval '30 days', v_actor)
+  returning id into v_grant_id;
 
   insert into workflow.workflow_instance (case_id, workflow_code, current_state)
   values (v_case_id, 'CDF_CASE_V1', 'REFERRAL');
@@ -317,7 +319,7 @@ begin
   perform audit.record_event('CASE_CREATED', 'BUSINESS', 'SUCCESS', v_case_id, 'case_record', v_case_id::text, null,
     jsonb_build_object('case_number', v_number, 'source_report_id', p_report_id, 'classification', p_classification,
                        'is_restricted', coalesce(p_is_restricted, false)));
-  perform audit.record_event('CASE_ACCESS_GRANTED', 'BUSINESS', 'SUCCESS', v_case_id, 'case_access_grant', v_actor::text,
+  perform audit.record_event('CASE_ACCESS_GRANTED', 'BUSINESS', 'SUCCESS', v_case_id, 'case_access_grant', v_grant_id::text,
     'Case opened from triaged report', jsonb_build_object('user_id', v_actor, 'scope', 'TRIAGE'));
   perform workflow.apply_transition(v_case_id, 'REGISTER', v_actor, null);
   return v_case_id;

@@ -18,7 +18,9 @@ insert into iam.user_profile (id, email, display_name, display_name_ar, departme
   ('a0000000-0000-4000-8000-000000000010', 'audit@example.test',          'Internal Auditor Theta',   'المراجع الداخلي ثيتا',     'Internal Audit (synthetic)', 'ACTIVE',  'INTERNAL'),
   ('a0000000-0000-4000-8000-000000000011', 'soc@example.test',            'SOC Analyst Iota',         'محلل الأمن يوتا',          'Cybersecurity (synthetic)', 'ACTIVE',  'INTERNAL'),
   ('a0000000-0000-4000-8000-000000000012', 'dpo@example.test',            'Privacy Officer Kappa',    'مسؤول الخصوصية كابا',      'Privacy (synthetic)',       'ACTIVE',  'CONFIDENTIAL'),
-  ('a0000000-0000-4000-8000-000000000013', 'revoked@example.test',        'Former Investigator Lambda','المحقق السابق لامدا',     'Investigations (synthetic)', 'REVOKED', 'CONFIDENTIAL');
+  ('a0000000-0000-4000-8000-000000000013', 'revoked@example.test',        'Former Investigator Lambda','المحقق السابق لامدا',     'Investigations (synthetic)', 'REVOKED', 'CONFIDENTIAL'),
+  -- Second identity-reveal holder so dual control (requester ≠ approver) can be demonstrated.
+  ('a0000000-0000-4000-8000-000000000014', 'grc.deputy@example.test',     'GRC Deputy Mu',            'نائب مدير الحوكمة مو',     'GRC (synthetic)',           'ACTIVE',  'SECRET');
 
 insert into iam.user_role_assignment (user_id, role_code, justification, source_reference, status, revoked_at, revocation_reason) values
   ('a0000000-0000-4000-8000-000000000001', 'INTAKE_OFFICER',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
@@ -33,4 +35,5 @@ insert into iam.user_role_assignment (user_id, role_code, justification, source_
   ('a0000000-0000-4000-8000-000000000010', 'INTERNAL_AUDIT',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
   ('a0000000-0000-4000-8000-000000000011', 'SOC_ANALYST',        'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
   ('a0000000-0000-4000-8000-000000000012', 'PRIVACY_DPO',        'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
-  ('a0000000-0000-4000-8000-000000000013', 'INVESTIGATOR',       'Synthetic demo seed', 'SEED', 'REVOKED', now(), 'Synthetic: left the department');
+  ('a0000000-0000-4000-8000-000000000013', 'INVESTIGATOR',       'Synthetic demo seed', 'SEED', 'REVOKED', now(), 'Synthetic: left the department'),
+  ('a0000000-0000-4000-8000-000000000014', 'GRC_DIRECTOR',       'Synthetic demo seed', 'SEED', 'ACTIVE', null, null);

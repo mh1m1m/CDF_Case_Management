@@ -46,6 +46,11 @@ export default tseslint.config(
     rules: { "no-restricted-imports": "off" },
   },
   {
+    // Developer CLI scripts report progress on stdout.
+    files: ["scripts/**/*.mjs"],
+    rules: { "no-console": "off" },
+  },
+  {
     // Pure packages must not depend on frameworks or infrastructure.
     files: [
       "packages/domain/**/*.ts",

@@ -1,0 +1,13 @@
+{
+  "name": "@cdf/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cdf/infrastructure": "workspace:*",
+    "postgres": "3.4.9"
+  }
+}
