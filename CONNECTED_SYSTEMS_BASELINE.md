@@ -73,7 +73,7 @@ Created:
   | 21   | [CDF-26] | Reference Implementation Release | In Progress |
   | 22   | [CDF-27] | Reference Implementation Release | Backlog     |
 
-- Stories: [CDF-28] to [CDF-30] record Phases 0–6 against PRs #1–#3; [CDF-31] is this activation; [CDF-32] to [CDF-34] are the open gaps below; [CDF-35] to [CDF-43] are the `PRODUCTION_SUBSTITUTION_REQUIRED` rows of `architecture/PRODUCTION_MAPPING.md` (the Sentry and Mixpanel rows are covered by EPIC 18 and 19).
+- Stories: [CDF-28] to [CDF-30] record Phases 0–6 against PRs #1–#3; [CDF-31] is this activation; [CDF-32] to [CDF-34] are the gaps below; [CDF-35] to [CDF-43] are the `PRODUCTION_SUBSTITUTION_REQUIRED` rows of `architecture/PRODUCTION_MAPPING.md` (the Sentry and Mixpanel rows are covered by EPIC 18 and 19).
 - Not created: the CEOM initiative "CDF Case Management & Investigation Platform". The Linear connector cannot create initiatives. The projects carry the platform name in their descriptions; the initiative can be added in the Linear UI and the projects attached to it.
 
 ## Google Drive
@@ -141,7 +141,7 @@ Only one project exists, where the CEOM expects `cdf-case-dev` and `cdf-case-dem
 
 1. Supabase is empty, while the repository defines 8 migrations: [CDF-32].
 2. No Vercel project builds this repository; the existing `cdf` project is unreadable (403): [CDF-33].
-3. The Supabase CLI compatibility job in CI has not been observed passing: [CDF-34].
+3. ~~The Supabase CLI compatibility job in CI had not been observed passing~~: it passed on this PR's head `8cd4a59` (Actions run 37605339626), closing [CDF-34].
 4. Only one Supabase project exists, where the CEOM expects DEV and DEMO: decision in [CDF-32].
 5. Sentry and Mixpanel are provisioned but adopting them is undecided; Mixpanel is unreadable from the current connector region: [CDF-23], [CDF-24].
 6. PR #4 (Stitch skills and MCP config) has no Linear issue and is outside the CEOM roadmap. It should get an issue, or be closed, before merge.
