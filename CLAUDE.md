@@ -84,7 +84,7 @@ Mark simulated capabilities `PRODUCTION_SUBSTITUTION_REQUIRED` in code and docs 
 - pnpm workspaces; Node 22; TypeScript `strict` everywhere; ESM.
 - Dependencies need justification (§69): prefer platform capabilities; record why in the PR.
 - Arabic RTL and English LTR from the start (§42). All user-facing text comes from `packages/i18n`; no hard-coded strings in components. Use logical CSS properties.
-- Forms: React Hook Form + Zod; the same Zod schema is re-validated on the server (§45).
+- Forms: one Zod schema per command in `packages/validation`, re-validated on the server and again by the database (§45). Multi-section forms use React Hook Form; short command forms are Server Action forms validated by the same schema.
 - Tests: Vitest (unit, integration, security), Playwright (e2e, accessibility). Security tests are mandatory for any authorization change (§20).
 - `data-testid` on interactive elements used by e2e tests.
 

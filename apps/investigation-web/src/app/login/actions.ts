@@ -18,7 +18,7 @@ function limiter() {
 const bucketKey = (value: string) =>
   createHmac("sha256", env().CDF_RATE_LIMIT_SALT).update(value).digest("base64url").slice(0, 43);
 
-/** One generic failure for every reason, so sign-in never reveals which accounts exist (T07). */
+/** One generic failure for every reason, so sign-in never reveals which accounts exist (T24). */
 const failed = (ref: string): ActionState => ({
   status: "error",
   kind: "INVALID",
@@ -31,7 +31,7 @@ export async function signInAction(_: ActionState, form: FormData): Promise<Acti
   const parsed = signInSchema.safeParse({ email: form.get("email"), password: form.get("password") });
   if (!parsed.success) return failed(requestId);
 
-  // Brute-force protection per account and per client. Keys are keyed hashes; no raw emails or IPs are stored.
+  // Brute-force protection per account and per client (T24). Keys are keyed hashes; no raw emails or IPs are stored.
   const client = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
   const [accountOk, clientOk] = await Promise.all([
     limiter().consume(`login_account:${bucketKey(parsed.data.email)}`, 10, 900),
