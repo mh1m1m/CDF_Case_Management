@@ -12,7 +12,13 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@cdf/contracts": "workspace:*",
     "@cdf/i18n": "workspace:*",
-    "@cdf/contracts": "workspace:*"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
   }
 }

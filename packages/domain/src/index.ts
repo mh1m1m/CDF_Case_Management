@@ -8,7 +8,7 @@ import { CLASSIFICATION_LEVELS, type Classification } from "@cdf/contracts";
 export const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const REPORT_REF_PATTERN = /^WB-[0-9A-HJKMNP-TV-Z]{12}$/;
 
-export type RandomSource = (bytes: Uint8Array) => Uint8Array;
+export type RandomSource = (bytes: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
 const defaultRandom: RandomSource = (bytes) => globalThis.crypto.getRandomValues(bytes);
 
 /** 12 random Crockford characters = 60 bits. Not a secret; collisions are retried by the caller. */

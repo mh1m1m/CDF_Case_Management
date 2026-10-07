@@ -94,6 +94,8 @@ export default tseslint.config(
         },
       ],
       "@next/next/no-html-link-for-pages": "off",
+      // Scrollable regions must be focusable (axe scrollable-region-focusable, WCAG 2.1.1).
+      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["region", "tabpanel"], tags: [] }],
     },
   },
 );

@@ -34,6 +34,107 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+  database:
+    name: Database, RLS and security tests (PostgreSQL 16 + compatibility shim)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["54322:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate throwaway login-role passwords (never stored)
+        run: |
+          for v in CDF_BFF_DB_PASSWORD CDF_PORTAL_DB_PASSWORD; do
+            p=$(openssl rand -hex 24); echo "::add-mask::$p"; echo "$v=$p" >> "$GITHUB_ENV"
+          done
+          echo "CDF_ADMIN_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+      - run: pnpm db:reset
+      - run: pnpm test:db
+      - name: Access-model snapshot is up to date
+        run: |
+          pnpm db:policies
+          git diff --exit-code -- infrastructure/supabase/policies/policy-snapshot.md \
+            || { echo "::error::Access model changed. Run pnpm db:reset && pnpm db:policies and commit the snapshot."; exit 1; }
+
+  e2e:
+    name: End-to-end and accessibility (Playwright)
+    runs-on: ubuntu-latest
+    needs: database
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["54322:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate throwaway secrets for this run (never stored)
+        run: |
+          for v in CDF_BFF_DB_PASSWORD CDF_PORTAL_DB_PASSWORD CDF_REPORT_SECRET_PEPPER CDF_RATE_LIMIT_SALT CDF_DEV_IDENTITY_SECRET CDF_DEV_PASSWORD; do
+            p=$(openssl rand -hex 24); echo "::add-mask::$p"; echo "$v=$p" >> "$GITHUB_ENV"
+          done
+          echo "CDF_ADMIN_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+          echo "CDF_IDENTITY_PROVIDER=local-dev" >> "$GITHUB_ENV"
+      - run: pnpm db:reset
+      - name: App connection strings
+        run: |
+          echo "CDF_BFF_DATABASE_URL=postgresql://cdf_bff:${CDF_BFF_DB_PASSWORD}@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+          echo "CDF_PORTAL_DATABASE_URL=postgresql://cdf_portal:${CDF_PORTAL_DB_PASSWORD}@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - run: pnpm test:a11y
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+
+  supabase:
+    name: Supabase compatibility (Supabase CLI local stack)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: pnpm install --frozen-lockfile
+      - run: supabase start --workdir infrastructure
+      - name: Generate throwaway login-role passwords (never stored)
+        run: |
+          for v in CDF_BFF_DB_PASSWORD CDF_PORTAL_DB_PASSWORD; do
+            p=$(openssl rand -hex 24); echo "::add-mask::$p"; echo "$v=$p" >> "$GITHUB_ENV"
+          done
+          echo "CDF_ADMIN_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
+      - run: pnpm db:reset
+        env:
+          CDF_DB_MODE: supabase
+      - run: pnpm test:db
+
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest

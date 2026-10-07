@@ -14,6 +14,11 @@ describe("submitReportSchema", () => {
     expect(r.identity).toBeUndefined();
   });
 
+  it("ignores partial identity fields left over in anonymous mode", () => {
+    const r = submitReportSchema.safeParse({ ...base, identity: { preferredContact: "PORTAL_ONLY" } });
+    expect(r.success).toBe(true);
+  });
+
   it("requires some identity for identified reports", () => {
     const r = submitReportSchema.safeParse({ ...base, reporterMode: "IDENTIFIED", identity: {} });
     expect(r.success).toBe(false);

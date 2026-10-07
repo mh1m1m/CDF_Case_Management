@@ -25,6 +25,7 @@ export const investigationServerEnvSchema = base.extend({
   CDF_DEV_PASSWORD: z.string().min(12).optional(),
   CDF_SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(300).max(43_200).default(28_800),
   CDF_SESSION_IDLE_SECONDS: z.coerce.number().int().min(60).max(7_200).default(1_800),
+  CDF_RATE_LIMIT_SALT: secret("CDF_RATE_LIMIT_SALT"),
 });
 export type InvestigationServerEnv = z.infer<typeof investigationServerEnvSchema>;
 
@@ -89,3 +90,5 @@ export function loadPortalServerEnv(env: Record<string, string | undefined> = pr
 export function isLocalOnlyEnvironment(env: Record<string, string | undefined> = process.env): boolean {
   return !env.VERCEL && (env.CDF_ENVIRONMENT === "local" || env.CDF_ENVIRONMENT === "test");
 }
+export { contentSecurityPolicy, securityHeaders } from "./security-headers";
+export type { SecurityHeaderOptions } from "./security-headers";

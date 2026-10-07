@@ -77,15 +77,24 @@ export const submitReportSchema = z
     location: optionalText(200),
     language: z.enum(["ar", "en"]).default("ar"),
     reporterMode: z.enum(["ANONYMOUS", "IDENTIFIED"]),
-    identity: reportIdentitySchema.optional(),
+    // Validated only for identified reports; anything entered in anonymous mode is discarded.
+    identity: z.unknown().optional(),
     acknowledgement: z.literal(true, { message: "validation.acknowledgementRequired" }),
   })
-  .refine((v) => v.reporterMode === "ANONYMOUS" || v.identity, {
-    message: "validation.identityRequired",
-    path: ["identity"],
-  })
-  .transform((v) => (v.reporterMode === "ANONYMOUS" ? { ...v, identity: undefined } : v));
-export type SubmitReportInput = z.input<typeof submitReportSchema>;
+  .transform((v, ctx) => {
+    if (v.reporterMode === "ANONYMOUS") return { ...v, identity: undefined };
+    const identity = reportIdentitySchema.safeParse(v.identity ?? {});
+    if (!identity.success) {
+      for (const issue of identity.error.issues) {
+        ctx.addIssue({ code: "custom", message: issue.message, path: ["identity", ...issue.path] });
+      }
+      return z.NEVER;
+    }
+    return { ...v, identity: identity.data };
+  });
+export type SubmitReportInput = Omit<z.input<typeof submitReportSchema>, "identity"> & {
+  identity?: z.input<typeof reportIdentitySchema>;
+};
 export type SubmitReport = z.output<typeof submitReportSchema>;
 
 export const reportAccessSchema = z.object({
