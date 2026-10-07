@@ -9,8 +9,8 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "pnpm --parallel --filter ./apps/* dev",
-    "build": "pnpm -r --filter ./apps/* build",
+    "dev": "pnpm --parallel --filter @cdf/investigation-web --filter @cdf/whistleblowing-web dev",
+    "build": "pnpm --filter @cdf/investigation-web --filter @cdf/whistleblowing-web build",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "pnpm -r --parallel typecheck",
     "format": "prettier --write .",

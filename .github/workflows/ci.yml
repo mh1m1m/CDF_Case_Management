@@ -101,8 +101,22 @@ jobs:
           echo "CDF_PORTAL_DATABASE_URL=postgresql://cdf_portal:${CDF_PORTAL_DB_PASSWORD}@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
-      - run: pnpm test:a11y
+      - run: set -o pipefail; pnpm test:e2e 2>&1 | tee playwright-e2e.log
+      - run: set -o pipefail; pnpm test:a11y 2>&1 | tee playwright-a11y.log
+      - name: Surface Playwright output as annotations (job logs are not downloadable from every client)
+        if: failure()
+        run: |
+          for f in playwright-e2e.log playwright-a11y.log; do
+            [ -f "$f" ] || continue
+            grep -nE '\[WebServer\]|Error|error|✘|failed|Exit code|Timed out' "$f" | head -n 200 > filtered.log || true
+            [ -s filtered.log ] || tail -n 50 "$f" > filtered.log
+            split -l 25 -d filtered.log chunk_
+            for c in chunk_*; do
+              msg=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' "$c" | sed ':a;N;$!ba;s/\n/%0A/g')
+              echo "::error title=Playwright output ($f, ${c#chunk_})::${msg}"
+            done
+            rm -f chunk_* filtered.log
+          done
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
