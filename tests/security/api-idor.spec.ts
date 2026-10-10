@@ -6,7 +6,17 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
-import { USERS, admin, caseId, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  admin,
+  caseId,
+  ownerScenario,
+  scenario,
+  type OwnerScenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
+import { DECISION, JUSTIFICATION, makeEligible, placeHold, requestDisposition } from "../support/records";
 
 interface Targets {
   case: string;
@@ -23,10 +33,10 @@ interface Targets {
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
-interface Probe {
+interface Probe<T = Targets> {
   fn: string;
   outcome: Outcome;
-  call: (tx: Tx, t: Targets, self: string) => Promise<readonly Record<string, unknown>[]>;
+  call: (tx: Tx, t: T, self: string) => Promise<readonly Record<string, unknown>[]>;
 }
 
 const REASON = "Synthetic: security regression probe.";
@@ -263,9 +273,68 @@ const PROBES: Probe[] = [
   },
 ];
 
+// Records, retention and legal hold commands (ADR-013) take their own objects: a hold, a release request,
+// a disposition request and a certificate.
+interface RecordsTargets {
+  case: string;
+  hold: string;
+  release: string;
+  disposition: string;
+  certificate: string;
+}
+
+const RECORDS_PROBES: Probe<RecordsTargets>[] = [
+  {
+    fn: "assign_retention_class",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.assign_retention_class(${t.case}, 'TEST_SHORT_RETENTION')`,
+  },
+  {
+    fn: "decide_disposition",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_disposition(${t.disposition}, false, ${REASON})`,
+  },
+  {
+    fn: "decide_legal_hold_release",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_legal_hold_release(${t.release}, true, ${REASON})`,
+  },
+  {
+    fn: "execute_disposition",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.execute_disposition(${t.disposition})`,
+  },
+  {
+    fn: "list_records",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.list_records(null, ${t.case})`,
+  },
+  {
+    fn: "place_legal_hold",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.place_legal_hold(${t.case}, 'CASE', null, 'LITIGATION', ${REASON + " Preserve."}, null)`,
+  },
+  {
+    fn: "request_disposition",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.request_disposition(${t.case})`,
+  },
+  {
+    fn: "request_legal_hold_release",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.request_legal_hold_release(${t.hold}, ${REASON + " Release."})`,
+  },
+  {
+    fn: "verify_disposition_certificate",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.verify_disposition_certificate(${t.certificate})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 const ADMIN_COMMANDS = ["grant_role", "revoke_role", "set_user_status"];
-const GLOBAL_COMMANDS = ["record_security_event", "verify_audit_chain"];
+const GLOBAL_COMMANDS = ["record_security_event", "verify_audit_chain", "refresh_disposition_eligibility"];
 
 let caseA: string, caseB: string, caseExec: string;
 beforeAll(async () => {
@@ -345,7 +414,7 @@ async function insiderObjects(
   };
 }
 
-async function outcomeOf(s: Scenario, probe: Probe, t: Targets, self: string): Promise<string> {
+async function outcomeOf<T>(s: Scenario, probe: Probe<T>, t: T, self: string): Promise<string> {
   let result: readonly Record<string, unknown>[] | undefined;
   let error: string | undefined;
   try {
@@ -382,7 +451,12 @@ describe("catalog guard", () => {
       select p.proname as name from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'api' and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
-    const covered = new Set([...PROBES.map((p) => p.fn), ...ADMIN_COMMANDS, ...GLOBAL_COMMANDS]);
+    const covered = new Set([
+      ...PROBES.map((p) => p.fn),
+      ...RECORDS_PROBES.map((p) => p.fn),
+      ...ADMIN_COMMANDS,
+      ...GLOBAL_COMMANDS,
+    ]);
     expect(rows.map((r) => r.name).filter((n) => !covered.has(n))).toEqual([]);
     expect([...covered].filter((n) => !rows.some((r) => r.name === n))).toEqual([]);
   });
@@ -456,6 +530,140 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
       await s.as("grcDirector");
       const [exec] = await s.tx<{ v: boolean }[]>`select api.open_case(${caseExec}) as v`;
       expect(exec!.v).toBe(true);
+    });
+  });
+});
+
+const randomRecordsTargets = (): RecordsTargets => ({
+  case: randomUUID(),
+  hold: randomUUID(),
+  release: randomUUID(),
+  disposition: randomUUID(),
+  certificate: randomUUID(),
+});
+
+/**
+ * Takes case B through the whole records lifecycle inside the scenario: a hold placed and released by two
+ * legal reviewers, then closure, archive, a short CONFIGURED class (test fixture), a disposition request,
+ * approval by the GRC director and logical execution with a certificate.
+ */
+async function disposedCaseB(s: OwnerScenario, target: string): Promise<RecordsTargets> {
+  await s.as("legal");
+  const hold = await placeHold(s.tx, target);
+  const [rel] = await s.tx<
+    { id: string }[]
+  >`select api.request_legal_hold_release(${hold}, ${JUSTIFICATION}) as id`;
+  await s.as("legalB");
+  await s.tx`select api.decide_legal_hold_release(${rel!.id}, true, ${DECISION})`;
+  await makeEligible(s, target);
+  const disposition = await requestDisposition(s.tx, target);
+  await s.as("grcDirector");
+  await s.tx`select api.decide_disposition(${disposition}, true, ${DECISION})`;
+  await s.as("records");
+  const [cert] = await s.tx<{ id: string }[]>`select api.execute_disposition(${disposition}) as id`;
+  return { case: target, hold, release: rel!.id, disposition, certificate: cert!.id };
+}
+
+async function probeRecords(s: Scenario, actor: UserKey, real: RecordsTargets): Promise<string[]> {
+  await s.as(actor);
+  // A fresh request id, so the trace check below sees only the probes, not the fixture's own steps.
+  await s.tx`select set_config('cdf.request_id', ${randomUUID()}, true)`;
+  const mismatches: string[] = [];
+  for (const probe of RECORDS_PROBES) {
+    const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+    const onRandom = await outcomeOf(s, probe, randomRecordsTargets(), USERS[actor]);
+    if (onReal !== probe.outcome || onRandom !== probe.outcome)
+      mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+  }
+  return mismatches;
+}
+
+describe("IDOR: records commands give outsiders the same answer for real objects as for random UUIDs", () => {
+  // Everyone without records visibility of case B: case roles (a disposed case is gone for them, REC-T37),
+  // roles without records permissions, and internal audit (RECORDS_VIEW, but cleared below RESTRICTED).
+  const RECORDS_OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "investigatorB",
+    "lead",
+    "caseManager",
+    "triage",
+    "intake",
+    "committee",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(RECORDS_OUTSIDERS)(
+    "%s against disposed case B and its hold, release, request and certificate",
+    async (actor) => {
+      await ownerScenario(async (s) => {
+        const real = await disposedCaseB(s, caseB);
+        expect(await probeRecords(s, actor, real)).toEqual([]);
+        await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.refresh_disposition_eligibility()`);
+
+        await s.as("dpo");
+        const events = await s.tx<{ category: string; outcome: string }[]>`
+        select category, outcome from audit.audit_event
+        where actor_id = ${USERS[actor]} and request_id = nullif(current_setting('cdf.request_id', true), '')::uuid`;
+        expect(events.filter((e) => e.category !== "SECURITY" || e.outcome !== "DENIED")).toEqual([]);
+      });
+    },
+  );
+
+  it.each<UserKey>(["records", "recordsB", "legal", "legalB"])(
+    "%s against a hold on the restricted SECRET case (no assignment, clearance below SECRET)",
+    async (actor) => {
+      await scenario(async (s) => {
+        // A disposition can never reach the live executive case, so those two ids stay random here;
+        // REC-T05 and REC-T46 cover the restricted case in the records view.
+        await s.as("grcDirector");
+        const hold = await placeHold(s.tx, caseExec);
+        const [rel] = await s.tx<
+          { id: string }[]
+        >`select api.request_legal_hold_release(${hold}, ${JUSTIFICATION}) as id`;
+        const real = { ...randomRecordsTargets(), case: caseExec, hold, release: rel!.id };
+        expect(await probeRecords(s, actor, real)).toEqual([]);
+      });
+    },
+  );
+
+  it("records staff get real answers from the same probes (the probes are not vacuous)", async () => {
+    await ownerScenario(async (s) => {
+      const real = await disposedCaseB(s, caseB);
+      await s.as("internalAudit");
+      expect(await s.tx`select * from api.list_records(null, ${caseB})`).toEqual([]);
+      await s.as("legal");
+      const rows = await s.tx<{ records_state: string }[]>`select * from api.list_records(null, ${caseB})`;
+      expect(rows.map((r) => r.records_state)).toEqual(["DISPOSED"]);
+      const [ok] = await s.tx<
+        { v: boolean }[]
+      >`select api.verify_disposition_certificate(${real.certificate}) as v`;
+      expect(ok!.v).toBe(true);
+      await s.expectError(
+        "CDF_CONFLICT:HOLD_NOT_ACTIVE",
+        (tx) => tx`select api.request_legal_hold_release(${real.hold}, ${JUSTIFICATION})`,
+      );
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:REQUEST_NOT_PENDING",
+        (tx) => tx`select api.decide_disposition(${real.disposition}, false, ${DECISION})`,
+      );
+    });
+  });
+
+  it("a revoked user gets nothing from any records probe", async () => {
+    await ownerScenario(async (s) => {
+      const real = await disposedCaseB(s, caseB);
+      await s.as("revoked");
+      const leaks: string[] = [];
+      for (const probe of RECORDS_PROBES) {
+        const got = await outcomeOf(s, probe, real, USERS.revoked);
+        if (!["EMPTY", "FALSE", "NOT_FOUND"].includes(got) && !got.startsWith("ERROR CDF_UNAUTHENTICATED"))
+          leaks.push(`${probe.fn}: ${got}`);
+      }
+      expect(leaks).toEqual([]);
     });
   });
 });
