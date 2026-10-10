@@ -187,15 +187,43 @@ jobs:
           CDF_BFF_DB_PASSWORD: ${{ secrets.CDF_BFF_DB_PASSWORD }}
           CDF_PORTAL_DB_PASSWORD: ${{ secrets.CDF_PORTAL_DB_PASSWORD }}
         run: |
+          # The session pooler caches each role's password verifier and refuses the first login after a change
+          # ("Validation secrets changed, cache updated", then "password authentication failed": the first
+          # test to connect failed in runs 38054622850 and 38056162850). So a stable password that already logs
+          # in stays as it is, and after any change a login is retried until the pooler accepts it, before the
+          # suites open their first connection.
+          login() {
+            PGPASSWORD="$2" PGCONNECT_TIMEOUT=15 psql "postgresql://$1.${SUPABASE_PROJECT_REF}@${CDF_POOLER_HOST}:5432/postgres" \
+              --no-psqlrc -qtAX -c "select 1" > /dev/null 2>&1
+          }
+          set_password() {
+            printf "alter role %s password :'pw';\n" "$1" \
+              | psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 -v pw="$2"
+          }
           for pair in cdf_bff:CDF_BFF_DB_PASSWORD cdf_portal:CDF_PORTAL_DB_PASSWORD; do
             role=${pair%%:*}; var=${pair#*:}; p=${!var}
-            if [ -z "$p" ]; then
+            if [ -n "$p" ]; then
+              echo "::add-mask::$p"
+              if login "$role" "$p" || { sleep 3; login "$role" "$p"; }; then
+                echo "$role: the password from $var already works and is left unchanged"
+              else
+                echo "$role: setting the password from $var"
+                set_password "$role" "$p"
+              fi
+            else
               p=$(openssl rand -hex 24)
+              echo "::add-mask::$p"
               echo "$var is not set as a secret; a throwaway password is used for this run"
+              set_password "$role" "$p"
             fi
-            echo "::add-mask::$p"
-            printf "alter role %s password :'pw';\n" "$role" \
-              | psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 -v pw="$p"
+            for attempt in 1 2 3 4 5 6; do
+              if login "$role" "$p"; then break; fi
+              if [ "$attempt" = 6 ]; then
+                echo "::error::The session pooler did not accept the $role password in 6 attempts"
+                exit 1
+              fi
+              sleep 5
+            done
             enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$p")
             echo "::add-mask::$enc"
             prefix=${var%_DB_PASSWORD}
