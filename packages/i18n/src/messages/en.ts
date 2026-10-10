@@ -314,6 +314,7 @@ export const en = {
   },
   evidence: {
     title: "Evidence",
+    tableCaption: "Evidence items",
     intro:
       "Files are checked, scanned, hashed and stored privately. Every download is recorded in the chain of custody.",
     empty: "No evidence yet.",
@@ -327,7 +328,6 @@ export const en = {
     addedBy: "Added by",
     addedAt: "Added",
     download: "Download",
-    tableCaption: "Evidence items",
     versions: "Versions and chain of custody",
     version: "Version {no}",
     custody: "Chain of custody",

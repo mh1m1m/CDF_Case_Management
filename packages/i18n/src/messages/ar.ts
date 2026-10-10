@@ -312,6 +312,7 @@ export const ar: Messages = {
   },
   evidence: {
     title: "الأدلة",
+    tableCaption: "قائمة الأدلة",
     intro: "تُفحص الملفات وتُحسب بصمتها وتُخزَّن بشكل خاص. يُسجَّل كل تنزيل في سلسلة الحيازة.",
     empty: "لا توجد أدلة بعد.",
     number: "الرقم",
@@ -324,7 +325,6 @@ export const ar: Messages = {
     addedBy: "أضافه",
     addedAt: "تاريخ الإضافة",
     download: "تنزيل",
-    tableCaption: "قائمة الأدلة",
     versions: "الإصدارات وسلسلة الحيازة",
     version: "الإصدار {no}",
     custody: "سلسلة الحيازة",
