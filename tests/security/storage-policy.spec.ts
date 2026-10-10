@@ -65,10 +65,19 @@ describe("storage policy", () => {
     }
   });
 
-  it("no bucket is public, and evidence buckets (when present) are private", async () => {
-    const rows = await admin<{ id: string; public: boolean }[]>`select id, public from storage.buckets`;
+  it("the evidence buckets come from Git (1000_evidence_storage_buckets): private, 25 MiB, allow-listed types", async () => {
+    const rows = await admin<{ id: string; public: boolean; limit: number | null; types: string[] | null }[]>`
+      select id, public, file_size_limit::int as limit, allowed_mime_types as types from storage.buckets order by id`;
     expect(rows.filter((b) => b.public)).toEqual([]);
-    for (const b of rows.filter((b) => b.id.startsWith("evidence-"))) expect(b.public).toBe(false);
+    const evidence = rows.filter((b) => b.id === "evidence-quarantine" || b.id === "evidence-vault");
+    expect(evidence.map((b) => b.id)).toEqual(["evidence-quarantine", "evidence-vault"]);
+    const [allowList] = await admin<{ types: string[] }[]>`
+      select array_agg(content_type order by content_type) as types from evidence.allowed_content_type`;
+    for (const b of evidence) {
+      expect(b.public).toBe(false);
+      expect(b.limit).toBe(26_214_400); // EVIDENCE_MAX_BYTES (§25)
+      expect(b.types).toEqual(allowList!.types);
+    }
   });
 
   it("object keys are constrained to the random cases/{case}/evidence/{item}/{version} scheme", async () => {

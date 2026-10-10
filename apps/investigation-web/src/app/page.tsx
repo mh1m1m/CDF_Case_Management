@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { navigationFor } from "@cdf/authorization";
-import { CDFAlert } from "@cdf/ui";
+import { CDFAlert, CDFPageHeader } from "@cdf/ui";
 import { requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "./app-nav";
@@ -15,6 +15,7 @@ export default async function Home() {
   return (
     <>
       <AppNav actor={actor} t={t} />
+      <CDFPageHeader title={t("cases.homeTitle")} />
       <CDFAlert tone="info">{t("cases.empty")}</CDFAlert>
     </>
   );

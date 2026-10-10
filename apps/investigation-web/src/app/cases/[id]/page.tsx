@@ -82,8 +82,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         }))}
       />
 
+      {/* min-w-0: grid items default to min-width:auto, so a wide table would widen the page (WCAG 1.4.10). */}
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div>
+        <div className="min-w-0">
           <CDFCard title={t("cases.details")}>
             <CDFDescriptionList
               items={[
@@ -96,9 +97,12 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                 {
                   term: t("cases.reporterRef"),
                   value: c.reporterWbId ? (
-                    <span dir="ltr" title={t("cases.reporterRefHint")}>
-                      {c.reporterWbId}
-                    </span>
+                    <>
+                      <span dir="ltr">{c.reporterWbId}</span>
+                      <span className="block text-sm text-cdf-text-secondary">
+                        {t("cases.reporterRefHint")}
+                      </span>
+                    </>
                   ) : (
                     "—"
                   ),
@@ -243,7 +247,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           </CDFCard>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <CDFCard title={t("cases.team")} testId="team-card">
             {c.assignments.length === 0 ? (
               <p className="text-cdf-text-secondary">{t("cases.noTeam")}</p>
