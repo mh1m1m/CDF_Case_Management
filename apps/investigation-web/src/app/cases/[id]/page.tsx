@@ -15,11 +15,12 @@ import {
   textareaClass,
 } from "@cdf/ui";
 import { STATES } from "@cdf/workflow";
-import { investigationService, requireActor } from "@/server/container";
+import { evidenceService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { assignAction, declareConflictAction, transitionAction, updateDetailsAction } from "./actions";
+import { EvidencePanel } from "./evidence-panel";
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -32,10 +33,21 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   // open_case audits CASE_VIEWED or a SECURITY denial; invisible and missing cases are indistinguishable.
   const c = await service.getCase(ctx, id);
   if (!c) notFound();
-  const [timeline, directory] = await Promise.all([
+  const [timeline, directory, evidence] = await Promise.all([
     service.caseTimeline(ctx, id),
     can(actor, "CASE_ASSIGN") ? service.directory(ctx) : Promise.resolve([]),
+    evidenceService().listEvidence(ctx, id),
   ]);
+  // Mirrors authz.can_upload_evidence for the UI only; the database decides (§19).
+  const canUpload =
+    can(actor, "EVIDENCE_UPLOAD") &&
+    c.recordsState === "ACTIVE" &&
+    (can(actor, "CASE_EDIT_ALL") ||
+      c.assignments.some(
+        (a) =>
+          a.userId === actor.userId &&
+          ["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"].includes(a.assignmentRole),
+      ));
   const name = (n: { displayName: string; displayNameAr?: string }) =>
     t.locale === "ar" && n.displayNameAr ? n.displayNameAr : n.displayName;
 
@@ -147,6 +159,15 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               ))}
             </ul>
           </CDFCard>
+
+          <EvidencePanel
+            c={c}
+            items={evidence}
+            canUpload={canUpload}
+            canDownload={can(actor, "EVIDENCE_DOWNLOAD")}
+            clearance={actor.clearance}
+            t={t}
+          />
 
           <CDFCard title={t("cases.transitionsTitle")} testId="transitions-card">
             {c.transitions.length === 0 ? (

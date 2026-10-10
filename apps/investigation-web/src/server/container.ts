@@ -4,24 +4,72 @@ import { cache } from "react";
 import { randomUUID } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createInvestigationService, type InvestigationService } from "@cdf/application";
+import { join } from "node:path";
+import {
+  createEvidenceService,
+  createInvestigationService,
+  type EvidenceService,
+  type EvidenceStorage,
+  type InvestigationService,
+} from "@cdf/application";
 import type { Actor } from "@cdf/contracts";
-import { PostgresInvestigationGateway, PostgresSecurityEventSink, createPool } from "@cdf/infrastructure";
+import {
+  LocalFilesystemEvidenceStorage,
+  MockMalwareScanner,
+  PostgresEvidenceGateway,
+  PostgresInvestigationGateway,
+  PostgresSecurityEventSink,
+  SupabaseEvidenceStorage,
+  createPool,
+  type Sql,
+} from "@cdf/infrastructure";
 import type { CookieJar } from "@cdf/infrastructure/identity";
 import { env } from "./env";
 import { identityProvider } from "./identity";
 
-const globalForApp = globalThis as unknown as { cdfInvestigation?: InvestigationService };
+const globalForApp = globalThis as unknown as {
+  cdfPool?: Sql;
+  cdfInvestigation?: InvestigationService;
+  cdfEvidence?: EvidenceService;
+};
+
+function pool(): Sql {
+  globalForApp.cdfPool ??= createPool(env().CDF_BFF_DATABASE_URL, {
+    applicationName: "cdf-investigation-web",
+    max: 5,
+  });
+  return globalForApp.cdfPool;
+}
 
 export function investigationService(): InvestigationService {
-  if (!globalForApp.cdfInvestigation) {
-    const sql = createPool(env().CDF_BFF_DATABASE_URL, { applicationName: "cdf-investigation-web", max: 5 });
-    globalForApp.cdfInvestigation = createInvestigationService({
-      gateway: new PostgresInvestigationGateway(sql),
-      securityEvents: new PostgresSecurityEventSink(sql),
-    });
-  }
+  globalForApp.cdfInvestigation ??= createInvestigationService({
+    gateway: new PostgresInvestigationGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
   return globalForApp.cdfInvestigation;
+}
+
+/** Evidence storage adapter from configuration (ADR-006). Both adapters are PRODUCTION_SUBSTITUTION_REQUIRED. */
+function evidenceStorage(): EvidenceStorage {
+  const e = env();
+  if (e.CDF_EVIDENCE_STORAGE === "supabase") {
+    return new SupabaseEvidenceStorage(e.SUPABASE_URL!, e.SUPABASE_SERVICE_ROLE_KEY!);
+  }
+  return new LocalFilesystemEvidenceStorage({
+    rootDir: e.CDF_EVIDENCE_LOCAL_DIR ?? join(process.cwd(), ".local-storage", "evidence"),
+    environment: e.CDF_ENVIRONMENT,
+    isVercel: Boolean(process.env.VERCEL),
+  });
+}
+
+export function evidenceService(): EvidenceService {
+  globalForApp.cdfEvidence ??= createEvidenceService({
+    gateway: new PostgresEvidenceGateway(pool()),
+    storage: evidenceStorage(),
+    scanner: new MockMalwareScanner(),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfEvidence;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

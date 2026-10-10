@@ -69,8 +69,85 @@ export const PERMISSIONS = [
   "SECURITY_EVENT_VIEW",
   "USER_ADMIN",
   "ROLE_ADMIN",
+  "EVIDENCE_UPLOAD",
+  "EVIDENCE_DOWNLOAD",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
+
+// ---- Evidence (§24–§27, ADR-006) ---------------------------------------------------------------
+export const EVIDENCE_TYPES = [
+  "DOCUMENT",
+  "IMAGE",
+  "AUDIO",
+  "VIDEO",
+  "EMAIL",
+  "DATA_EXPORT",
+  "OTHER",
+] as const;
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
+
+export const EVIDENCE_STATUSES = ["PENDING", "AVAILABLE", "REJECTED"] as const;
+export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
+
+export const EVIDENCE_VERSION_STATUSES = ["QUARANTINED", "AVAILABLE", "REJECTED"] as const;
+export type EvidenceVersionStatus = (typeof EVIDENCE_VERSION_STATUSES)[number];
+
+export const SCAN_STATUSES = ["PENDING", "CLEAN", "INFECTED", "UNSCANNED"] as const;
+export type ScanStatus = (typeof SCAN_STATUSES)[number];
+
+export const EVIDENCE_REJECTION_CODES = ["MALWARE_DETECTED", "SCAN_UNAVAILABLE", "STORAGE_FAILURE"] as const;
+export type EvidenceRejectionCode = (typeof EVIDENCE_REJECTION_CODES)[number];
+
+export const CUSTODY_EVENT_TYPES = ["RECEIVED", "STORED", "REJECTED", "DOWNLOADED"] as const;
+export type CustodyEventType = (typeof CUSTODY_EVENT_TYPES)[number];
+
+/** Upper bound for one evidence file (25 MiB), enforced by the browser hint, the server and the database. */
+export const EVIDENCE_MAX_BYTES = 26_214_400;
+
+export interface EvidenceVersionInfo {
+  id: string;
+  versionNo: number;
+  originalFileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  status: EvidenceVersionStatus;
+  scanStatus: ScanStatus;
+  scanner: string | null;
+  rejectionCode: EvidenceRejectionCode | null;
+  uploadedBy: string;
+  uploadedByName: string | null;
+  uploadedAt: string;
+  storedAt: string | null;
+}
+
+export interface CustodyEventInfo {
+  id: string;
+  versionId: string | null;
+  eventType: CustodyEventType;
+  actorId: string;
+  actorName: string | null;
+  occurredAt: string;
+}
+
+export interface EvidenceItem {
+  id: string;
+  caseId: string;
+  sequenceNo: number;
+  title: string;
+  description: string | null;
+  evidenceType: EvidenceType;
+  sourceDescription: string | null;
+  collectedAt: string | null;
+  classification: Classification;
+  status: EvidenceStatus;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  currentVersion: EvidenceVersionInfo | null;
+  versions: EvidenceVersionInfo[];
+  custody: CustodyEventInfo[];
+}
 
 export const ROLES = [
   "INTAKE_OFFICER",

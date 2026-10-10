@@ -18,7 +18,9 @@ const config: NextConfig = {
     "@cdf/workflow",
   ],
   serverExternalPackages: ["postgres"],
-  experimental: { serverActions: { bodySizeLimit: "64kb" } },
+  // Evidence uploads are server actions (origin-checked by Next); the per-file limit (25 MiB) is enforced by
+  // the domain rules and the database. Rate limiting of uploads is a gateway concern (PRODUCTION_SUBSTITUTION_REQUIRED).
+  experimental: { serverActions: { bodySizeLimit: "26mb" } },
 };
 
 export default config;

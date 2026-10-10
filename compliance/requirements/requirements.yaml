@@ -300,12 +300,41 @@ requirements:
 
   - id: CDF-EVID-001
     title: "Evidence storage with private buckets, immutable object keys, custody and malware scanning"
-    source: [protocol §24–§27, ADR-006]
+    source: [protocol §24–§27, ADR-006, threats T05 and T10]
     external_ids: []
-    status: NOT_STARTED
-    enforcement: []
-    tests: []
-    production_substitution: "Alibaba OSS with WORM, KMS SSE, approved scanner"
+    linear_issues: [CDF-13]
+    status: PRODUCTION_SUBSTITUTION_REQUIRED
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007000900_evidence.sql,
+        authz.can_view_evidence,
+        authz.can_upload_evidence,
+        authz.can_download_evidence,
+        api.register_evidence_version,
+        api.complete_evidence_version,
+        api.reject_evidence_version,
+        api.open_evidence_version,
+        packages/domain/src/evidence.ts,
+        packages/validation (uploadEvidenceSchema),
+        packages/application/src/evidence.ts,
+        packages/infrastructure/src/storage,
+        packages/infrastructure/src/scanning,
+        "apps/investigation-web/src/app/cases/[id]/evidence/[versionId]/download/route.ts",
+      ]
+    tests:
+      [
+        tests/security/evidence-access.spec.ts,
+        tests/security/storage-policy.spec.ts,
+        tests/integration/evidence.spec.ts,
+        tests/integration/mirrors.spec.ts,
+        tests/e2e/evidence.spec.ts,
+        packages/domain/src/evidence.test.ts,
+        packages/application/src/evidence.test.ts,
+        packages/infrastructure/src/storage/local-fs.test.ts,
+        packages/infrastructure/src/scanning/mock-scanner.test.ts,
+      ]
+    production_substitution: "Alibaba OSS with WORM and KMS SSE replaces SupabaseEvidenceStorage/LocalFilesystemEvidenceStorage; an approved scanning service replaces MockMalwareScanner (EICAR only)"
+    notes: "Complete in the prototype: RLS + clearance, DB-owned random object keys, two-phase quarantine → scan → vault, immutable versions and custody, audited BFF-streamed downloads. Marked PRODUCTION_SUBSTITUTION_REQUIRED because the storage adapter and the scanner are stand-ins."
 
   - id: CDF-INV-001
     title: "Interviews, findings and investigation plan"

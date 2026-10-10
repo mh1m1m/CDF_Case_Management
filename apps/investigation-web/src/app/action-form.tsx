@@ -44,7 +44,8 @@ export function ActionForm(props: {
         </CDFAlert>
       ) : null}
       {state.status === "ok" && props.successMessage ? (
-        <CDFAlert tone="success">{props.successMessage}</CDFAlert>
+        // "{message}" in the success text is replaced by the action's result (e.g. a file hash).
+        <CDFAlert tone="success">{props.successMessage.replace("{message}", state.message ?? "")}</CDFAlert>
       ) : null}
       {props.children}
       <button type="submit" className={buttonClass(props.variant ?? "primary")} disabled={pending}>

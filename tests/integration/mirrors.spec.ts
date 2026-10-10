@@ -2,6 +2,7 @@
 // which are authoritative (ADR-006, ADR-007).
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
+import { ALLOWED_CONTENT_TYPES } from "@cdf/domain";
 import { STATES, TRANSITIONS } from "@cdf/workflow";
 import { admin } from "../support/db";
 
@@ -22,6 +23,15 @@ describe("mirrors", () => {
              enabled_in_phase as "enabledInPhase"
       from workflow.workflow_transition_definition where workflow_code = 'CDF_CASE_V1' order by code`;
     expect(rows).toEqual([...TRANSITIONS].sort((a, b) => a.code.localeCompare(b.code)));
+  });
+
+  it("evidence content-type allow-list matches evidence.allowed_content_type", async () => {
+    const rows = await admin<{ contentType: string; extensions: string[]; evidenceType: string }[]>`
+      select content_type as "contentType", extensions, evidence_type as "evidenceType"
+      from evidence.allowed_content_type order by content_type`;
+    expect(rows).toEqual(
+      [...ALLOWED_CONTENT_TYPES].sort((a, b) => a.contentType.localeCompare(b.contentType)),
+    );
   });
 
   it("role permissions match iam.role_permission", async () => {

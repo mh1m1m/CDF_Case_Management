@@ -14,12 +14,12 @@ prototype component becomes in production.
 Anonymous report → triage → create case → assign investigator → open investigation, with database, RLS,
 audit, workflow, UI and tests:
 
-| Area                                                | Delivered                                                                                                                                                                                   |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public portal (`apps/whistleblowing-web`, :3001)    | Anonymous or identified report, one-time Report ID + secret, follow-up with coarse status, two-way messages, rate limiting                                                                  |
-| Investigation app (`apps/investigation-web`, :3000) | Sign-in, intake queue, triage, case creation, case page (progress, details, team, conflict declaration, workflow steps with reasons, audit timeline)                                        |
-| Database (`infrastructure/supabase`)                | 8 migrations: IAM, append-only hash-chained audit ledger, intake, case master and ACL, identity vault with dual-control reveal, `CDF_CASE_V1` workflow, `api.*` and `public_api.*` commands |
-| Tests                                               | Unit, integration, security (RLS coverage, isolation, vault, audit, admin separation, portal, injection), Playwright end-to-end and axe WCAG 2.1 AA in Arabic and English                   |
+| Area                                                | Delivered                                                                                                                                                                                                                                 |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public portal (`apps/whistleblowing-web`, :3001)    | Anonymous or identified report, one-time Report ID + secret, follow-up with coarse status, two-way messages, rate limiting                                                                                                                |
+| Investigation app (`apps/investigation-web`, :3000) | Sign-in, intake queue, triage, case creation, case page (progress, details, team, conflict declaration, workflow steps with reasons, audit timeline), evidence upload with scanning, versions, chain of custody and audited downloads     |
+| Database (`infrastructure/supabase`)                | 9 migrations: IAM, append-only hash-chained audit ledger, intake, case master and ACL, identity vault with dual-control reveal, `CDF_CASE_V1` workflow, `api.*` and `public_api.*` commands, evidence with immutable versions and custody |
+| Tests                                               | Unit, integration, security (RLS coverage, isolation, vault, audit, admin separation, portal, injection, evidence access, storage policy), Playwright end-to-end and axe WCAG 2.1 AA in Arabic and English                                |
 
 Status by phase and control: [`PROJECT_STATUS.md`](PROJECT_STATUS.md).
 
