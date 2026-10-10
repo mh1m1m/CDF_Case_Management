@@ -32,7 +32,14 @@ describe("audit ledger immutability", () => {
       "delete from audit.audit_event",
       "truncate audit.audit_event",
     ]) {
-      await expect(admin.begin((tx) => tx.unsafe(statement))).rejects.toThrow(/append-only/);
+      // Should a statement ever get through, the throw still rolls it back: these suites also run against
+      // hosted DEV (CDF-32), whose ledger must survive a failing test.
+      await expect(
+        admin.begin(async (tx) => {
+          await tx.unsafe(statement);
+          throw new Error(`not rejected: ${statement}`);
+        }),
+      ).rejects.toThrow(/append-only/);
     }
   });
 

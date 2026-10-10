@@ -1,5 +1,10 @@
 import { defineConfig } from "vitest/config";
 
+// CI runs the database suites against a PostgreSQL next to the runner. hosted-dev.yml runs the same suites
+// against Supabase DEV in another region (CDF-32), where one multi-statement scenario can take minutes, so
+// that workflow raises the limits with CDF_DB_TEST_TIMEOUT_MS. Everywhere else the limit stays 30 s.
+const dbTimeout = Number(process.env.CDF_DB_TEST_TIMEOUT_MS) || 30_000;
+
 export default defineConfig({
   test: {
     projects: [
@@ -16,8 +21,8 @@ export default defineConfig({
           include: ["tests/integration/**/*.spec.ts"],
           environment: "node",
           fileParallelism: false,
-          testTimeout: 30_000,
-          hookTimeout: 60_000,
+          testTimeout: dbTimeout,
+          hookTimeout: 2 * dbTimeout,
         },
       },
       {
@@ -26,8 +31,8 @@ export default defineConfig({
           include: ["tests/security/**/*.spec.ts"],
           environment: "node",
           fileParallelism: false,
-          testTimeout: 30_000,
-          hookTimeout: 60_000,
+          testTimeout: dbTimeout,
+          hookTimeout: 2 * dbTimeout,
         },
       },
     ],

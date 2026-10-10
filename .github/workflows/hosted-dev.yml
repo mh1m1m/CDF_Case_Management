@@ -2,21 +2,24 @@ name: Hosted DEV (Supabase)
 
 # CDF-32 / CEOM §11: the hosted DEV database (Supabase project blycdqjphsxvyiuoommv, "cdf-case-dev")
 # changes only from Git. This workflow applies infrastructure/supabase/migrations with the Supabase
-# CLI, seeds the synthetic demo data once, and runs the database, RLS and security suites against
-# DEV. It runs on pushes to the branch named below that touch the database or the tests, and manually
-# (workflow_dispatch) once the file exists on the default branch, because GitHub resolves manual
-# dispatch against main. It never resets, drops or truncates anything on the hosted project.
+# CLI, seeds the synthetic demo data once (later only users added to the seed), and runs the database,
+# RLS and security suites against DEV. It runs on pushes to the branch named below that touch the
+# database or the tests, and manually (workflow_dispatch) once the file exists on the default branch,
+# because GitHub resolves manual dispatch against main. It never resets, drops or truncates anything
+# on the hosted project.
 #
 # The CLI connects with --db-url through the Supavisor session pooler (IPv4; the direct database host
 # is IPv6-only, which GitHub-hosted runners cannot reach), so no Supabase access token is needed.
 #
-# Repository secrets (GitHub → Settings → Secrets and variables → Actions). Values never appear
-# in logs; every secret-derived value is masked.
+# Secrets: the job runs in the GitHub environment "Subapase" (spelled that way in Settings → Environments), so it reads that
+# environment's secrets and variables first and falls back to repository secrets of the same name
+# (Settings → Secrets and variables → Actions). The environment's protection rules (required reviewers,
+# allowed branches) apply to every run. Values never appear in logs; every secret-derived value is masked.
 #   SUPABASE_DB_PASSWORD    DEV project database password (Project Settings → Database)
 #   CDF_BFF_DB_PASSWORD     optional: stable password for the cdf_bff login role (same value as in Vercel)
 #   CDF_PORTAL_DB_PASSWORD  optional: stable password for the cdf_portal login role (same value as in Vercel)
 # Without the optional two, throwaway passwords are generated for the test run and set on the roles.
-# Repository variable (optional): SUPABASE_POOLER_HOST, the session-pooler host shown under
+# Variable (optional, environment or repository): SUPABASE_POOLER_HOST, the session-pooler host shown under
 # Dashboard → Connect → Session pooler, if the probe of the two regional pooler hosts below fails.
 
 on:
@@ -30,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       seed:
-        description: Seed synthetic data if the DEV database is still empty
+        description: Seed synthetic data (all of it into an empty DEV, afterwards only users added to the seed)
         type: boolean
         default: true
       test:
@@ -48,12 +51,24 @@ concurrency:
 env:
   SUPABASE_PROJECT_REF: blycdqjphsxvyiuoommv
   SUPABASE_REGION: ap-northeast-1
-  SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
 jobs:
   hosted-dev:
     name: Migrate, seed and test DEV
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: Subapase
+    env:
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    services:
+      # Reference database for the drift check, built from Git alone (compatibility shim); never DEV.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["54322:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -63,12 +78,14 @@ jobs:
           cache: pnpm
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Exact version: "latest" costs an unauthenticated GitHub API lookup that hits the rate limit (CDF-86).
+          # Bumped by hand in ci.yml and hosted-dev.yml together (CONTRIBUTING.md, Dependencies).
+          version: 2.120.0
 
       - name: Check the required secret exists (its value is never printed)
         run: |
           if [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::error::Repository secret SUPABASE_DB_PASSWORD is not set"; exit 1
+            echo "::error::SUPABASE_DB_PASSWORD is set neither in the Subapase environment nor as a repository secret"; exit 1
           fi
 
       - name: Database connection string (session pooler, IPv4; values masked)
@@ -115,7 +132,7 @@ jobs:
             echo "::warning::$candidate: $(printf '%s' "$err" | tr '\n' ' ')"
           done
           if [ -z "$host" ]; then
-            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the repository variable SUPABASE_POOLER_HOST from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
+            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the variable SUPABASE_POOLER_HOST (Subapase environment or repository) from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
             exit 1
           fi
           echo "Session pooler: $host"
@@ -126,7 +143,10 @@ jobs:
         run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
 
       - name: Apply pending Git migrations (supabase db push)
-        run: supabase --workdir infrastructure db push --db-url "$CDF_ADMIN_DATABASE_URL" --yes
+        # --include-all: migration numbers are reserved per work stream, so a file can reach main after a
+        # higher-numbered one was applied here (1300–1330 arrived after 1500 on 2026-10-10). The drift check
+        # below proves DEV still equals a database built from Git in file order.
+        run: supabase --workdir infrastructure db push --db-url "$CDF_ADMIN_DATABASE_URL" --include-all --yes
 
       - name: Migration history after
         run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
@@ -141,21 +161,113 @@ jobs:
             psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 --single-transaction -f "$f"
           done
 
+      - name: Drift check (DEV schema and reference data equal a database built from Git)
+        env:
+          CDF_ENVIRONMENT: test
+          REFERENCE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: |
+          # reset.mjs only ever targets a loopback host: here the service container above.
+          CDF_ADMIN_DATABASE_URL="$REFERENCE_URL" node scripts/db/reset.mjs > /dev/null
+          drift=0
+          for kind in schema data; do
+            psql "$REFERENCE_URL" --no-psqlrc -qtAX -F ' | ' -f "scripts/db/fingerprint-$kind.sql" > "git-$kind.txt"
+            psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -F ' | ' -f "scripts/db/fingerprint-$kind.sql" > "dev-$kind.txt"
+            echo "::notice::Drift check ($kind): $(wc -l < "dev-$kind.txt") rows on DEV, $(wc -l < "git-$kind.txt") from Git"
+            # Rows are object kinds, counts and md5 hashes; they carry no data values.
+            if ! diff -q "git-$kind.txt" "dev-$kind.txt" > /dev/null; then
+              drift=1
+              diff "git-$kind.txt" "dev-$kind.txt" | grep '^[<>]' | head -n 10 | while IFS= read -r line; do
+                echo "::error::$kind drift (< Git, > DEV): $line"
+              done
+            fi
+          done
+          [ "$drift" = 0 ] || { echo "::error::DEV differs from a database built from Git"; exit 1; }
+          echo "::notice::No drift: DEV schema and reference data equal a database built from Git"
+
+      - name: Synthetic users added to the seed since DEV was seeded (insert only)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
+        env:
+          REFERENCE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: |
+          # The seed files run only while DEV is empty, because they are not idempotent (02 onwards act through
+          # the api.* commands). Users added to 01_synthetic_users.sql later therefore never reached DEV: run
+          # 38058158699 lacked the records and legal actors of CDF-69/CDF-73, and the 86 tests acting as them
+          # failed. So the users of the database the drift check has just built from Git that DEV lacks are
+          # inserted here, with their role assignments. Nothing on DEV is updated or deleted, and the drift check
+          # has just shown both tables identical, column order included.
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select * from iam.user_profile) to 'seed-users.csv' csv"
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select user_id, role_code, status, effective_from, effective_to, justification, source_reference, granted_by, granted_at, revoked_by, revoked_at, revocation_reason from iam.user_role_assignment) to 'seed-roles.csv' csv"
+          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 <<'SQL'
+          begin;
+          create temp table seed_user (like iam.user_profile) on commit drop;
+          \copy seed_user from 'seed-users.csv' csv
+          create temp table seed_role (like iam.user_role_assignment) on commit drop;
+          alter table seed_role drop column id;
+          \copy seed_role from 'seed-roles.csv' csv
+          create temp table added (id uuid primary key) on commit drop;
+          with ins as (
+            insert into iam.user_profile
+            select s.* from seed_user s where not exists (select 1 from iam.user_profile u where u.id = s.id)
+            returning id
+          )
+          insert into added select id from ins;
+          insert into iam.user_role_assignment (user_id, role_code, status, effective_from, effective_to, justification,
+            source_reference, granted_by, granted_at, revoked_by, revoked_at, revocation_reason)
+          select * from seed_role where user_id in (select id from added);
+          select count(*) || ' ' || coalesce(string_agg(u.email, ', ' order by u.email), '') from added a join iam.user_profile u using (id);
+          commit;
+          SQL
+          )
+          rm -f seed-users.csv seed-roles.csv
+          if [ "${added%% *}" = 0 ]; then
+            echo "::notice::Seed users: DEV already has every synthetic user of the seed in Git"
+          else
+            echo "::notice::Seed users: ${added%% *} synthetic users of the seed in Git added to DEV (${added#* })"
+          fi
+
       - name: Login-role passwords for the test run (stable from secrets, else throwaway)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
           CDF_BFF_DB_PASSWORD: ${{ secrets.CDF_BFF_DB_PASSWORD }}
           CDF_PORTAL_DB_PASSWORD: ${{ secrets.CDF_PORTAL_DB_PASSWORD }}
         run: |
+          # The session pooler caches each role's password verifier and refuses the first login after a change
+          # ("Validation secrets changed, cache updated", then "password authentication failed": the first
+          # test to connect failed in runs 38054622850 and 38056162850). So a stable password that already logs
+          # in stays as it is, and after any change a login is retried until the pooler accepts it, before the
+          # suites open their first connection.
+          login() {
+            PGPASSWORD="$2" PGCONNECT_TIMEOUT=15 psql "postgresql://$1.${SUPABASE_PROJECT_REF}@${CDF_POOLER_HOST}:5432/postgres" \
+              --no-psqlrc -qtAX -c "select 1" > /dev/null 2>&1
+          }
+          set_password() {
+            printf "alter role %s password :'pw';\n" "$1" \
+              | psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 -v pw="$2"
+          }
           for pair in cdf_bff:CDF_BFF_DB_PASSWORD cdf_portal:CDF_PORTAL_DB_PASSWORD; do
             role=${pair%%:*}; var=${pair#*:}; p=${!var}
-            if [ -z "$p" ]; then
+            if [ -n "$p" ]; then
+              echo "::add-mask::$p"
+              if login "$role" "$p" || { sleep 3; login "$role" "$p"; }; then
+                echo "$role: the password from $var already works and is left unchanged"
+              else
+                echo "$role: setting the password from $var"
+                set_password "$role" "$p"
+              fi
+            else
               p=$(openssl rand -hex 24)
-              echo "$var is not a repository secret; a throwaway password is used for this run"
+              echo "::add-mask::$p"
+              echo "$var is not set as a secret; a throwaway password is used for this run"
+              set_password "$role" "$p"
             fi
-            echo "::add-mask::$p"
-            printf "alter role %s password :'pw';\n" "$role" \
-              | psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 -v pw="$p"
+            for attempt in 1 2 3 4 5 6; do
+              if login "$role" "$p"; then break; fi
+              if [ "$attempt" = 6 ]; then
+                echo "::error::The session pooler did not accept the $role password in 6 attempts"
+                exit 1
+              fi
+              sleep 5
+            done
             enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$p")
             echo "::add-mask::$enc"
             prefix=${var%_DB_PASSWORD}
@@ -166,10 +278,17 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
 
       - name: Database, RLS and security suites against DEV
+        id: suites
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
           CDF_ENVIRONMENT: test
-        run: pnpm test:db
+          # Every statement crosses regions (runner to the Tokyo pooler); the CI default of 30 s per test is too short.
+          CDF_DB_TEST_TIMEOUT_MS: "600000"
+        run: pnpm test:db --reporter=default --reporter=github-actions --reporter=json --outputFile.json=vitest-dev.json
+
+      - name: Suite totals and failed tests as annotations (job logs are not readable from every client)
+        if: ${{ always() && steps.suites.outcome != 'skipped' }}
+        run: node scripts/db/vitest-annotations.mjs vitest-dev.json "DB suites on DEV"
 
       - name: Evidence summary
         if: always()

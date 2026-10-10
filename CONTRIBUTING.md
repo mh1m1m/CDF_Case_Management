@@ -19,6 +19,8 @@ Read [`CLAUDE.md`](CLAUDE.md) first. It is the governing rule set for humans and
 
 Every new dependency needs a one-line justification in the PR: why platform capability is insufficient, maintenance status, licence, and known vulnerabilities (protocol §69).
 
+The Supabase CLI in CI is pinned to an exact version (input `version` of `supabase/setup-cli` in `.github/workflows/ci.yml` and `hosted-dev.yml`), because `latest` makes an unauthenticated GitHub API lookup that hits the rate limit (CDF-86). Dependabot updates the action, not this input. To move to a newer CLI, change both lines in one PR; the Supabase compatibility job proves the new version.
+
 ## Data
 
 Synthetic data only (`@example.test`, "Employee Alpha", `CDF-DEMO-2026-0001`). The database rejects non-`@example.test` user emails by design.
