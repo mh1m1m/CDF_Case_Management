@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
@@ -20,6 +21,11 @@ import { getTranslator } from "@/server/locale";
 import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { createCaseAction, replyAction, triageAction } from "./actions";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.intakeDetail") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 

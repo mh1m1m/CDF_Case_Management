@@ -1,6 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { CDFAlert, CDFCard, buttonClass } from "@cdf/ui";
 import { getTranslator } from "@/server/locale";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  // The layout's title template only applies to child segments, so the root page spells it out.
+  return { title: { absolute: `${t("portal.homeTitle")} · ${t("common.portalName")}` } };
+}
 
 export default async function HomePage() {
   const t = await getTranslator();
