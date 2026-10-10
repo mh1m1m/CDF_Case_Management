@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
@@ -20,6 +21,11 @@ import { getTranslator } from "@/server/locale";
 import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { createCaseAction, replyAction, triageAction } from "./actions";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.intakeDetail") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -64,6 +70,20 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
         <CDFDescriptionList
           items={[
             { term: t("intake.category"), value: t(`category.${report.category}` as MessageKey) },
+            ...(report.categoryOther
+              ? [{ term: t("intake.categoryOther"), value: report.categoryOther }]
+              : []),
+            ...(report.relationshipToFund
+              ? [
+                  {
+                    term: t("intake.relationshipToFund"),
+                    value: t(`portal.relationshipOption.${report.relationshipToFund}` as MessageKey),
+                  },
+                ]
+              : []),
+            ...(report.relationshipOther
+              ? [{ term: t("intake.relationshipOther"), value: report.relationshipOther }]
+              : []),
             { term: t("intake.reporterMode"), value: t(`reporterMode.${report.reporterMode}` as MessageKey) },
             { term: t("intake.receivedAt"), value: formatDateTime(t.locale, report.receivedAt) },
             { term: t("intake.subjectDescription"), value: report.subjectDescription ?? t("common.none") },
@@ -71,7 +91,16 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
               term: t("intake.incidentDate"),
               value: report.incidentDate ? formatDate(t.locale, report.incidentDate) : t("common.none"),
             },
+            ...(report.incidentTime ? [{ term: t("intake.incidentTime"), value: report.incidentTime }] : []),
             { term: t("intake.location"), value: report.location ?? t("common.none") },
+            ...(report.willingToCooperate === null
+              ? []
+              : [
+                  {
+                    term: t("intake.willingToCooperate"),
+                    value: t(report.willingToCooperate ? "common.yes" : "common.no"),
+                  },
+                ]),
             {
               term: t("intake.description"),
               value: <span lang={report.language}>{report.description}</span>,
@@ -94,7 +123,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             }}
             testId="triage-form"
           >
-            <CDFField id="outcome" label={t("intake.outcome")}>
+            <CDFField id="outcome" label={t("intake.outcome")} requiredLabel={t("common.required")}>
               <select id="outcome" name="outcome" className={inputClass} required>
                 {TRIAGE_OUTCOMES.map((o) => (
                   <option key={o} value={o}>
@@ -103,7 +132,12 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                 ))}
               </select>
             </CDFField>
-            <CDFField id="reason" label={t("intake.reason")} hint={t("intake.reasonHint")}>
+            <CDFField
+              id="reason"
+              label={t("intake.reason")}
+              hint={t("intake.reasonHint")}
+              requiredLabel={t("common.required")}
+            >
               <textarea
                 id="reason"
                 name="reason"
@@ -139,10 +173,10 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             }}
             testId="create-case-form"
           >
-            <CDFField id="title" label={t("intake.caseTitle")}>
+            <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
               <input id="title" name="title" className={inputClass} required minLength={3} maxLength={200} />
             </CDFField>
-            <CDFField id="summary" label={t("intake.caseSummary")}>
+            <CDFField id="summary" label={t("intake.caseSummary")} requiredLabel={t("common.required")}>
               <textarea
                 id="summary"
                 name="summary"
@@ -198,7 +232,12 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
               fieldLabels={{ body: t("intake.reply") }}
               testId="reply-form"
             >
-              <CDFField id="body" label={t("intake.reply")} hint={t("intake.replyHint")}>
+              <CDFField
+                id="body"
+                label={t("intake.reply")}
+                hint={t("intake.replyHint")}
+                requiredLabel={t("common.required")}
+              >
                 <textarea
                   id="body"
                   name="body"

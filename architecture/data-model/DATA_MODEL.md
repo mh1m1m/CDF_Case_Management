@@ -179,4 +179,19 @@ Writes happen only through `api.start_form`, `api.save_form_draft` (idempotent o
 
 ## 7. Not yet modelled
 
-Interviews (CDF-60, in progress on a parallel branch), findings, committee and decisions, corrective actions, retention and legal hold detail (CDF-69, parallel branch), document generation, notifications, and search are later phases (`NOT_STARTED`). Forms are modelled (§4.9); activities are not. Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.
+Findings, committee and decisions, corrective actions, retention and legal hold detail (CDF-69, parallel branch), document generation, notifications, and search are later phases (`NOT_STARTED`). Forms (§4.9) and interviews (below) are modelled; activities are not. Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.
+
+## Interviews (EPIC 09, ADR-012)
+
+Migration `20261007001200_interviews.sql` adds six tables to `case_mgmt`. Interviews are no longer "not yet modelled" (section 7).
+
+| Table                         | Key columns                                                                                                                                                                                                       | Notes                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `interview`                   | `case_id`, `sequence_no` (`INT-NNN`), `interviewee_kind` (`WITNESS`/`SUBJECT`/`REPORTER`/`OTHER`), `interviewee_label`, `case_person_id`, `classification`, `status`, schedule, rights, conduct, lifecycle actors | Label is null exactly for `REPORTER`; frozen once `APPROVED`/`CANCELLED`; no delete     |
+| `interview_participant`       | `interview_id`, `user_id`, `participant_role` (`LEAD_INTERVIEWER`/`INTERVIEWER`/`NOTE_TAKER`)                                                                                                                     | One lead per interview; unique per user; append-only                                    |
+| `interview_notice`            | `notice_type` (`INVITATION`/`RESCHEDULE`), `channel`, `scheduled_start` snapshot                                                                                                                                  | `PORTAL_MESSAGE` only, and always, for the reporter; append-only                        |
+| `interview_statement_version` | `version_no`, `content` (1–50,000 chars), `language`, `content_sha256`                                                                                                                                            | Hash computed by trigger; `interview.current_statement_version_id` points at the latest |
+| `interview_statement_ack`     | `statement_version_id` (unique), `method`, `attested_sha256`                                                                                                                                                      | Attested hash must equal the version hash; append-only                                  |
+| `interview_recording`         | `interview_id`, `evidence_id` → `evidence.evidence`                                                                                                                                                               | Evidence must be `AVAILABLE` and `AUDIO`, `VIDEO` or `DOCUMENT`; append-only            |
+
+Identifier: `INT-NNN` is a per-case display number like `EV-NNN`; the UUID remains the only lookup key. `interview.form_instance_id` is a soft link reserved for the forms engine (ADR-011).
