@@ -52,6 +52,7 @@ export function ReportReceipt({
               type="button"
               className={buttonClass("secondary")}
               onClick={() => copy(item.label, item.value)}
+              aria-label={copied === item.label ? undefined : t("portal.copyItem", { item: item.label })}
             >
               {copied === item.label ? t("portal.copied") : t("portal.copy")}
             </button>
