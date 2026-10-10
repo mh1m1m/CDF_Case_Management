@@ -55,6 +55,7 @@ jobs:
   hosted-dev:
     name: Migrate, seed and test DEV
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -173,6 +174,8 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
           CDF_ENVIRONMENT: test
+          # Every statement crosses regions (runner to the Tokyo pooler); the CI default of 30 s per test is too short.
+          CDF_DB_TEST_TIMEOUT_MS: "600000"
         run: pnpm test:db
 
       - name: Evidence summary
