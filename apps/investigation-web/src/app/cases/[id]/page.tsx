@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { can } from "@cdf/authorization";
 import { ASSIGNMENT_ROLES, PRIORITIES } from "@cdf/contracts";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
