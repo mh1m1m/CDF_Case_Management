@@ -10,11 +10,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@cdf/audit": "workspace:*",
+    "@cdf/authorization": "workspace:*",
     "@cdf/contracts": "workspace:*",
     "@cdf/domain": "workspace:*",
     "@cdf/validation": "workspace:*",
     "@cdf/workflow": "workspace:*",
-    "@cdf/authorization": "workspace:*",
-    "@cdf/audit": "workspace:*"
+    "zod": "4.6.5"
   }
 }

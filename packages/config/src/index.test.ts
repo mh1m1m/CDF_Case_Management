@@ -39,6 +39,7 @@ describe("server env loading", () => {
         CDF_ENVIRONMENT: "local",
         CDF_BFF_DATABASE_URL: "postgres://u:p@localhost:5432/db",
         CDF_IDENTITY_PROVIDER: "local-dev",
+        CDF_RATE_LIMIT_SALT: "x".repeat(32),
       }),
     ).toThrow(/CDF_DEV_IDENTITY_SECRET/);
   });
@@ -54,5 +55,19 @@ describe("isLocalOnlyEnvironment", () => {
   it("is true for local and test", () => {
     expect(isLocalOnlyEnvironment({ CDF_ENVIRONMENT: "local" })).toBe(true);
     expect(isLocalOnlyEnvironment({ CDF_ENVIRONMENT: "test" })).toBe(true);
+  });
+});
+
+describe("securityHeaders", () => {
+  it("builds a nonce-based CSP without unsafe-inline, and HSTS only over HTTPS", async () => {
+    const { securityHeaders } = await import("./index");
+    const local = securityHeaders({ nonce: "abc", isDev: false, secure: false });
+    expect(local["Content-Security-Policy"]).toContain("script-src 'self' 'nonce-abc' 'strict-dynamic'");
+    expect(local["Content-Security-Policy"]).not.toContain("unsafe-inline");
+    expect(local["Content-Security-Policy"]).not.toContain("unsafe-eval");
+    expect(local["Strict-Transport-Security"]).toBeUndefined();
+    const deployed = securityHeaders({ nonce: "abc", isDev: false, secure: true });
+    expect(deployed["Strict-Transport-Security"]).toContain("max-age=");
+    expect(deployed["Content-Security-Policy"]).toContain("upgrade-insecure-requests");
   });
 });

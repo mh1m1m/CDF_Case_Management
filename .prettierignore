@@ -7,3 +7,4 @@ test-results
 baseline/extracted
 infrastructure/supabase/policies/POLICY_SNAPSHOT.md
 *.sql
+infrastructure/supabase/policies/policy-snapshot.md

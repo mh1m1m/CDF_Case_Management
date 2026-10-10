@@ -1,0 +1,22 @@
+{
+  "name": "@cdf/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cdf/application": "workspace:*",
+    "@cdf/authorization": "workspace:*",
+    "@cdf/contracts": "workspace:*",
+    "@cdf/domain": "workspace:*",
+    "@cdf/infrastructure": "workspace:*",
+    "@cdf/workflow": "workspace:*",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@axe-core/playwright": "4.13.0"
+  }
+}

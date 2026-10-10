@@ -46,6 +46,11 @@ export default tseslint.config(
     rules: { "no-restricted-imports": "off" },
   },
   {
+    // Developer CLI scripts report progress on stdout.
+    files: ["scripts/**/*.mjs"],
+    rules: { "no-console": "off" },
+  },
+  {
     // Pure packages must not depend on frameworks or infrastructure.
     files: [
       "packages/domain/**/*.ts",
@@ -89,6 +94,8 @@ export default tseslint.config(
         },
       ],
       "@next/next/no-html-link-for-pages": "off",
+      // Scrollable regions must be focusable (axe scrollable-region-focusable, WCAG 2.1.1).
+      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["region", "tabpanel"], tags: [] }],
     },
   },
 );

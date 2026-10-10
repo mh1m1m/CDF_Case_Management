@@ -61,3 +61,26 @@ export function formatDate(locale: Locale, value: string | Date): string {
     timeZone: "Asia/Riyadh",
   }).format(d);
 }
+
+/**
+ * Translates a dynamic code (e.g. an enum value or blocking-reason code) under a catalog section,
+ * falling back to `fallback` when the code has no message.
+ */
+export function translateCode(locale: Locale, section: string, code: string, fallback: MessageKey): string {
+  const key = `${section}.${code}`;
+  const value = translate(locale, key as MessageKey);
+  return value === key ? translate(locale, fallback) : value;
+}
+
+export type Translator = ((key: MessageKey, vars?: Record<string, string | number>) => string) & {
+  locale: Locale;
+  code: (section: string, code: string, fallback?: MessageKey) => string;
+};
+
+export function createTranslator(locale: Locale): Translator {
+  const t = ((key: MessageKey, vars?: Record<string, string | number>) =>
+    translate(locale, key, vars)) as Translator;
+  t.locale = locale;
+  t.code = (section, code, fallback = "errors.CONFLICT") => translateCode(locale, section, code, fallback);
+  return t;
+}

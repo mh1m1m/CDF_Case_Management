@@ -4,15 +4,20 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./identity": "./src/identity/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@cdf/application": "workspace:*",
-    "@cdf/contracts": "workspace:*",
     "@cdf/audit": "workspace:*",
-    "@cdf/config": "workspace:*"
+    "@cdf/config": "workspace:*",
+    "@cdf/contracts": "workspace:*",
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
+    "jose": "6.2.12",
+    "postgres": "3.4.9"
   }
 }

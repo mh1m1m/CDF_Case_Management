@@ -1,0 +1,36 @@
+{
+  "name": "@cdf/whistleblowing-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cdf/application": "workspace:*",
+    "@cdf/authorization": "workspace:*",
+    "@cdf/config": "workspace:*",
+    "@cdf/contracts": "workspace:*",
+    "@cdf/domain": "workspace:*",
+    "@cdf/i18n": "workspace:*",
+    "@cdf/infrastructure": "workspace:*",
+    "@cdf/ui": "workspace:*",
+    "@cdf/validation": "workspace:*",
+    "@cdf/workflow": "workspace:*",
+    "@hookform/resolvers": "5.9.1",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-hook-form": "7.89.0",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3"
+  }
+}
