@@ -15,9 +15,9 @@ const seedHmac = (ref: string) =>
   createHash("sha256").update(`unusable-seed-secret:${ref}`, "utf8").digest("hex");
 const sha = (seed: string) => createHash("sha256").update(seed).digest("hex");
 
-let intakeReport: string, caseBReport: string;
+let intakeReport: string;
 beforeAll(async () => {
-  [intakeReport, caseBReport] = await Promise.all([reportId(INTAKE_REF), reportId(CASE_B_REF)]);
+  intakeReport = await reportId(INTAKE_REF);
 });
 
 interface Registered {
