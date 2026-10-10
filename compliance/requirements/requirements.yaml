@@ -608,6 +608,7 @@ requirements:
     enforcement: [infrastructure/supabase/migrations/20261007001200_interviews.sql]
     tests: [tests/security/interviews-integrity.spec.ts, tests/e2e/interviews.spec.ts]
     notes: "Mechanism complete; the rights notice wording and versioning are SOURCE_REQUIRED."
+
   # Public portal intake field set from the Drive report «تقرير متطلبات خدمة الإبلاغ عن المخالفات»
   # (19 Jan 2025), fields 1–21 (CDF-63). Identity fields live only in protected_identity.reporter_identity.
 

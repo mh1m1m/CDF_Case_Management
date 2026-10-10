@@ -10,8 +10,10 @@ import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
 import {
   assignCaseSchema,
+  caseDiscoverySchema,
   createCaseSchema,
   declareConflictSchema,
+  recordsCatalogueSearchSchema,
   replyToReporterSchema,
   transitionCaseSchema,
   triageReportSchema,
@@ -91,6 +93,34 @@ export function createInvestigationService(deps: InvestigationDeps) {
     getCase: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.getCase(ctx, id)),
     caseTimeline: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.caseTimeline(ctx, id)),
     directory: (ctx: UserRequestContext) => query(ctx, () => gateway.directory(ctx)),
+
+    // Records and legal views (ADR-014). The catalogue is not a case browser; dashboards show own work.
+    searchRecordsCatalogue: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "search_records_catalogue",
+        recordsCatalogueSearchSchema,
+        raw,
+        null, // catalogue scope, tasks or case relationships decide; the database filters every row
+        (i) => gateway.searchRecordsCatalogue(ctx, i),
+      ),
+    myCaseTasks: (ctx: UserRequestContext) => query(ctx, () => gateway.myCaseTasks(ctx)),
+    myWorkSummary: (ctx: UserRequestContext) => query(ctx, () => gateway.myWorkSummary(ctx)),
+    requestCaseForLegalHold: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "request_case_for_legal_hold",
+        caseDiscoverySchema,
+        raw,
+        "CASE_DISCOVER",
+        async (i) => {
+          const result = await gateway.requestCaseForLegalHold(ctx, i);
+          if (result.outcome === "RATE_LIMITED") throw new AppError("RATE_LIMITED", ctx.requestId);
+          return result;
+        },
+      ),
 
     triageReport: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(

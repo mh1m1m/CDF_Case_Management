@@ -5,7 +5,15 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
 import { caseId, ownerScenario, scenario, USERS, type Scenario } from "../support/db";
-import { DECISION, JUSTIFICATION, placeHold, recordsState, releaseHold } from "../support/records";
+import {
+  DECISION,
+  giveTask,
+  JUSTIFICATION,
+  legalHoldTasks,
+  placeHold,
+  recordsState,
+  releaseHold,
+} from "../support/records";
 
 let caseA: string, caseB: string, caseExec: string;
 beforeAll(async () => {
@@ -35,6 +43,7 @@ const holdCount = async (tx: Tx, target: string) => {
 describe("placing a legal hold", () => {
   it("REC-T01: a legal reviewer places a case hold; flag, history and audit land in the same transaction", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("legal");
       const holdId = await placeHold(s.tx, caseA);
       const [hold] = await s.tx<{ status: string; hold_number: string; placed_by: string }[]>`
@@ -109,6 +118,7 @@ describe("placing a legal hold", () => {
 
   it("REC-T08, T09: an evidence-item hold is scoped to an item of the same case; input is validated", async () => {
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("investigatorA");
       const ev = await storedEvidence(s, caseA, "1");
       await s.as("investigatorB");
@@ -138,6 +148,7 @@ describe("placing a legal hold", () => {
 describe("releasing a legal hold", () => {
   it("REC-T10: two different people release it; the flag clears and every step is audited", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("legal");
       const holdId = await placeHold(s.tx, caseA);
       await releaseHold(s, holdId);
@@ -162,6 +173,8 @@ describe("releasing a legal hold", () => {
 
   it("REC-T11, T13: the requester cannot approve their own release, and records officers cannot release", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
+      await giveTask(s, caseA, "records", "LEGAL_HOLD_APPLICATION");
       await s.as("records");
       const holdId = await placeHold(s.tx, caseA);
       await s.expectError(
@@ -186,6 +199,7 @@ describe("releasing a legal hold", () => {
 
   it("REC-T14: the flag stays until the last hold on the case is released", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("legal");
       const first = await placeHold(s.tx, caseA);
       const second = await placeHold(s.tx, caseA, { reason: "AUDIT" });
@@ -198,6 +212,7 @@ describe("releasing a legal hold", () => {
 
   it("REC-T15: a rejected release puts the hold back to ACTIVE and allows a new request", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("legal");
       const holdId = await placeHold(s.tx, caseA);
       const [req] = await s.tx<
@@ -226,6 +241,7 @@ describe("releasing a legal hold", () => {
 describe("hold and record immutability", () => {
   it("REC-T16, T22: released holds, decided releases and protected records cannot be changed or deleted, owner included", async () => {
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("legal");
       const holdId = await placeHold(s.tx, caseA);
       await releaseHold(s, holdId);
@@ -270,6 +286,7 @@ describe("hold and record immutability", () => {
 
   it("REC-T23: evidence under hold keeps its status, classification and available current version", async () => {
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("investigatorA");
       const ev = await storedEvidence(s, caseA, "3");
       await s.as("legal");
@@ -294,6 +311,7 @@ describe("hold and record immutability", () => {
 
   it("REC-T24: a hold preserves but does not freeze an active investigation", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("investigatorA");
       const ev = await storedEvidence(s, caseA, "4");
       await s.as("legal");
@@ -314,6 +332,7 @@ describe("hold and record immutability", () => {
 describe("hold visibility", () => {
   it("REC-T47: case staff without a hold permission see the flag, not the hold", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("legal");
       await placeHold(s.tx, caseA);
       await s.as("investigatorA");
@@ -328,6 +347,7 @@ describe("hold visibility", () => {
 
   it("REC-T41: records events carry codes and ids, never the justification", async () => {
     await scenario(async (s) => {
+      await legalHoldTasks(s, caseA);
       await s.as("legal");
       const holdId = await placeHold(s.tx, caseA);
       await releaseHold(s, holdId);
