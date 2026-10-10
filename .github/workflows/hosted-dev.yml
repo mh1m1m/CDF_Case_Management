@@ -59,6 +59,15 @@ jobs:
     environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    services:
+      # Reference database for the drift check, built from Git alone (compatibility shim); never DEV.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["54322:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -131,7 +140,10 @@ jobs:
         run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
 
       - name: Apply pending Git migrations (supabase db push)
-        run: supabase --workdir infrastructure db push --db-url "$CDF_ADMIN_DATABASE_URL" --yes
+        # --include-all: migration numbers are reserved per work stream, so a file can reach main after a
+        # higher-numbered one was applied here (1300–1330 arrived after 1500 on 2026-10-10). The drift check
+        # below proves DEV still equals a database built from Git in file order.
+        run: supabase --workdir infrastructure db push --db-url "$CDF_ADMIN_DATABASE_URL" --include-all --yes
 
       - name: Migration history after
         run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
@@ -145,6 +157,29 @@ jobs:
             echo "→ $f"
             psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 --single-transaction -f "$f"
           done
+
+      - name: Drift check (DEV schema and reference data equal a database built from Git)
+        env:
+          CDF_ENVIRONMENT: test
+          REFERENCE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: |
+          # reset.mjs only ever targets a loopback host: here the service container above.
+          CDF_ADMIN_DATABASE_URL="$REFERENCE_URL" node scripts/db/reset.mjs > /dev/null
+          drift=0
+          for kind in schema data; do
+            psql "$REFERENCE_URL" --no-psqlrc -qtAX -F ' | ' -f "scripts/db/fingerprint-$kind.sql" > "git-$kind.txt"
+            psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -F ' | ' -f "scripts/db/fingerprint-$kind.sql" > "dev-$kind.txt"
+            echo "::notice::Drift check ($kind): $(wc -l < "dev-$kind.txt") rows on DEV, $(wc -l < "git-$kind.txt") from Git"
+            # Rows are object kinds, counts and md5 hashes; they carry no data values.
+            if ! diff -q "git-$kind.txt" "dev-$kind.txt" > /dev/null; then
+              drift=1
+              diff "git-$kind.txt" "dev-$kind.txt" | grep '^[<>]' | head -n 10 | while IFS= read -r line; do
+                echo "::error::$kind drift (< Git, > DEV): $line"
+              done
+            fi
+          done
+          [ "$drift" = 0 ] || { echo "::error::DEV differs from a database built from Git"; exit 1; }
+          echo "::notice::No drift: DEV schema and reference data equal a database built from Git"
 
       - name: Login-role passwords for the test run (stable from secrets, else throwaway)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
@@ -171,12 +206,17 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
 
       - name: Database, RLS and security suites against DEV
+        id: suites
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
           CDF_ENVIRONMENT: test
           # Every statement crosses regions (runner to the Tokyo pooler); the CI default of 30 s per test is too short.
           CDF_DB_TEST_TIMEOUT_MS: "600000"
-        run: pnpm test:db
+        run: pnpm test:db --reporter=default --reporter=github-actions --reporter=json --outputFile.json=vitest-dev.json
+
+      - name: Suite totals and failed tests as annotations (job logs are not readable from every client)
+        if: ${{ always() && steps.suites.outcome != 'skipped' }}
+        run: node scripts/db/vitest-annotations.mjs vitest-dev.json "DB suites on DEV"
 
       - name: Evidence summary
         if: always()

@@ -6,7 +6,7 @@
 with
 schemas as (
   select unnest(array['core','iam','authz','audit','intake','case_mgmt','workflow','config',
-                      'protected_identity','api','public_api','evidence','forms']) as s
+                      'protected_identity','api','public_api','evidence','forms','records']) as s
 ),
 objs as (
   select 'function' as kind, n.nspname as schema,
