@@ -27,16 +27,18 @@ Wave 2–3 will need further accounts (committee secretary and chair, decision a
 
 ## 2. Seed cases and reports
 
-From `infrastructure/supabase/seed/02_synthetic_cases.sql`:
+From `infrastructure/supabase/seed/02_synthetic_cases.sql` and `03_synthetic_intake_modes.sql`:
 
-| Case / report      | State                 | Classification     | Team / notes                                                     |
-| ------------------ | --------------------- | ------------------ | ---------------------------------------------------------------- |
-| CDF-DEMO-2026-0001 | INVESTIGATION         | RESTRICTED         | lead (lead investigator), investigator.a; GRC approved           |
-| CDF-DEMO-2026-0002 | SCREENING             | RESTRICTED         | investigator.b; identified reporter "Reporter Gamma (synthetic)" |
-| CDF-DEMO-2026-0003 | REGISTERED            | SECRET, restricted | grc.director only                                                |
-| CDF-DEMO-2026-0004 | REGISTERED            | CONFIDENTIAL       | investigator.b; investigator.a's conflict confirmed              |
-| WB-SEED00000005    | report RECEIVED       | —                  | Waiting in the intake queue                                      |
-| WB-SEED00000006    | report INFO_REQUESTED | —                  | Waiting for the reporter                                         |
+| Case / report      | State                 | Classification     | Team / notes                                           |
+| ------------------ | --------------------- | ------------------ | ------------------------------------------------------ |
+| CDF-DEMO-2026-0001 | INVESTIGATION         | RESTRICTED         | lead (lead investigator), investigator.a; GRC approved |
+| CDF-DEMO-2026-0002 | SCREENING             | RESTRICTED         | investigator.b; identified reporter (persona IP-00)    |
+| CDF-DEMO-2026-0003 | REGISTERED            | SECRET, restricted | grc.director only                                      |
+| CDF-DEMO-2026-0004 | REGISTERED            | CONFIDENTIAL       | investigator.b; investigator.a's conflict confirmed    |
+| WB-SEED00000005    | report RECEIVED       | —                  | Waiting in the intake queue                            |
+| WB-SEED00000006    | report INFO_REQUESTED | —                  | Waiting for the reporter                               |
+| WB-SEED00000007    | report RECEIVED       | —                  | Email-only report (`03_synthetic_intake_modes.sql`)    |
+| WB-SEED00000008    | report RECEIVED       | —                  | Anonymous; relationship and violation type "Other"     |
 
 Seed report secrets are unusable by design. Portal scenarios use reports created during the cycle (UAT-PORTAL-01).
 
@@ -45,7 +47,7 @@ Seed report secrets are unusable by design. Portal scenarios use reports created
 Some scenarios change shared seed state. Run Wave 1 in this order so earlier scenarios do not invalidate later ones:
 
 1. UAT-ENV-01..04
-2. UAT-PORTAL-01..05, UAT-VAULT-01, UAT-INTAKE-01..02
+2. UAT-PORTAL-01..06, UAT-VAULT-01, UAT-INTAKE-01..02
 3. UAT-WF-01..03, UAT-COI-02
 4. UAT-AUTHZ-01..02 (lead must still have access to 0001)
 5. UAT-EVID-01..04
@@ -55,7 +57,7 @@ Some scenarios change shared seed state. Run Wave 1 in this order so earlier sce
 
 Between cycles DEMO is re-seeded only by a human decision (CLAUDE.md §11, "production-like environment resets"); otherwise the next cycle starts from the state the last one left and the test lead notes it.
 
-## 3. Report texts
+## 3. Report texts and field values
 
 Use these verbatim so records are comparable across cycles. All persons, places and amounts are fictional.
 
@@ -67,15 +69,32 @@ Use these verbatim so records are comparable across cycles. All persons, places 
 | R-02 | ar       | اختبار قبول تجريبي. معلومة إضافية: المستند المشارك بعنوان "مسودة جدول الأسعار" وأُرسل صباح يوم ثلاثاء.                                                             |
 | R-03 | en       | SYNTHETIC UAT. Repeated report used to exercise triage outcomes and throttling. No real event is described.                                                        |
 
+The other Drive report fields (CDF-63). Every portal submission in UAT uses these unless a step says otherwise.
+
+| Id   | Field (Drive no.)             | Value                                                                 |
+| ---- | ----------------------------- | --------------------------------------------------------------------- |
+| F-01 | Relationship to the Fund (1)  | Employee                                                              |
+| F-02 | Relationship, other (2)       | "Other", then `Volunteer at a Fund-sponsored event (synthetic)`       |
+| F-03 | Type of violation (13)        | Passing irregular transactions                                        |
+| F-04 | Type of violation, other (14) | "Other", then `Misuse of event sponsorship materials (synthetic)`     |
+| F-05 | Who is being reported (18)    | `Employee Alpha, Synthetic Procurement Unit (synthetic)`              |
+| F-06 | Incident date (16)            | Any past date in the current month (or the previous month on the 1st) |
+| F-07 | Incident time (16)            | `09:30`                                                               |
+| F-08 | Location or entity (17)       | `Synthetic Procurement Unit, head office (synthetic)`                 |
+| F-09 | Willing to cooperate (20)     | Yes (use No once per cycle to check it is stored and shown as "No")   |
+
 ## 4. Reporter personas
 
-| Id    | Mode       | Name                       | Email                       | Phone                      | Use                                |
-| ----- | ---------- | -------------------------- | --------------------------- | -------------------------- | ---------------------------------- |
-| AP-01 | anonymous  | —                          | —                           | —                          | UAT-PORTAL-01..05                  |
-| IP-00 | identified | Reporter Gamma (synthetic) | reporter.gamma@example.test | —                          | Seeded on case 0002 (UAT-VAULT-02) |
-| IP-01 | identified | Reporter Sigma (synthetic) | reporter.sigma@example.test | `0500000001` (placeholder) | UAT-VAULT-01                       |
+| Id    | Mode       | Values                                                                                                                                                                                                                                                      | Use                                |
+| ----- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| AP-01 | anonymous  | none                                                                                                                                                                                                                                                        | UAT-PORTAL-01..05                  |
+| EP-01 | email only | `reporter.omicron@example.test`                                                                                                                                                                                                                             | UAT-PORTAL-06                      |
+| IP-00 | identified | Seeded: Reporter / Gamma / Synthetic / Example, female, 1990-04-15 Gregorian, National ID `1000000001`, Riyadh, Saudi Arabia, `+966 500000001`, `reporter.gamma@example.test`                                                                               | Seeded on case 0002 (UAT-VAULT-02) |
+| IP-01 | identified | First name `Reporter`, father `Sigma`, grandfather `Synthetic`, family `Example`; male; date of birth `1995-03-10` Gregorian; National ID `1000000002`; city Jeddah; nationality Saudi Arabia; mobile `+966 500000002`; email `reporter.sigma@example.test` | UAT-VAULT-01                       |
 
-Never enter a real national ID, Iqama, passport or phone number, even when CDF-63 adds those fields. When they arrive, synthetic values that fail no format check will be listed here first.
+Invalid value for UAT-PORTAL-02: **V-ID-BAD** = National ID `2000000002` (a national ID must start with 1; numbers starting with 2 are Iqama numbers).
+
+The ID numbers and mobiles above are placeholders that pass the format checks only; they are not checked against any real register. Never enter a real national ID, Iqama, passport or phone number, and never "try" a real one to see whether it is accepted. If a persona value collides with anything real, replace it here first.
 
 ## 5. Evidence files
 
