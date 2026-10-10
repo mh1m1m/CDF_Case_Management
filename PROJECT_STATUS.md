@@ -7,6 +7,33 @@ Protocol §92. Updated at the end of every phase PR.
 Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Nothing here is a production control; see
 `architecture/PRODUCTION_MAPPING.md` for every `PRODUCTION_SUBSTITUTION_REQUIRED` item.
 
+## Last audit (CDF-DEV-AUDIT)
+
+Evidence-based audit of the live systems (GitHub, Linear, Supabase, Vercel, Sentry, Mixpanel, Drive, Slack). Percentages
+measure functioning, CI-tested implementation against prototype scope; the build-phase metrics further down use a narrower
+basis and are kept for continuity. Linear remains the backlog system of record.
+
+| Field                           | Value                                                                                                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Last audit                      | 2026-10-10 progress check (previous: 2026-10-07 baseline, 41%)                                                                                                                                   |
+| Current phase                   | 7 evidence in review; Phase 8 forms (#23), interviews (#21), records (#14, #26) coded and CI-tested on branches                                                                                  |
+| Current release level           | Level 2 — Functional Prototype (maturity: FUNCTIONAL PROTOTYPE; not production ready; Level 3 gate not met)                                                                                      |
+| Overall completion              | 47% coded and CI-tested on open branches (engine default weights); 0% merged to `main`                                                                                                           |
+| Frontend                        | 38%                                                                                                                                                                                              |
+| Backend                         | 42%                                                                                                                                                                                              |
+| Database                        | 50% (data model 55%; hosted DEV 7 of 9 base migrations, no seed, no buckets)                                                                                                                     |
+| Security                        | 55% (purpose-bound access and regression suite on branches; repo still public, `main` unprotected)                                                                                               |
+| CI/CD                           | CI 70% (26 PRs, 25 green; hosted-DEV job red on #16); CD 0%                                                                                                                                      |
+| Testing                         | 42%                                                                                                                                                                                              |
+| UAT                             | DESIGNED: UAT plan in PR #12; no UAT executed (CDF-51)                                                                                                                                           |
+| Hosting                         | 0% (no Vercel project linked; connector 403 on `cdf`)                                                                                                                                            |
+| Known blockers                  | Repo private + `main` protection (CDF-49, owner); DEV DB password secret rejected (CDF-32, owner); Vercel scope not re-authorised (CDF-33, owner); 18 sibling PRs never tested together (CDF-80) |
+| Current Linear epic             | EPIC 09 Investigation & Interviews (CDF-14): CDF-50 forms, CDF-60 interviews; EPIC 13 Records (CDF-18): CDF-69, CDF-73                                                                           |
+| Open critical issues            | None. Medium: CDF-78 break-glass self-review (fix in PR #26)                                                                                                                                     |
+| Latest stable Git SHA           | None on `main` (`1220bae` bootstrap); latest green core head `54786e4` (PR #7)                                                                                                                   |
+| Latest stable Vercel deployment | None                                                                                                                                                                                             |
+| Latest Supabase migration       | GitHub (branches) `20261007001710_purpose_bound_commands`; hosted DEV `20261007000700_api_commands`                                                                                              |
+
 | Metric                              | Value | Basis                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | IMPLEMENTATION_COMPLETION_PERCENT   | 36%   | Slices: anonymous report → triage → case → assignment → investigation; evidence upload → scan → vault → versioned, audited download. Interviews, findings, committee, reporting, notifications, search not started                                                                                            |

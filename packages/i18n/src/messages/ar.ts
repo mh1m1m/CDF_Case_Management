@@ -36,6 +36,11 @@ export const ar: Messages = {
     intake: "الوارد والفرز",
     cases: "القضايا",
   },
+  pageTitles: {
+    overview: "نظرة عامة",
+    caseDetail: "قضية",
+    intakeDetail: "بلاغ وارد",
+  },
   errors: {
     UNAUTHENTICATED: "انتهت جلستك. يرجى تسجيل الدخول مرة أخرى.",
     NOT_FOUND: "غير موجود أو غير متاح لك.",
@@ -229,6 +234,7 @@ export const ar: Messages = {
     reportRef: "رقم البلاغ",
     secret: "الرمز السري",
     copy: "نسخ",
+    copyItem: "نسخ {item}",
     copied: "تم النسخ",
     savedConfirm: "حفظت رقم البلاغ والرمز السري",
     followUpTitle: "متابعة بلاغك",
@@ -376,6 +382,7 @@ export const ar: Messages = {
     willingToCooperate: "الرغبة في التعاون",
   },
   cases: {
+    homeTitle: "نظرة عامة",
     title: "القضايا",
     intro: "القضايا المصرح لك بالاطلاع عليها.",
     empty: "لا توجد قضايا متاحة لك.",
@@ -387,6 +394,9 @@ export const ar: Messages = {
     updatedAt: "آخر تحديث",
     due: "الاستحقاق",
     progress: "مسار القضية",
+    stepDone: "مكتملة",
+    stepCurrent: "المرحلة الحالية",
+    stepUpcoming: "لم تبدأ",
     summary: "الملخص",
     details: "بيانات القضية",
     editDetails: "تحديث البيانات",
@@ -422,6 +432,7 @@ export const ar: Messages = {
   },
   evidence: {
     title: "الأدلة",
+    tableCaption: "قائمة الأدلة",
     intro: "تُفحص الملفات وتُحسب بصمتها وتُخزَّن بشكل خاص. يُسجَّل كل تنزيل في سلسلة الحيازة.",
     empty: "لا توجد أدلة بعد.",
     number: "الرقم",
@@ -434,6 +445,8 @@ export const ar: Messages = {
     addedBy: "أضافه",
     addedAt: "تاريخ الإضافة",
     download: "تنزيل",
+    downloadItem: "تنزيل {item}",
+    downloadVersion: "تنزيل {item}، الإصدار {no}",
     versions: "الإصدارات وسلسلة الحيازة",
     version: "الإصدار {no}",
     custody: "سلسلة الحيازة",
@@ -443,6 +456,7 @@ export const ar: Messages = {
     uploadIntro:
       "المسموح: PDF ومستندات Office والنصوص وCSV وJSON والبريد الإلكتروني (.eml) والصور والصوت والفيديو، بحد أقصى 25 ميجابايت. ملفات اصطناعية فقط.",
     fileLabel: "الملف",
+    fileFor: "الملف للدليل {item}",
     titleLabel: "العنوان",
     typeLabel: "النوع",
     descriptionLabel: "الوصف",
@@ -455,6 +469,7 @@ export const ar: Messages = {
     uploaded: "تم تخزين الدليل. البصمة SHA-256: {sha}",
     newVersionTitle: "إضافة إصدار جديد لهذا الدليل",
     newVersion: "إصدار جديد",
+    newVersionOf: "إصدار جديد للدليل {item}",
   },
   evidenceType: {
     DOCUMENT: "مستند",

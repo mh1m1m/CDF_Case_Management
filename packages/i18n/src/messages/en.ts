@@ -34,6 +34,12 @@ export const en = {
     intake: "Intake & Triage",
     cases: "Cases",
   },
+  /** Browser tab titles (WCAG 2.4.2); the layout appends the app name. Never a Report ID, secret or case content. */
+  pageTitles: {
+    overview: "Overview",
+    caseDetail: "Case",
+    intakeDetail: "Intake report",
+  },
   errors: {
     UNAUTHENTICATED: "Your session has ended. Please sign in again.",
     NOT_FOUND: "Not found or not available to you.",
@@ -227,6 +233,7 @@ export const en = {
     reportRef: "Report ID",
     secret: "Secret code",
     copy: "Copy",
+    copyItem: "Copy {item}",
     copied: "Copied",
     savedConfirm: "I have saved my Report ID and secret code",
     followUpTitle: "Follow up on your report",
@@ -377,6 +384,7 @@ export const en = {
     willingToCooperate: "Willing to cooperate",
   },
   cases: {
+    homeTitle: "Overview",
     title: "Cases",
     intro: "Cases you are permitted to see.",
     empty: "No cases available to you.",
@@ -388,6 +396,9 @@ export const en = {
     updatedAt: "Updated",
     due: "Due",
     progress: "Case progress",
+    stepDone: "completed",
+    stepCurrent: "current step",
+    stepUpcoming: "not started",
     summary: "Summary",
     details: "Case details",
     editDetails: "Update details",
@@ -423,6 +434,7 @@ export const en = {
   },
   evidence: {
     title: "Evidence",
+    tableCaption: "Evidence items",
     intro:
       "Files are checked, scanned, hashed and stored privately. Every download is recorded in the chain of custody.",
     empty: "No evidence yet.",
@@ -436,6 +448,8 @@ export const en = {
     addedBy: "Added by",
     addedAt: "Added",
     download: "Download",
+    downloadItem: "Download {item}",
+    downloadVersion: "Download {item}, version {no}",
     versions: "Versions and chain of custody",
     version: "Version {no}",
     custody: "Chain of custody",
@@ -445,6 +459,7 @@ export const en = {
     uploadIntro:
       "Allowed: PDF, Office documents, text, CSV, JSON, email (.eml), images, audio and video, up to 25 MB. Synthetic files only.",
     fileLabel: "File",
+    fileFor: "File for {item}",
     titleLabel: "Title",
     typeLabel: "Type",
     descriptionLabel: "Description",
@@ -457,6 +472,7 @@ export const en = {
     uploaded: "Evidence stored. SHA-256: {sha}",
     newVersionTitle: "Add a new version of this item",
     newVersion: "New version",
+    newVersionOf: "New version of {item}",
   },
   evidenceType: {
     DOCUMENT: "Document",
