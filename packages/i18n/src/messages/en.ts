@@ -365,6 +365,17 @@ export const en = {
     REJECTED: "Rejected",
     DOWNLOADED: "Downloaded",
   },
+  /** Idle-session warning (CDF-57, WCAG 2.2.1). */
+  session: {
+    warningTitle: "Are you still there?",
+    warningBody:
+      "You will be signed out in {minutes} minutes because there has been no activity. Unsaved changes on this page will be lost.",
+    stay: "Stay signed in",
+    endedTitle: "You have been signed out",
+    endedBody:
+      "For security, you were signed out after {minutes} minutes without activity. Copy any unsaved text from this page before you sign in again.",
+    signInAgain: "Sign in again",
+  },
 };
 
 type Widen<T> = { [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };
