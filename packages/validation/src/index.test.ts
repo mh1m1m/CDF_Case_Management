@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fieldErrors, isValidBirthDate, submitReportSchema, triageReportSchema } from "./index";
+import {
+  fieldErrors,
+  isValidBirthDate,
+  reportAttachmentUploadSchema,
+  submitReportSchema,
+  triageReportSchema,
+} from "./index";
 
 const base = {
   relationship: "EMPLOYEE",
@@ -195,5 +201,18 @@ describe("triageReportSchema", () => {
       reason: "Synthetic: belongs to another authority.",
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("reportAttachmentUploadSchema (CDF-72)", () => {
+  it("accepts credentials with a known source and refuses anything else", () => {
+    const ok = { reportRef: "WB-0123456789AB", secret: "ABCD-EFGH-JKMN-PQRS-TVWX" };
+    expect(reportAttachmentUploadSchema.safeParse({ ...ok, source: "REPORT" }).success).toBe(true);
+    expect(reportAttachmentUploadSchema.safeParse({ ...ok, source: "FOLLOW_UP" }).success).toBe(true);
+    expect(reportAttachmentUploadSchema.safeParse({ ...ok, source: "EMAIL" }).success).toBe(false);
+    expect(reportAttachmentUploadSchema.safeParse({ ...ok, secret: "", source: "REPORT" }).success).toBe(
+      false,
+    );
+    expect(reportAttachmentUploadSchema.safeParse({ source: "REPORT" }).success).toBe(false);
   });
 });

@@ -16,6 +16,7 @@ import { createTranslator, type Locale, type MessageKey } from "@cdf/i18n";
 import { CDFAlert, CDFCard, CDFField, buttonClass, fieldIds, inputClass, textareaClass } from "@cdf/ui";
 import { submitReportSchema, type SubmitReport, type SubmitReportInput } from "@cdf/validation";
 import { submitReportAction, type SubmitResult } from "./actions";
+import { AttachmentsUnavailable } from "./attachment-uploader";
 import { ReportReceipt } from "./report-receipt";
 
 const MODE_LABELS = {
@@ -25,7 +26,7 @@ const MODE_LABELS = {
 } as const satisfies Record<(typeof REPORTER_MODES)[number], readonly [MessageKey, MessageKey]>;
 
 /** Field set from the Drive whistleblowing requirements report (CDF-63); numbers refer to its table. */
-export function ReportForm({ locale }: { locale: Locale }) {
+export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; attachmentsEnabled: boolean }) {
   const t = createTranslator(locale);
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [pending, startTransition] = useTransition();
@@ -61,7 +62,14 @@ export function ReportForm({ locale }: { locale: Locale }) {
   }, [locale]);
 
   if (result?.status === "ok")
-    return <ReportReceipt locale={locale} reportRef={result.reportRef} secret={result.secret} />;
+    return (
+      <ReportReceipt
+        locale={locale}
+        reportRef={result.reportRef}
+        secret={result.secret}
+        attachmentsEnabled={attachmentsEnabled}
+      />
+    );
 
   const onSubmit = handleSubmit((values) =>
     startTransition(async () => {
@@ -307,10 +315,14 @@ export function ReportForm({ locale }: { locale: Locale }) {
             autoComplete="off"
           />
         </CDFField>
-        {/* Field 19: deferred until the intake attachment pipeline exists (CDF-72). */}
-        <CDFAlert tone="info" testId="attachments-unavailable">
-          {t("portal.attachmentsUnavailable")}
-        </CDFAlert>
+        {/* Field 19 (CDF-72, ADR-015): files are added after submission, with the Report ID and secret. */}
+        {attachmentsEnabled ? (
+          <CDFAlert tone="info" testId="attachments-notice">
+            {t("portal.attachments.formNotice")}
+          </CDFAlert>
+        ) : (
+          <AttachmentsUnavailable locale={locale} />
+        )}
       </CDFCard>
 
       <CDFCard title={t("portal.reporterMode")}>

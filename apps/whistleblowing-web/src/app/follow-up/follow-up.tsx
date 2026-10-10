@@ -11,10 +11,11 @@ import {
   inputClass,
   textareaClass,
 } from "@cdf/ui";
+import { AttachmentUploader } from "../report/attachment-uploader";
 import { getStatusAction, postMessageAction, type StatusResult } from "./actions";
 
 /** Credentials live only in component state for this page view; never in storage, cookies or URLs. */
-export function FollowUp({ locale }: { locale: Locale }) {
+export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attachmentsEnabled: boolean }) {
   const t = createTranslator(locale);
   const [creds, setCreds] = useState<{ reportRef: string; secret: string } | null>(null);
   const [result, setResult] = useState<StatusResult | null>(null);
@@ -137,6 +138,14 @@ export function FollowUp({ locale }: { locale: Locale }) {
         ) : (
           <CDFAlert tone="info">{t("portal.closedNotice")}</CDFAlert>
         )}
+        {report.canReply && attachmentsEnabled ? (
+          <AttachmentUploader
+            locale={locale}
+            reportRef={creds.reportRef}
+            secret={creds.secret}
+            source="FOLLOW_UP"
+          />
+        ) : null}
       </div>
     );
   }
