@@ -1,7 +1,7 @@
 // WCAG 2.1 AA checks (§43) on the first-slice screens, in Arabic (RTL) and English (LTR).
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { APP, PORTAL, contextIn, signIn } from "../e2e/support";
+import { APP, PORTAL, contextIn, fillReportFields, signIn, submitAndReadReceipt } from "../e2e/support";
 
 async function audit(page: Page) {
   const results = await new AxeBuilder({ page })
@@ -30,6 +30,34 @@ for (const locale of ["ar", "en"] as const) {
       await page.getByTestId("mode-identified").check();
       await page.getByTestId("submit-report").click();
       await expect(page.locator("#givenName")).toHaveAttribute("aria-invalid", "true");
+      await audit(page);
+      await ctx.close();
+    });
+
+    test("receipt with the attachment uploader (CDF-72)", async ({ browser }) => {
+      const ctx = await contextIn(browser, locale, PORTAL);
+      // Own synthetic client address (RFC 5737) so the portal's submit limit is not shared with other specs.
+      await ctx.setExtraHTTPHeaders({
+        "x-forwarded-for": locale === "ar" ? "198.51.100.75" : "198.51.100.76",
+      });
+      const page = await ctx.newPage();
+      await page.goto("/report");
+      await fillReportFields(page, "SYNTHETIC: accessibility check of the attachment uploader.");
+      await page.getByTestId("mode-anonymous").check();
+      await submitAndReadReceipt(page);
+      await expect(page.getByTestId("attachment-uploader")).toBeVisible();
+      await audit(page);
+      // Error state, then a per-file outcome in the live region.
+      await page.getByTestId("upload-attachments").click();
+      await expect(page.locator("#attachments")).toHaveAttribute("aria-invalid", "true");
+      await audit(page);
+      await page.locator("#attachments").setInputFiles({
+        name: "notes.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF-1.7\n% SYNTHETIC\n%%EOF\n"),
+      });
+      await page.getByTestId("upload-attachments").click();
+      await expect(page.getByTestId("attachment-result")).toHaveCount(1);
       await audit(page);
       await ctx.close();
     });

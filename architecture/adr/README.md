@@ -16,5 +16,6 @@
 | [ADR-012](ADR-012-interviews.md)                                | Interviews domain                                       | Accepted |
 | [ADR-013](ADR-013-records-retention-legal-hold.md)              | Records, retention, legal hold and disposition          | Proposed |
 | [ADR-014](ADR-014-purpose-bound-records-legal-authorization.md) | Purpose-bound records and legal authorization model     | Proposed |
+| [ADR-015](ADR-015-reporter-attachments.md)                      | Reporter attachments via public_api                     | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.

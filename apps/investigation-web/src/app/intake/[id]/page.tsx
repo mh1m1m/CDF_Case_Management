@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
 import { CLASSIFICATION_LEVELS, TRIAGE_OUTCOMES } from "@cdf/contracts";
+import { formatBytes } from "@cdf/domain";
 import { formatDate, formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
@@ -16,7 +17,7 @@ import {
   inputClass,
   textareaClass,
 } from "@cdf/ui";
-import { investigationService, requireActor } from "@/server/container";
+import { evidenceService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
@@ -37,6 +38,8 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
   // Opening a report is itself an audited event; a hidden report and a missing one look the same (§40).
   const report = await investigationService().getReport(ctx, id);
   if (!report) notFound();
+  // Reporter attachments (CDF-72): RLS shows them to whoever can view the report; downloads are gated again.
+  const attachments = await evidenceService().listReportAttachments(ctx, report.id);
 
   const canTriage =
     can(actor, "REPORT_TRIAGE") && ["RECEIVED", "INFO_REQUESTED"].includes(report.status) && !report.caseId;
@@ -107,6 +110,47 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             },
           ]}
         />
+      </CDFCard>
+
+      <CDFCard title={t("intake.attachmentsTitle")} testId="report-attachments">
+        <p className="mb-2 text-sm text-cdf-text-secondary">{t("intake.attachmentsIntro")}</p>
+        {attachments.length === 0 ? (
+          <p>{t("intake.attachmentsNone")}</p>
+        ) : (
+          <ul className="space-y-2">
+            {attachments.map((a) => (
+              <li
+                key={a.id}
+                className="flex flex-wrap items-center gap-3"
+                data-testid={`attachment-${a.displayName}`}
+              >
+                {a.status === "AVAILABLE" ? (
+                  <a
+                    href={`/intake/${report.id}/attachments/${a.id}`}
+                    className="font-semibold underline"
+                    aria-label={t("intake.attachmentDownload", { name: a.displayName })}
+                    dir="ltr"
+                  >
+                    {a.displayName}
+                  </a>
+                ) : (
+                  <span className="font-semibold" dir="ltr">
+                    {a.displayName}
+                  </span>
+                )}
+                <CDFBadge
+                  tone={a.status === "AVAILABLE" ? "success" : a.status === "REJECTED" ? "danger" : "warning"}
+                >
+                  {t(`intake.attachmentStatus.${a.status}` as MessageKey)}
+                </CDFBadge>
+                <span className="text-sm text-cdf-text-secondary">
+                  {t(`intake.attachmentSource.${a.source}` as MessageKey)} · {formatBytes(a.sizeBytes)} ·{" "}
+                  {formatDateTime(t.locale, a.receivedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </CDFCard>
 
       {canTriage ? (

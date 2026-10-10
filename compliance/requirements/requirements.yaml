@@ -948,12 +948,22 @@ requirements:
 
   - id: CDF-WB-INTAKE-019
     title: "Supporting attachments from the reporter (optional upload)"
-    source: [Drive whistleblowing requirements report field 19, protocol §22, §23]
-    external_ids: []
-    status: NOT_STARTED
-    enforcement: [apps/whistleblowing-web/src/app/report/report-form.tsx]
-    tests: []
-    notes: "Evidence storage is case-bound (migration 0900); portal uploads need an intake attachment design (private bucket, scan, custody). The form says attachments are not available yet. Tracked as CDF-72."
+    source:
+      [Drive whistleblowing requirements report field 19, protocol §22, §23, §24, §25, §26, §27, ADR-015]
+    external_ids: [CDF-72]
+    status: IN_PROGRESS
+    enforcement:
+      - infrastructure/supabase/migrations/20261007001600_reporter_attachments.sql
+      - packages/application/src/portal.ts
+      - apps/whistleblowing-web/src/app/report/attachments/route.ts
+      - apps/whistleblowing-web/src/app/report/attachment-uploader.tsx
+      - apps/investigation-web/src/app/intake/[id]/attachments/[attachmentId]/route.ts
+    tests:
+      - tests/security/reporter-attachments.spec.ts
+      - packages/application/src/portal.test.ts
+      - tests/e2e/portal-attachments.spec.ts
+      - tests/accessibility/a11y.spec.ts
+    notes: "Report-scoped attachments through public_api with the report credentials, quarantine, scan and vault; no original file names stored. Enabled with local storage in local/test only; hosted portals keep it off until the owner chooses a write-only storage credential (ADR-015). Carry-over into case evidence and metadata stripping are follow-ups. PRODUCTION_SUBSTITUTION_REQUIRED: storage and scanner."
 
   - id: CDF-WB-INTAKE-020
     title: "Willingness to cooperate (mandatory)"

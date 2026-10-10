@@ -53,6 +53,8 @@ function harness(opts: { scan?: ScanResult["status"]; putFails?: boolean; promot
             caseId: CASE,
           }
         : null,
+    listReportAttachments: async () => [],
+    openReportAttachment: async () => null,
   };
   const storage: EvidenceStorage = {
     kind: "local-fs",

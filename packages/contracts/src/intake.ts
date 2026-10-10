@@ -70,3 +70,34 @@ export const NATIONALITIES = (
   "PK PW PA PG PY PE PH PL PT RO RU RW KN LC VC WS SM ST SN RS SC SL SG SK SI SB ZA SS ES LK SR SE CH TJ TZ TH TL " +
   "TG TO TT TR TM TV UG UA GB US UY UZ VU VE VN ZM ZW"
 ).split(" ");
+
+// ---- Reporter attachments (Drive field 19; CDF-72, ADR-015) -----------------------------------
+/** Per file. Keeps one upload request under the hosting request-body limit. Mirrors migration 1600. */
+export const REPORTER_ATTACHMENT_MAX_BYTES = 4_194_304;
+/** Live (non-rejected) files per report. */
+export const REPORTER_ATTACHMENT_MAX_FILES = 10;
+/** Live bytes per report. */
+export const REPORTER_ATTACHMENT_MAX_TOTAL_BYTES = 20_971_520;
+
+export const ATTACHMENT_SOURCES = ["REPORT", "FOLLOW_UP"] as const;
+export type AttachmentSource = (typeof ATTACHMENT_SOURCES)[number];
+
+export type ReportAttachmentStatus = "QUARANTINED" | "AVAILABLE" | "REJECTED";
+
+/** What intake and case teams see. No file name is ever stored; the display name is generated. */
+export interface ReportAttachmentItem {
+  id: string;
+  sequenceNo: number;
+  displayName: string;
+  source: AttachmentSource;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  status: ReportAttachmentStatus;
+  receivedAt: string;
+}
+
+/** ATT-001.pdf: the only name an attachment has inside the platform. */
+export function attachmentDisplayName(sequenceNo: number, extension: string): string {
+  return `ATT-${String(sequenceNo).padStart(3, "0")}.${extension}`;
+}

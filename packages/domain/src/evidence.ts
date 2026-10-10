@@ -161,3 +161,30 @@ export function formatBytes(size: number): string {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+// ---- Reporter attachments (CDF-72; ADR-015) -------------------------------------------------------
+/**
+ * Unicode format characters (Cf) include the bidirectional controls (U+202A–U+202E, U+2066–U+2069,
+ * U+200E/U+200F, U+061C) that can disguise an extension ("invoice‮fdp.exe"). They are removed
+ * before the extension is read (CDF-68).
+ */
+export function stripFormatCharacters(input: string): string {
+  return input.replace(/\p{Cf}/gu, "");
+}
+
+export type ReporterAttachmentCheck =
+  { ok: true; extension: string; contentType: string } | { ok: false; reason: EvidenceFileRejection };
+
+/**
+ * Validates a reporter's file with the evidence rules and the smaller per-file limit. Only the
+ * extension survives; the file name itself is never stored or logged (it may carry identity).
+ */
+export function checkReporterAttachment(
+  input: { fileName: string; size: number; bytes: Uint8Array },
+  maxBytes: number,
+): ReporterAttachmentCheck {
+  if (input.size > maxBytes || input.bytes.length > maxBytes) return { ok: false, reason: "TOO_LARGE" };
+  const check = checkEvidenceFile({ ...input, fileName: stripFormatCharacters(input.fileName) });
+  if (!check.ok) return { ok: false, reason: check.reason };
+  return { ok: true, extension: extensionOf(check.fileName)!, contentType: check.contentType };
+}
