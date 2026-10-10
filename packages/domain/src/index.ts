@@ -75,3 +75,24 @@ export {
   sanitizeFileName,
 } from "./evidence";
 export type { AllowedContentType, EvidenceFileCheck, EvidenceFileRejection } from "./evidence";
+
+// ---- Forms engine (Phase 8; ADR-011) --------------------------------------------------------------
+export {
+  FORM_CODE_PATTERN,
+  FORM_DATE_PATTERN,
+  FORM_DEFINITIONS,
+  FORM_ENTITLEMENTS,
+  FORM_FIELD_NAME_PATTERN,
+  FORM_NUMBER_PATTERN,
+  canonicalJson,
+  fieldsOf,
+  formContentHash,
+  formDisplayNumber,
+  formFinalStatus,
+  formSchemaHash,
+  getFormDefinition,
+  isFormEntitled,
+  sha256Hex,
+  validateFormData,
+} from "./forms";
+export type { FormDataCheck, FormDataIssue, FormDataIssueCode } from "./forms";

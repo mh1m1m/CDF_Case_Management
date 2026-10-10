@@ -4,30 +4,32 @@ Protocol §91 item 10 and §93. Each scenario runs against the synthetic seed (`
 
 Switch language with the `ar`/`en` toggle in the header; every scenario works in both.
 
-**What the workspace UI covers today:** the intake queue, triage, reply to reporter, create case, edit details, assign, declare your own conflict, workflow transitions and the case timeline. Other commands (deciding conflicts, access grants, identity reveal, role administration, security-event views, audit-chain verification) exist and are tested at the database API level but have no screens yet. Scenarios mark those steps **API** and point at the automated test that exercises them. They get UI in later phases.
+**What the workspace UI covers today:** the intake queue, triage, reply to reporter, create case, edit details, assign, declare your own conflict, workflow transitions, the case timeline, evidence, and case forms at `/cases/{id}/forms` (the case page gets its entry link in the accessibility story CDF-58). Other commands (deciding conflicts, access grants, identity reveal, role administration, security-event views, audit-chain verification) exist and are tested at the database API level but have no screens yet. Scenarios mark those steps **API** and point at the automated test that exercises them. They get UI in later phases.
 
 ## Seed users
 
-| Email                       | Role(s)           | Clearance    | Notes                                |
-| --------------------------- | ----------------- | ------------ | ------------------------------------ |
-| intake@example.test         | INTAKE_OFFICER    | RESTRICTED   |                                      |
-| triage@example.test         | TRIAGE_OFFICER    | CONFIDENTIAL |                                      |
-| casemanager@example.test    | CASE_MANAGER      | CONFIDENTIAL |                                      |
-| investigator.a@example.test | INVESTIGATOR      | CONFIDENTIAL | Conflict confirmed on case 0004      |
-| investigator.b@example.test | INVESTIGATOR      | CONFIDENTIAL |                                      |
-| lead@example.test           | LEAD_INVESTIGATOR | CONFIDENTIAL |                                      |
-| committee@example.test      | COMMITTEE_MEMBER  | CONFIDENTIAL | No case access                       |
-| grc.director@example.test   | GRC_DIRECTOR      | SECRET       | Owner of restricted case 0003        |
-| grc.deputy@example.test     | GRC_DIRECTOR      | SECRET       | Second approver for identity reveals |
-| records@example.test        | RECORDS_OFFICER   | CONFIDENTIAL | Retention class, disposition request |
-| records.b@example.test      | RECORDS_OFFICER   | CONFIDENTIAL | Second records officer               |
-| legal@example.test          | LEGAL_REVIEWER    | CONFIDENTIAL | Places and releases legal holds      |
-| legal.b@example.test        | LEGAL_REVIEWER    | CONFIDENTIAL | Second hold release approver         |
-| admin@example.test          | PLATFORM_ADMIN    | INTERNAL     | No case content                      |
-| audit@example.test          | INTERNAL_AUDIT    | INTERNAL     | Audit metadata only                  |
-| soc@example.test            | SOC_ANALYST       | INTERNAL     | Security events only                 |
-| dpo@example.test            | PRIVACY_DPO       | CONFIDENTIAL |                                      |
-| revoked@example.test        | (revoked)         | CONFIDENTIAL | Cannot sign in                       |
+| Email                            | Role(s)             | Clearance    | Notes                                                              |
+| -------------------------------- | ------------------- | ------------ | ------------------------------------------------------------------ |
+| intake@example.test              | INTAKE_OFFICER      | RESTRICTED   |                                                                    |
+| triage@example.test              | TRIAGE_OFFICER      | CONFIDENTIAL |                                                                    |
+| casemanager@example.test         | CASE_MANAGER        | CONFIDENTIAL |                                                                    |
+| investigator.a@example.test      | INVESTIGATOR        | CONFIDENTIAL | Conflict confirmed on case 0004                                    |
+| investigator.b@example.test      | INVESTIGATOR        | CONFIDENTIAL |                                                                    |
+| lead@example.test                | LEAD_INVESTIGATOR   | CONFIDENTIAL |                                                                    |
+| committee@example.test           | COMMITTEE_MEMBER    | CONFIDENTIAL | No case access                                                     |
+| grc.director@example.test        | GRC_DIRECTOR        | SECRET       | Owner of restricted case 0003                                      |
+| grc.deputy@example.test          | GRC_DIRECTOR        | SECRET       | Second approver for identity reveals                               |
+| records@example.test             | RECORDS_OFFICER     | CONFIDENTIAL | Retention class, disposition request                               |
+| records.b@example.test           | RECORDS_OFFICER     | CONFIDENTIAL | Second records officer                                             |
+| legal@example.test               | LEGAL_REVIEWER      | CONFIDENTIAL | Places and releases legal holds                                    |
+| legal.b@example.test             | LEGAL_REVIEWER      | CONFIDENTIAL | Second hold release approver                                       |
+| admin@example.test               | PLATFORM_ADMIN      | INTERNAL     | No case content                                                    |
+| audit@example.test               | INTERNAL_AUDIT      | INTERNAL     | Audit metadata only                                                |
+| soc@example.test                 | SOC_ANALYST         | INTERNAL     | Security events only                                               |
+| dpo@example.test                 | PRIVACY_DPO         | CONFIDENTIAL |                                                                    |
+| revoked@example.test             | (revoked)           | CONFIDENTIAL | Cannot sign in                                                     |
+| committee.secretary@example.test | COMMITTEE_SECRETARY | CONFIDENTIAL | COMMITTEE grant on case 0001; prepares committee forms             |
+| committee.chair@example.test     | COMMITTEE_CHAIR     | CONFIDENTIAL | COMMITTEE grant on case 0001; reviews and approves committee forms |
 
 ## Seed cases
 
@@ -114,6 +116,17 @@ Sign in as **revoked**: a generic failure, the same message as for a wrong passw
 
 Automated equivalent: `tests/e2e/evidence.spec.ts`; `tests/integration/evidence.spec.ts`; `tests/security/evidence-access.spec.ts`, `tests/security/storage-policy.spec.ts`. The local filesystem adapter and the mock scanner are PRODUCTION_SUBSTITUTION_REQUIRED.
 
+## Scenario 12: case forms with separation of duties (Phase 8)
+
+1. As **investigator.a** (assigned to 0001): open `/cases/{id}/forms`. The registry lists all 19 WB-FRM forms in Arabic and English with their review/approval requirements; only forms an investigator may prepare offer "Start" (WB-FRM-11 Evidence Register yes, WB-FRM-13 Committee Formation no). Start WB-FRM-11 → the instance page shows "Draft", the form's sections and fields.
+2. Fill the required fields and "Save draft": the message carries the version number and the SHA-256 of the content; the versions panel lists version 1 with its hash. Saving unchanged content creates no new version. A wrong value (a number field with text, an unknown option) is refused on the field, before any database write.
+3. "Mark as prepared": required fields are checked strictly; the status becomes "Prepared", the fields turn read-only and the preparer sees no review controls.
+4. As **lead** (lead investigator, entitled to review investigation forms): open the instance → "Review" card → accept → "Reviewed". WB-FRM-11 needs no approval, so the form is final: no one can edit or withdraw it. The case timeline shows "Form started", "Form prepared", "Form reviewed" with hashes, never field values.
+5. As **committee.secretary**: start WB-FRM-13 Committee Formation Decision, prepare it. As **committee.chair**: review it; trying to also approve it is refused ("separation of duties"). As **grc.director**: return it with a reason → back to "Draft" with the reason in the history; after a second preparation and review, approve → "Approved".
+6. As **investigator.b** (not on 0001): the forms page and the instance answer "not found" and the ledger records `FORM_ACCESS_DENIED`. As **triage** (grant on 0001): the Evidence Register is read-only with no decision controls. As **admin**: no forms at all.
+
+Automated equivalent: `tests/e2e/forms.spec.ts`; `tests/integration/forms.spec.ts`; `tests/security/forms-access.spec.ts`. Approver assignments are `SOURCE_REQUIRED` pending the CDF Delegation of Authority; English labels are `TRANSLATION_REVIEW_PENDING`.
+
 ## What these scenarios do not show
 
-Interviews, findings, committee, decisions, corrective actions, retention and reporting are not implemented (`NOT_STARTED`). Local sign-in, the HMAC key provider, the local filesystem evidence store and the mock malware scanner are prototype substitutions, not production controls.
+Interviews (in progress, CDF-60), findings, committee, decisions, corrective actions, retention and reporting are not implemented (`NOT_STARTED`). Activities (task lists) are not part of the forms engine. Local sign-in, the HMAC key provider, the local filesystem evidence store and the mock malware scanner are prototype substitutions, not production controls.

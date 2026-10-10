@@ -336,6 +336,51 @@ requirements:
     production_substitution: "Alibaba OSS with WORM and KMS SSE replaces SupabaseEvidenceStorage/LocalFilesystemEvidenceStorage; an approved scanning service replaces MockMalwareScanner (EICAR only)"
     notes: "Complete in the prototype: RLS + clearance, DB-owned random object keys, two-phase quarantine → scan → vault, immutable versions and custody, audited BFF-streamed downloads. Marked PRODUCTION_SUBSTITUTION_REQUIRED because the storage adapter and the scanner are stand-ins."
 
+  - id: CDF-FORM-001
+    title: "Forms engine: 19 WB-FRM definitions as versioned data, case-bound instances with versions, content hash, prepared/reviewed/approved lifecycle and per-form entitlements"
+    source: [protocol §13, §18–§21, §29, §45, §83, ADR-011, baseline WB-FRM catalogue]
+    external_ids: []
+    linear_issues: [CDF-50]
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001100_forms.sql,
+        infrastructure/supabase/migrations/20261007001110_form_definitions_seed.sql,
+        scripts/forms/generate-registry.mjs,
+        authz.form_entitled,
+        authz.can_view_form_instance,
+        authz.can_prepare_form,
+        authz.can_review_form,
+        authz.can_approve_form,
+        forms.validate_data,
+        forms.content_hash,
+        api.open_form_instance,
+        api.start_form,
+        api.save_form_draft,
+        api.prepare_form,
+        api.review_form,
+        api.approve_form,
+        api.withdraw_form,
+        packages/domain/src/forms.ts,
+        packages/validation (startFormSchema … withdrawFormSchema),
+        packages/application/src/forms.ts,
+        packages/infrastructure/src/db/forms-gateway.ts,
+        "apps/investigation-web/src/app/cases/[id]/forms",
+      ]
+    tests:
+      [
+        tests/security/forms-access.spec.ts,
+        tests/security/rls-coverage.spec.ts,
+        tests/integration/forms.spec.ts,
+        tests/integration/mirrors.spec.ts,
+        tests/e2e/forms.spec.ts,
+        packages/domain/src/forms.test.ts,
+        packages/application/src/forms.test.ts,
+        packages/authorization/src/index.test.ts,
+      ]
+    production_substitution: "None: plain PostgreSQL schema, functions and RLS; runs unchanged on Alibaba RDS PostgreSQL"
+    notes: "Approver entitlements and form repeatability are SOURCE_REQUIRED (CDF Delegation of Authority not in Drive); English labels are TRANSLATION_REVIEW_PENDING; legal-hold gating of form commands is added by CDF-69 (records). Activities and interviews are separate stories (CDF-60)."
+
   - id: CDF-INV-001
     title: "Interviews, findings and investigation plan"
     source: [protocol §37]

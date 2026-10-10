@@ -39,6 +39,8 @@ declare
   u_lead  uuid := 'a0000000-0000-4000-8000-000000000006';
   u_cm    uuid := 'a0000000-0000-4000-8000-000000000003';
   u_grc   uuid := 'a0000000-0000-4000-8000-000000000008';
+  u_sec   uuid := 'a0000000-0000-4000-8000-000000000015';
+  u_chair uuid := 'a0000000-0000-4000-8000-000000000016';
 begin
   -- Reports -------------------------------------------------------------------
   r1 := pg_temp.seed_report('WB-SEED00000001', 'FRAUD',
@@ -83,6 +85,10 @@ begin
   perform api.declare_conflict(c_a, false, 'Synthetic: no relationship with the parties.');
   perform pg_temp.act_as('grc.director@example.test');
   perform api.transition_case(c_a, 'APPROVE_INVESTIGATION', 'Synthetic: approved for full investigation.');
+  -- Committee access to case A so committee forms (WB-FRM-13/14) can be prepared, reviewed and approved (Phase 8).
+  perform pg_temp.act_as('casemanager@example.test');
+  perform api.grant_case_access(c_a, u_sec, 'COMMITTEE', 'Synthetic: committee secretary for case A', null);
+  perform api.grant_case_access(c_a, u_chair, 'COMMITTEE', 'Synthetic: committee chair for case A', null);
 
   -- Case B (0002): identified reporter, investigator B assigned, in SCREENING --------------
   perform pg_temp.act_as('triage@example.test');
