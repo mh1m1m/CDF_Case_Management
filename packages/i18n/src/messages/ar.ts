@@ -377,6 +377,7 @@ export const ar: Messages = {
     willingToCooperate: "الرغبة في التعاون",
   },
   cases: {
+    homeTitle: "نظرة عامة",
     title: "القضايا",
     intro: "القضايا المصرح لك بالاطلاع عليها.",
     empty: "لا توجد قضايا متاحة لك.",
@@ -426,6 +427,7 @@ export const ar: Messages = {
   },
   evidence: {
     title: "الأدلة",
+    tableCaption: "قائمة الأدلة",
     intro: "تُفحص الملفات وتُحسب بصمتها وتُخزَّن بشكل خاص. يُسجَّل كل تنزيل في سلسلة الحيازة.",
     empty: "لا توجد أدلة بعد.",
     number: "الرقم",
