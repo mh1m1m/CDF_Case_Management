@@ -6,7 +6,7 @@ This repository is a **synthetic-data reference implementation**. It is not CDF 
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately to the repository owner (@prodya-dev) through GitHub's private vulnerability reporting ("Security" tab → "Report a vulnerability"). Do not open public issues for security problems. Include reproduction steps against synthetic data only.
+The repository is private. Report vulnerabilities to the repository owner (@mh1m1m) directly, or as a GitHub security advisory draft if you have access to the repository's "Security" tab. Do not put security problems in ordinary issues or pull request comments. Include reproduction steps against synthetic data only.
 
 ## Security model (summary)
 

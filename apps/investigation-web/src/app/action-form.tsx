@@ -12,6 +12,8 @@ export function ActionForm(props: {
   action: (state: ActionState, form: FormData) => Promise<ActionState>;
   locale: Locale;
   submitLabel: string;
+  /** Accessible name when several forms share one visible label; must start with the visible label (WCAG 2.5.3). */
+  submitName?: string;
   fieldLabels?: Record<string, string>;
   variant?: "primary" | "secondary" | "danger";
   testId?: string;
@@ -48,7 +50,12 @@ export function ActionForm(props: {
         <CDFAlert tone="success">{props.successMessage.replace("{message}", state.message ?? "")}</CDFAlert>
       ) : null}
       {props.children}
-      <button type="submit" className={buttonClass(props.variant ?? "primary")} disabled={pending}>
+      <button
+        type="submit"
+        className={buttonClass(props.variant ?? "primary")}
+        disabled={pending}
+        aria-label={pending ? undefined : props.submitName}
+      >
         {pending ? t("common.working") : props.submitLabel}
       </button>
     </form>

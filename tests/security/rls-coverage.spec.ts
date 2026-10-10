@@ -13,6 +13,7 @@ const APP_SCHEMAS = [
   "protected_identity",
   "workflow",
   "evidence",
+  "forms",
   "config",
   "api",
   "public_api",
