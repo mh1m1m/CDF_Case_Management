@@ -1,7 +1,7 @@
 // CDF-54: the portal follow-up page keeps keyboard focus when its view changes (WCAG 2.4.3, 4.1.3),
 // and the login error is announced once.
 import { expect, test, type Page } from "@playwright/test";
-import { APP, PORTAL, contextIn, submitAnonymousReport } from "../e2e/support";
+import { APP, PORTAL, contextIn, sharedAnonymousReport } from "../e2e/support";
 
 let credentials: { reportRef: string; secret: string };
 
@@ -20,7 +20,7 @@ const focused = (page: Page) =>
 
 test.describe("portal follow-up", () => {
   test.beforeAll(async ({ browser }) => {
-    credentials = await submitAnonymousReport(browser, "Synthetic report for the follow-up focus check.");
+    credentials = await sharedAnonymousReport(browser);
   });
 
   for (const locale of ["ar", "en"] as const) {

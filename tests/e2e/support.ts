@@ -84,6 +84,18 @@ export async function submitAndReadReceipt(page: Page) {
   return { reportRef, secret };
 }
 
+let sharedReport: Promise<{ reportRef: string; secret: string }> | undefined;
+
+/**
+ * One synthetic anonymous report shared by the accessibility specs that only need valid credentials. The portal
+ * allows five submissions per client per hour, which the combined e2e and accessibility suites would otherwise
+ * exceed; the limit itself is unchanged.
+ */
+export function sharedAnonymousReport(browser: Browser) {
+  sharedReport ??= submitAnonymousReport(browser, "Synthetic report shared by the accessibility checks.");
+  return sharedReport;
+}
+
 export async function publicStatus(browser: Browser, reportRef: string, secret: string) {
   const context = await contextIn(browser, "en", PORTAL);
   const page = await context.newPage();
