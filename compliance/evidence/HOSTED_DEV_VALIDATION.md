@@ -1,6 +1,6 @@
 # Hosted DEV validation — Supabase `cdf-case-dev`
 
-CDF-32 · CEOM §11 (Supabase holds the prototype database state as executed; the Git migrations remain the intended-state authority) · recorded 2026-10-07 from the Claude Code cloud session, branch `feature/CDF-32-hosted-dev` (base: PR #7 head `54786e4`).
+CDF-32 · CEOM §11 (Supabase holds the prototype database state as executed; the Git migrations remain the intended-state authority) · recorded 2026-10-07 from the Claude Code cloud session, branch `feature/CDF-32-hosted-dev` (base: PR #7 head `54786e4`); merged with PR #16 on 2026-10-10 and re-checked against DEV the same day (§4.2, §4.3, §5).
 
 Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. This document carries identifiers and technical metadata only. No key, password, token or connection string appears here or in the linked issues, ever.
 
@@ -38,9 +38,9 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. This document carries i
 | `20261007000700_api_commands`             | APPLIED | same                                       | —                                                                                       |
 | `20261007000800_public_api`               | PENDING | CI, `hosted-dev.yml`                       | blocked through the connector, drift record 2                                           |
 | `20261007000900_evidence`                 | PENDING | CI                                         | waits behind 0800 so the order stays as in Git                                          |
-| `20261007001000_evidence_storage_buckets` | PENDING | CI                                         | new on this branch (§7)                                                                 |
+| `20261007001000_evidence_storage_buckets` | PENDING | CI                                         | on `main` since PR #16 (§7)                                                             |
 
-The hosted history (`supabase_migrations.schema_migrations`) lists exactly `20261007000100` … `20261007000700` with their Git names, so `supabase db push` applies 0800–1000 and nothing else.
+The hosted history (`supabase_migrations.schema_migrations`) lists exactly `20261007000100` … `20261007000700` with their Git names, so `supabase db push` applies 0800–1000 and nothing else. Re-read on 2026-10-10 (about 08:45 UTC), after PR #16 put all ten files on `main` (`cd0776a`): unchanged, still exactly 0100–0700.
 
 ## 4. Drift records (EXPECTED / ACTUAL / DRIFT / CAUSE / REMEDIATION)
 
@@ -58,8 +58,22 @@ The hosted history (`supabase_migrations.schema_migrations`) lists exactly `2026
 - ACTUAL: 7.
 - DRIFT: missing on DEV: the `public_api` schema (anonymous portal commands, `core.rate_limit` and `core.consume_rate_limit`, `usage` on `public_api` for `authenticated`), the `evidence` schema (items, versions, custody, content-type allow-list, the evidence `api.*` and `authz.*` functions), the `EVIDENCE_UPLOAD` and `EVIDENCE_DOWNLOAD` permissions with their twelve role grants, and the two storage buckets.
 - CAUSE: `0800_public_api` contains a `delete from core.rate_limit …` inside `core.consume_rate_limit()`. The connector classifies the statement as destructive and raises a confirmation prompt that expires after about a minute and never reached the requester (four attempts, 2026-10-07 12:20–12:27). The migration was not rewritten to avoid the check. DEV was verified unchanged after every attempt (last migration 0700, no `core.rate_limit` objects).
-- REMEDIATION: `.github/workflows/hosted-dev.yml` (runs on pushes to `feature/CDF-32-hosted-dev` that touch the database or the tests; manual `workflow_dispatch` works only once the file is on `main`, because GitHub resolves manual dispatch against the default branch, which has no workflows yet) connects the Supabase CLI to the IPv4 session pooler on port 5432 with `--db-url` (the direct database host is IPv6-only, which GitHub-hosted runners cannot reach; no Supabase access token is involved), runs `supabase db push` (exactly the pending Git files, in order), seeds the synthetic data while DEV is still empty, and runs `pnpm test:db` against DEV. It needs the repository secret `SUPABASE_DB_PASSWORD` (§9). The run ID and commit are recorded here and in CDF-32 once it has run.
+- REMEDIATION: `.github/workflows/hosted-dev.yml` (on `main` since PR #16, 2026-10-10: GitHub → Actions → "Hosted DEV (Supabase)" → Run workflow; before that it ran on pushes to `feature/CDF-32-hosted-dev`, because GitHub resolves manual dispatch against the default branch) connects the Supabase CLI to the IPv4 session pooler on port 5432 with `--db-url` (the direct database host is IPv6-only, which GitHub-hosted runners cannot reach; no Supabase access token is involved), runs `supabase db push` (exactly the pending Git files, in order), seeds the synthetic data while DEV is still empty, and runs `pnpm test:db` against DEV. It needs the repository secret `SUPABASE_DB_PASSWORD` (§9). The run ID and commit are recorded here and in CDF-32 once it has run.
 - STATUS (2026-10-10): the secret exists, but every run so far ends in `password authentication failed for user "postgres"` at the session pooler. The project's Supavisor log shows a fresh `auth_query` lookup before each failure, so the stored value was compared with the live database password and differs. The owner resets the database password and pastes it into the secret; until then 0800–1000 stay unapplied and nothing on DEV changes. Runs: 37646362409 (secret absent), 37649397943, 37649683119, 37649873035, 37650225769, 37683914418, 38034939932.
+- RE-CHECK (2026-10-10, about 08:45 UTC, `main` at `cd0776a`, read-only through the connector):
+  - EXPECTED: `main` carries all ten migrations since PR #16 merged (08:26 UTC); DEV holds them once the workflow has run.
+  - ACTUAL: `list_migrations` lists 0100–0700. DEV has no `evidence` schema, no function in `public_api`, no `core.consume_rate_limit`, no storage bucket and no row in `iam.user_profile`; its 25 tables all have RLS enabled. Both fingerprint scripts give the same output on DEV as on a database built from Git 0100–0700 alone (§5).
+  - DRIFT: unchanged: 0800–1000 are missing and nothing else differs.
+  - CAUSE: the workflow has not connected yet (the STATUS above), and the Supabase GitHub integration does not apply them either (§4.3).
+  - REMEDIATION: unchanged: run `hosted-dev.yml` from `main` once the secret holds the current database password.
+
+### 4.3 Supabase GitHub integration finds no migrations — OPEN (no effect on DEV)
+
+- EXPECTED: one documented path changes DEV: Git `main` through `hosted-dev.yml`, which also seeds and runs the suites. Any second path is either deliberate and documented, or inert.
+- ACTUAL: the integration (Branching on, production branch `main`) ran once per merge to `main`: 14 runs on 2026-10-10 between 07:45 and 08:41 UTC, one for each of the 14 pull requests merged that morning (#1 first, #12 last), including #3, #7 and #16, which brought 0800, 0900 and 1000. Every run cloned `main`, connected to DEV and logged "All migrations are up to date", "No buckets found", "Skipping configuration for protected branch", "Skipping seed data for protected branch" and "No functions to deploy" (connector `query_logs`, source `workflow_run_logs`). DEV did not change (§4.2 re-check).
+- DRIFT: none on DEV. The integration's view is wrong: it reports nothing pending while three migrations are.
+- CAUSE (inferred from the log; the integration's settings cannot be read through the connector): the integration applies the `supabase/migrations` folder under its configured working directory (the directory that contains `supabase/`, per the Supabase GitHub-integration guide). This repository keeps it at `infrastructure/supabase`, so with any other working directory the integration finds no migration files.
+- REMEDIATION: none needed for DEV, which keeps changing only through `hosted-dev.yml`. Owner decision, not taken here: leave the integration as it is (inert for migrations), or set its working directory to `infrastructure` (Project Settings → Integrations → GitHub). With "Deploy to production" on (the runs indicate it is), the second option makes every merge to `main` apply pending migrations to DEV without seed or suites, and can start billable preview branches for pull requests that touch the directory.
 
 ## 5. Verification: no transcription drift in 0100–0700
 
@@ -69,6 +83,8 @@ The hosted schema was compared with a reference database built from Git alone (`
 - `scripts/db/fingerprint-data.sql`: per reference-data table, the row count and an md5 over the rows without timestamps (`iam.role`, `iam.permission`, `iam.role_permission`, `workflow.workflow_definition`, `workflow.workflow_state`, `workflow.workflow_transition_definition`, `config.setting`).
 
 Result (2026-10-07): every (kind, schema) bucket present on DEV has the same count and fingerprint locally. The buckets that exist only locally are exactly the objects 0800–1000 create. Excluding those objects: `api` functions 28 = 28 (`8c02c07b…`), `authz` functions 16 = 16 (`835ff286…`). Reference data: `config.setting` 4 = 4, `iam.role` 21 = 21, `iam.permission` 19 = 19 (local 21 once 0900 adds the two evidence permissions), `iam.role_permission` 41 = 41 (local 53), `workflow_definition` 1 = 1, `workflow_state` 15 = 15, `workflow_transition_definition` 20 = 20; every fingerprint equal.
+
+Re-check (2026-10-10, about 08:45 UTC): a database built locally from the compatibility shim and Git 0100–0700 alone (no seed) and DEV return identical output from both scripts: all 55 (kind, schema) buckets of `fingerprint-schema.sql` (for example `api` functions 28 `8c02c07b…`, `authz` functions 16 `835ff286…`) and all 7 reference tables of `fingerprint-data.sql` (`iam.role` 21, `iam.permission` 19, `iam.role_permission` 41, `config.setting` 4, `workflow_definition` 1, `workflow_state` 15, `workflow_transition_definition` 20). Nothing on DEV changed since 2026-10-07.
 
 Observation: DEV collates `en_US.UTF-8`, the local database `C.UTF-8`. Text ordering inside `string_agg` therefore differs unless the sort uses `collate "C"`, which both scripts now do. Anything that orders text for a comparison or a stable hash must do the same.
 
@@ -93,8 +109,8 @@ PRODUCTION_SUBSTITUTION_REQUIRED: in production the buckets are Alibaba Cloud OS
 
 | Gate                                               | Status               | Evidence or blocker                                                                                                                                                   |
 | -------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Migrations 0100–1000 applied, history equals Git   | IN_PROGRESS          | 7 of 10 (§3); CI run pending on the secrets in §9                                                                                                                     |
-| Schema equals Git (fingerprints)                   | PASSED for 0100–0700 | §5; rerun after 0800–1000                                                                                                                                             |
+| Migrations 0100–1000 applied, history equals Git   | IN_PROGRESS          | 7 of 10 (§3, re-read 2026-10-10); `hosted-dev.yml` on `main` waits for the database password (§4.2)                                                                   |
+| Schema equals Git (fingerprints)                   | PASSED for 0100–0700 | §5 (re-checked 2026-10-10); rerun after 0800–1000                                                                                                                     |
 | RLS and security suites against DEV                | NOT_STARTED          | `hosted-dev.yml`, `pnpm test:db` (projects `integration` and `security`)                                                                                              |
 | Authorization-isolation suites                     | NOT_STARTED          | same run                                                                                                                                                              |
 | Storage security (`storage-policy.spec.ts`)        | NOT_STARTED          | same run; needs 1000                                                                                                                                                  |
@@ -102,7 +118,7 @@ PRODUCTION_SUBSTITUTION_REQUIRED: in production the buckets are Alibaba Cloud OS
 | Supabase Auth adapter against DEV                  | BLOCKED              | DEV has no auth users: `infrastructure/supabase/seed/01_synthetic_users.sql` refers to `scripts/db/seed-auth-users.mjs`, which does not exist (CDF-65, blocks CDF-32) |
 | Storage adapter (`SupabaseEvidenceStorage`) on DEV | NOT_STARTED          | needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as CI secrets and an adapter test, which does not exist yet                                                      |
 | Evidence workflow end to end on DEV                | NOT_STARTED          | after the storage adapter                                                                                                                                             |
-| Regression (lint, typecheck, unit, build)          | PASSED locally       | at `54786e4` plus this branch; CI on the pull request                                                                                                                 |
+| Regression (lint, typecheck, unit, build)          | PASSED               | PR #16: all 7 required checks green on its merged head (2026-10-10)                                                                                                   |
 | Advisors clean (no security WARN or ERROR)         | PASSED at 0700       | §6; reread after 1000                                                                                                                                                 |
 
 ## 9. Credentials map (names only)
@@ -121,6 +137,8 @@ None of these is ever `NEXT_PUBLIC_*` (§46, §47). Values are entered where the
 
 ## 10. Vercel (CDF-33)
 
+Historical record of 2026-10-07. The Vercel projects are tracked in CDF-33 from 2026-10-10 on.
+
 - Attempt, 2026-10-07: `create_project` under team `malsalehs-projects` (`team_tJxfhTJObyoeBcCmY0SQnFHL`) returned HTTP 403: the connector token has no scope for that team. The team is listed, but nothing in it can be created or changed.
 - Remediation, Fady: claude.ai → Settings → Connectors → Vercel → Disconnect, then Connect again and, on Vercel's authorisation screen, choose the `malsalehs-projects` scope with access to all projects. Connectors are read when a session starts, so the projects are created from a new thread afterwards.
 - Plan once scoped: `cdf-whistleblowing` (root `apps/whistleblowing-web`) and `cdf-investigations` (root `apps/investigation-web`), framework Next.js, Git repository `mh1m1m/CDF_Case_Management`, both on DEV; server-scoped variables as in §9 (Sensitive ones entered by Fady); preview deployments from `feature/CDF-44-evidence-custody` (PR #7); production deployments only after the stack merges; verify that no service-role key reaches a client bundle and that investigation pages and the evidence download route answer with a `Cache-Control` that forbids shared caching (`no-store`); attach the preview URLs to CDF-33.
@@ -132,7 +150,7 @@ None of these is ever `NEXT_PUBLIC_*` (§46, §47). Values are entered where the
 
 ## 12. How to re-run
 
-1. Push a commit to `feature/CDF-32-hosted-dev` that touches the workflow, a migration, a seed, a test or `scripts/db/` (the workflow runs on such pushes while `main` lacks the file). Once the file is on `main`: GitHub → Actions → "Hosted DEV (Supabase)" → Run workflow (inputs `seed` and `test`, both default true), or `gh workflow run hosted-dev.yml --ref <branch>`.
+1. GitHub → Actions → "Hosted DEV (Supabase)" → Run workflow on `main` (inputs `seed` and `test`, both default true), or `POST /repos/mh1m1m/CDF_Case_Management/actions/workflows/hosted-dev.yml/dispatches` with `ref` `main`. Until PR #16 merged (2026-10-10) the workflow ran on pushes to `feature/CDF-32-hosted-dev`.
 2. Read the run summary: migration history before and after, seed result, suite results.
 3. Run `scripts/db/fingerprint-schema.sql` and `scripts/db/fingerprint-data.sql` on DEV (connector `execute_sql`) and locally (`psql -f`); every bucket must match, `evidence` and `public_api` included.
 4. Reread the advisors; update §3, §6 and §8 here and the evidence comment on CDF-32 with the run ID and commit.
