@@ -1,6 +1,6 @@
 // CDF-62 · §18–§21, §87, threats T01/T02/T03: broken access control and IDOR on every api.* command.
 // Each command is called by people who cannot see the target case, with the UUIDs of real objects on it
-// (case, report, assignment, grant, conflict, evidence item and version, reveal request). Every call must be
+// (case, report, assignment, grant, conflict, evidence item and version, reveal request, form instance). Every call must be
 // refused exactly as if the object did not exist, and the catalog guard makes a new api.* function fail this
 // file until it has an entry here.
 import { randomUUID } from "node:crypto";
@@ -19,6 +19,7 @@ interface Targets {
   revealRequest: string;
   interview: string;
   statementVersion: string;
+  formInstance: string;
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
@@ -34,6 +35,11 @@ const SHA = "c".repeat(64);
 // One probe per object-scoped api.* function. The self id is the acting outsider, so "assign me" and
 // "grant me" attempts are covered too.
 const PROBES: Probe[] = [
+  {
+    fn: "approve_form",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.approve_form(${t.formInstance}, 'APPROVED', null)`,
+  },
   {
     fn: "assign_case",
     outcome: "NOT_FOUND",
@@ -97,7 +103,17 @@ const PROBES: Probe[] = [
     outcome: "EMPTY",
     call: (tx, t) => tx`select * from api.open_evidence_version(${t.version})`,
   },
+  {
+    fn: "open_form_instance",
+    outcome: "FALSE",
+    call: (tx, t) => tx`select api.open_form_instance(${t.formInstance}) as v`,
+  },
   { fn: "open_report", outcome: "FALSE", call: (tx, t) => tx`select api.open_report(${t.report}) as v` },
+  {
+    fn: "prepare_form",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.prepare_form(${t.formInstance})`,
+  },
   {
     fn: "reassign_case",
     outcome: "NOT_FOUND",
@@ -133,9 +149,25 @@ const PROBES: Probe[] = [
     call: (tx, t) => tx`select * from api.resolve_reporter_identity(${t.case}, ${REASON})`,
   },
   {
+    fn: "review_form",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.review_form(${t.formInstance}, 'REVIEWED', null)`,
+  },
+  {
     fn: "revoke_case_access",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.revoke_case_access(${t.grant}, ${REASON})`,
+  },
+  {
+    fn: "save_form_draft",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select * from api.save_form_draft(${t.formInstance}, '{}'::jsonb)`,
+  },
+  {
+    fn: "start_form",
+    outcome: "NOT_FOUND",
+    // The lowest classification: the refusal must come from case visibility, never from the clearance check.
+    call: (tx, t) => tx`select api.start_form(${t.case}, 'WB-FRM-11', 'INTERNAL'::core.classification_level)`,
   },
   {
     fn: "transition_case",
@@ -224,6 +256,11 @@ const PROBES: Probe[] = [
     outcome: "FALSE",
     call: (tx, t) => tx`select api.open_interview(${t.interview}) as v`,
   },
+  {
+    fn: "withdraw_form",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_form(${t.formInstance}, ${REASON})`,
+  },
 ];
 
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
@@ -246,8 +283,10 @@ async function seedObjects(caseNo: string) {
 }
 
 /**
- * Creates, inside the scenario, the objects only an insider can create: an evidence item and version, an
- * identity reveal request and a conflict declaration. `uploader` must be able to upload on the case.
+ * Creates, inside the scenario, the objects only an insider can create: an evidence item and version, a form
+ * instance, an identity reveal request and a conflict declaration. `uploader` must be able to upload on the
+ * case and `formPreparer` to prepare an investigation form on it. No seed role can prepare a form on the
+ * restricted SECRET case (GRC has no FORM_PREPARE), so without a preparer the form probes use a random id.
  */
 async function insiderObjects(
   s: Scenario,
@@ -256,8 +295,12 @@ async function insiderObjects(
   revealer: UserKey,
   declarer: UserKey,
   classification = "RESTRICTED",
+  formPreparer?: UserKey,
 ): Promise<
-  Pick<Targets, "evidence" | "version" | "revealRequest" | "conflict" | "interview" | "statementVersion">
+  Pick<
+    Targets,
+    "evidence" | "version" | "revealRequest" | "conflict" | "interview" | "statementVersion" | "formInstance"
+  >
 > {
   await s.as(uploader);
   const [ev] = await s.tx<{ evidence: string; version: string }[]>`
@@ -274,6 +317,14 @@ async function insiderObjects(
   await s.tx`select api.record_interview_conducted(${iv!.id}, now() - interval '2 hours', now() - interval '1 hour')`;
   const [sv] = await s.tx<{ id: string }[]>`
     select o_version_id as id from api.record_interview_statement(${iv!.id}, 'Probe statement (synthetic).', 'en')`;
+  let formInstance: string = randomUUID();
+  if (formPreparer) {
+    await s.as(formPreparer);
+    const [f] = await s.tx<
+      { id: string }[]
+    >`select api.start_form(${target}, 'WB-FRM-11', ${classification}::core.classification_level) as id`;
+    formInstance = f!.id;
+  }
   await s.as(revealer);
   const [rr] = await s.tx<
     { id: string }[]
@@ -290,6 +341,7 @@ async function insiderObjects(
     conflict: k!.id,
     interview: iv!.id,
     statementVersion: sv!.id,
+    formInstance,
   };
 }
 
@@ -321,6 +373,7 @@ const randomTargets = (): Targets => ({
   revealRequest: randomUUID(),
   interview: randomUUID(),
   statementVersion: randomUUID(),
+  formInstance: randomUUID(),
 });
 
 describe("catalog guard", () => {
@@ -358,7 +411,15 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
     await scenario(async (s) => {
       const inside =
         which === "B"
-          ? await insiderObjects(s, target, "investigatorB", "grcDirector", "investigatorB")
+          ? await insiderObjects(
+              s,
+              target,
+              "investigatorB",
+              "grcDirector",
+              "investigatorB",
+              "RESTRICTED",
+              "investigatorB",
+            )
           : await insiderObjects(s, target, "grcDirector", "grcDirector", "grcDirector", "SECRET");
       const real: Targets = { case: target, ...seeded, ...inside };
       await s.as(actor);
@@ -387,6 +448,11 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
       const [opened] = await s.tx<{ v: boolean }[]>`select api.open_case(${caseB}) as v`;
       expect(opened!.v).toBe(true);
       expect((await s.tx`select * from api.available_transitions(${caseB})`).length).toBeGreaterThan(0);
+      const [form] = await s.tx<
+        { id: string }[]
+      >`select api.start_form(${caseB}, 'WB-FRM-11', 'RESTRICTED'::core.classification_level) as id`;
+      const [formOpened] = await s.tx<{ v: boolean }[]>`select api.open_form_instance(${form!.id}) as v`;
+      expect(formOpened!.v).toBe(true);
       await s.as("grcDirector");
       const [exec] = await s.tx<{ v: boolean }[]>`select api.open_case(${caseExec}) as v`;
       expect(exec!.v).toBe(true);
@@ -494,7 +560,15 @@ describe("non-object commands", () => {
   it("a revoked user gets nothing from any probe, even on a case they were assigned to", async () => {
     const seeded = await seedObjects("0002");
     await scenario(async (s) => {
-      const inside = await insiderObjects(s, caseB, "investigatorB", "grcDirector", "investigatorB");
+      const inside = await insiderObjects(
+        s,
+        caseB,
+        "investigatorB",
+        "grcDirector",
+        "investigatorB",
+        "RESTRICTED",
+        "investigatorB",
+      );
       await s.as("revoked");
       const leaks: string[] = [];
       for (const probe of PROBES) {
