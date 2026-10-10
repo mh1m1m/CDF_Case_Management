@@ -24,18 +24,26 @@ let readable: { table: string; columns: string[] }[] = [];
 beforeAll(async () => {
   caseB = await caseId("0002");
   const vault = await admin<
-    { wb_id: string; full_name: string | null; email: string | null; phone: string | null }[]
+    {
+      wb_id: string;
+      full_name: string | null;
+      email: string | null;
+      phone: string | null;
+      id_number: string | null;
+      birth_date: string | null;
+    }[]
   >`
-    select wb_id, full_name, email, phone from protected_identity.reporter_identity`;
+    select wb_id, full_name, email, phone, id_number, birth_date from protected_identity.reporter_identity`;
+  // Includes the identified-mode ID number and birth date added by CDF-63 (migration 1500).
   needles = vault
-    .flatMap((v) => [v.full_name, v.email, v.phone])
+    .flatMap((v) => [v.full_name, v.email, v.phone, v.id_number, v.birth_date])
     .filter((v): v is string => !!v && v.length >= 6)
     .map((v) => v.toLowerCase());
   // Every relation in an application schema with at least one column `authenticated` may select.
   const cols = await admin<{ table: string; column: string }[]>`
     select format('%I.%I', c.table_schema, c.table_name) as table, c.column_name as column
     from information_schema.columns c
-    where c.table_schema in ('core', 'iam', 'authz', 'audit', 'intake', 'case_mgmt', 'workflow', 'evidence', 'protected_identity', 'public_api', 'api')
+    where c.table_schema in ('core', 'iam', 'authz', 'audit', 'intake', 'case_mgmt', 'workflow', 'evidence', 'forms', 'protected_identity', 'public_api', 'api')
       and has_column_privilege('authenticated', format('%I.%I', c.table_schema, c.table_name), c.column_name, 'SELECT')
     order by 1, c.ordinal_position`;
   const byTable = new Map<string, string[]>();
@@ -128,17 +136,30 @@ describe("the portal's answers carry no identity and no internal data", () => {
       const ref = newReportRef();
       const secret = newSecret();
       const identity = {
-        full_name: "Reporter Lambda (synthetic)",
+        given_name: "Reporter",
+        father_name: "Lambda",
+        grandfather_name: "Synthetic",
+        family_name: "Example",
+        gender: "FEMALE",
+        birth_date: "1991-03-07",
+        birth_date_calendar: "GREGORIAN",
+        id_type: "NATIONAL_ID",
+        id_number: "1000000099",
+        city: "DAMMAM",
+        nationality: "SA",
         email: "reporter.lambda@example.test",
         phone: "+966500000099",
       };
-      await tx`select * from public_api.submit_report(${ref}, ${secretHmac(secret)}, 'FRAUD', null,
-        'SYNTHETIC: Vendor Omega allegedly invoiced twice for the same delivery.', null, null, 'en', ${tx.json(identity)})`;
+      await tx`select * from public_api.submit_report(${ref}, ${secretHmac(secret)}, 'IDENTIFIED', 'SUPPLIER', null,
+        'FINANCIAL_CORRUPTION', null, 'Vendor Omega (synthetic)',
+        'SYNTHETIC: Vendor Omega allegedly invoiced twice for the same delivery.', ${"2026-09-01"}, ${"10:00"},
+        'Finance department (synthetic)', true, 'en', ${tx.json(identity)})`;
       await tx`select public_api.post_reporter_message(${ref}, ${secretHmac(secret)}, 'Synthetic follow-up from the reporter.')`;
       const [row] = await tx<{ s: Record<string, unknown> }[]>`
         select public_api.get_report_status(${ref}, ${secretHmac(secret)}) as s`;
       const text = JSON.stringify(row!.s).toLowerCase();
-      for (const v of Object.values(identity)) expect(text).not.toContain(v.toLowerCase());
+      for (const v of [identity.email, identity.phone, identity.id_number, identity.birth_date, "lambda"])
+        expect(text).not.toContain(v.toLowerCase());
       // Coarse public facts only: no workflow state, case number, WB-ID, staff identity or secret material.
       expect(text).not.toMatch(/wbid-|cdf-demo-|@example\.test|secret_hmac|a0000000-/);
       expect(Object.keys(row!.s).sort()).toEqual(

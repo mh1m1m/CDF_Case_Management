@@ -17,8 +17,10 @@ export class PostgresPortalGateway implements PortalGateway {
         : null;
       const [row] = await tx<{ reportRef: string; receivedAt: Date }[]>`
         select report_ref as "reportRef", received_at as "receivedAt"
-        from public_api.submit_report(${i.reportRef}, ${i.secretHmac}, ${i.category}, ${i.subjectDescription ?? null},
-          ${i.description}, ${i.incidentDate ?? null}, ${i.location ?? null}, ${i.language}, ${identity})`;
+        from public_api.submit_report(${i.reportRef}, ${i.secretHmac}, ${i.reporterMode}, ${i.relationship},
+          ${i.relationshipOther ?? null}, ${i.category}, ${i.categoryOther ?? null}, ${i.subjectDescription},
+          ${i.description}, ${i.incidentDate}, ${i.incidentTime}, ${i.location}, ${i.willingToCooperate},
+          ${i.language}, ${identity})`;
       return { reportRef: row!.reportRef, receivedAt: new Date(row!.receivedAt).toISOString() };
     });
   }

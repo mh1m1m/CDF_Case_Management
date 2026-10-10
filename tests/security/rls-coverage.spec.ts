@@ -13,6 +13,7 @@ const APP_SCHEMAS = [
   "protected_identity",
   "workflow",
   "evidence",
+  "forms",
   "config",
   "api",
   "public_api",
@@ -103,7 +104,7 @@ describe("RLS coverage", () => {
       "public_api.consume_rate_limit(text,integer,integer)",
       "public_api.get_report_status(text,text)",
       "public_api.post_reporter_message(text,text,text)",
-      "public_api.submit_report(text,text,text,text,text,date,text,text,jsonb)",
+      "public_api.submit_report(text,text,text,text,text,text,text,text,text,date,time without time zone,text,boolean,text,jsonb)",
     ]);
   });
 

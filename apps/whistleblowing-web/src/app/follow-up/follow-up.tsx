@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition, type FormEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import { createTranslator, formatDateTime, type Locale, type MessageKey } from "@cdf/i18n";
 import {
   CDFAlert,
@@ -20,6 +20,25 @@ export function FollowUp({ locale }: { locale: Locale }) {
   const [result, setResult] = useState<StatusResult | null>(null);
   const [replySent, setReplySent] = useState(false);
   const [pending, startTransition] = useTransition();
+  // The view swaps between the form and the status card, and the submit button is disabled while
+  // pending, so focus would fall to <body>. Say where it goes after each swap (WCAG 2.4.3).
+  const focusNext = useRef<"status" | "reportRef" | "body" | null>(null);
+  const statusView = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const target = focusNext.current;
+    focusNext.current = null;
+    if (target === "status") {
+      // CDFCard owns its heading element, so make the first card heading programmatically focusable.
+      const heading = statusView.current?.querySelector<HTMLElement>("h2");
+      if (heading) {
+        heading.tabIndex = -1;
+        heading.focus();
+      }
+    } else if (target) {
+      document.getElementById(target)?.focus();
+    }
+  }, [result, creds]);
 
   const open = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -27,6 +46,7 @@ export function FollowUp({ locale }: { locale: Locale }) {
     const next = { reportRef: String(data.get("reportRef") ?? ""), secret: String(data.get("secret") ?? "") };
     startTransition(async () => {
       const r = await getStatusAction(next.reportRef, next.secret);
+      focusNext.current = r.status === "ok" ? "status" : "reportRef";
       setResult(r);
       setCreds(r.status === "ok" ? next : null);
     });
@@ -39,6 +59,7 @@ export function FollowUp({ locale }: { locale: Locale }) {
     const body = String(new FormData(form).get("body") ?? "");
     startTransition(async () => {
       const r = await postMessageAction(creds.reportRef, creds.secret, body);
+      focusNext.current = r.status === "ok" ? "body" : "reportRef";
       setResult(r);
       if (r.status === "ok") {
         setReplySent(true);
@@ -50,7 +71,7 @@ export function FollowUp({ locale }: { locale: Locale }) {
   if (result?.status === "ok" && creds) {
     const report = result.report;
     return (
-      <div data-testid="report-status">
+      <div ref={statusView} data-testid="report-status">
         <CDFCard
           title={`${t("portal.reportRef")}: ${report.reportRef}`}
           actions={
@@ -58,6 +79,7 @@ export function FollowUp({ locale }: { locale: Locale }) {
               type="button"
               className={buttonClass("ghost")}
               onClick={() => {
+                focusNext.current = "reportRef";
                 setCreds(null);
                 setResult(null);
               }}

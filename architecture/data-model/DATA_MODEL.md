@@ -14,20 +14,21 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Every user row is const
 
 ## 2. Schemas
 
-| Schema               | Purpose                                                                                                         | Application access                                        |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `core`               | Cross-cutting types and the rate-limit bucket                                                                   | `consume_rate_limit` via `public_api` wrapper only        |
-| `iam`                | Users, roles, permissions, role assignments                                                                     | `SELECT` by policy                                        |
-| `authz`              | Authorization predicates used by RLS and commands                                                               | `EXECUTE` for `authenticated`                             |
-| `audit`              | Append-only, hash-chained ledger                                                                                | `SELECT` by category policy                               |
-| `intake`             | Reports from the public portal, reporter messages, triage decisions                                             | `SELECT` by policy (column-limited on `report`)           |
-| `protected_identity` | Reporter identity vault and reveal requests                                                                     | **none** (functions only)                                 |
-| `case_mgmt`          | Case master, persons, allegations, assignments, access grants, conflict checks, numbering, `case_overview` view | `SELECT` by policy                                        |
-| `workflow`           | Workflow definition, states, transitions, per-case instance, transition events                                  | `SELECT` by policy                                        |
-| `evidence`           | Evidence items, immutable file versions, content-type allow-list, chain of custody                              | `SELECT` by policy (column-limited on `evidence_version`) |
-| `config`             | Settings whose authoritative source is still `SOURCE_REQUIRED`                                                  | `SELECT` for signed-in users                              |
-| `api`                | Authenticated command and query functions                                                                       | `EXECUTE` for `authenticated`                             |
-| `public_api`         | Anonymous portal functions                                                                                      | `EXECUTE` for `anon`                                      |
+| Schema               | Purpose                                                                                                          | Application access                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `core`               | Cross-cutting types and the rate-limit bucket                                                                    | `consume_rate_limit` via `public_api` wrapper only         |
+| `iam`                | Users, roles, permissions, role assignments                                                                      | `SELECT` by policy                                         |
+| `authz`              | Authorization predicates used by RLS and commands                                                                | `EXECUTE` for `authenticated`                              |
+| `audit`              | Append-only, hash-chained ledger                                                                                 | `SELECT` by category policy                                |
+| `intake`             | Reports from the public portal, reporter messages, triage decisions                                              | `SELECT` by policy (column-limited on `report`)            |
+| `protected_identity` | Reporter identity vault and reveal requests                                                                      | **none** (functions only)                                  |
+| `case_mgmt`          | Case master, persons, allegations, assignments, access grants, conflict checks, numbering, `case_overview` view  | `SELECT` by policy                                         |
+| `workflow`           | Workflow definition, states, transitions, per-case instance, transition events                                   | `SELECT` by policy                                         |
+| `evidence`           | Evidence items, immutable file versions, content-type allow-list, chain of custody                               | `SELECT` by policy (column-limited on `evidence_version`)  |
+| `forms`              | WB-FRM form registry (definitions, versions, fields, entitlements) and per-case form instances, versions, events | `SELECT` by policy (column-limited on versions and events) |
+| `config`             | Settings whose authoritative source is still `SOURCE_REQUIRED`                                                   | `SELECT` for signed-in users                               |
+| `api`                | Authenticated command and query functions                                                                        | `EXECUTE` for `authenticated`                              |
+| `public_api`         | Anonymous portal functions                                                                                       | `EXECUTE` for `anon`                                       |
 
 ## 3. Entity overview
 
@@ -49,6 +50,12 @@ case_mgmt.case_record 1──1 workflow.workflow_instance 1──* workflow.work
 case_mgmt.case_record 1──* evidence.evidence 1──* evidence.evidence_version *──1 evidence.allowed_content_type
 evidence.evidence 0..1──1 evidence.evidence_version                 (current_version_id = latest AVAILABLE)
 evidence.evidence 1──* evidence.custody_event                      (seq; version_id nullable)
+
+forms.form_definition 1──* forms.form_definition_version 1──* forms.form_field_definition
+forms.form_definition 1──* forms.form_entitlement *──1 iam.role
+case_mgmt.case_record 1──* forms.form_instance *──1 forms.form_definition_version
+forms.form_instance 1──* forms.form_instance_version        (current_version_id, prepared_version_id)
+forms.form_instance 1──* forms.form_event                   (seq; append-only state history)
 
 workflow.workflow_definition 1──* workflow.workflow_state
 workflow.workflow_definition 1──* workflow.workflow_transition_definition (from_state, to_state, required_permission)
@@ -139,6 +146,20 @@ See [`../WORKFLOW.md`](../WORKFLOW.md) for the state machine.
 
 Writes happen only through `api.register_evidence_version`, `api.complete_evidence_version`, `api.reject_evidence_version` and `api.open_evidence_version`, each recording its custody event and audit event in the same transaction. The immutability triggers bind to the table owner too, so `SECURITY DEFINER` commands cannot overwrite history either.
 
+### 4.9 `forms` (ADR-011)
+
+| Table                           | Columns and rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `forms.form_definition`         | `code` PK (`WB-FRM-NN`); `sequence_no`; `name_ar/en`; `purpose_ar/en`; `owner_role_hint`; `source_reference`; `review_required`; `approval_required` (⇒ review); `repeatable`; `is_enabled`; `current_version_id` FK. 19 rows of reference data, generated from the baseline catalogue and mirrored by `FORM_DEFINITIONS` in `@cdf/domain` (`tests/integration/mirrors.spec.ts`).                                                                                                                                                                                                                                                                                                         |
+| `forms.form_definition_version` | `id` (deterministic per code); `form_code` FK; `version_no` unique per form; `schema jsonb` (sections → fields); `schema_hash` 64 hex = SHA-256 of the canonical schema JSON. Immutable once shipped: a changed form is a new version migration.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `forms.form_field_definition`   | `version_id` FK; `section_no`, section titles; `field_no` (global, 1-based), `name` (`^[a-z][a-z0-9_]{1,63}$`), `label_ar/en`, `field_type` (`text`, `textarea`, `date`, `number`, `boolean`, `select`), `required`, `options jsonb` (select ⇔ options), help text, `sensitive`. Unique `(version_id, name)` and `(version_id, field_no)`. 184 rows.                                                                                                                                                                                                                                                                                                                                      |
+| `forms.form_entitlement`        | `form_code` FK; `role_code` FK `iam.role`; `action` (`VIEW`, `PREPARE`, `REVIEW`, `APPROVE`); `source` (`BASELINE`, `DERIVED`, `SOURCE_REQUIRED`). 255 rows mirrored by `FORM_ENTITLEMENTS`; every row implies the matching `FORM_*` permission on the role.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `forms.form_instance`           | `id`; `case_id` FK; `form_code` FK; `definition_version_id` FK; `instance_no` ≥ 1 unique per case and form (display `WB-FRM-11 #2`); `status` (`DRAFT`, `PREPARED`, `REVIEWED`, `APPROVED`, `WITHDRAWN`); `classification core.classification_level` (≥ case classification, ≤ preparer clearance); `current_version_id`, `prepared_version_id` FK; `prepared_by/at`, `reviewed_by/at`, `approved_by/at`, `withdrawn_by/at` (consistency checks per status); `created_by/at`, `updated_at`. Trigger `forms.protect_instance()` rejects any update once the status is terminal for its definition or `WITHDRAWN`, and any change to identity columns; no `DELETE`/`TRUNCATE` for any role. |
+| `forms.form_instance_version`   | `id`; `instance_id` FK; `version_no` ≥ 1 unique per instance; `data jsonb` (flat object of string values ≤ 256 KiB, validated against the definition version); `content_hash` 64 hex = `forms.content_hash(form_code, schema_hash, data)`; `saved_by`, `saved_at`; `request_id` (not selectable). Append-only: `UPDATE`/`DELETE`/`TRUNCATE` rejected for every role.                                                                                                                                                                                                                                                                                                                      |
+| `forms.form_event`              | `id`; `seq` identity (strict order within a transaction); `instance_id` FK; `event_type` (`CREATED`, `SAVED`, `PREPARED`, `REVIEWED`, `RETURNED`, `APPROVED`, `WITHDRAWN`); `from_status`, `to_status`; `version_id` FK nullable; `actor_id` FK; `occurred_at`; `reason`; `request_id` (not selectable). Append-only.                                                                                                                                                                                                                                                                                                                                                                     |
+
+Writes happen only through `api.start_form`, `api.save_form_draft` (idempotent on an unchanged hash), `api.prepare_form`, `api.review_form`, `api.approve_form` and `api.withdraw_form`; `api.open_form_instance` records every read of an instance. Each command writes its `form_event` and audit event in the same transaction. Migrations: `20261007001100_forms` (schema, RLS, commands) and `20261007001110_form_definitions_seed` (registry data); the `1100–1199` range belongs to the forms engine.
+
 ## 5. Identifiers
 
 | Identifier      | Format                                | Purpose                                                   | Shown to               |
@@ -149,6 +170,7 @@ Writes happen only through `api.register_evidence_version`, `api.complete_eviden
 | `case_number`   | `CDF-DEMO-YYYY-NNNN`                  | Display number for cases                                  | Case team              |
 | `sequence_no`   | `EV-NNN` (per case)                   | Display number for evidence items; never a lookup key     | Case team              |
 | `object_key`    | `cases/{uuid}/evidence/{uuid}/{uuid}` | Storage location, generated by the database               | Server code only       |
+| `instance_no`   | `WB-FRM-NN #N` (per case and form)    | Display number for form instances; never a lookup key     | Case team              |
 | `id`            | UUID v4                               | The only lookup key the application uses                  | URLs (unguessable)     |
 
 ## 6. Report status lifecycle
@@ -157,4 +179,19 @@ Writes happen only through `api.register_evidence_version`, `api.complete_eviden
 
 ## 7. Not yet modelled
 
-Interviews, findings, committee and decisions, corrective actions, retention and legal hold detail, document generation, notifications, and search are later phases (`NOT_STARTED`). Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.
+Findings, committee and decisions, corrective actions, retention and legal hold detail (CDF-69, parallel branch), document generation, notifications, and search are later phases (`NOT_STARTED`). Forms (§4.9) and interviews (below) are modelled; activities are not. Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.
+
+## Interviews (EPIC 09, ADR-012)
+
+Migration `20261007001200_interviews.sql` adds six tables to `case_mgmt`. Interviews are no longer "not yet modelled" (section 7).
+
+| Table                         | Key columns                                                                                                                                                                                                       | Notes                                                                                   |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `interview`                   | `case_id`, `sequence_no` (`INT-NNN`), `interviewee_kind` (`WITNESS`/`SUBJECT`/`REPORTER`/`OTHER`), `interviewee_label`, `case_person_id`, `classification`, `status`, schedule, rights, conduct, lifecycle actors | Label is null exactly for `REPORTER`; frozen once `APPROVED`/`CANCELLED`; no delete     |
+| `interview_participant`       | `interview_id`, `user_id`, `participant_role` (`LEAD_INTERVIEWER`/`INTERVIEWER`/`NOTE_TAKER`)                                                                                                                     | One lead per interview; unique per user; append-only                                    |
+| `interview_notice`            | `notice_type` (`INVITATION`/`RESCHEDULE`), `channel`, `scheduled_start` snapshot                                                                                                                                  | `PORTAL_MESSAGE` only, and always, for the reporter; append-only                        |
+| `interview_statement_version` | `version_no`, `content` (1–50,000 chars), `language`, `content_sha256`                                                                                                                                            | Hash computed by trigger; `interview.current_statement_version_id` points at the latest |
+| `interview_statement_ack`     | `statement_version_id` (unique), `method`, `attested_sha256`                                                                                                                                                      | Attested hash must equal the version hash; append-only                                  |
+| `interview_recording`         | `interview_id`, `evidence_id` → `evidence.evidence`                                                                                                                                                               | Evidence must be `AVAILABLE` and `AUDIO`, `VIDEO` or `DOCUMENT`; append-only            |
+
+Identifier: `INT-NNN` is a per-case display number like `EV-NNN`; the UUID remains the only lookup key. `interview.form_instance_id` is a soft link reserved for the forms engine (ADR-011).
