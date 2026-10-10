@@ -8,16 +8,16 @@ Update 2026-10-10, Supabase only: the project is DEV (`cdf-case-dev`). It holds 
 
 ## Summary
 
-| System       | Reachable | What exists                                                      | Status for this platform                                  |
-| ------------ | --------- | ---------------------------------------------------------------- | --------------------------------------------------------- |
-| GitHub       | Yes       | `mh1m1m/CDF_Case_Management`, PRs #1–#4 (all open drafts)        | System of record for code; CI running on PRs              |
-| Linear       | Yes       | Workspace `CDF`, team `CDF` (key `CDF`)                          | Delivery hierarchy created (17 projects, EPIC 00–22)      |
-| Google Drive | Yes       | CDF folder + architecture/compliance documents                   | Requirement sources identified                            |
-| Supabase     | Yes       | Org `CDF`, one project, **empty** (0 migrations, 0 tables)       | Drift: whole schema not applied ([CDF-32])                |
-| Vercel       | Partial   | One project `cdf` (predates the repo); details 403               | No project linked to this repo ([CDF-33])                 |
-| Sentry       | Yes       | Org `cdf-xm` (EU region), **no projects**                        | Not instrumented; adoption needs a decision ([CDF-23])    |
-| Mixpanel     | Partial   | Project `CDF` (id 4071134), EU-hosted                            | Events CONNECTOR_UNAVAILABLE (region mismatch) ([CDF-24]) |
-| Slack        | Yes       | Workspace with `#all-cdf` (default channel, no project messages) | Communication only; no decisions to formalise             |
+| System       | Reachable | What exists                                                      | Status for this platform                                     |
+| ------------ | --------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| GitHub       | Yes       | `mh1m1m/CDF_Case_Management`, PRs #1–#4 (all open drafts)        | System of record for code; CI running on PRs                 |
+| Linear       | Yes       | Workspace `CDF`, team `CDF` (key `CDF`)                          | Delivery hierarchy created (17 projects, EPIC 00–22)         |
+| Google Drive | Yes       | CDF folder + architecture/compliance documents                   | Requirement sources identified                               |
+| Supabase     | Yes       | Org `CDF`, one project, **empty** (0 migrations, 0 tables)       | Drift: whole schema not applied ([CDF-32])                   |
+| Vercel       | Partial   | `cdf-whistleblowing`, `cdf-investigations` linked to this repo   | Deploying from `main`; Hobby deploy cap ([CDF-33], [CDF-85]) |
+| Sentry       | Yes       | Org `cdf-xm` (EU region), **no projects**                        | Not instrumented; adoption needs a decision ([CDF-23])       |
+| Mixpanel     | Partial   | Project `CDF` (id 4071134), EU-hosted                            | Events CONNECTOR_UNAVAILABLE (region mismatch) ([CDF-24])    |
+| Slack        | Yes       | Workspace with `#all-cdf` (default channel, no project messages) | Communication only; no decisions to formalise                |
 
 ## GitHub
 
@@ -120,10 +120,10 @@ Only one project exists, where the CEOM expects `cdf-case-dev` and `cdf-case-dem
 
 ## Vercel
 
-- Account `mohammedadelalsaleh-9344` (Hobby plan), default team `team_tJxfhTJObyoeBcCmY0SQnFHL` (scope `malsalehs-projects`). `list_teams` returns no teams.
-- One project: `cdf` (`prj_Rur72UwjUtmEDpwyLhtWbM6f9iJG`), created 2026-01-28, last updated 2026-05-16. It predates this repository.
-- CONNECTOR_UNAVAILABLE for project details and deployments: `403 forbidden — Not authorized: Trying to access resource under scope "malsalehs-projects"`. So its framework, Git link and deployments are unknown.
-- No project builds `apps/whistleblowing-web` or `apps/investigation-web`, so there are no previews. The two intended projects were not created here: they need the connector's scope fixed and a decision on whether to reuse `cdf` ([CDF-33]).
+- Account `mohammedadelalsaleh-9344` (Hobby plan: 1 concurrent build, 100 deployments per day), team `team_tJxfhTJObyoeBcCmY0SQnFHL` (scope `malsalehs-projects`). The Vercel login's GitHub identity is `mh1m1m`.
+- Projects (2026-10-10, [CDF-33]): `cdf-whistleblowing` (root `apps/whistleblowing-web`) and `cdf-investigations` (root `apps/investigation-web`), both Git-linked to `mh1m1m/CDF_Case_Management`, production branch `main`, deployment protection on. Environment variables are server-scoped; no service-role key or `NEXT_PUBLIC_*` credential. The older `cdf` project is unrelated and left untouched.
+- Connector: unscoped calls work; calls that inject the team scope (deployment events, runtime logs, protected URL fetches) return 403, so those are read in the dashboard.
+- **Preview policy ([CDF-85]).** Each app's `vercel.json` skips a build when nothing under that app, `packages/`, the lockfile or the root workspace config changed since the last deployment of the branch (`ignoreCommand`), and disables deployments for `dependabot/**` and `claude/swarm-status-*` branches. Previews are not required checks. `update-branch` is run only on the next PR to merge, because each run deploys both apps. Node 22.x is to be pinned in both projects' settings before the next production deploy (not yet done). Production remains PRODUCTION_SUBSTITUTION_REQUIRED (CDF Alibaba runtime).
 
 ## Sentry
 
@@ -145,7 +145,7 @@ Only one project exists, where the CEOM expects `cdf-case-dev` and `cdf-case-dem
 ## Misalignments and their issues
 
 1. Supabase is empty, while the repository defines 8 migrations: [CDF-32].
-2. No Vercel project builds this repository; the existing `cdf` project is unreadable (403): [CDF-33].
+2. ~~No Vercel project builds this repository~~: both apps are linked and deploying (2026-10-10); the investigations app needs its server environment before it loads: [CDF-33].
 3. ~~The Supabase CLI compatibility job in CI had not been observed passing~~: it passed on this PR's head `8cd4a59` (Actions run 37605339626), closing [CDF-34].
 4. Only one Supabase project exists, where the CEOM expects DEV and DEMO: decision in [CDF-32].
 5. Sentry and Mixpanel are provisioned but adopting them is undecided; Mixpanel is unreadable from the current connector region: [CDF-23], [CDF-24].
@@ -182,6 +182,7 @@ Only one project exists, where the CEOM expects `cdf-case-dev` and `cdf-case-dem
 [CDF-31]: https://linear.app/cdfcasemanagement/issue/CDF-31
 [CDF-32]: https://linear.app/cdfcasemanagement/issue/CDF-32
 [CDF-33]: https://linear.app/cdfcasemanagement/issue/CDF-33
+[CDF-85]: https://linear.app/cdfcasemanagement/issue/CDF-85
 [CDF-34]: https://linear.app/cdfcasemanagement/issue/CDF-34
 [CDF-35]: https://linear.app/cdfcasemanagement/issue/CDF-35
 [CDF-43]: https://linear.app/cdfcasemanagement/issue/CDF-43
