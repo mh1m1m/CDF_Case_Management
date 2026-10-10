@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { navigationFor } from "@cdf/authorization";
 import { CDFAlert, CDFPageHeader } from "@cdf/ui";
 import { requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "./app-nav";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  // The layout's title template only applies to child segments, so the root page spells it out.
+  return { title: { absolute: `${t("pageTitles.overview")} · ${t("common.appName")}` } };
+}
 
 export default async function Home() {
   const { actor } = await requireActor();
