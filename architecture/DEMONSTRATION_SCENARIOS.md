@@ -99,6 +99,17 @@ Sign in as **revoked**: a generic failure, the same message as for a wrong passw
 1. Switch both apps to Arabic. Layout mirrors (logical CSS properties); the progress tracker, tables and forms read right-to-left.
 2. Keyboard only: skip link, focus order, focusable scrollable regions, visible focus. `pnpm test:a11y` runs axe on the main pages in both languages.
 
+## Scenario 11: evidence with chain of custody (the second slice)
+
+1. As **investigator.a** (assigned to 0001): open the case → "Evidence" card → choose a PDF, give it a title, pick the type and a classification (never below the case's, never above your own clearance) → "Upload evidence". The success message carries the SHA-256; the table shows EV-001, the file, its size and "Available"; the versions panel shows the hash, the scanner and the chain of custody "Received → Stored in the vault".
+2. "Download" streams the exact bytes through the app with `Content-Disposition: attachment`, `nosniff` and `no-store` headers. The custody list gains "Downloaded" and the audit timeline shows "Evidence downloaded". The browser never receives a storage URL.
+3. Upload a `.txt` file containing the EICAR test string: "The scanner rejected this file as suspected malware." The item is listed as Rejected with the version's scan result, and the ledger records `MALWARE_DETECTED` as a `SECURITY` event.
+4. Rename an executable to `.pdf` and upload it: "does not match its extension". Nothing is written to storage or the database.
+5. "Add a new version" on EV-001 with a changed file: version 2 becomes current; version 1 stays downloadable. Uploading the identical file again is refused as a duplicate.
+6. As **triage** (grant on 0001, no `EVIDENCE_DOWNLOAD`): the card lists the item but shows no upload form and no download links; pasting the download URL answers "not found" and records `EVIDENCE_ACCESS_DENIED`. As **investigator.b**: the case page and the download URL both answer "not found".
+
+Automated equivalent: `tests/e2e/evidence.spec.ts`; `tests/integration/evidence.spec.ts`; `tests/security/evidence-access.spec.ts`, `tests/security/storage-policy.spec.ts`. The local filesystem adapter and the mock scanner are PRODUCTION_SUBSTITUTION_REQUIRED.
+
 ## What these scenarios do not show
 
-Evidence upload, interviews, findings, committee, decisions, corrective actions, retention and reporting are not implemented (`NOT_STARTED`). Local sign-in and the HMAC key provider are prototype substitutions, not production controls.
+Interviews, findings, committee, decisions, corrective actions, retention and reporting are not implemented (`NOT_STARTED`). Local sign-in, the HMAC key provider, the local filesystem evidence store and the mock malware scanner are prototype substitutions, not production controls.
