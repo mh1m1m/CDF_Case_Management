@@ -26,6 +26,11 @@ for (const locale of ["ar", "en"] as const) {
       await page.getByTestId("submit-report").click();
       await expect(page.locator("[aria-invalid=true]").first()).toBeVisible();
       await audit(page);
+      // Identified mode expands the Drive identity fields (CDF-63); audit them with their errors.
+      await page.getByTestId("mode-identified").check();
+      await page.getByTestId("submit-report").click();
+      await expect(page.locator("#givenName")).toHaveAttribute("aria-invalid", "true");
+      await audit(page);
       await ctx.close();
     });
 

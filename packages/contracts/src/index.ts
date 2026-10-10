@@ -3,18 +3,22 @@
  * Types only (plus literal lists); no behaviour.
  */
 
+import type { RelationshipToFund, ReporterMode } from "./intake";
+export * from "./intake";
+
 export const CLASSIFICATION_LEVELS = ["INTERNAL", "RESTRICTED", "CONFIDENTIAL", "SECRET"] as const;
 export type Classification = (typeof CLASSIFICATION_LEVELS)[number];
 
+/** Violation types from the Drive whistleblowing requirements report, field 13 (CDF-63). */
 export const REPORT_CATEGORIES = [
-  "FINANCIAL_MISCONDUCT",
-  "FRAUD",
-  "CONFLICT_OF_INTEREST",
-  "PROCUREMENT",
-  "BEHAVIOURAL_MISCONDUCT",
-  "ADMINISTRATIVE_VIOLATION",
-  "PRIVACY_DATA",
-  "CYBERSECURITY",
+  "FINANCIAL_CORRUPTION",
+  "ADMINISTRATIVE_CORRUPTION",
+  "POLICY_BREACH",
+  "EHS_BREACH",
+  "ABUSE_OF_AUTHORITY",
+  "IRREGULAR_TRANSACTIONS",
+  "PUBLIC_ORDER_VIOLATION",
+  "CONCEALMENT",
   "OTHER",
 ] as const;
 export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -200,7 +204,7 @@ export interface IntakeReportItem {
   id: string;
   reportRef: string;
   category: ReportCategory;
-  reporterMode: "ANONYMOUS" | "IDENTIFIED";
+  reporterMode: ReporterMode;
   status: ReportStatus;
   classification: Classification;
   receivedAt: string;
@@ -211,7 +215,13 @@ export interface ReportDetail extends IntakeReportItem {
   subjectDescription: string | null;
   description: string;
   incidentDate: string | null;
+  /** HH:MM; null for reports received before CDF-63. */
+  incidentTime: string | null;
   location: string | null;
+  relationshipToFund: RelationshipToFund | null;
+  relationshipOther: string | null;
+  categoryOther: string | null;
+  willingToCooperate: boolean | null;
   language: "ar" | "en";
   messages: ReportMessage[];
 }
