@@ -306,3 +306,5 @@ export type Result<T> =
   | { ok: false; error: { kind: AppErrorKind; detail?: string; correlationId: string } };
 
 export * from "./forms";
+// ---- Interviews (EPIC 09, CDF-60) ----------------------------------------------------------------
+export * from "./interviews";
