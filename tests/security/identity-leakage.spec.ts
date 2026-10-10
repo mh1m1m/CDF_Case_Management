@@ -35,7 +35,7 @@ beforeAll(async () => {
   const cols = await admin<{ table: string; column: string }[]>`
     select format('%I.%I', c.table_schema, c.table_name) as table, c.column_name as column
     from information_schema.columns c
-    where c.table_schema in ('core', 'iam', 'authz', 'audit', 'intake', 'case_mgmt', 'workflow', 'evidence', 'protected_identity', 'public_api', 'api')
+    where c.table_schema in ('core', 'iam', 'authz', 'audit', 'intake', 'case_mgmt', 'workflow', 'evidence', 'records', 'protected_identity', 'public_api', 'api')
       and has_column_privilege('authenticated', format('%I.%I', c.table_schema, c.table_name), c.column_name, 'SELECT')
     order by 1, c.ordinal_position`;
   const byTable = new Map<string, string[]>();
