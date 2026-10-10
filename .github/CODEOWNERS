@@ -1,8 +1,8 @@
 # Security-sensitive paths require owner review (protocol §52, §88).
-*                                   @prodya-dev
-/infrastructure/supabase/           @prodya-dev
-/packages/authorization/            @prodya-dev
-/packages/infrastructure/           @prodya-dev
-/tests/security/                    @prodya-dev
-/architecture/adr/                  @prodya-dev
-/CLAUDE.md                          @prodya-dev
+*                                   @mh1m1m
+/infrastructure/supabase/           @mh1m1m
+/packages/authorization/            @mh1m1m
+/packages/infrastructure/           @mh1m1m
+/tests/security/                    @mh1m1m
+/architecture/adr/                  @mh1m1m
+/CLAUDE.md                          @mh1m1m
