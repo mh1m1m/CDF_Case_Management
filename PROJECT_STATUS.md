@@ -13,26 +13,26 @@ Evidence-based audit of the live systems (GitHub, Linear, Supabase, Vercel, Sent
 measure functioning, CI-tested implementation against prototype scope; the build-phase metrics further down use a narrower
 basis and are kept for continuity. Linear remains the backlog system of record.
 
-| Field                           | Value                                                                                                |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Last audit                      | 2026-10-07, first run, against `54786e4` (PR #7 head)                                                |
-| Current phase                   | 7 evidence and chain of custody: coded and CI-tested, awaiting human review                          |
-| Current release level           | Level 2 — Functional Prototype (maturity: FUNCTIONAL PROTOTYPE; not production ready)                |
-| Overall completion              | 41% (engine default weights)                                                                         |
-| Frontend                        | 32% (public portal 55%, internal platform 25%)                                                       |
-| Backend                         | 30%                                                                                                  |
-| Database                        | 40% (data model 45%; hosted Supabase 0%)                                                             |
-| Security                        | 50% (RLS 75%, whistleblower vault 70%, audit ledger 70%)                                             |
-| CI/CD                           | CI 70% (8/8 checks green, not required); CD 0%                                                       |
-| Testing                         | 40%                                                                                                  |
-| UAT                             | DESIGNED (partial), 15% readiness; no UAT executed (CDF-51)                                          |
-| Hosting                         | 0%                                                                                                   |
-| Known blockers                  | No deployment (CDF-33); hosted Supabase has 0 of 9 migrations (CDF-32); both wait on owner decisions |
-| Current Linear epic             | EPIC 08 Evidence (CDF-13), story CDF-44 In Review; next EPIC 09 (CDF-14, forms engine CDF-50)        |
-| Open critical issues            | None. High: repository public and `main` unprotected (CDF-49)                                        |
-| Latest stable Git SHA           | `54786e4` (CI run 37611302357, CodeQL run 37611302244 green); nothing merged to `main` yet           |
-| Latest stable Vercel deployment | None                                                                                                 |
-| Latest Supabase migration       | GitHub `20261007000900_evidence`; hosted project: none applied                                       |
+| Field                           | Value                                                                                                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Last audit                      | 2026-10-10 progress check (previous: 2026-10-07 baseline, 41%)                                                                                                                                   |
+| Current phase                   | 7 evidence in review; Phase 8 forms (#23), interviews (#21), records (#14, #26) coded and CI-tested on branches                                                                                  |
+| Current release level           | Level 2 — Functional Prototype (maturity: FUNCTIONAL PROTOTYPE; not production ready; Level 3 gate not met)                                                                                      |
+| Overall completion              | 47% coded and CI-tested on open branches (engine default weights); 0% merged to `main`                                                                                                           |
+| Frontend                        | 38%                                                                                                                                                                                              |
+| Backend                         | 42%                                                                                                                                                                                              |
+| Database                        | 50% (data model 55%; hosted DEV 7 of 9 base migrations, no seed, no buckets)                                                                                                                     |
+| Security                        | 55% (purpose-bound access and regression suite on branches; repo still public, `main` unprotected)                                                                                               |
+| CI/CD                           | CI 70% (26 PRs, 25 green; hosted-DEV job red on #16); CD 0%                                                                                                                                      |
+| Testing                         | 42%                                                                                                                                                                                              |
+| UAT                             | DESIGNED: UAT plan in PR #12; no UAT executed (CDF-51)                                                                                                                                           |
+| Hosting                         | 0% (no Vercel project linked; connector 403 on `cdf`)                                                                                                                                            |
+| Known blockers                  | Repo private + `main` protection (CDF-49, owner); DEV DB password secret rejected (CDF-32, owner); Vercel scope not re-authorised (CDF-33, owner); 18 sibling PRs never tested together (CDF-80) |
+| Current Linear epic             | EPIC 09 Investigation & Interviews (CDF-14): CDF-50 forms, CDF-60 interviews; EPIC 13 Records (CDF-18): CDF-69, CDF-73                                                                           |
+| Open critical issues            | None. Medium: CDF-78 break-glass self-review (fix in PR #26)                                                                                                                                     |
+| Latest stable Git SHA           | None on `main` (`1220bae` bootstrap); latest green core head `54786e4` (PR #7)                                                                                                                   |
+| Latest stable Vercel deployment | None                                                                                                                                                                                             |
+| Latest Supabase migration       | GitHub (branches) `20261007001710_purpose_bound_commands`; hosted DEV `20261007000700_api_commands`                                                                                              |
 
 | Metric                              | Value | Basis                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
