@@ -83,7 +83,10 @@ describe("records screens (CDF-71)", () => {
 
       const classes = await records.listRetentionClasses(ctx);
       expect(classes.map((c) => c.code)).not.toContain("UNASSIGNED");
-      expect(classes.every((c) => c.status === "SOURCE_REQUIRED")).toBe(true);
+      // Shipped classes have no values yet (SOURCE_REQUIRED); test fixtures are the only CONFIGURED rows.
+      expect(classes.filter((c) => !/^TEST_/.test(c.code)).every((c) => c.status === "SOURCE_REQUIRED")).toBe(
+        true,
+      );
 
       const me = await actor("records");
       expect(
