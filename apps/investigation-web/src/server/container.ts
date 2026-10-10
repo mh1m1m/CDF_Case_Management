@@ -7,9 +7,11 @@ import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
   createEvidenceService,
+  createFormsService,
   createInvestigationService,
   type EvidenceService,
   type EvidenceStorage,
+  type FormsService,
   type InvestigationService,
 } from "@cdf/application";
 import type { Actor } from "@cdf/contracts";
@@ -17,6 +19,7 @@ import {
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
   PostgresEvidenceGateway,
+  PostgresFormsGateway,
   PostgresInvestigationGateway,
   PostgresSecurityEventSink,
   SupabaseEvidenceStorage,
@@ -31,6 +34,7 @@ const globalForApp = globalThis as unknown as {
   cdfPool?: Sql;
   cdfInvestigation?: InvestigationService;
   cdfEvidence?: EvidenceService;
+  cdfForms?: FormsService;
 };
 
 function pool(): Sql {
@@ -70,6 +74,14 @@ export function evidenceService(): EvidenceService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfEvidence;
+}
+
+export function formsService(): FormsService {
+  globalForApp.cdfForms ??= createFormsService({
+    gateway: new PostgresFormsGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfForms;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */
