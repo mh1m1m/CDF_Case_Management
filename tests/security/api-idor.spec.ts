@@ -17,6 +17,8 @@ interface Targets {
   evidence: string;
   version: string;
   revealRequest: string;
+  interview: string;
+  statementVersion: string;
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
@@ -160,6 +162,68 @@ const PROBES: Probe[] = [
     call: (tx, t) =>
       tx`select api.update_case_details(${t.case}, 'Overwritten title (synthetic)', 'Overwritten summary (synthetic).', 'LOW', 1)`,
   },
+  // ---- Interviews (CDF-60, ADR-012) ------------------------------------------------------------------
+  {
+    fn: "plan_interview",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.plan_interview(${t.case}, 'Probe interview (synthetic)', null, 'WITNESS', 'Witness Probe', null,
+        'RESTRICTED'::core.classification_level)`,
+  },
+  {
+    fn: "add_interview_participant",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.add_interview_participant(${t.interview}, ${self}, 'INTERVIEWER')`,
+  },
+  {
+    fn: "schedule_interview",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.schedule_interview(${t.interview}, now() + interval '2 days', 60, 'PHONE', null)`,
+  },
+  {
+    fn: "issue_interview_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.issue_interview_notice(${t.interview}, 'RESCHEDULE', 'INTERNAL_EMAIL')`,
+  },
+  {
+    fn: "record_interview_rights",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_interview_rights(${t.interview}, 'SIGNED_FORM', 'PROBE-RIGHTS-V1')`,
+  },
+  {
+    fn: "record_interview_conducted",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_interview_conducted(${t.interview}, now() - interval '1 hour', now())`,
+  },
+  {
+    fn: "record_interview_statement",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select * from api.record_interview_statement(${t.interview}, 'Overwritten statement (synthetic).', 'en')`,
+  },
+  {
+    fn: "acknowledge_interview_statement",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.acknowledge_interview_statement(${t.statementVersion}, 'ELECTRONIC_ACK', ${SHA})`,
+  },
+  {
+    fn: "link_interview_recording",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.link_interview_recording(${t.interview}, ${t.evidence})`,
+  },
+  {
+    fn: "transition_interview",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.transition_interview(${t.interview}, 'CANCEL', ${REASON})`,
+  },
+  {
+    fn: "open_interview",
+    outcome: "FALSE",
+    call: (tx, t) => tx`select api.open_interview(${t.interview}) as v`,
+  },
 ];
 
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
@@ -192,12 +256,24 @@ async function insiderObjects(
   revealer: UserKey,
   declarer: UserKey,
   classification = "RESTRICTED",
-): Promise<Pick<Targets, "evidence" | "version" | "revealRequest" | "conflict">> {
+): Promise<
+  Pick<Targets, "evidence" | "version" | "revealRequest" | "conflict" | "interview" | "statementVersion">
+> {
   await s.as(uploader);
   const [ev] = await s.tx<{ evidence: string; version: string }[]>`
     select o_evidence_id as evidence, o_version_id as version
     from api.register_evidence_version(${target}, null, 'Probe ledger (synthetic)', null, 'DOCUMENT', 'Synthetic source',
       null, ${classification}::core.classification_level, 'ledger.pdf', 'application/pdf', 2048, ${"d".repeat(64)})`;
+  // A conducted interview with one statement version (CDF-60), by the same insider.
+  const [iv] = await s.tx<{ id: string }[]>`
+    select api.plan_interview(${target}, 'Probe interview (synthetic)', null, 'WITNESS', 'Witness Probe (synthetic)', null,
+      ${classification}::core.classification_level) as id`;
+  await s.tx`select api.schedule_interview(${iv!.id}, now() - interval '2 hours', 60, 'PHONE', null)`;
+  await s.tx`select api.issue_interview_notice(${iv!.id}, 'INVITATION', 'INTERNAL_EMAIL')`;
+  await s.tx`select api.record_interview_rights(${iv!.id}, 'SIGNED_FORM', 'PROBE-RIGHTS-V1')`;
+  await s.tx`select api.record_interview_conducted(${iv!.id}, now() - interval '2 hours', now() - interval '1 hour')`;
+  const [sv] = await s.tx<{ id: string }[]>`
+    select o_version_id as id from api.record_interview_statement(${iv!.id}, 'Probe statement (synthetic).', 'en')`;
   await s.as(revealer);
   const [rr] = await s.tx<
     { id: string }[]
@@ -207,7 +283,14 @@ async function insiderObjects(
   const [k] = await s.tx<
     { id: string }[]
   >`select api.declare_conflict(${target}, true, 'Synthetic: probe conflict declaration.') as id`;
-  return { evidence: ev!.evidence, version: ev!.version, revealRequest: rr!.id, conflict: k!.id };
+  return {
+    evidence: ev!.evidence,
+    version: ev!.version,
+    revealRequest: rr!.id,
+    conflict: k!.id,
+    interview: iv!.id,
+    statementVersion: sv!.id,
+  };
 }
 
 async function outcomeOf(s: Scenario, probe: Probe, t: Targets, self: string): Promise<string> {
@@ -236,6 +319,8 @@ const randomTargets = (): Targets => ({
   evidence: randomUUID(),
   version: randomUUID(),
   revealRequest: randomUUID(),
+  interview: randomUUID(),
+  statementVersion: randomUUID(),
 });
 
 describe("catalog guard", () => {
@@ -329,8 +414,8 @@ describe("cross-case object substitution", () => {
       );
       // Registering on case A but naming an evidence item from case B is refused, not silently re-homed.
       await s.as("investigatorB");
-      const [ev] = await s.tx<{ evidence: string }[]>`
-        select o_evidence_id as evidence from api.register_evidence_version(${caseB}, null, 'Case B item (synthetic)', null,
+      const [ev] = await s.tx<{ evidence: string; version: string }[]>`
+        select o_evidence_id as evidence, o_version_id as version from api.register_evidence_version(${caseB}, null, 'Case B item (synthetic)', null,
           'DOCUMENT', 'Synthetic source', null, 'RESTRICTED'::core.classification_level, 'b.pdf', 'application/pdf', 100, ${"e".repeat(64)})`;
       await s.as("investigatorA");
       await s.expectError(
@@ -338,6 +423,33 @@ describe("cross-case object substitution", () => {
         (tx) =>
           tx`select * from api.register_evidence_version(${caseA}, ${ev!.evidence}, null, null, null, null, null, null,
             'swap.pdf', 'application/pdf', 100, ${"f".repeat(64)})`,
+      );
+      // Linking case B's evidence as a recording of a case A interview is refused, not re-homed (CDF-60),
+      // with the same answer as for an evidence id that does not exist.
+      await s.as("investigatorB");
+      await s.tx`select api.complete_evidence_version(${ev!.version}, 'CLEAN', 'probe-scanner')`;
+      await s.as("investigatorA");
+      const [iv] = await s.tx<{ id: string }[]>`
+        select api.plan_interview(${caseA}, 'Swap interview (synthetic)', null, 'WITNESS', 'Witness Swap (synthetic)', null,
+          'CONFIDENTIAL'::core.classification_level) as id`;
+      await s.tx`select api.schedule_interview(${iv!.id}, now() - interval '2 hours', 60, 'PHONE', null)`;
+      await s.tx`select api.issue_interview_notice(${iv!.id}, 'INVITATION', 'INTERNAL_EMAIL')`;
+      await s.tx`select api.record_interview_rights(${iv!.id}, 'SIGNED_FORM', 'PROBE-RIGHTS-V1')`;
+      await s.tx`select api.record_interview_conducted(${iv!.id}, now() - interval '2 hours', now() - interval '1 hour')`;
+      await s.expectError(
+        "CDF_INVALID:evidence_id",
+        (tx) => tx`select api.link_interview_recording(${iv!.id}, ${ev!.evidence})`,
+      );
+      await s.expectError(
+        "CDF_INVALID:evidence_id",
+        (tx) => tx`select api.link_interview_recording(${iv!.id}, ${randomUUID()})`,
+      );
+      // And case B's seeded reporter interview is unreachable from case A's team.
+      const [reporterInterview] = await admin<{ id: string }[]>`
+        select id from case_mgmt.interview where case_id = ${caseB} and interviewee_kind = 'REPORTER' limit 1`;
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.transition_interview(${reporterInterview!.id}, 'CANCEL', ${REASON})`,
       );
     });
   });
