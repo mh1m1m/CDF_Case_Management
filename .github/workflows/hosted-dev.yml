@@ -1,0 +1,184 @@
+name: Hosted DEV (Supabase)
+
+# CDF-32 / CEOM §11: the hosted DEV database (Supabase project blycdqjphsxvyiuoommv, "cdf-case-dev")
+# changes only from Git. This workflow applies infrastructure/supabase/migrations with the Supabase
+# CLI, seeds the synthetic demo data once, and runs the database, RLS and security suites against
+# DEV. It runs on pushes to the branch named below that touch the database or the tests, and manually
+# (workflow_dispatch) once the file exists on the default branch, because GitHub resolves manual
+# dispatch against main. It never resets, drops or truncates anything on the hosted project.
+#
+# The CLI connects with --db-url through the Supavisor session pooler (IPv4; the direct database host
+# is IPv6-only, which GitHub-hosted runners cannot reach), so no Supabase access token is needed.
+#
+# Repository secrets (GitHub → Settings → Secrets and variables → Actions). Values never appear
+# in logs; every secret-derived value is masked.
+#   SUPABASE_DB_PASSWORD    DEV project database password (Project Settings → Database)
+#   CDF_BFF_DB_PASSWORD     optional: stable password for the cdf_bff login role (same value as in Vercel)
+#   CDF_PORTAL_DB_PASSWORD  optional: stable password for the cdf_portal login role (same value as in Vercel)
+# Without the optional two, throwaway passwords are generated for the test run and set on the roles.
+# Repository variable (optional): SUPABASE_POOLER_HOST, the session-pooler host shown under
+# Dashboard → Connect → Session pooler, if the probe of the two regional pooler hosts below fails.
+
+on:
+  push:
+    branches: [feature/CDF-32-hosted-dev]
+    paths:
+      - .github/workflows/hosted-dev.yml
+      - infrastructure/supabase/**
+      - tests/**
+      - scripts/db/**
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Seed synthetic data if the DEV database is still empty
+        type: boolean
+        default: true
+      test:
+        description: Run the database, RLS and security suites against DEV
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-dev
+  cancel-in-progress: false
+
+env:
+  SUPABASE_PROJECT_REF: blycdqjphsxvyiuoommv
+  SUPABASE_REGION: ap-northeast-1
+  SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+
+jobs:
+  hosted-dev:
+    name: Migrate, seed and test DEV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Check the required secret exists (its value is never printed)
+        run: |
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::error::Repository secret SUPABASE_DB_PASSWORD is not set"; exit 1
+          fi
+
+      - name: Database connection string (session pooler, IPv4; values masked)
+        run: |
+          echo "::add-mask::$SUPABASE_DB_PASSWORD"
+          # Accept what people paste: the bare password, or the connection string from Dashboard → Connect
+          # (its password part is used). Line breaks and surrounding spaces are dropped; nothing else changes.
+          pw="${SUPABASE_DB_PASSWORD%%[$'\r\n']*}"
+          pw="$(printf '%s' "$pw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          case "$pw" in
+            *YOUR-PASSWORD*)
+              echo "::error::SUPABASE_DB_PASSWORD still contains the [YOUR-PASSWORD] placeholder from the Connect dialog"; exit 1 ;;
+            postgres://*|postgresql://*)
+              pw=$(python3 -c 'import sys,urllib.parse;u=urllib.parse.urlsplit(sys.argv[1]);print(urllib.parse.unquote(u.password or ""))' "$pw")
+              echo "::notice::SUPABASE_DB_PASSWORD held a connection string; only its password part is used" ;;
+            eyJ*)
+              echo "::error::SUPABASE_DB_PASSWORD looks like an API key (JWT), not the database password"; exit 1 ;;
+            sbp_*)
+              echo "::error::SUPABASE_DB_PASSWORD looks like a personal access token, not the database password"; exit 1 ;;
+          esac
+          [ -n "$pw" ] || { echo "::error::SUPABASE_DB_PASSWORD is empty"; exit 1; }
+          echo "::add-mask::$pw"
+          enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$pw")
+          echo "::add-mask::$enc"
+          # Diagnostics go out as annotations: job logs are not readable from the cloud session.
+          echo "::notice::$(psql --version 2>&1 || echo 'psql is not installed on the runner')"
+          user="postgres.${SUPABASE_PROJECT_REF}"
+          host=""
+          # Run 37649873035 showed this project's tenant lives on aws-0 (aws-1 answers "tenant not found").
+          for candidate in "${{ vars.SUPABASE_POOLER_HOST }}" "aws-0-${SUPABASE_REGION}.pooler.supabase.com" "aws-1-${SUPABASE_REGION}.pooler.supabase.com"; do
+            [ -n "$candidate" ] || continue
+            getent hosts "$candidate" >/dev/null || echo "::warning::$candidate does not resolve"
+            # libpq error text names host, port and user, never the password (masked anyway).
+            if err=$(PGCONNECT_TIMEOUT=15 psql "postgresql://${user}:${enc}@${candidate}:5432/postgres" --no-psqlrc -qtAX -c "select 1" 2>&1 >/dev/null); then
+              host="$candidate"; break
+            fi
+            echo "::warning::$candidate: $(printf '%s' "$err" | tr '\n' ' ')"
+          done
+          if [ -z "$host" ]; then
+            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the repository variable SUPABASE_POOLER_HOST from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
+            exit 1
+          fi
+          echo "Session pooler: $host"
+          echo "CDF_POOLER_HOST=$host" >> "$GITHUB_ENV"
+          echo "CDF_ADMIN_DATABASE_URL=postgresql://${user}:${enc}@${host}:5432/postgres" >> "$GITHUB_ENV"
+
+      - name: Migration history before
+        run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
+
+      - name: Apply pending Git migrations (supabase db push)
+        run: supabase --workdir infrastructure db push --db-url "$CDF_ADMIN_DATABASE_URL" --yes
+
+      - name: Migration history after
+        run: supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL"
+
+      - name: Seed synthetic data (only while iam.user_profile is empty)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
+        run: |
+          n=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -c "select count(*) from iam.user_profile")
+          if [ "$n" != "0" ]; then echo "DEV already holds $n synthetic users; seed skipped"; exit 0; fi
+          for f in infrastructure/supabase/seed/*.sql; do
+            echo "→ $f"
+            psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 --single-transaction -f "$f"
+          done
+
+      - name: Login-role passwords for the test run (stable from secrets, else throwaway)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
+        env:
+          CDF_BFF_DB_PASSWORD: ${{ secrets.CDF_BFF_DB_PASSWORD }}
+          CDF_PORTAL_DB_PASSWORD: ${{ secrets.CDF_PORTAL_DB_PASSWORD }}
+        run: |
+          for pair in cdf_bff:CDF_BFF_DB_PASSWORD cdf_portal:CDF_PORTAL_DB_PASSWORD; do
+            role=${pair%%:*}; var=${pair#*:}; p=${!var}
+            if [ -z "$p" ]; then
+              p=$(openssl rand -hex 24)
+              echo "$var is not a repository secret; a throwaway password is used for this run"
+            fi
+            echo "::add-mask::$p"
+            printf "alter role %s password :'pw';\n" "$role" \
+              | psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 -v pw="$p"
+            enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$p")
+            echo "::add-mask::$enc"
+            prefix=${var%_DB_PASSWORD}
+            echo "${prefix}_DATABASE_URL=postgresql://${role}.${SUPABASE_PROJECT_REF}:${enc}@${CDF_POOLER_HOST}:5432/postgres" >> "$GITHUB_ENV"
+          done
+
+      - run: pnpm install --frozen-lockfile
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
+
+      - name: Database, RLS and security suites against DEV
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
+        env:
+          CDF_ENVIRONMENT: test
+        run: pnpm test:db
+
+      - name: Evidence summary
+        if: always()
+        run: |
+          {
+            echo "## Hosted DEV run"
+            echo "- Project: \`$SUPABASE_PROJECT_REF\` (cdf-case-dev)"
+            echo "- Commit: \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`"
+            echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- Trigger: ${{ github.event_name }} · Seed: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }} · Tests: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}"
+            echo
+            echo '```'
+            if [ -n "$CDF_ADMIN_DATABASE_URL" ]; then
+              supabase --workdir infrastructure migration list --db-url "$CDF_ADMIN_DATABASE_URL" 2>&1 || true
+            else
+              echo "no database connection was established"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
