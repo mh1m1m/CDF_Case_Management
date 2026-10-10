@@ -48,7 +48,7 @@ export function EvidencePanel({
     <CDFCard title={t("evidence.title")} testId="evidence-card">
       <p className="mb-3 text-sm text-cdf-text-secondary">{t("evidence.intro")}</p>
       <CDFTable<EvidenceItem>
-        caption={t("evidence.title")}
+        caption={t("evidence.tableCaption")}
         testId="evidence-table"
         rows={items}
         rowKey={(e) => e.id}
@@ -113,6 +113,7 @@ export function EvidencePanel({
               canDownload && e.currentVersion?.status === "AVAILABLE" ? (
                 <a
                   href={downloadHref(e.currentVersion.id)}
+                  aria-label={t("evidence.downloadItem", { item: evidenceDisplayNumber(e.sequenceNo) })}
                   className="font-semibold underline underline-offset-4"
                   data-testid={`download-${e.currentVersion.id}`}
                 >
@@ -177,6 +178,10 @@ export function EvidencePanel({
                     {" "}
                     <a
                       href={downloadHref(v.id)}
+                      aria-label={t("evidence.downloadVersion", {
+                        item: evidenceDisplayNumber(e.sequenceNo),
+                        no: v.versionNo,
+                      })}
                       className="underline underline-offset-4"
                       data-testid={`download-${v.id}`}
                     >
@@ -187,7 +192,7 @@ export function EvidencePanel({
               </li>
             ))}
           </ul>
-          <h4 className="mt-2 font-semibold">{t("evidence.custody")}</h4>
+          <h3 className="mt-2 font-semibold">{t("evidence.custody")}</h3>
           <ol className="list-decimal ps-5 text-sm" data-testid={`custody-${e.sequenceNo}`}>
             {e.custody.map((ev) => (
               <li key={ev.id}>
@@ -198,17 +203,21 @@ export function EvidencePanel({
           </ol>
           {canUpload ? (
             <div className="mt-3">
-              <h4 className="mb-2 font-semibold">{t("evidence.newVersionTitle")}</h4>
+              <h3 className="mb-2 font-semibold">{t("evidence.newVersionTitle")}</h3>
               <ActionForm
                 action={uploadEvidenceAction.bind(null, c.id, e.id)}
                 locale={t.locale}
                 submitLabel={t("evidence.newVersion")}
+                submitName={t("evidence.newVersionOf", { item: evidenceDisplayNumber(e.sequenceNo) })}
                 variant="secondary"
                 fieldLabels={{ file: t("evidence.fileLabel") }}
                 testId={`new-version-form-${e.sequenceNo}`}
                 successMessage={t("evidence.uploaded", { sha: "{message}" })}
               >
-                <CDFField id={`file-${e.sequenceNo}`} label={t("evidence.fileLabel")}>
+                <CDFField
+                  id={`file-${e.sequenceNo}`}
+                  label={t("evidence.fileFor", { item: evidenceDisplayNumber(e.sequenceNo) })}
+                >
                   <input
                     id={`file-${e.sequenceNo}`}
                     name="file"

@@ -202,6 +202,7 @@ export const en = {
     reportRef: "Report ID",
     secret: "Secret code",
     copy: "Copy",
+    copyItem: "Copy {item}",
     copied: "Copied",
     savedConfirm: "I have saved my Report ID and secret code",
     followUpTitle: "Follow up on your report",
@@ -267,6 +268,7 @@ export const en = {
     viewCase: "View case",
   },
   cases: {
+    homeTitle: "Overview",
     title: "Cases",
     intro: "Cases you are permitted to see.",
     empty: "No cases available to you.",
@@ -313,6 +315,7 @@ export const en = {
   },
   evidence: {
     title: "Evidence",
+    tableCaption: "Evidence items",
     intro:
       "Files are checked, scanned, hashed and stored privately. Every download is recorded in the chain of custody.",
     empty: "No evidence yet.",
@@ -326,6 +329,8 @@ export const en = {
     addedBy: "Added by",
     addedAt: "Added",
     download: "Download",
+    downloadItem: "Download {item}",
+    downloadVersion: "Download {item}, version {no}",
     versions: "Versions and chain of custody",
     version: "Version {no}",
     custody: "Chain of custody",
@@ -335,6 +340,7 @@ export const en = {
     uploadIntro:
       "Allowed: PDF, Office documents, text, CSV, JSON, email (.eml), images, audio and video, up to 25 MB. Synthetic files only.",
     fileLabel: "File",
+    fileFor: "File for {item}",
     titleLabel: "Title",
     typeLabel: "Type",
     descriptionLabel: "Description",
@@ -347,6 +353,7 @@ export const en = {
     uploaded: "Evidence stored. SHA-256: {sha}",
     newVersionTitle: "Add a new version of this item",
     newVersion: "New version",
+    newVersionOf: "New version of {item}",
   },
   evidenceType: {
     DOCUMENT: "Document",
