@@ -48,7 +48,7 @@ The engine is data-driven: a transition is allowed only if its definition exists
 | `REQUIRE_CORRECTIVE_ACTION`   | `DECISION` → `CORRECTIVE_ACTION`           | `WORKFLOW_ADVANCE`      |        | yes      |                                                                                  | no                                                  | 10    |
 | `CLOSE_AFTER_DECISION`        | `DECISION` → `CLOSURE`                     | `WORKFLOW_ADVANCE`      | yes    | yes      |                                                                                  | no                                                  | 10    |
 | `COMPLETE_CORRECTIVE_ACTIONS` | `CORRECTIVE_ACTION` → `CLOSURE`            | `WORKFLOW_ADVANCE`      |        | yes      |                                                                                  | no                                                  | 10    |
-| `ARCHIVE_CASE`                | `CLOSURE` → `ARCHIVE`                      | `WORKFLOW_ADVANCE`      |        |          |                                                                                  | no                                                  | 11    |
+| `ARCHIVE_CASE`                | `CLOSURE` → `ARCHIVE`                      | `WORKFLOW_ADVANCE`      |        |          |                                                                                  | yes                                                 | 11    |
 | `REOPEN_CASE`                 | `CLOSURE` → `INVESTIGATION`                | `INVESTIGATION_APPROVE` | yes    | yes      |                                                                                  | no                                                  | 10    |
 
 ## 3. Conditions

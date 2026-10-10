@@ -4,7 +4,17 @@
 // api.* function fail this file until the walk below exercises it.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, admin, caseId, reportId, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  admin,
+  caseId,
+  ownerScenario,
+  reportId,
+  scenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
+import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 
 let caseA: string, caseB: string;
 let receivedReport: string, infoReport: string;
@@ -45,6 +55,13 @@ const NOT_STATE_CHANGING = new Set([
   "open_case",
   "open_report",
   "open_evidence_version",
+  "list_records",
+  "verify_disposition_certificate",
+  // CDF-73: reads of the caller's own work and the authorised catalogue; open_case_metadata records a view.
+  "my_case_tasks",
+  "my_work_summary",
+  "open_case_metadata",
+  "search_records_catalogue",
 ]);
 
 interface Step {
@@ -213,6 +230,95 @@ describe("every state-changing command writes its audit event in the same transa
             select o_version_id as v from api.register_evidence_version(${caseB}, null, 'Audit walk item 2 (synthetic)', null,
               'DOCUMENT', 'Synthetic source', null, 'CONFIDENTIAL'::core.classification_level, 'walk2.pdf', 'application/pdf', 512, ${"2".repeat(64)})`;
           return s.tx`select api.reject_evidence_version(${r!.v}, 'MALWARE_DETECTED', 'INFECTED', 'walk-scanner')`;
+        },
+      },
+      // Purpose-bound access (CDF-73, ADR-014) on case A, which the case manager can see.
+      {
+        fn: "create_case_task",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.task = await one(
+            s,
+            s.tx`select api.create_case_task(${caseA}, 'LEGAL_REVIEW', ${USERS.legal}, 'Synthetic: audit walk legal review.') as id`,
+          )),
+      },
+      {
+        fn: "open_case_task",
+        actor: "legal",
+        run: (s) => s.tx`select api.open_case_task(${ids.task!})`,
+      },
+      {
+        fn: "request_break_glass",
+        actor: "legal",
+        run: async (s) =>
+          (ids.breakGlass = await one(
+            s,
+            s.tx`select api.request_break_glass(${caseA}, 'Synthetic: audit walk break-glass reason.', 30) as id`,
+          )),
+      },
+      {
+        fn: "decide_break_glass",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.decide_break_glass(${ids.breakGlass!}, true, ${REASON})`,
+      },
+      {
+        fn: "end_break_glass",
+        actor: "legal",
+        run: (s) => s.tx`select api.end_break_glass(${ids.breakGlass!})`,
+      },
+      {
+        fn: "review_break_glass",
+        actor: "grcDeputy", // neither the requester nor the approver (CDF-78)
+        run: (s) => s.tx`select api.review_break_glass(${ids.breakGlass!}, 'APPROPRIATE', ${REASON})`,
+      },
+      {
+        fn: "complete_case_task",
+        actor: "legal",
+        run: (s) => s.tx`select api.complete_case_task(${ids.task!}, ${REASON})`,
+      },
+      {
+        fn: "cancel_case_task",
+        actor: "caseManager",
+        run: async (s) => {
+          const id = await one(
+            s,
+            s.tx`select api.create_case_task(${caseA}, 'LEGAL_REVIEW', ${USERS.legalB}, 'Synthetic: audit walk task to cancel.') as id`,
+          );
+          return s.tx`select api.cancel_case_task(${id}, ${REASON})`;
+        },
+      },
+      {
+        fn: "expire_case_tasks", // the lapsed task is inserted before the walk
+        actor: "caseManager",
+        run: (s) => s.tx`select api.expire_case_tasks()`,
+      },
+      {
+        fn: "request_legal_hold",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.holdRequest = await one(
+            s,
+            s.tx`select api.request_legal_hold(${caseA}, 'LITIGATION', 'Synthetic: audit walk hold request.') as id`,
+          )),
+      },
+      {
+        fn: "assign_legal_hold_request",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.assign_legal_hold_request(${ids.holdRequest!}, ${USERS.legal})`,
+      },
+      {
+        fn: "review_legal_hold_request",
+        actor: "legal",
+        run: (s) => s.tx`select api.review_legal_hold_request(${ids.holdRequest!}, false, ${REASON})`,
+      },
+      {
+        fn: "request_case_for_legal_hold",
+        actor: "records", // not used by the committed integration lookups, so never rate limited here
+        run: async (s) => {
+          const [c] = await admin<
+            { n: string }[]
+          >`select case_number as n from case_mgmt.case_record where id = ${caseA}`;
+          return s.tx`select * from api.request_case_for_legal_hold(${c!.n}, 'Synthetic: audit walk controlled lookup.')`;
         },
       },
       // ---- Interviews (CDF-60, ADR-012): one interview on case A carried from plan to prepared -----------
@@ -392,16 +498,94 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.set_user_status(${USERS.investigatorB}, 'SUSPENDED'::core.record_status, ${REASON})`,
       },
+      // Records lifecycle on the walk case (ADR-013): close, archive, hold and release, class, eligibility,
+      // request, approval by someone else, logical execution. The class fixture is added before the walk.
+      {
+        fn: "transition_case",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.transition_case(${ids.case!}, 'SCREEN_OUT', ${REASON})`,
+      },
+      {
+        fn: "transition_case",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.transition_case(${ids.case!}, 'ARCHIVE_CASE', null)`,
+      },
+      {
+        // ADR-014 (CDF-73): legal reviewers act on a case through hold tasks, not role-wide visibility.
+        fn: "create_case_task",
+        actor: "grcDirector",
+        run: (s) => legalHoldTasks(s, ids.case!, "grcDirector"),
+      },
+      {
+        fn: "place_legal_hold",
+        actor: "legal",
+        run: async (s) =>
+          (ids.hold = await one(
+            s,
+            s.tx`select api.place_legal_hold(${ids.case!}, 'CASE', null, 'LITIGATION', 'Synthetic: preservation for the audit walk.', null) as id`,
+          )),
+      },
+      {
+        fn: "request_legal_hold_release",
+        actor: "legal",
+        run: async (s) =>
+          (ids.release = await one(
+            s,
+            s.tx`select api.request_legal_hold_release(${ids.hold!}, 'Synthetic: the walk inquiry has concluded.') as id`,
+          )),
+      },
+      {
+        fn: "decide_legal_hold_release",
+        actor: "legalB",
+        run: (s) => s.tx`select api.decide_legal_hold_release(${ids.release!}, true, ${REASON})`,
+      },
+      {
+        fn: "assign_retention_class",
+        actor: "records",
+        run: (s) => s.tx`select api.assign_retention_class(${ids.case!}, 'TEST_SHORT_RETENTION')`,
+      },
+      {
+        fn: "refresh_disposition_eligibility",
+        actor: "records",
+        run: (s) => s.tx`select api.refresh_disposition_eligibility()`,
+      },
+      {
+        fn: "request_disposition",
+        actor: "records",
+        run: async (s) =>
+          (ids.disposition = await one(s, s.tx`select api.request_disposition(${ids.case!}) as id`)),
+      },
+      {
+        fn: "decide_disposition",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.decide_disposition(${ids.disposition!}, true, ${REASON})`,
+      },
+      {
+        fn: "execute_disposition",
+        actor: "records",
+        run: (s) => s.tx`select api.execute_disposition(${ids.disposition!})`,
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
 
-    await scenario(async (s) => {
+    // Owner connection only for fixtures (the CONFIGURED class, a lapsed task); every step runs as `authenticated`.
+    await ownerScenario(async (s) => {
+      await addShortRetentionClass(s);
+      // A task whose access window has already lapsed, for expire_case_tasks (CDF-73): the commands refuse
+      // to create one, and now() is fixed for the whole transaction.
+      await s.asOwner();
+      await s.tx`
+        insert into case_mgmt.case_task (case_id, task_type, assigned_user_id, assigned_role, purpose, scope, created_by,
+                                         access_granted_at, expires_at)
+        values (${caseA}, 'LEGAL_HOLD_RELEASE', ${USERS.legalB}, 'LEGAL_REVIEWER', 'Synthetic: lapsed audit walk task.',
+                array['CASE_VIEW_METADATA'], ${USERS.caseManager}, now() - interval '2 days', now() - interval '1 day')`;
       const missing: string[] = [];
       for (const step of steps) {
         const { events } = await audited(s, step);
         // Identity-vault commands are deliberately SECURITY-category events, hidden from the case team (V-4).
-        const category = /identity/.test(step.fn) ? "SECURITY" : "BUSINESS_OR_ADMIN";
+        // Break-glass is likewise recorded as SECURITY events (ADR-014 D5).
+        const category = /identity|break_glass/.test(step.fn) ? "SECURITY" : "BUSINESS_OR_ADMIN";
         const ok = events.some(
           (e) =>
             e.outcome === "SUCCESS" &&
@@ -511,27 +695,41 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
     // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers
     // (ADR-011: canonical JSON, content hash and terminal status read no data) and the shared rate limiter.
+    // CDF-73 (ADR-014) adds the purpose-bound predicates; each answers for the caller only.
     expect(rows.map((r) => r.fn)).toEqual([
+      "authz.can_apply_legal_hold",
+      "authz.can_approve_disposition",
       "authz.can_approve_form",
       "authz.can_approve_interviews",
       "authz.can_assign_case",
       "authz.can_conduct_interviews",
+      "authz.can_discover_case",
       "authz.can_download_evidence",
       "authz.can_edit_case",
+      "authz.can_manage_disposition",
+      "authz.can_manage_retention",
       "authz.can_prepare_form",
+      "authz.can_release_legal_hold",
+      "authz.can_request_disposition",
+      "authz.can_request_legal_hold",
       "authz.can_reveal_whistleblower_identity",
       "authz.can_review_form",
       "authz.can_review_interviews",
+      "authz.can_review_legal_hold",
       "authz.can_upload_evidence",
       "authz.can_view_case",
+      "authz.can_view_case_content",
+      "authz.can_view_case_metadata",
       "authz.can_view_evidence",
       "authz.can_view_form_instance",
       "authz.can_view_interview",
+      "authz.can_view_records",
+      "authz.can_view_records_catalogue",
       "authz.can_view_report",
       "authz.current_clearance",
       "authz.current_roles",
@@ -539,10 +737,13 @@ describe("audit internals are not reachable", () => {
       "authz.current_user_id",
       "authz.form_entitled",
       "authz.has_permission",
+      "authz.in_records_catalogue_scope",
+      "authz.task_grants",
       "forms.canonical_json",
       "forms.content_hash",
       "forms.terminal_status",
       "public_api.consume_rate_limit",
+      "records.catalogue_rows",
     ]);
   });
 });
