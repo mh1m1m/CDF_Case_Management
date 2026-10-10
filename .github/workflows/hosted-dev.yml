@@ -10,7 +10,7 @@ name: Hosted DEV (Supabase)
 # The CLI connects with --db-url through the Supavisor session pooler (IPv4; the direct database host
 # is IPv6-only, which GitHub-hosted runners cannot reach), so no Supabase access token is needed.
 #
-# Secrets: the job runs in the GitHub environment "Supabase" (Settings → Environments), so it reads that
+# Secrets: the job runs in the GitHub environment "Subapase" (spelled that way in Settings → Environments), so it reads that
 # environment's secrets and variables first and falls back to repository secrets of the same name
 # (Settings → Secrets and variables → Actions). The environment's protection rules (required reviewers,
 # allowed branches) apply to every run. Values never appear in logs; every secret-derived value is masked.
@@ -55,7 +55,7 @@ jobs:
   hosted-dev:
     name: Migrate, seed and test DEV
     runs-on: ubuntu-latest
-    environment: Supabase
+    environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
@@ -72,7 +72,7 @@ jobs:
       - name: Check the required secret exists (its value is never printed)
         run: |
           if [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::error::SUPABASE_DB_PASSWORD is set neither in the Supabase environment nor as a repository secret"; exit 1
+            echo "::error::SUPABASE_DB_PASSWORD is set neither in the Subapase environment nor as a repository secret"; exit 1
           fi
 
       - name: Database connection string (session pooler, IPv4; values masked)
@@ -119,7 +119,7 @@ jobs:
             echo "::warning::$candidate: $(printf '%s' "$err" | tr '\n' ' ')"
           done
           if [ -z "$host" ]; then
-            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the variable SUPABASE_POOLER_HOST (Supabase environment or repository) from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
+            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the variable SUPABASE_POOLER_HOST (Subapase environment or repository) from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
             exit 1
           fi
           echo "Session pooler: $host"
