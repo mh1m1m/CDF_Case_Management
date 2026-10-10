@@ -1,0 +1,360 @@
+// CDF-62 · §29, §74, ADR-005, threat T09: no state-changing command can run without leaving its audit event
+// in the same transaction, a refused command leaves no business event, and the application-facing security
+// event command cannot be used to forge business history. The coverage guard makes a new state-changing
+// api.* function fail this file until the walk below exercises it.
+import { randomUUID } from "node:crypto";
+import { beforeAll, describe, expect, it } from "vitest";
+import { USERS, admin, caseId, reportId, scenario, type Scenario, type UserKey } from "../support/db";
+
+let caseA: string, caseB: string;
+let receivedReport: string, infoReport: string;
+beforeAll(async () => {
+  [caseA, caseB, receivedReport, infoReport] = await Promise.all([
+    caseId("0001"),
+    caseId("0002"),
+    reportId("WB-SEED00000005"),
+    reportId("WB-SEED00000006"),
+  ]);
+});
+
+const REASON = "Synthetic: audit regression walk.";
+// Read-only or event-only functions: they are not state-changing commands for this guard.
+const NOT_STATE_CHANGING = new Set([
+  "available_transitions",
+  "list_identity_reveal_requests",
+  "verify_audit_chain",
+  "record_security_event",
+  "open_case",
+  "open_report",
+  "open_evidence_version",
+]);
+
+interface Step {
+  fn: string;
+  actor: UserKey;
+  run: (s: Scenario) => Promise<unknown>;
+}
+
+/** Runs one command under a fresh request id and returns the audit events that request produced. */
+async function audited(s: Scenario, step: Step) {
+  const requestId = randomUUID();
+  await s.as(step.actor);
+  await s.tx`select set_config('cdf.request_id', ${requestId}, true)`;
+  const value = await step.run(s);
+  await s.as("dpo"); // AUDIT_VIEW + SECURITY_EVENT_VIEW: reads every category
+  const events = await s.tx<{ action: string; category: string; outcome: string; actor_id: string | null }[]>`
+    select action, category, outcome, actor_id from audit.audit_event where request_id = ${requestId} order by seq`;
+  return { value, events };
+}
+
+describe("every state-changing command writes its audit event in the same transaction", () => {
+  it("walks every state-changing api.* command and finds a SUCCESS event by the actor for each", async () => {
+    const catalog = await admin<{ name: string }[]>`
+      select p.proname as name from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'api' and has_function_privilege('authenticated', p.oid, 'EXECUTE')`;
+    const mustCover = catalog.map((r) => r.name).filter((n) => !NOT_STATE_CHANGING.has(n));
+
+    const ids: Record<string, string> = {};
+    const one = async (s: Scenario, q: Promise<readonly Record<string, unknown>[]>) => {
+      const rows = await q;
+      return Object.values(rows[0] ?? {})[0] as string;
+    };
+    const steps: Step[] = [
+      {
+        fn: "triage_report",
+        actor: "triage",
+        run: (s) => s.tx`select api.triage_report(${receivedReport}, 'OPEN_CASE', ${REASON}, null, null)`,
+      },
+      {
+        fn: "create_case_from_report",
+        actor: "triage",
+        run: async (s) =>
+          (ids.case = await one(
+            s,
+            s.tx`select api.create_case_from_report(${receivedReport}, 'Audit walk case (synthetic)', 'Synthetic audit walk summary.', 'RESTRICTED'::core.classification_level, false) as id`,
+          )),
+      },
+      {
+        fn: "transition_case",
+        actor: "triage",
+        run: (s) => s.tx`select api.transition_case(${ids.case!}, 'START_SCREENING', null)`,
+      },
+      {
+        fn: "update_case_details",
+        actor: "caseManager",
+        run: async (s) => {
+          const [c] = await s.tx<
+            { v: number }[]
+          >`select row_version as v from case_mgmt.case_record where id = ${caseA}`;
+          return s.tx`select api.update_case_details(${caseA}, 'Duplicate invoice approvals (synthetic)', 'Synthetic summary, edited.', 'HIGH', ${c!.v})`;
+        },
+      },
+      {
+        fn: "change_case_classification",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.change_case_classification(${caseB}, 'CONFIDENTIAL'::core.classification_level, false, ${REASON})`,
+      },
+      {
+        fn: "assign_case",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.assignment = await one(
+            s,
+            s.tx`select api.assign_case(${caseB}, ${USERS.investigatorA}, 'INVESTIGATOR', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "reassign_case",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.reassigned = await one(
+            s,
+            s.tx`select api.reassign_case(${ids.assignment!}, ${USERS.lead}, ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "end_assignment",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.end_assignment(${ids.reassigned!}, ${REASON})`,
+      },
+      {
+        fn: "grant_case_access",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.grant = await one(
+            s,
+            s.tx`select api.grant_case_access(${caseB}, ${USERS.committee}, 'COMMITTEE', ${REASON}, null) as id`,
+          )),
+      },
+      {
+        fn: "revoke_case_access",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.revoke_case_access(${ids.grant!}, ${REASON})`,
+      },
+      {
+        fn: "declare_conflict",
+        actor: "grcDeputy", // declaring ends one's own assignments, so not the case's investigator
+        run: async (s) =>
+          (ids.conflict = await one(
+            s,
+            s.tx`select api.declare_conflict(${caseB}, true, 'Synthetic: audit walk declaration.') as id`,
+          )),
+      },
+      {
+        fn: "decide_conflict",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.decide_conflict(${ids.conflict!}, 'CONFLICT_CLEARED', ${REASON})`,
+      },
+      {
+        fn: "reply_to_reporter",
+        actor: "intake",
+        run: (s) =>
+          s.tx`select api.reply_to_reporter(${infoReport}, 'Synthetic follow-up question for the reporter.')`,
+      },
+      {
+        fn: "request_identity_reveal",
+        actor: "grcDirector",
+        run: async (s) =>
+          (ids.reveal = await one(
+            s,
+            s.tx`select api.request_identity_reveal(${caseB}, 'Synthetic: need to contact the reporter for documents.') as id`,
+          )),
+      },
+      {
+        fn: "decide_identity_reveal",
+        actor: "grcDeputy",
+        run: (s) => s.tx`select api.decide_identity_reveal(${ids.reveal!}, true, ${REASON})`,
+      },
+      {
+        fn: "resolve_reporter_identity",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select * from api.resolve_reporter_identity(${caseB}, 'Synthetic: need to contact the reporter for documents.')`,
+      },
+      {
+        fn: "register_evidence_version",
+        actor: "investigatorB",
+        run: async (s) => {
+          const [r] = await s.tx<{ v: string }[]>`
+            select o_version_id as v from api.register_evidence_version(${caseB}, null, 'Audit walk item (synthetic)', null,
+              'DOCUMENT', 'Synthetic source', null, 'CONFIDENTIAL'::core.classification_level, 'walk.pdf', 'application/pdf', 512, ${"1".repeat(64)})`;
+          return (ids.version = r!.v);
+        },
+      },
+      {
+        fn: "complete_evidence_version",
+        actor: "investigatorB",
+        run: (s) => s.tx`select api.complete_evidence_version(${ids.version!}, 'CLEAN', 'walk-scanner')`,
+      },
+      {
+        fn: "reject_evidence_version",
+        actor: "investigatorB",
+        run: async (s) => {
+          const [r] = await s.tx<{ v: string }[]>`
+            select o_version_id as v from api.register_evidence_version(${caseB}, null, 'Audit walk item 2 (synthetic)', null,
+              'DOCUMENT', 'Synthetic source', null, 'CONFIDENTIAL'::core.classification_level, 'walk2.pdf', 'application/pdf', 512, ${"2".repeat(64)})`;
+          return s.tx`select api.reject_evidence_version(${r!.v}, 'MALWARE_DETECTED', 'INFECTED', 'walk-scanner')`;
+        },
+      },
+      {
+        fn: "grant_role",
+        actor: "platformAdmin",
+        run: async (s) =>
+          (ids.role = await one(
+            s,
+            s.tx`select api.grant_role(${USERS.committee}, 'LEGAL_REVIEWER', ${REASON}, null) as id`,
+          )),
+      },
+      {
+        fn: "revoke_role",
+        actor: "platformAdmin",
+        run: (s) => s.tx`select api.revoke_role(${ids.role!}, ${REASON})`,
+      },
+      {
+        fn: "set_user_status",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_user_status(${USERS.investigatorB}, 'SUSPENDED'::core.record_status, ${REASON})`,
+      },
+    ];
+
+    expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
+
+    await scenario(async (s) => {
+      const missing: string[] = [];
+      for (const step of steps) {
+        const { events } = await audited(s, step);
+        // Identity-vault commands are deliberately SECURITY-category events, hidden from the case team (V-4).
+        const category = /identity/.test(step.fn) ? "SECURITY" : "BUSINESS_OR_ADMIN";
+        const ok = events.some(
+          (e) =>
+            e.outcome === "SUCCESS" &&
+            e.actor_id === USERS[step.actor] &&
+            (category === "SECURITY" ? e.category === "SECURITY" : e.category !== "SECURITY"),
+        );
+        if (!ok) missing.push(`${step.fn}: ${JSON.stringify(events)}`);
+      }
+      expect(missing).toEqual([]);
+      // The walk leaves a valid chain.
+      await s.as("internalAudit");
+      expect(await s.tx`select * from api.verify_audit_chain()`).toEqual([]);
+    });
+  });
+});
+
+describe("refused commands leave no business trace", () => {
+  it("a command that fails after its checks pass rolls back its business event with it", async () => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      const requestId = randomUUID();
+      await s.tx`select set_config('cdf.request_id', ${requestId}, true)`;
+      // Stale row version: the command reaches its conflict check and must abort atomically.
+      await s.expectError(
+        "CDF_CONFLICT:STALE_VERSION",
+        (tx) =>
+          tx`select api.update_case_details(${caseA}, 'Stale write (synthetic)', 'Synthetic.', 'LOW', -1)`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:ALREADY_ASSIGNED",
+        (tx) => tx`select api.assign_case(${caseB}, ${USERS.investigatorB}, 'INVESTIGATOR', ${REASON})`,
+      );
+      await s.as("dpo");
+      expect(await s.tx`select action from audit.audit_event where request_id = ${requestId}`).toEqual([]);
+    });
+  });
+});
+
+describe("the security event command cannot forge history", () => {
+  it.each<UserKey>(["investigatorA", "caseManager", "grcDirector", "platformAdmin"])(
+    "%s can only record DENIED SECURITY events from the fixed list",
+    async (user) => {
+      await scenario(async (s) => {
+        await s.as(user);
+        for (const action of [
+          "CASE_VIEWED",
+          "EVIDENCE_DOWNLOADED",
+          "CASE_CLOSED",
+          "ROLE_GRANTED",
+          "IDENTITY_RESOLVED",
+          "",
+        ]) {
+          await s.expectError(
+            "CDF_INVALID:action",
+            (tx) => tx`select api.record_security_event(${action}, 'case_record', ${caseA}, '{}'::jsonb)`,
+          );
+        }
+        await s.expectError(
+          "CDF_INVALID:metadata",
+          (tx) =>
+            tx`select api.record_security_event('ACCESS_DENIED', 'case_record', ${caseA}, ${JSON.stringify({ pad: "x".repeat(3000) })}::jsonb)`,
+        );
+        const requestId = randomUUID();
+        await s.tx`select set_config('cdf.request_id', ${requestId}, true)`;
+        await s.tx`select api.record_security_event('ACCESS_DENIED', 'case_record', ${caseA}, '{}'::jsonb)`;
+        await s.as("dpo");
+        const events = await s.tx<
+          { category: string; outcome: string; case_id: string | null; actor_id: string }[]
+        >`
+          select category, outcome, case_id, actor_id from audit.audit_event where request_id = ${requestId}`;
+        // Never a business event, never attached to a case's history, always attributed to the caller.
+        expect(events).toEqual([
+          { category: "SECURITY", outcome: "DENIED", case_id: null, actor_id: USERS[user] },
+        ]);
+      });
+    },
+  );
+
+  it("anonymous callers cannot record security events through the investigation API", async () => {
+    await scenario(async (s) => {
+      await s.as(null);
+      await s.expectError(
+        "permission denied",
+        (tx) => tx`select api.record_security_event('ACCESS_DENIED', 'case_record', ${caseA}, '{}'::jsonb)`,
+      );
+    });
+  });
+});
+
+describe("audit internals are not reachable", () => {
+  it.each<UserKey>(["internalAudit", "soc", "dpo", "grcDirector"])(
+    "%s cannot call the hashing and verification internals directly",
+    async (user) => {
+      await scenario(async (s) => {
+        await s.as(user);
+        await s.expectError("permission denied", (tx) => tx`select audit.verify_chain()`);
+        await s.expectError("permission denied", (tx) => tx`select audit.compute_hash('0', 'x')`);
+        await s.expectError(
+          "permission denied",
+          (tx) =>
+            tx`select case_mgmt.end_assignment_internal(${randomUUID()}, ${USERS[user]}, 'x', 'CASE_UNASSIGNED')`,
+        );
+      });
+    },
+  );
+
+  it("authenticated can execute exactly the documented helper functions outside api", async () => {
+    const rows = await admin<{ fn: string }[]>`
+      select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'intake', 'iam', 'protected_identity', 'public_api')
+        and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      order by 1`;
+    // Predicates about the caller only (used by RLS policies), plus the shared rate limiter.
+    expect(rows.map((r) => r.fn)).toEqual([
+      "authz.can_assign_case",
+      "authz.can_download_evidence",
+      "authz.can_edit_case",
+      "authz.can_reveal_whistleblower_identity",
+      "authz.can_upload_evidence",
+      "authz.can_view_case",
+      "authz.can_view_evidence",
+      "authz.can_view_report",
+      "authz.current_clearance",
+      "authz.current_roles",
+      "authz.current_subject",
+      "authz.current_user_id",
+      "authz.has_permission",
+      "public_api.consume_rate_limit",
+    ]);
+  });
+});

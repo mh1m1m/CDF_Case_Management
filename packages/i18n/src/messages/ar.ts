@@ -200,6 +200,7 @@ export const ar: Messages = {
     reportRef: "رقم البلاغ",
     secret: "الرمز السري",
     copy: "نسخ",
+    copyItem: "نسخ {item}",
     copied: "تم النسخ",
     savedConfirm: "حفظت رقم البلاغ والرمز السري",
     followUpTitle: "متابعة بلاغك",
@@ -325,6 +326,8 @@ export const ar: Messages = {
     addedBy: "أضافه",
     addedAt: "تاريخ الإضافة",
     download: "تنزيل",
+    downloadItem: "تنزيل {item}",
+    downloadVersion: "تنزيل {item}، الإصدار {no}",
     versions: "الإصدارات وسلسلة الحيازة",
     version: "الإصدار {no}",
     custody: "سلسلة الحيازة",
@@ -334,6 +337,7 @@ export const ar: Messages = {
     uploadIntro:
       "المسموح: PDF ومستندات Office والنصوص وCSV وJSON والبريد الإلكتروني (.eml) والصور والصوت والفيديو، بحد أقصى 25 ميجابايت. ملفات اصطناعية فقط.",
     fileLabel: "الملف",
+    fileFor: "الملف للدليل {item}",
     titleLabel: "العنوان",
     typeLabel: "النوع",
     descriptionLabel: "الوصف",
@@ -346,6 +350,7 @@ export const ar: Messages = {
     uploaded: "تم تخزين الدليل. البصمة SHA-256: {sha}",
     newVersionTitle: "إضافة إصدار جديد لهذا الدليل",
     newVersion: "إصدار جديد",
+    newVersionOf: "إصدار جديد للدليل {item}",
   },
   evidenceType: {
     DOCUMENT: "مستند",

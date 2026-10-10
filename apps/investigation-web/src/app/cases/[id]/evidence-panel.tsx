@@ -113,6 +113,7 @@ export function EvidencePanel({
               canDownload && e.currentVersion?.status === "AVAILABLE" ? (
                 <a
                   href={downloadHref(e.currentVersion.id)}
+                  aria-label={t("evidence.downloadItem", { item: evidenceDisplayNumber(e.sequenceNo) })}
                   className="font-semibold underline underline-offset-4"
                   data-testid={`download-${e.currentVersion.id}`}
                 >
@@ -177,6 +178,10 @@ export function EvidencePanel({
                     {" "}
                     <a
                       href={downloadHref(v.id)}
+                      aria-label={t("evidence.downloadVersion", {
+                        item: evidenceDisplayNumber(e.sequenceNo),
+                        no: v.versionNo,
+                      })}
                       className="underline underline-offset-4"
                       data-testid={`download-${v.id}`}
                     >
@@ -203,12 +208,16 @@ export function EvidencePanel({
                 action={uploadEvidenceAction.bind(null, c.id, e.id)}
                 locale={t.locale}
                 submitLabel={t("evidence.newVersion")}
+                submitName={t("evidence.newVersionOf", { item: evidenceDisplayNumber(e.sequenceNo) })}
                 variant="secondary"
                 fieldLabels={{ file: t("evidence.fileLabel") }}
                 testId={`new-version-form-${e.sequenceNo}`}
                 successMessage={t("evidence.uploaded", { sha: "{message}" })}
               >
-                <CDFField id={`file-${e.sequenceNo}`} label={t("evidence.fileLabel")}>
+                <CDFField
+                  id={`file-${e.sequenceNo}`}
+                  label={t("evidence.fileFor", { item: evidenceDisplayNumber(e.sequenceNo) })}
+                >
                   <input
                     id={`file-${e.sequenceNo}`}
                     name="file"
