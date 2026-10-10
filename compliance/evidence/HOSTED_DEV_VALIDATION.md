@@ -88,6 +88,14 @@ The hosted history (`supabase_migrations.schema_migrations`) lists exactly the f
 - CAUSE: migration numbers are reserved per work stream (1100s forms, 1200s interviews, 1300s records, 1400s CDF-66/67, 1500s CDF-63, …), so files can merge in a different order than their numbers. The 1400s will arrive below 1500 too.
 - REMEDIATION: `hosted-dev.yml` runs `supabase db push --include-all`, then a drift check: it builds a reference database from Git alone in a PostgreSQL 16 service container (`node scripts/db/reset.mjs`, compatibility shim, file order) and fails the run unless both fingerprint scripts return the same rows for DEV and the reference. Verified locally before the change: a database built in DEV's order (…1200, 1500, 1300–1330) and one built in Git order return identical fingerprints (91 schema buckets including `records`, 13 reference tables). A deliberately added function in the DEV-order copy made the check fail with the differing bucket (`function | api | 60` against `61`).
 
+### 4.5 Test bucket left on DEV by `storage-policy.spec.ts` — OPEN (removal waits for the owner)
+
+- EXPECTED: `storage.buckets` on DEV holds exactly the buckets Git declares, `evidence-quarantine` and `evidence-vault` (1000).
+- ACTUAL (read-only through the connector, 2026-10-10 about 13:30 UTC): also `cdf-test-private`: private, no size limit, no type list, no objects.
+- DRIFT: one extra bucket row, empty and private. No storage policy exists for an application role (§7), so `anon`, `authenticated`, `cdf_bff` and `cdf_portal` cannot reach it.
+- CAUSE: the test "application roles see no storage rows" inserted that bucket before probing and deleted it afterwards, ignoring any error from the delete. On DEV, Supabase's trigger `protect_buckets_delete` (`storage.protect_delete()`) refuses a direct DELETE from `storage.buckets` unless `storage.allow_delete_query` is set, so the row stayed after the first suite run against DEV (run 38053483205); later inserts were no-ops (`on conflict do nothing`). The local compatibility shim has no such trigger, so CI never showed it.
+- REMEDIATION: the test now writes nothing. It requires the two evidence buckets from Git and probes with those (this branch). Removing the leftover row is a delete on DEV, outside "migrations and synthetic seed", so it waits for the owner's word.
+
 ## 5. Verification: DEV schema and reference data equal Git
 
 The hosted schema was compared with a reference database built from Git alone (`node scripts/db/reset.mjs`: compatibility shim, migrations, seeds; PostgreSQL 16, `127.0.0.1:5432`) with two committed scripts, run on DEV through the connector's `execute_sql` and locally through `psql`:
@@ -129,7 +137,7 @@ No security finding at WARN or ERROR.
 
 ## 7. Evidence buckets from Git
 
-`20261007001000_evidence_storage_buckets.sql` declares `evidence-quarantine` and `evidence-vault` in `storage.buckets`: `public = false`, `file_size_limit = 26214400` (`EVIDENCE_MAX_BYTES`, §25) and `allowed_mime_types` = `evidence.allowed_content_type`. It is idempotent (`on conflict … do update` forces the bucket private again) and raises if either bucket ends up missing, public or unlimited. `tests/security/storage-policy.spec.ts` asserts the same on every run: no public bucket anywhere, both evidence buckets present and configured, no storage policy for an application role, RLS on `storage.buckets` and `storage.objects`. The adapter's `ensureBuckets()` stays as a fallback and is a no-op once the migration has run. Verified on the local shim: both buckets private, 25 MiB, 16 allowed types; the suite passes (6 tests).
+`20261007001000_evidence_storage_buckets.sql` declares `evidence-quarantine` and `evidence-vault` in `storage.buckets`: `public = false`, `file_size_limit = 26214400` (`EVIDENCE_MAX_BYTES`, §25) and `allowed_mime_types` = `evidence.allowed_content_type`. It is idempotent (`on conflict … do update` forces the bucket private again) and raises if either bucket ends up missing, public or unlimited. `tests/security/storage-policy.spec.ts` asserts the same on every run: no public bucket anywhere, both evidence buckets present and configured, no storage policy for an application role, RLS on `storage.buckets` and `storage.objects`. The adapter's `ensureBuckets()` stays as a fallback and is a no-op once the migration has run. Verified on the local shim: both buckets private, 25 MiB, 16 allowed types; the suite passes (6 tests). Verified on DEV (read-only through the connector, 2026-10-10 about 13:30 UTC, after run 38053483205): `evidence-quarantine` and `evidence-vault` private, 26214400 bytes, 16 allowed types, no objects; one more bucket, left by a test, is drift record 4.5.
 
 PRODUCTION_SUBSTITUTION_REQUIRED: in production the buckets are Alibaba Cloud OSS buckets created by infrastructure-as-code with WORM retention and KMS encryption (`architecture/PRODUCTION_MAPPING.md`; the substitution issues are CDF-35 to CDF-43).
 
@@ -174,7 +182,8 @@ Historical record of 2026-10-07. The Vercel projects are tracked in CDF-33 from 
 ## 11. Not done, by decision
 
 - `cdf-case-demo` is not created (§1).
-- No destructive operation ran on DEV: no reset, drop, truncate or delete. The only UPDATE was the history repair in §4.1.
+- No reset, drop or truncate ran on DEV, and no delete took effect. The only direct UPDATE was the history repair in §4.1.
+- What `hosted-dev.yml` writes on DEV: the pending Git migrations; the seed, once, while `iam.user_profile` is empty; the passwords of the two login roles (`alter role`, every run, throwaway unless the stable secrets of §9 exist); and the suites' own synthetic records. The integration project drives the real services and commits what they create (a report taken to a case, form instances, evidence rows without stored objects, an interview, and their audit events); the public-portal tests commit a few synthetic submissions through `public_api` as `anon`, on purpose, to inspect the vault and the ledger afterwards. Every other security test runs inside a transaction that is rolled back, including the negative tests that try UPDATE, DELETE or TRUNCATE as the table owner. From 2026-10-10 the owner-level audit-ledger test rolls back even if the ledger ever let a statement through (it used to commit in that case), and `storage-policy.spec.ts` no longer creates a bucket (§4.5).
 
 ## 12. How to re-run
 

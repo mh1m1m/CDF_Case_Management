@@ -41,28 +41,22 @@ describe("storage policy", () => {
   });
 
   it("application roles see no storage rows, whether the grants are absent or RLS denies them", async () => {
-    // Best effort: make sure at least one bucket row exists so "0 rows" means hidden, not empty.
-    const seeded = await admin`
-      insert into storage.buckets (id, name, public) values ('cdf-test-private', 'cdf-test-private', false)
-      on conflict do nothing`.then(
-      () => true,
-      () => false,
-    );
-    try {
-      await scenario(async (s) => {
-        for (const user of ["investigatorA", "lead", "platformAdmin", null] as const) {
-          await s.as(user);
-          for (const table of ["storage.objects", "storage.buckets"]) {
-            expect(await visibleRows(s.tx, table), `${user ?? "anon"} ${table}`).toSatisfy(
-              (v: number | "denied") => v === 0 || v === "denied",
-            );
-          }
+    // The evidence buckets from Git exist, so "0 rows" below means hidden, not empty. Nothing is written:
+    // these suites also run against hosted DEV (CDF-32), where Supabase refuses a direct DELETE from
+    // storage.buckets (storage.protect_delete), so a temporary bucket could never be removed again.
+    const [buckets] = await admin<{ n: number }[]>`
+      select count(*)::int as n from storage.buckets where id in ('evidence-quarantine', 'evidence-vault')`;
+    expect(buckets!.n).toBe(2);
+    await scenario(async (s) => {
+      for (const user of ["investigatorA", "lead", "platformAdmin", null] as const) {
+        await s.as(user);
+        for (const table of ["storage.objects", "storage.buckets"]) {
+          expect(await visibleRows(s.tx, table), `${user ?? "anon"} ${table}`).toSatisfy(
+            (v: number | "denied") => v === 0 || v === "denied",
+          );
         }
-      });
-    } finally {
-      if (seeded)
-        await admin`delete from storage.buckets where id = 'cdf-test-private'`.catch(() => undefined);
-    }
+      }
+    });
   });
 
   it("the evidence buckets come from Git (1000_evidence_storage_buckets): private, 25 MiB, allow-listed types", async () => {
