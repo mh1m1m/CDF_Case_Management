@@ -46,7 +46,8 @@ export const portalServerEnvSchema = base.extend({
 export type PortalServerEnv = z.infer<typeof portalServerEnvSchema>;
 
 const PUBLIC_PREFIX = "NEXT_PUBLIC_";
-const FORBIDDEN_PUBLIC_NAME = /(SECRET|SERVICE|PASSWORD|PRIVATE|DATABASE|PEPPER|SALT|TOKEN|KEY)/;
+// SENTRY and DSN (CDF-81): the Sentry SDK is server-only, so no Sentry setting is ever public.
+const FORBIDDEN_PUBLIC_NAME = /(SECRET|SERVICE|PASSWORD|PRIVATE|DATABASE|PEPPER|SALT|TOKEN|KEY|SENTRY|DSN)/;
 
 /**
  * Fails if any browser-exposed variable looks like a credential (threat R4, protocol §47).

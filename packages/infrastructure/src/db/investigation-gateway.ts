@@ -5,8 +5,12 @@ import type {
   AuditTimelineEntry,
   CaseAssignment,
   CaseDetail,
+  CaseDiscoveryResult,
   CaseListItem,
   IntakeReportItem,
+  MyCaseTask,
+  MyWorkSummary,
+  RecordsCatalogueEntry,
   ReportDetail,
   TransitionOption,
   UserDirectoryEntry,
@@ -221,5 +225,81 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
       select id, display_name as "displayName", display_name_ar as "displayNameAr", department
       from iam.user_profile where status = 'ACTIVE' order by display_name`.then((r) => [...r]),
     );
+  }
+
+  // ---- Purpose-bound records and legal access (ADR-014) ------------------------------------------
+  // Totals come from the database and count authorised rows only (§17): never a global count.
+  searchRecordsCatalogue(
+    ctx: UserRequestContext,
+    i: {
+      caseNumber?: string;
+      archiveStatus?: string;
+      legalHoldStatus?: string;
+      limit: number;
+      offset: number;
+    },
+  ): Promise<{ total: number; items: RecordsCatalogueEntry[] }> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<
+        (Omit<RecordsCatalogueEntry, "closedDate" | "retentionStartDate" | "retentionEndDate"> & {
+          closedDate: Date | null;
+          retentionStartDate: Date | null;
+          retentionEndDate: Date | null;
+          totalCount: string;
+        })[]
+      >`
+        select case_id as "caseId", case_number as "caseNumber", case_type as "caseType", classification,
+               closed_date as "closedDate", retention_class as "retentionClass",
+               retention_start_date as "retentionStartDate", retention_end_date as "retentionEndDate",
+               legal_hold_status as "legalHoldStatus", archive_status as "archiveStatus",
+               disposition_status as "dispositionStatus", record_owner as "recordOwner", total_count as "totalCount"
+        from api.search_records_catalogue(${i.caseNumber ?? null}, ${i.archiveStatus ?? null},
+                                          ${i.legalHoldStatus ?? null}, ${i.limit}, ${i.offset})`;
+      return {
+        total: Number(rows[0]?.totalCount ?? 0),
+        items: rows.map(({ totalCount: _total, ...r }) => ({
+          ...r,
+          closedDate: iso(r.closedDate),
+          retentionStartDate: iso(r.retentionStartDate),
+          retentionEndDate: iso(r.retentionEndDate),
+        })),
+      };
+    });
+  }
+
+  myCaseTasks(ctx: UserRequestContext): Promise<MyCaseTask[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<
+        (Omit<MyCaseTask, "dueDate" | "expiresAt"> & { dueDate: string | null; expiresAt: Date })[]
+      >`
+        select task_id as "taskId", case_id as "caseId", case_number as "caseNumber", task_type as "taskType",
+               category, purpose, scope, status, due_date::text as "dueDate", expires_at as "expiresAt",
+               legal_hold_status as "legalHoldStatus", archive_status as "archiveStatus"
+        from api.my_case_tasks()`;
+      return rows.map((r) => ({ ...r, expiresAt: iso(r.expiresAt)! }));
+    });
+  }
+
+  myWorkSummary(ctx: UserRequestContext): Promise<MyWorkSummary> {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<MyWorkSummary[]>`
+        select my_retention_tasks as "myRetentionTasks", my_disposition_tasks as "myDispositionTasks",
+               pending_archive_transfers as "pendingArchiveTransfers", assigned_legal_holds as "assignedLegalHolds",
+               my_legal_reviews as "myLegalReviews", my_legal_hold_requests as "myLegalHoldRequests"
+        from api.my_work_summary()`;
+      return row!;
+    });
+  }
+
+  requestCaseForLegalHold(
+    ctx: UserRequestContext,
+    i: { caseReference: string; justification: string; reasonCode: string },
+  ): Promise<CaseDiscoveryResult> {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<CaseDiscoveryResult[]>`
+        select outcome, request_id as "requestId"
+        from api.request_case_for_legal_hold(${i.caseReference}, ${i.justification}, ${i.reasonCode})`;
+      return row!;
+    });
   }
 }

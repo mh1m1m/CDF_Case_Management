@@ -16,7 +16,14 @@ import {
   type Scenario,
   type UserKey,
 } from "../support/db";
-import { DECISION, JUSTIFICATION, makeEligible, placeHold, requestDisposition } from "../support/records";
+import {
+  DECISION,
+  JUSTIFICATION,
+  legalHoldTasks,
+  makeEligible,
+  placeHold,
+  requestDisposition,
+} from "../support/records";
 
 interface Targets {
   case: string;
@@ -27,6 +34,10 @@ interface Targets {
   evidence: string;
   version: string;
   revealRequest: string;
+  // Purpose-bound access (CDF-73, ADR-014)
+  task: string;
+  holdRequest: string;
+  breakGlass: string;
   interview: string;
   statementVersion: string;
   formInstance: string;
@@ -210,6 +221,63 @@ const PROBES: Probe[] = [
     call: (tx, t) =>
       tx`select api.update_case_details(${t.case}, 'Overwritten title (synthetic)', 'Overwritten summary (synthetic).', 'LOW', 1)`,
   },
+  // Purpose-bound access (CDF-73, ADR-014): tasks, legal-hold requests and break-glass.
+  {
+    fn: "assign_legal_hold_request",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.assign_legal_hold_request(${t.holdRequest}, ${self})`,
+  },
+  {
+    fn: "cancel_case_task",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_case_task(${t.task}, ${REASON})`,
+  },
+  {
+    fn: "complete_case_task",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.complete_case_task(${t.task}, ${REASON})`,
+  },
+  {
+    fn: "create_case_task",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.create_case_task(${t.case}, 'LEGAL_REVIEW', ${self}, ${REASON})`,
+  },
+  {
+    fn: "decide_break_glass",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_break_glass(${t.breakGlass}, true, ${REASON})`,
+  },
+  {
+    fn: "end_break_glass",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.end_break_glass(${t.breakGlass})`,
+  },
+  {
+    fn: "open_case_metadata",
+    outcome: "FALSE",
+    call: (tx, t) => tx`select api.open_case_metadata(${t.case}) as v`,
+  },
+  { fn: "open_case_task", outcome: "FALSE", call: (tx, t) => tx`select api.open_case_task(${t.task}) as v` },
+  {
+    fn: "request_break_glass",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.request_break_glass(${t.case}, ${REASON}, 60)`,
+  },
+  {
+    fn: "request_legal_hold",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.request_legal_hold(${t.case}, 'LITIGATION', ${REASON})`,
+  },
+  {
+    fn: "review_break_glass",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.review_break_glass(${t.breakGlass}, 'APPROPRIATE', ${REASON})`,
+  },
+  {
+    fn: "review_legal_hold_request",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.review_legal_hold_request(${t.holdRequest}, true, ${REASON})`,
+  },
   // ---- Interviews (CDF-60, ADR-012) ------------------------------------------------------------------
   {
     fn: "plan_interview",
@@ -340,7 +408,18 @@ const RECORDS_PROBES: Probe<RecordsTargets>[] = [
 
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 const ADMIN_COMMANDS = ["grant_role", "revoke_role", "set_user_status"];
-const GLOBAL_COMMANDS = ["record_security_event", "verify_audit_chain", "refresh_disposition_eligibility"];
+// The caller's own tasks and counts, the authorised catalogue search, the exact-number lookup (a case number,
+// never a UUID; PBA-T16 to T18) and task housekeeping take no object id (CDF-73).
+const GLOBAL_COMMANDS = [
+  "record_security_event",
+  "verify_audit_chain",
+  "refresh_disposition_eligibility",
+  "expire_case_tasks",
+  "my_case_tasks",
+  "my_work_summary",
+  "request_case_for_legal_hold",
+  "search_records_catalogue",
+];
 
 let caseA: string, caseB: string, caseExec: string;
 beforeAll(async () => {
@@ -435,6 +514,35 @@ async function insiderObjects(
   };
 }
 
+/**
+ * CDF-73 objects on the target: a legal-review task, a legal-hold request and, where the case allows it, a
+ * break-glass request. Break-glass never reaches a restricted case (ADR-014 D5), so on the executive case the
+ * probe gets a random id, which must give the same answer anyway.
+ */
+async function purposeObjects(
+  s: Scenario,
+  target: string,
+  authority: UserKey,
+  assignee: UserKey,
+  withBreakGlass: boolean,
+): Promise<Pick<Targets, "task" | "holdRequest" | "breakGlass">> {
+  await s.as(authority);
+  const [task] = await s.tx<{ id: string }[]>`
+    select api.create_case_task(${target}, ${assignee === "legal" ? "LEGAL_REVIEW" : "LEGAL_HOLD_APPLICATION"},
+      ${USERS[assignee]}, 'Synthetic: probe task purpose.') as id`;
+  const [req] = await s.tx<
+    { id: string }[]
+  >`select api.request_legal_hold(${target}, 'LITIGATION', 'Synthetic: probe hold request justification.') as id`;
+  let breakGlass: string = randomUUID();
+  if (withBreakGlass) {
+    await s.as(assignee);
+    const [bg] = await s.tx<{ id: string }[]>`
+      select api.request_break_glass(${target}, 'Synthetic: probe break-glass justification.', 60) as id`;
+    breakGlass = bg!.id;
+  }
+  return { task: task!.id, holdRequest: req!.id, breakGlass };
+}
+
 async function outcomeOf<T>(s: Scenario, probe: Probe<T>, t: T, self: string): Promise<string> {
   let result: readonly Record<string, unknown>[] | undefined;
   let error: string | undefined;
@@ -461,6 +569,9 @@ const randomTargets = (): Targets => ({
   evidence: randomUUID(),
   version: randomUUID(),
   revealRequest: randomUUID(),
+  task: randomUUID(),
+  holdRequest: randomUUID(),
+  breakGlass: randomUUID(),
   interview: randomUUID(),
   statementVersion: randomUUID(),
   formInstance: randomUUID(),
@@ -505,6 +616,11 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
     const target = which === "B" ? caseB : caseExec;
     const seeded = await seedObjects(which === "B" ? "0002" : "0003");
     await scenario(async (s) => {
+      // Before the insider objects: their conflict declaration removes the declarer's own access.
+      const purpose =
+        which === "B"
+          ? await purposeObjects(s, target, "caseManager", "legal", true)
+          : await purposeObjects(s, target, "grcDirector", "grcDirector", false);
       const inside =
         which === "B"
           ? await insiderObjects(
@@ -518,7 +634,7 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
             )
           : await insiderObjects(s, target, "grcDirector", "grcDirector", "grcDirector", "SECRET");
       const attachment = await reporterAttachment(s, seeded.reportRef);
-      const real: Targets = { case: target, ...seeded, ...inside, attachment };
+      const real: Targets = { case: target, ...seeded, ...inside, ...purpose, attachment };
       await s.as(actor);
       const self = USERS[actor];
       const mismatches: string[] = [];
@@ -553,6 +669,15 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
       await s.as("grcDirector");
       const [exec] = await s.tx<{ v: boolean }[]>`select api.open_case(${caseExec}) as v`;
       expect(exec!.v).toBe(true);
+      // CDF-73: the task assignee opens their own task, and the requester can end their own break-glass.
+      const purpose = await purposeObjects(s, caseB, "caseManager", "legal", true);
+      await s.as("legal");
+      const [task] = await s.tx<{ v: boolean }[]>`select api.open_case_task(${purpose.task}) as v`;
+      expect(task!.v).toBe(true);
+      await s.expectError(
+        "CDF_CONFLICT:BREAK_GLASS_NOT_ACTIVE",
+        (tx) => tx`select api.end_break_glass(${purpose.breakGlass})`,
+      );
     });
   });
 });
@@ -571,6 +696,7 @@ const randomRecordsTargets = (): RecordsTargets => ({
  * approval by the GRC director and logical execution with a certificate.
  */
 async function disposedCaseB(s: OwnerScenario, target: string): Promise<RecordsTargets> {
+  await legalHoldTasks(s, target); // ADR-014: legal acts on a case through its hold tasks (CDF-73)
   await s.as("legal");
   const hold = await placeHold(s.tx, target);
   const [rel] = await s.tx<
@@ -791,6 +917,7 @@ describe("non-object commands", () => {
   it("a revoked user gets nothing from any probe, even on a case they were assigned to", async () => {
     const seeded = await seedObjects("0002");
     await scenario(async (s) => {
+      const purpose = await purposeObjects(s, caseB, "caseManager", "legal", true);
       const inside = await insiderObjects(
         s,
         caseB,
@@ -807,7 +934,7 @@ describe("non-object commands", () => {
         const got = await outcomeOf(
           s,
           probe,
-          { case: caseB, ...seeded, ...inside, attachment },
+          { case: caseB, ...seeded, ...inside, ...purpose, attachment },
           USERS.revoked,
         );
         if (!["EMPTY", "FALSE", "NOT_FOUND"].includes(got) && !got.startsWith("ERROR CDF_UNAUTHENTICATED"))

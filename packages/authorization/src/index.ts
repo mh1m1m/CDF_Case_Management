@@ -33,6 +33,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "CLASSIFICATION_CHANGE",
     "EVIDENCE_UPLOAD",
     "EVIDENCE_DOWNLOAD",
+    "CASE_TASK_ASSIGN",
+    "LEGAL_HOLD_REQUEST",
     "FORM_VIEW",
     "FORM_PREPARE",
     "FORM_REVIEW",
@@ -43,6 +45,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "CONFLICT_DECLARE",
     "EVIDENCE_UPLOAD",
     "EVIDENCE_DOWNLOAD",
+    "LEGAL_HOLD_REQUEST",
     "FORM_VIEW",
     "FORM_PREPARE",
     "FORM_REVIEW",
@@ -51,13 +54,17 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   COMMITTEE_SECRETARY: ["CONFLICT_DECLARE", "FORM_VIEW", "FORM_PREPARE"],
   COMMITTEE_CHAIR: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW", "FORM_REVIEW", "FORM_APPROVE"],
   COMMITTEE_MEMBER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW"],
+  // ADR-014: no role-wide case discovery; cases are reached through tasks, grants or the controlled lookup.
   LEGAL_REVIEWER: [
     "CONFLICT_DECLARE",
     "EVIDENCE_DOWNLOAD",
     "FORM_VIEW",
-    "RECORDS_VIEW",
     "LEGAL_HOLD_APPLY",
     "LEGAL_HOLD_RELEASE",
+    "LEGAL_HOLD_REQUEST",
+    "LEGAL_HOLD_REVIEW",
+    "CASE_DISCOVER",
+    "BREAK_GLASS_REQUEST",
   ],
   HR_REVIEWER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW"],
   GRC_DIRECTOR: [
@@ -74,13 +81,18 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "FORM_VIEW",
     "FORM_REVIEW",
     "FORM_APPROVE",
-    "RECORDS_VIEW",
     "LEGAL_HOLD_APPLY",
     "LEGAL_HOLD_RELEASE",
     "DISPOSITION_APPROVE",
+    "ARCHIVE_RECORD_VIEW",
+    "CASE_TASK_ASSIGN",
+    "LEGAL_HOLD_REQUEST",
+    "LEGAL_HOLD_REVIEW",
+    "DISPOSITION_TASK_VIEW",
+    "BREAK_GLASS_APPROVE",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
-  INTERNAL_AUDIT: ["AUDIT_VIEW", "RECORDS_VIEW"],
+  INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],
   SOC_ANALYST: ["SECURITY_EVENT_VIEW"],
   PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN"],
   // Form entitlements (ADR-011) give these roles their first permissions; the rest come in later phases.
@@ -89,7 +101,21 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   DECISION_AUTHORITY: ["FORM_VIEW", "FORM_APPROVE"],
   IMPLEMENTATION_OWNER: ["FORM_VIEW", "FORM_PREPARE"],
   // Records authority is SOURCE_REQUIRED (Delegation of Authority); this is the prototype default (ADR-013 D9).
-  RECORDS_OFFICER: ["RECORDS_VIEW", "RETENTION_CLASS_ASSIGN", "LEGAL_HOLD_APPLY", "DISPOSITION_REQUEST"],
+  // ADR-014: catalogue scope (post-closure, non-restricted) and tasks, never active-case discovery by role.
+  RECORDS_OFFICER: [
+    "RETENTION_CLASS_ASSIGN",
+    "LEGAL_HOLD_APPLY",
+    "DISPOSITION_REQUEST",
+    "ARCHIVE_RECORD_VIEW",
+    "ARCHIVE_RECORD_ADMINISTER",
+    "RECORDS_LIFECYCLE_ADMIN",
+    "RETENTION_TASK_VIEW",
+    "RETENTION_TASK_EXECUTE",
+    "DISPOSITION_TASK_VIEW",
+    "DISPOSITION_TASK_EXECUTE",
+    "LEGAL_HOLD_REQUEST",
+    "CASE_DISCOVER",
+  ],
   REFERRER: [],
   DB_ADMIN: [],
 };
@@ -116,6 +142,13 @@ export function navigationFor(actor: Pick<Actor, "permissions">) {
       ),
     ),
     audit: can(actor, "AUDIT_VIEW") || can(actor, "SECURITY_EVENT_VIEW"),
+    // "My work" (tasks, hold requests) and the records catalogue; never a list of all investigations (§18).
+    myWork: actor.permissions.some((p) =>
+      ["RETENTION_TASK_VIEW", "DISPOSITION_TASK_VIEW", "LEGAL_HOLD_REVIEW", "LEGAL_HOLD_REQUEST"].includes(p),
+    ),
+    recordsCatalogue: can(actor, "ARCHIVE_RECORD_VIEW"),
     administration: can(actor, "ROLE_ADMIN") || can(actor, "USER_ADMIN"),
   };
 }
+
+export * from "./purpose";

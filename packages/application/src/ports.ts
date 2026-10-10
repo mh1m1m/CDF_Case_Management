@@ -6,6 +6,7 @@ import type {
   AttachmentSource,
   AuditTimelineEntry,
   CaseDetail,
+  CaseDiscoveryResult,
   CaseListItem,
   EvidenceItem,
   EvidenceRejectionCode,
@@ -16,7 +17,10 @@ import type {
   FormInstanceSummary,
   FormReviewOutcome,
   IntakeReportItem,
+  MyCaseTask,
+  MyWorkSummary,
   PublicReportStatus,
+  RecordsCatalogueEntry,
   ReportAttachmentItem,
   ReportDetail,
   ReportMessage,
@@ -245,6 +249,23 @@ export interface InvestigationGateway {
   ): Promise<string>;
   caseTimeline(ctx: UserRequestContext, caseId: string): Promise<AuditTimelineEntry[]>;
   directory(ctx: UserRequestContext): Promise<UserDirectoryEntry[]>;
+  // Purpose-bound records and legal access (ADR-014): authorised rows, counts and own work only.
+  searchRecordsCatalogue(
+    ctx: UserRequestContext,
+    input: {
+      caseNumber?: string;
+      archiveStatus?: string;
+      legalHoldStatus?: string;
+      limit: number;
+      offset: number;
+    },
+  ): Promise<{ total: number; items: RecordsCatalogueEntry[] }>;
+  myCaseTasks(ctx: UserRequestContext): Promise<MyCaseTask[]>;
+  myWorkSummary(ctx: UserRequestContext): Promise<MyWorkSummary>;
+  requestCaseForLegalHold(
+    ctx: UserRequestContext,
+    input: { caseReference: string; justification: string; reasonCode: string },
+  ): Promise<CaseDiscoveryResult>;
 }
 
 export interface PortalReportStatus {
