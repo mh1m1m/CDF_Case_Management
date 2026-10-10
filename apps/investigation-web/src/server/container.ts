@@ -10,11 +10,13 @@ import {
   createFormsService,
   createInterviewService,
   createInvestigationService,
+  createRecordsService,
   type EvidenceService,
   type EvidenceStorage,
   type FormsService,
   type InterviewService,
   type InvestigationService,
+  type RecordsService,
 } from "@cdf/application";
 import type { Actor } from "@cdf/contracts";
 import {
@@ -24,6 +26,7 @@ import {
   PostgresFormsGateway,
   PostgresInterviewGateway,
   PostgresInvestigationGateway,
+  PostgresRecordsGateway,
   PostgresSecurityEventSink,
   SupabaseEvidenceStorage,
   createPool,
@@ -39,6 +42,7 @@ const globalForApp = globalThis as unknown as {
   cdfEvidence?: EvidenceService;
   cdfForms?: FormsService;
   cdfInterviews?: InterviewService;
+  cdfRecords?: RecordsService;
 };
 
 function pool(): Sql {
@@ -95,6 +99,15 @@ export function interviewService(): InterviewService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfInterviews;
+}
+
+/** Records, retention and legal hold (CDF-71, ADR-013/014): database commands only; no deletion path. */
+export function recordsService(): RecordsService {
+  globalForApp.cdfRecords ??= createRecordsService({
+    gateway: new PostgresRecordsGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfRecords;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */
