@@ -68,13 +68,20 @@ export {
   EVIDENCE_MAX_BYTES,
   allowedTypeForExtension,
   checkEvidenceFile,
+  checkReporterAttachment,
   detectContentType,
   evidenceDisplayNumber,
   extensionOf,
   formatBytes,
   sanitizeFileName,
+  stripFormatCharacters,
 } from "./evidence";
-export type { AllowedContentType, EvidenceFileCheck, EvidenceFileRejection } from "./evidence";
+export type {
+  AllowedContentType,
+  EvidenceFileCheck,
+  EvidenceFileRejection,
+  ReporterAttachmentCheck,
+} from "./evidence";
 
 // ---- Forms engine (Phase 8; ADR-011) --------------------------------------------------------------
 export {

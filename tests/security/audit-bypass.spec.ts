@@ -45,6 +45,7 @@ const NOT_STATE_CHANGING = new Set([
   "open_case",
   "open_report",
   "open_evidence_version",
+  "open_report_attachment",
 ]);
 
 interface Step {

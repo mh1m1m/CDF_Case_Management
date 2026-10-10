@@ -1,13 +1,16 @@
 // EvidenceGateway over PostgreSQL. Reads go through RLS; writes only call api.* commands (ADR-003, ADR-006).
-import type {
-  CustodyEventInfo,
-  EvidenceItem,
-  EvidenceRejectionCode,
-  EvidenceVersionInfo,
+import {
+  attachmentDisplayName,
+  type CustodyEventInfo,
+  type EvidenceItem,
+  type EvidenceRejectionCode,
+  type EvidenceVersionInfo,
+  type ReportAttachmentItem,
 } from "@cdf/contracts";
 import type {
   EvidenceDownloadRecord,
   EvidenceGateway,
+  ReportAttachmentDownloadRecord,
   RegisteredEvidenceVersion,
   UserRequestContext,
 } from "@cdf/application";
@@ -151,6 +154,44 @@ export class PostgresEvidenceGateway implements EvidenceGateway {
         select o_object_key as "objectKey", o_file_name as "fileName", o_content_type as "contentType",
                o_size_bytes as "sizeBytes", o_sha256 as "sha256", o_evidence_id as "evidenceId", o_case_id as "caseId"
         from api.open_evidence_version(${versionId})`;
+      return row ? { ...row, sizeBytes: Number(row.sizeBytes) } : null;
+    });
+  }
+
+  listReportAttachments(ctx: UserRequestContext, reportId: string): Promise<ReportAttachmentItem[]> {
+    return this.run(ctx, async (tx) => {
+      // RLS (authz.can_view_report) filters; object_key and request_id are not selectable.
+      const rows = await tx<
+        (Omit<ReportAttachmentItem, "displayName" | "sizeBytes" | "receivedAt"> & {
+          fileExtension: string;
+          sizeBytes: string | number;
+          receivedAt: Date;
+        })[]
+      >`
+        select a.id, a.sequence_no as "sequenceNo", a.source, a.file_extension as "fileExtension",
+               a.content_type as "contentType", a.size_bytes as "sizeBytes", a.sha256, a.status,
+               a.received_at as "receivedAt"
+        from intake.report_attachment a where a.report_id = ${reportId} order by a.sequence_no`;
+      return rows.map(({ fileExtension, ...r }) => ({
+        ...r,
+        displayName: attachmentDisplayName(r.sequenceNo, fileExtension),
+        sizeBytes: Number(r.sizeBytes),
+        receivedAt: new Date(r.receivedAt).toISOString(),
+      }));
+    });
+  }
+
+  openReportAttachment(
+    ctx: UserRequestContext,
+    attachmentId: string,
+  ): Promise<ReportAttachmentDownloadRecord | null> {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<
+        (Omit<ReportAttachmentDownloadRecord, "sizeBytes"> & { sizeBytes: string | number })[]
+      >`
+        select o_object_key as "objectKey", o_display_name as "displayName", o_content_type as "contentType",
+               o_size_bytes as "sizeBytes", o_sha256 as "sha256", o_report_id as "reportId"
+        from api.open_report_attachment(${attachmentId})`;
       return row ? { ...row, sizeBytes: Number(row.sizeBytes) } : null;
     });
   }

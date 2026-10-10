@@ -38,6 +38,10 @@ export const portalServerEnvSchema = base.extend({
   CDF_PORTAL_DATABASE_URL: z.string().url(),
   CDF_REPORT_SECRET_PEPPER: secret("CDF_REPORT_SECRET_PEPPER"),
   CDF_RATE_LIMIT_SALT: secret("CDF_RATE_LIMIT_SALT"),
+  // Reporter attachments (ADR-015). Unset: local-fs in local/test, off everywhere else. The portal never
+  // holds the service-role key; a hosted storage-only credential is an open owner decision (CDF-72).
+  CDF_PORTAL_ATTACHMENTS: z.enum(["off", "local-fs"]).optional(),
+  CDF_EVIDENCE_LOCAL_DIR: z.string().min(1).optional(),
 });
 export type PortalServerEnv = z.infer<typeof portalServerEnvSchema>;
 

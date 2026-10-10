@@ -3,6 +3,7 @@
  */
 import type {
   Actor,
+  AttachmentSource,
   AuditTimelineEntry,
   CaseDetail,
   CaseListItem,
@@ -16,6 +17,7 @@ import type {
   FormReviewOutcome,
   IntakeReportItem,
   PublicReportStatus,
+  ReportAttachmentItem,
   ReportDetail,
   ReportMessage,
   ReporterMode,
@@ -59,6 +61,8 @@ export interface KeyManagementProvider {
 /** PRODUCTION_SUBSTITUTION_REQUIRED: WAF / API gateway rate limiting. */
 export interface RateLimiter {
   consume(bucket: string, limit: number, windowSeconds: number): Promise<boolean>;
+  /** Weighted variant (e.g. KiB uploaded): adds `amount` to the window and checks it against `limit`. */
+  consumeAmount(bucket: string, amount: number, limit: number, windowSeconds: number): Promise<boolean>;
 }
 
 /**
@@ -77,6 +81,13 @@ export interface EvidenceStorage {
   openReadStream(objectKey: string): Promise<ReadableStream<Uint8Array>>;
   exists(objectKey: string): Promise<boolean>;
 }
+
+/**
+ * The public portal's view of evidence storage (ADR-015): write-only. It can drop a reporter attachment
+ * into quarantine and promote it after a clean scan, but it can never read an object back.
+ * PRODUCTION_SUBSTITUTION_REQUIRED: an OSS RAM policy allowing PutObject/CopyObject on reports/ only.
+ */
+export type AttachmentDropbox = Pick<EvidenceStorage, "kind" | "putQuarantine" | "promoteToVault">;
 
 export interface ScanResult {
   status: "CLEAN" | "INFECTED" | "UNSCANNED";
@@ -135,6 +146,29 @@ export interface EvidenceGateway {
   ): Promise<void>;
   /** Records the download (custody + audit) and returns the storage facts, or null when denied/missing. */
   openVersion(ctx: UserRequestContext, versionId: string): Promise<EvidenceDownloadRecord | null>;
+  /** Reporter attachments on a report the caller can view (CDF-72), quarantined and rejected ones included. */
+  listReportAttachments(ctx: UserRequestContext, reportId: string): Promise<ReportAttachmentItem[]>;
+  /** Download gate for an available reporter attachment; null when denied, missing or not yet scanned. */
+  openReportAttachment(
+    ctx: UserRequestContext,
+    attachmentId: string,
+  ): Promise<ReportAttachmentDownloadRecord | null>;
+}
+
+/** Storage facts for a reporter attachment the caller may download. Never leaves the server. */
+export interface ReportAttachmentDownloadRecord {
+  objectKey: string;
+  displayName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  reportId: string;
+}
+
+export interface RegisteredReportAttachment {
+  attachmentId: string;
+  objectKey: string;
+  displayName: string;
 }
 
 // ---- Forms engine (Phase 8; ADR-011) ---------------------------------------------------------
@@ -255,5 +289,33 @@ export interface PortalGateway {
     reportRef: string,
     secretHmac: string,
     body: string,
+  ): Promise<boolean>;
+  /** Null when the credentials do not match (indistinguishable from an unknown Report ID). */
+  registerAttachment(
+    ctx: RequestContext,
+    reportRef: string,
+    secretHmac: string,
+    input: {
+      source: AttachmentSource;
+      extension: string;
+      contentType: string;
+      sizeBytes: number;
+      sha256: string;
+    },
+  ): Promise<RegisteredReportAttachment | null>;
+  completeAttachment(
+    ctx: RequestContext,
+    reportRef: string,
+    secretHmac: string,
+    attachmentId: string,
+    scanner: string,
+  ): Promise<boolean>;
+  rejectAttachment(
+    ctx: RequestContext,
+    reportRef: string,
+    secretHmac: string,
+    attachmentId: string,
+    reasonCode: EvidenceRejectionCode,
+    scan?: { status: "INFECTED" | "UNSCANNED"; scanner: string },
   ): Promise<boolean>;
 }

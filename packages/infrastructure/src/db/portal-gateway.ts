@@ -55,4 +55,49 @@ export class PostgresPortalGateway implements PortalGateway {
       return row?.ok === true;
     });
   }
+
+  registerAttachment(
+    ctx: RequestContext,
+    reportRef: string,
+    secretHmac: string,
+    i: Parameters<PortalGateway["registerAttachment"]>[3],
+  ) {
+    return withAnonContext(this.sql, ctx.requestId, async (tx) => {
+      const [row] = await tx<{ attachmentId: string; objectKey: string; displayName: string }[]>`
+        select attachment_id as "attachmentId", object_key as "objectKey", display_name as "displayName"
+        from public_api.register_report_attachment(${reportRef}, ${secretHmac}, ${i.source}, ${i.extension},
+          ${i.contentType}, ${i.sizeBytes}, ${i.sha256})`;
+      return row ?? null;
+    });
+  }
+
+  completeAttachment(
+    ctx: RequestContext,
+    reportRef: string,
+    secretHmac: string,
+    attachmentId: string,
+    scanner: string,
+  ) {
+    return withAnonContext(this.sql, ctx.requestId, async (tx) => {
+      const [row] = await tx<{ ok: boolean }[]>`
+        select public_api.complete_report_attachment(${reportRef}, ${secretHmac}, ${attachmentId}, 'CLEAN', ${scanner}) as ok`;
+      return row?.ok === true;
+    });
+  }
+
+  rejectAttachment(
+    ctx: RequestContext,
+    reportRef: string,
+    secretHmac: string,
+    attachmentId: string,
+    reasonCode: Parameters<PortalGateway["rejectAttachment"]>[4],
+    scan?: { status: "INFECTED" | "UNSCANNED"; scanner: string },
+  ) {
+    return withAnonContext(this.sql, ctx.requestId, async (tx) => {
+      const [row] = await tx<{ ok: boolean }[]>`
+        select public_api.reject_report_attachment(${reportRef}, ${secretHmac}, ${attachmentId}, ${reasonCode},
+          ${scan?.status ?? null}, ${scan?.scanner ?? null}) as ok`;
+      return row?.ok === true;
+    });
+  }
 }

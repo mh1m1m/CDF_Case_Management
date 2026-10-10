@@ -6,6 +6,7 @@
 import { z } from "zod";
 import {
   ASSIGNMENT_ROLES,
+  ATTACHMENT_SOURCES,
   BIRTH_DATE_CALENDARS,
   CITIES,
   CLASSIFICATION_LEVELS,
@@ -192,6 +193,12 @@ export const reportAccessSchema = z.object({
 });
 
 export const reporterMessageSchema = reportAccessSchema.extend({ body: text(1, 4000) });
+
+/** Credentials and source for one reporter attachment upload (CDF-72); the file is checked separately. */
+export const reportAttachmentUploadSchema = reportAccessSchema.extend({
+  source: z.enum(ATTACHMENT_SOURCES, { message: "validation.invalid" }),
+});
+export type ReportAttachmentUpload = z.infer<typeof reportAttachmentUploadSchema>;
 
 // ---- Investigation app ----------------------------------------------------------------------
 export const triageReportSchema = z

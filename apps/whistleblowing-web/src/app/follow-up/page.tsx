@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CDFPageHeader } from "@cdf/ui";
+import { portalService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { FollowUp } from "./follow-up";
 
@@ -13,7 +14,7 @@ export default async function FollowUpPage() {
   return (
     <div className="mx-auto max-w-2xl">
       <CDFPageHeader title={t("portal.followUpTitle")} intro={t("portal.followUpIntro")} />
-      <FollowUp locale={t.locale} />
+      <FollowUp locale={t.locale} attachmentsEnabled={portalService().attachmentsEnabled} />
     </div>
   );
 }

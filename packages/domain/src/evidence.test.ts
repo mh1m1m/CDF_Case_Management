@@ -3,10 +3,12 @@ import {
   ALLOWED_CONTENT_TYPES,
   EVIDENCE_MAX_BYTES,
   checkEvidenceFile,
+  checkReporterAttachment,
   detectContentType,
   evidenceDisplayNumber,
   extensionOf,
   sanitizeFileName,
+  stripFormatCharacters,
 } from "./evidence";
 
 const bytes = (s: string) => new TextEncoder().encode(s);
@@ -99,5 +101,49 @@ describe("evidence file rules", () => {
   it("formats display numbers", () => {
     expect(evidenceDisplayNumber(1)).toBe("EV-001");
     expect(evidenceDisplayNumber(1234)).toBe("EV-1234");
+  });
+});
+
+describe("reporter attachment rules (CDF-72, ADR-015)", () => {
+  const MAX = 4_194_304;
+  it("keeps only the extension and the sniffed type", () => {
+    expect(
+      checkReporterAttachment({ fileName: "Employee Alpha notes.pdf", size: pdf.length, bytes: pdf }, MAX),
+    ).toEqual({ ok: true, extension: "pdf", contentType: "application/pdf" });
+    expect(checkReporterAttachment({ fileName: "photo.JPEG", size: png.length, bytes: png }, MAX)).toEqual({
+      ok: false,
+      reason: "CONTENT_MISMATCH",
+    });
+  });
+
+  it("removes bidi controls before reading the extension (CDF-68)", () => {
+    expect(stripFormatCharacters("invoice\u202Efdp.exe")).toBe("invoicefdp.exe");
+    // Displayed as "invoiceexe.pdf", really an .exe: refused, never accepted as a PDF.
+    expect(
+      checkReporterAttachment({ fileName: "invoice\u202Efdp.exe", size: pdf.length, bytes: pdf }, MAX),
+    ).toEqual({
+      ok: false,
+      reason: "EXTENSION_NOT_ALLOWED",
+    });
+    expect(
+      checkReporterAttachment({ fileName: "report\u2066.pdf\u2069", size: pdf.length, bytes: pdf }, MAX),
+    ).toEqual({ ok: true, extension: "pdf", contentType: "application/pdf" });
+  });
+
+  it("applies the smaller per-file limit before anything else", () => {
+    const big = new Uint8Array(MAX + 1);
+    big.set(pdf);
+    expect(checkReporterAttachment({ fileName: "a.pdf", size: big.length, bytes: big }, MAX)).toEqual({
+      ok: false,
+      reason: "TOO_LARGE",
+    });
+    expect(checkReporterAttachment({ fileName: "a.pdf", size: 0, bytes: new Uint8Array() }, MAX)).toEqual({
+      ok: false,
+      reason: "EMPTY",
+    });
+    expect(checkReporterAttachment({ fileName: "a.html", size: 5, bytes: bytes("<html>") }, MAX)).toEqual({
+      ok: false,
+      reason: "EXTENSION_NOT_ALLOWED",
+    });
   });
 });

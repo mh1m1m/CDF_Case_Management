@@ -3,7 +3,7 @@
 // (case, report, assignment, grant, conflict, evidence item and version, reveal request, form instance). Every call must be
 // refused exactly as if the object did not exist, and the catalog guard makes a new api.* function fail this
 // file until it has an entry here.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
 import { USERS, admin, caseId, scenario, type Scenario, type UserKey } from "../support/db";
@@ -18,6 +18,7 @@ interface Targets {
   version: string;
   revealRequest: string;
   formInstance: string;
+  attachment: string;
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
@@ -33,6 +34,11 @@ const SHA = "c".repeat(64);
 // One probe per object-scoped api.* function. The self id is the acting outsider, so "assign me" and
 // "grant me" attempts are covered too.
 const PROBES: Probe[] = [
+  {
+    fn: "open_report_attachment",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.open_report_attachment(${t.attachment})`,
+  },
   {
     fn: "approve_form",
     outcome: "NOT_FOUND",
@@ -209,13 +215,28 @@ beforeAll(async () => {
 });
 
 async function seedObjects(caseNo: string) {
-  const [row] = await admin<{ report: string; assignment: string; grant: string }[]>`
+  const [row] = await admin<{ report: string; reportRef: string; assignment: string; grant: string }[]>`
     select (select r.id from intake.report r where r.case_id = c.id limit 1) as report,
+           (select r.report_ref from intake.report r where r.case_id = c.id limit 1) as "reportRef",
            (select a.id from case_mgmt.case_assignment a where a.case_id = c.id and a.status = 'ACTIVE' limit 1) as assignment,
            (select g.id from case_mgmt.case_access_grant g where g.case_id = c.id and g.status = 'ACTIVE' limit 1) as "grant"
     from case_mgmt.case_record c where c.case_number like ${"CDF-DEMO-%-" + caseNo}`;
   if (!row?.report || !row.assignment || !row.grant) throw new Error(`seed objects for ${caseNo} missing`);
   return row;
+}
+
+/**
+ * A clean reporter attachment (CDF-72) on the case's source report, added through the anonymous portal
+ * commands. Seed reports store sha256('unusable-seed-secret:' || ref) as their secret HMAC (seed 02).
+ */
+async function reporterAttachment(s: Scenario, reportRef: string): Promise<string> {
+  const hmac = createHash("sha256").update(`unusable-seed-secret:${reportRef}`, "utf8").digest("hex");
+  await s.as(null);
+  const [a] = await s.tx<{ id: string }[]>`
+    select attachment_id as id from public_api.register_report_attachment(${reportRef}, ${hmac}, 'REPORT', 'pdf',
+      'application/pdf', 2048, ${createHash("sha256").update(randomUUID()).digest("hex")})`;
+  await s.tx`select public_api.complete_report_attachment(${reportRef}, ${hmac}, ${a!.id}, 'CLEAN', 'probe')`;
+  return a!.id;
 }
 
 /**
@@ -291,6 +312,7 @@ const randomTargets = (): Targets => ({
   version: randomUUID(),
   revealRequest: randomUUID(),
   formInstance: randomUUID(),
+  attachment: randomUUID(),
 });
 
 describe("catalog guard", () => {
@@ -338,7 +360,8 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
               "investigatorB",
             )
           : await insiderObjects(s, target, "grcDirector", "grcDirector", "grcDirector", "SECRET");
-      const real: Targets = { case: target, ...seeded, ...inside };
+      const attachment = await reporterAttachment(s, seeded.reportRef);
+      const real: Targets = { case: target, ...seeded, ...inside, attachment };
       await s.as(actor);
       const self = USERS[actor];
       const mismatches: string[] = [];
@@ -459,10 +482,16 @@ describe("non-object commands", () => {
         "RESTRICTED",
         "investigatorB",
       );
+      const attachment = await reporterAttachment(s, seeded.reportRef);
       await s.as("revoked");
       const leaks: string[] = [];
       for (const probe of PROBES) {
-        const got = await outcomeOf(s, probe, { case: caseB, ...seeded, ...inside }, USERS.revoked);
+        const got = await outcomeOf(
+          s,
+          probe,
+          { case: caseB, ...seeded, ...inside, attachment },
+          USERS.revoked,
+        );
         if (!["EMPTY", "FALSE", "NOT_FOUND"].includes(got) && !got.startsWith("ERROR CDF_UNAUTHENTICATED"))
           leaks.push(`${probe.fn}: ${got}`);
       }
