@@ -155,12 +155,19 @@ begin
 end;
 $$;
 
+-- Only the portal's byte bucket: a byte budget on any other bucket (for example a report's failed-access
+-- counter) would let one call lock a known Report ID (CDF-62 review, LOW 1).
 create function public_api.consume_rate_limit_amount(p_bucket text, p_amount int, p_limit int, p_window_seconds int)
 returns boolean
-language sql security definer
+language plpgsql security definer
 set search_path = ''
 as $$
-  select core.consume_rate_limit_amount(p_bucket, p_amount, p_limit, p_window_seconds);
+begin
+  if p_bucket is null or p_bucket !~ '^portal_attachment_kib:[A-Za-z0-9_-]{1,128}$' then
+    raise exception using errcode = 'check_violation', message = 'CDF_INVALID:rate_limit_bucket';
+  end if;
+  return core.consume_rate_limit_amount(p_bucket, p_amount, p_limit, p_window_seconds);
+end;
 $$;
 
 -- -----------------------------------------------------------------------------

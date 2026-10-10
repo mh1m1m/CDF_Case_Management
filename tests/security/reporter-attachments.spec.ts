@@ -198,6 +198,24 @@ describe("rate limits by count and by bytes", () => {
       );
     });
   });
+
+  it("consume_rate_limit_amount refuses every bucket but the portal's byte bucket", async () => {
+    await scenario(async (s) => {
+      await s.as(null);
+      // A byte budget on a report's failed-access counter would lock a known Report ID in one call.
+      const lockout = `report_fail:${createHash("sha256").update(INTAKE_REF).digest("hex")}`;
+      for (const bucket of [
+        lockout,
+        "portal_submit:abc",
+        "portal_attachment_kib:",
+        "portal_attachment_kib:a b",
+      ])
+        await s.expectError(
+          "CDF_INVALID:rate_limit_bucket",
+          (tx) => tx`select public_api.consume_rate_limit_amount(${bucket}, 1048576, 104857600, 900)`,
+        );
+    });
+  });
 });
 
 /** Runs as the table owner (the migration role) in a transaction that is always rolled back. */

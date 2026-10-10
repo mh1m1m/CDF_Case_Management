@@ -66,7 +66,15 @@ Both of those commands re-authenticate the report and act only on an attachment 
 - the actor type is `ANONYMOUS_REPORTER`;
 - the metadata carries ids, codes, sizes and hashes only.
 
-The scan verdict is asserted by the portal server, which is the only anon database caller (login role `cdf_portal`; the browser never reaches the database). This is the same trust model as `api.complete_evidence_version`.
+**Accepted trust boundary: the scan verdict.**
+
+- The database cannot verify a scan. It trusts the `CLEAN` verdict that the portal server passes to `complete_report_attachment`.
+- That server is the only anon database caller (login role `cdf_portal`); the browser never reaches the database.
+- This is the same trust model as `api.complete_evidence_version`.
+- What limits the impact: a table check enforces `AVAILABLE ⇒ CLEAN`, only `AVAILABLE` files can be downloaded, and downloads are served as sandboxed `nosniff` attachments.
+- `MockMalwareScanner` is **PRODUCTION_SUBSTITUTION_REQUIRED**. In production the approved scanning service should sign or record its own verdict.
+
+The byte limiter `public_api.consume_rate_limit_amount` accepts only the portal's `portal_attachment_kib:` bucket. A byte budget on any other bucket, such as a report's failed-access counter, could lock a known Report ID in one call.
 
 ### Download: scan gate first, then case visibility
 
