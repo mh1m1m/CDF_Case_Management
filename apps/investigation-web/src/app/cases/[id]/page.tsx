@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
 import { ASSIGNMENT_ROLES, PRIORITIES } from "@cdf/contracts";
@@ -21,6 +22,11 @@ import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { assignAction, declareConflictAction, transitionAction, updateDetailsAction } from "./actions";
 import { EvidencePanel } from "./evidence-panel";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.caseDetail") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -71,6 +77,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       <CDFProgressTracker
         label={t("cases.progress")}
         current={c.currentState}
+        stateLabels={{
+          done: t("cases.stepDone"),
+          current: t("cases.stepCurrent"),
+          upcoming: t("cases.stepUpcoming"),
+        }}
         steps={STATES.filter((s) => s.sequence <= 150).map((s) => ({
           code: s.code,
           label: t.locale === "ar" ? s.nameAr : s.nameEn,

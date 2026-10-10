@@ -87,7 +87,7 @@ A refused transition raises a `CDF_*` error and rolls back; the application laye
 
 ## 7. The first vertical slice, end to end
 
-1. Reporter submits through the portal → `intake.report` (`RECEIVED`), vault row if identified, `REPORT_SUBMITTED` audit as `ANONYMOUS_REPORTER`.
+1. Reporter submits through the portal → `intake.report` (`RECEIVED`), vault row if email-only (email only) or identified (Drive identity fields, CDF-63), `REPORT_SUBMITTED` audit as `ANONYMOUS_REPORTER`.
 2. Triage officer records `OPEN_CASE` → report `ACCEPTED`, `REPORT_TRIAGED`.
 3. Triage officer or case manager runs `api.create_case_from_report()` → `case_record`, `workflow_instance` at `REGISTERED` (system transition `REGISTER`), a `TRIAGE`-scope access grant for the creator, `CASE_CREATED`; report becomes `CASE_OPENED`.
 4. Screening: `START_SCREENING`; record an allegation; `COMPLETE_SCREENING`.

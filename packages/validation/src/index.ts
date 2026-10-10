@@ -6,10 +6,20 @@
 import { z } from "zod";
 import {
   ASSIGNMENT_ROLES,
+  BIRTH_DATE_CALENDARS,
+  CITIES,
   CLASSIFICATION_LEVELS,
   EVIDENCE_TYPES,
+  FORM_APPROVAL_OUTCOMES,
+  FORM_REVIEW_OUTCOMES,
+  FORM_TEXTAREA_MAX,
+  GENDERS,
+  ID_TYPES,
+  NATIONALITIES,
   PRIORITIES,
+  RELATIONSHIPS_TO_FUND,
   REPORT_CATEGORIES,
+  REPORTER_MODES,
   TRIAGE_OUTCOMES,
 } from "@cdf/contracts";
 
@@ -31,70 +41,148 @@ const optionalText = (max: number) =>
 const uuid = z.uuid({ message: "validation.invalid" });
 
 // ---- Public portal --------------------------------------------------------------------------
+// Field set from the Drive whistleblowing requirements report (CDF-63). The database command
+// public_api.submit_report re-checks every rule.
+
+const requiredEmail = z
+  .string({ message: "validation.required" })
+  .trim()
+  .toLowerCase()
+  .min(1, { message: "validation.required" })
+  .max(254, { message: "validation.tooLong" })
+  .pipe(z.email({ message: "validation.email" }));
+
+const requiredChoice = <T extends readonly [string, ...string[]]>(values: T) =>
+  z.enum(values, { message: "validation.required" });
+
+/** Mandatory text: empty or missing reads as "required", then the length rules apply. */
+const requiredText = (min: number, max: number) =>
+  z
+    .string({ message: "validation.required" })
+    .trim()
+    .min(1, { message: "validation.required" })
+    .min(min, { message: "validation.tooShort" })
+    .max(max, { message: "validation.tooLong" });
+
+const namePart = requiredText(1, 60);
+
+const ID_NUMBER_PATTERNS: Record<(typeof ID_TYPES)[number], RegExp> = {
+  NATIONAL_ID: /^1[0-9]{9}$/,
+  IQAMA: /^2[0-9]{9}$/,
+  PASSPORT: /^[A-Z0-9]{5,20}$/,
+};
+
+/** True when `value` is YYYY-MM-DD and a plausible past date in `calendar` (no conversion). */
+export function isValidBirthDate(value: string, calendar: (typeof BIRTH_DATE_CALENDARS)[number]): boolean {
+  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(value);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (mo < 1 || mo > 12 || d < 1) return false;
+  if (calendar === "HIJRI") return y >= 1318 && y <= 1460 && d <= 30;
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return y >= 1900 && date.getUTCDate() === d && value <= new Date().toISOString().slice(0, 10);
+}
+
+/** Email-only mode (Drive field 3): the email is the only identity value, stored in the vault. */
+export const emailOnlyIdentitySchema = z.object({ email: requiredEmail });
+
+/** Identified mode (Drive fields 4–12): every field is mandatory. */
 export const reportIdentitySchema = z
   .object({
-    fullName: optionalText(200),
-    email: z
-      .string()
+    givenName: namePart,
+    fatherName: namePart,
+    grandfatherName: namePart,
+    familyName: namePart,
+    gender: requiredChoice(GENDERS),
+    birthDateCalendar: requiredChoice(BIRTH_DATE_CALENDARS),
+    birthDate: z.string({ message: "validation.required" }).trim().min(1, { message: "validation.required" }),
+    idType: requiredChoice(ID_TYPES),
+    idNumber: z
+      .string({ message: "validation.required" })
       .trim()
-      .toLowerCase()
-      .max(254)
-      .optional()
-      .transform((v) => (v ? v : undefined))
-      .pipe(z.email({ message: "validation.email" }).optional()),
+      .toUpperCase()
+      .min(1, { message: "validation.required" }),
+    city: requiredChoice(CITIES),
+    nationality: z
+      .string({ message: "validation.required" })
+      .refine((v) => (NATIONALITIES as readonly string[]).includes(v), { message: "validation.required" }),
     phone: z
-      .string()
+      .string({ message: "validation.required" })
       .trim()
-      .optional()
-      .transform((v) => (v ? v : undefined))
-      .pipe(
-        z
-          .string()
-          .regex(/^\+?[0-9 ()-]{6,40}$/, { message: "validation.phone" })
-          .optional(),
-      ),
+      .min(1, { message: "validation.required" })
+      .regex(/^\+?[0-9 ()-]{6,40}$/, { message: "validation.phone" }),
+    email: requiredEmail,
     preferredContact: z.enum(["EMAIL", "PHONE", "PORTAL_ONLY"]).default("PORTAL_ONLY"),
   })
-  .refine((v) => v.fullName || v.email || v.phone, {
-    message: "validation.identityRequired",
-    path: ["fullName"],
+  .superRefine((v, ctx) => {
+    if (!isValidBirthDate(v.birthDate, v.birthDateCalendar))
+      ctx.addIssue({ code: "custom", message: "validation.birthDate", path: ["birthDate"] });
+    if (!ID_NUMBER_PATTERNS[v.idType].test(v.idNumber))
+      ctx.addIssue({ code: "custom", message: "validation.idNumber", path: ["idNumber"] });
   });
+
+function identitySchemaFor(mode: unknown) {
+  if (mode === "EMAIL_ONLY") return emailOnlyIdentitySchema;
+  if (mode === "IDENTIFIED") return reportIdentitySchema;
+  return null;
+}
 
 export const submitReportSchema = z
   .object({
-    category: z.enum(REPORT_CATEGORIES, { message: "validation.required" }),
-    subjectDescription: optionalText(500),
-    description: text(20, 8000),
+    relationship: requiredChoice(RELATIONSHIPS_TO_FUND),
+    relationshipOther: optionalText(500),
+    category: requiredChoice(REPORT_CATEGORIES),
+    categoryOther: optionalText(1000),
+    subjectDescription: requiredText(2, 500),
+    description: requiredText(20, 8000),
     incidentDate: z
-      .string()
-      .optional()
-      .transform((v) => (v ? v : undefined))
+      .string({ message: "validation.required" })
+      .min(1, { message: "validation.required" })
       .pipe(
         z.iso
           .date({ message: "validation.invalid" })
-          .refine((d) => d <= new Date().toISOString().slice(0, 10), { message: "validation.futureDate" })
-          .optional(),
+          .refine((d) => d <= new Date().toISOString().slice(0, 10), { message: "validation.futureDate" }),
       ),
-    location: optionalText(200),
+    incidentTime: z
+      .string({ message: "validation.required" })
+      .min(1, { message: "validation.required" })
+      .regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, { message: "validation.invalid" }),
+    location: requiredText(2, 200),
+    willingToCooperate: z.enum(["YES", "NO"], { message: "validation.required" }),
     language: z.enum(["ar", "en"]).default("ar"),
-    reporterMode: z.enum(["ANONYMOUS", "IDENTIFIED"]),
-    // Validated only for identified reports; anything entered in anonymous mode is discarded.
+    reporterMode: requiredChoice(REPORTER_MODES),
     identity: z.unknown().optional(),
     acknowledgement: z.literal(true, { message: "validation.acknowledgementRequired" }),
   })
-  .transform((v, ctx) => {
-    if (v.reporterMode === "ANONYMOUS") return { ...v, identity: undefined };
-    const identity = reportIdentitySchema.safeParse(v.identity ?? {});
-    if (!identity.success) {
+  // Identity is checked even when other fields are invalid, so every error shows in one pass.
+  .superRefine(
+    (v, ctx) => {
+      const schema = identitySchemaFor(v?.reporterMode);
+      if (!schema) return;
+      const identity = schema.safeParse(v.identity ?? {});
+      if (identity.success) return;
       for (const issue of identity.error.issues) {
         ctx.addIssue({ code: "custom", message: issue.message, path: ["identity", ...issue.path] });
       }
-      return z.NEVER;
-    }
-    return { ...v, identity: identity.data };
+    },
+    { when: () => true },
+  )
+  .transform((v) => {
+    const base = {
+      ...v,
+      // Conditional "other" texts (Drive fields 2 and 14) only travel with "Other".
+      relationshipOther: v.relationship === "OTHER" ? v.relationshipOther : undefined,
+      categoryOther: v.category === "OTHER" ? v.categoryOther : undefined,
+    };
+    const schema = identitySchemaFor(v.reporterMode);
+    // Validated above; anything entered for another mode is discarded, never sent.
+    if (!schema) return { ...base, identity: undefined };
+    return { ...base, identity: schema.parse(v.identity ?? {}) as ReportIdentity | EmailOnlyIdentity };
   });
+export type ReportIdentity = z.output<typeof reportIdentitySchema>;
+export type EmailOnlyIdentity = z.output<typeof emailOnlyIdentitySchema>;
 export type SubmitReportInput = Omit<z.input<typeof submitReportSchema>, "identity"> & {
-  identity?: z.input<typeof reportIdentitySchema>;
+  identity?: Partial<z.input<typeof reportIdentitySchema>>;
 };
 export type SubmitReport = z.output<typeof submitReportSchema>;
 
@@ -194,6 +282,41 @@ export const uploadEvidenceSchema = z
     path: ["classification"],
   });
 export type UploadEvidenceInput = z.output<typeof uploadEvidenceSchema>;
+
+// ---- Forms engine (Phase 8; ADR-011). Field values are checked against the definition by @cdf/domain
+// validateFormData and by forms.validate_data; these schemas cover the command envelope.
+const formCode = z.string().regex(/^WB-FRM-\d{2}$/, { message: "validation.invalid" });
+
+export const startFormSchema = z.object({
+  caseId: uuid,
+  formCode,
+  classification: z.enum(CLASSIFICATION_LEVELS, { message: "validation.required" }),
+});
+
+export const saveFormDraftSchema = z.object({
+  instanceId: uuid,
+  formCode,
+  data: z.record(
+    z.string().regex(/^[a-z][a-z0-9_]{1,63}$/, { message: "validation.invalid" }),
+    z.string().max(FORM_TEXTAREA_MAX, { message: "validation.tooLong" }),
+  ),
+});
+
+export const prepareFormSchema = z.object({ instanceId: uuid, formCode });
+
+const decisionReason = optionalText(2000);
+const returnNeedsReason = (v: { outcome: string; reason?: string }) =>
+  v.outcome !== "RETURNED" || (v.reason !== undefined && v.reason.length >= 10);
+
+export const reviewFormSchema = z
+  .object({ instanceId: uuid, formCode, outcome: z.enum(FORM_REVIEW_OUTCOMES), reason: decisionReason })
+  .refine(returnNeedsReason, { message: "validation.tooShort", path: ["reason"] });
+
+export const approveFormSchema = z
+  .object({ instanceId: uuid, formCode, outcome: z.enum(FORM_APPROVAL_OUTCOMES), reason: decisionReason })
+  .refine(returnNeedsReason, { message: "validation.tooShort", path: ["reason"] });
+
+export const withdrawFormSchema = z.object({ instanceId: uuid, formCode, reason: text(5, 2000) });
 
 export const revealRequestSchema = z.object({ caseId: uuid, justification: text(20, 2000) });
 
