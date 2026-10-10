@@ -10,6 +10,9 @@ import {
   CITIES,
   CLASSIFICATION_LEVELS,
   EVIDENCE_TYPES,
+  FORM_APPROVAL_OUTCOMES,
+  FORM_REVIEW_OUTCOMES,
+  FORM_TEXTAREA_MAX,
   GENDERS,
   ID_TYPES,
   NATIONALITIES,
@@ -279,6 +282,41 @@ export const uploadEvidenceSchema = z
     path: ["classification"],
   });
 export type UploadEvidenceInput = z.output<typeof uploadEvidenceSchema>;
+
+// ---- Forms engine (Phase 8; ADR-011). Field values are checked against the definition by @cdf/domain
+// validateFormData and by forms.validate_data; these schemas cover the command envelope.
+const formCode = z.string().regex(/^WB-FRM-\d{2}$/, { message: "validation.invalid" });
+
+export const startFormSchema = z.object({
+  caseId: uuid,
+  formCode,
+  classification: z.enum(CLASSIFICATION_LEVELS, { message: "validation.required" }),
+});
+
+export const saveFormDraftSchema = z.object({
+  instanceId: uuid,
+  formCode,
+  data: z.record(
+    z.string().regex(/^[a-z][a-z0-9_]{1,63}$/, { message: "validation.invalid" }),
+    z.string().max(FORM_TEXTAREA_MAX, { message: "validation.tooLong" }),
+  ),
+});
+
+export const prepareFormSchema = z.object({ instanceId: uuid, formCode });
+
+const decisionReason = optionalText(2000);
+const returnNeedsReason = (v: { outcome: string; reason?: string }) =>
+  v.outcome !== "RETURNED" || (v.reason !== undefined && v.reason.length >= 10);
+
+export const reviewFormSchema = z
+  .object({ instanceId: uuid, formCode, outcome: z.enum(FORM_REVIEW_OUTCOMES), reason: decisionReason })
+  .refine(returnNeedsReason, { message: "validation.tooShort", path: ["reason"] });
+
+export const approveFormSchema = z
+  .object({ instanceId: uuid, formCode, outcome: z.enum(FORM_APPROVAL_OUTCOMES), reason: decisionReason })
+  .refine(returnNeedsReason, { message: "validation.tooShort", path: ["reason"] });
+
+export const withdrawFormSchema = z.object({ instanceId: uuid, formCode, reason: text(5, 2000) });
 
 export const revealRequestSchema = z.object({ caseId: uuid, justification: text(20, 2000) });
 

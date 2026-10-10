@@ -75,6 +75,10 @@ export const PERMISSIONS = [
   "ROLE_ADMIN",
   "EVIDENCE_UPLOAD",
   "EVIDENCE_DOWNLOAD",
+  "FORM_VIEW",
+  "FORM_PREPARE",
+  "FORM_REVIEW",
+  "FORM_APPROVE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -300,3 +304,5 @@ export type AppErrorKind = (typeof APP_ERROR_KINDS)[number];
 export type Result<T> =
   | { ok: true; value: T }
   | { ok: false; error: { kind: AppErrorKind; detail?: string; correlationId: string } };
+
+export * from "./forms";

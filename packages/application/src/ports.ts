@@ -8,6 +8,12 @@ import type {
   CaseListItem,
   EvidenceItem,
   EvidenceRejectionCode,
+  FormApprovalOutcome,
+  FormData,
+  FormDefinitionListItem,
+  FormInstanceDetail,
+  FormInstanceSummary,
+  FormReviewOutcome,
   IntakeReportItem,
   PublicReportStatus,
   ReportDetail,
@@ -129,6 +135,40 @@ export interface EvidenceGateway {
   ): Promise<void>;
   /** Records the download (custody + audit) and returns the storage facts, or null when denied/missing. */
   openVersion(ctx: UserRequestContext, versionId: string): Promise<EvidenceDownloadRecord | null>;
+}
+
+// ---- Forms engine (Phase 8; ADR-011) ---------------------------------------------------------
+export interface SavedFormVersion {
+  versionId: string;
+  versionNo: number;
+  contentHash: string;
+}
+
+export interface FormsGateway {
+  /** The registry with the caller's right to start each form on this case (authz.can_prepare_form). */
+  listDefinitions(ctx: UserRequestContext, caseId: string): Promise<FormDefinitionListItem[]>;
+  listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceSummary[]>;
+  /** Calls api.open_form_instance (audit) and returns the instance, or null when denied or missing. */
+  getInstance(ctx: UserRequestContext, instanceId: string): Promise<FormInstanceDetail | null>;
+  startForm(
+    ctx: UserRequestContext,
+    input: { caseId: string; formCode: string; classification: string },
+  ): Promise<string>;
+  saveDraft(ctx: UserRequestContext, instanceId: string, data: FormData): Promise<SavedFormVersion>;
+  prepare(ctx: UserRequestContext, instanceId: string): Promise<void>;
+  review(
+    ctx: UserRequestContext,
+    instanceId: string,
+    outcome: FormReviewOutcome,
+    reason?: string,
+  ): Promise<void>;
+  approve(
+    ctx: UserRequestContext,
+    instanceId: string,
+    outcome: FormApprovalOutcome,
+    reason?: string,
+  ): Promise<void>;
+  withdraw(ctx: UserRequestContext, instanceId: string, reason: string): Promise<void>;
 }
 
 // ---- Data gateways (implemented over the per-transaction security context) --------------------
