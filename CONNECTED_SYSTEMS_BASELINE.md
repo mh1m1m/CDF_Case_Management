@@ -4,6 +4,8 @@ CDF-CEOM initial activation report · 2026-10-07 · Linear: [CDF-31](https://lin
 
 Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Every value below was read from the connected system on 2026-10-07. Anything that could not be read is `CONNECTOR_UNAVAILABLE` with the error; nothing is inferred.
 
+Update 2026-10-10, Supabase only: the project is DEV (`cdf-case-dev`). It holds migrations 0100–0700, and 0800–1000 are pending. The current state, drift records and validation gates are kept in `compliance/evidence/HOSTED_DEV_VALIDATION.md`; the Supabase values below are the 2026-10-07 snapshot.
+
 ## Summary
 
 | System       | Reachable | What exists                                                      | Status for this platform                                  |
