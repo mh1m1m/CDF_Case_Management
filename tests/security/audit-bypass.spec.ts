@@ -18,6 +18,24 @@ beforeAll(async () => {
 });
 
 const REASON = "Synthetic: audit regression walk.";
+// Forms engine (CDF-50): valid content for an investigation form and a committee form.
+const FORM_DATA = {
+  evidenceRegister: {
+    evidence_count: "2",
+    evidence_scope: "Synthetic: audit walk register.",
+    chain_of_custody_status: "مكتملة",
+    storage_confirmation: "true",
+  },
+  committeeFormation: {
+    formation_reference: "CDF-DEMO-WALK-0001",
+    formation_date: "2026-03-01",
+    chair: "Committee Chair Xi",
+    members: "Committee Member Epsilon",
+    secretary: "Committee Secretary Nu",
+    scope: "Synthetic: audit walk committee.",
+    independence_confirmed: "true",
+  },
+};
 // Read-only or event-only functions: they are not state-changing commands for this guard.
 const NOT_STATE_CHANGING = new Set([
   "available_transitions",
@@ -197,6 +215,83 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.reject_evidence_version(${r!.v}, 'MALWARE_DETECTED', 'INFECTED', 'walk-scanner')`;
         },
       },
+      // Forms engine (CDF-50): an investigation form through save, prepare and review (its final state), a
+      // committee form through review and approval by three different people, a draft withdrawn, and the
+      // audited open of an instance.
+      {
+        fn: "start_form",
+        actor: "investigatorA",
+        run: async (s) =>
+          (ids.form = await one(
+            s,
+            s.tx`select api.start_form(${caseA}, 'WB-FRM-11', 'CONFIDENTIAL'::core.classification_level) as id`,
+          )),
+      },
+      {
+        fn: "save_form_draft",
+        actor: "investigatorA",
+        run: (s) =>
+          s.tx`select * from api.save_form_draft(${ids.form!}, ${s.tx.json(FORM_DATA.evidenceRegister)})`,
+      },
+      {
+        fn: "prepare_form",
+        actor: "investigatorA",
+        run: (s) => s.tx`select api.prepare_form(${ids.form!})`,
+      },
+      {
+        fn: "review_form",
+        actor: "lead",
+        run: (s) => s.tx`select api.review_form(${ids.form!}, 'REVIEWED', null)`,
+      },
+      {
+        fn: "open_form_instance",
+        actor: "lead",
+        run: (s) => s.tx`select api.open_form_instance(${ids.form!})`,
+      },
+      {
+        fn: "start_form",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.committeeForm = await one(
+            s,
+            s.tx`select api.start_form(${caseA}, 'WB-FRM-13', 'CONFIDENTIAL'::core.classification_level) as id`,
+          )),
+      },
+      {
+        fn: "save_form_draft",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select * from api.save_form_draft(${ids.committeeForm!}, ${s.tx.json(FORM_DATA.committeeFormation)})`,
+      },
+      {
+        fn: "prepare_form",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.prepare_form(${ids.committeeForm!})`,
+      },
+      {
+        fn: "review_form",
+        actor: "committeeChair",
+        run: (s) => s.tx`select api.review_form(${ids.committeeForm!}, 'REVIEWED', null)`,
+      },
+      {
+        fn: "approve_form",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.approve_form(${ids.committeeForm!}, 'APPROVED', null)`,
+      },
+      {
+        fn: "start_form",
+        actor: "investigatorA",
+        run: async (s) =>
+          (ids.draftForm = await one(
+            s,
+            s.tx`select api.start_form(${caseA}, 'WB-FRM-11', 'CONFIDENTIAL'::core.classification_level) as id`,
+          )),
+      },
+      {
+        fn: "withdraw_form",
+        actor: "investigatorA",
+        run: (s) => s.tx`select api.withdraw_form(${ids.draftForm!}, ${REASON})`,
+      },
       {
         fn: "grant_role",
         actor: "platformAdmin",
@@ -336,24 +431,33 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'intake', 'iam', 'protected_identity', 'public_api')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
-    // Predicates about the caller only (used by RLS policies), plus the shared rate limiter.
+    // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers
+    // (ADR-011: canonical JSON, content hash and terminal status read no data) and the shared rate limiter.
     expect(rows.map((r) => r.fn)).toEqual([
+      "authz.can_approve_form",
       "authz.can_assign_case",
       "authz.can_download_evidence",
       "authz.can_edit_case",
+      "authz.can_prepare_form",
       "authz.can_reveal_whistleblower_identity",
+      "authz.can_review_form",
       "authz.can_upload_evidence",
       "authz.can_view_case",
       "authz.can_view_evidence",
+      "authz.can_view_form_instance",
       "authz.can_view_report",
       "authz.current_clearance",
       "authz.current_roles",
       "authz.current_subject",
       "authz.current_user_id",
+      "authz.form_entitled",
       "authz.has_permission",
+      "forms.canonical_json",
+      "forms.content_hash",
+      "forms.terminal_status",
       "public_api.consume_rate_limit",
     ]);
   });

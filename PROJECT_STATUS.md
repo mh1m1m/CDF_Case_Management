@@ -2,7 +2,7 @@
 
 Protocol §92. Updated at the end of every phase PR.
 
-**As of:** Phases 0–7, evidence and chain of custody (second vertical slice) · 2026-10-07
+**As of:** Phases 0–7 plus the Phase 8 forms engine (CDF-50, draft PR stacked on PR #7) · 2026-10-07
 
 Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Nothing here is a production control; see
 `architecture/PRODUCTION_MAPPING.md` for every `PRODUCTION_SUBSTITUTION_REQUIRED` item.
@@ -36,11 +36,11 @@ basis and are kept for continuity. Linear remains the backlog system of record.
 
 | Metric                              | Value | Basis                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| IMPLEMENTATION_COMPLETION_PERCENT   | 32%   | Slices: anonymous report → triage → case → assignment → investigation; evidence upload → scan → vault → versioned, audited download. Interviews, findings, committee, reporting, notifications, search not started                                                                                            |
+| IMPLEMENTATION_COMPLETION_PERCENT   | 36%   | Slices: anonymous report → triage → case → assignment → investigation; evidence upload → scan → vault → versioned, audited download. Interviews, findings, committee, reporting, notifications, search not started                                                                                            |
 | ARCHITECTURE_ALIGNMENT_PERCENT      | 60%   | Two apps, ports/adapters (identity, storage, scanner, security events, rate limiter), DB command layer, RLS, audit ledger in place; hosted Supabase/Vercel deployment not yet done                                                                                                                            |
 | SECURITY_CONTROL_COMPLETION_PERCENT | 50%   | RLS, ABAC clearance, identity vault, append-only hash-chained audit, portal HMAC + rate limiting, CSP, idle timeout, private evidence storage with DB-owned keys, quarantine → scan → vault, immutable versions and custody, audited downloads. Real scanning, WORM storage, KMS, SIEM, MFA are substitutions |
-| TEST_AUTOMATION_PERCENT             | 55%   | Unit (67), DB security (99), integration (11), e2e (5), accessibility (4) green locally on the evidence branch; CI evidence for PR #3 at `c1a29cb`                                                                                                                                                            |
-| BASELINE_MIGRATION_PERCENT          | 35%   | Baseline intake/triage/case/workflow/evidence features migrated; forms, interviews and later modules pending                                                                                                                                                                                                  |
+| TEST_AUTOMATION_PERCENT             | 58%   | Unit (92), DB security (116), integration (18), e2e (7), accessibility (4) green locally on the forms branch; CI evidence for PR #3 at `c1a29cb` and PR #7 at `54786e4`                                                                                                                                       |
+| BASELINE_MIGRATION_PERCENT          | 42%   | Baseline intake/triage/case/workflow/evidence features and the 19-form WB-FRM catalogue migrated; interviews and later modules pending                                                                                                                                                                        |
 
 ## Engineering status (CDF-CEOM)
 
@@ -53,7 +53,7 @@ Linear issue IDs below refer to the CDF workspace, team **CDF** (https://linear.
 | Current issues             | Phase 7 evidence story under CDF-13 (IN_PROGRESS); CDF-30 first vertical slice (IN_REVIEW, PR #3); CDF-32 apply migrations to the hosted Supabase project; CDF-34 Supabase CLI CI job; CDF-28/CDF-29 PRs #1 and #2 (IN_REVIEW) |
 | Latest stable commit       | `c1a29cb` on `phase-2-6/first-vertical-slice` (PR #3): CI run 37605838274 and CodeQL run 37605838514 green                                                                                                                     |
 | Latest stable deployment   | None                                                                                                                                                                                                                           |
-| Database migration version | `20261007000900_evidence`                                                                                                                                                                                                      |
+| Database migration version | `20261007001110_form_definitions_seed` (forms branch); `20261007000900_evidence` on PR #7                                                                                                                                      |
 | Known blockers             | Connector tools are not loaded in the build thread; connector work runs in the connected-systems thread (PR #5, CDF-31). Hosted Supabase project is empty (CDF-32); no Vercel project linked (CDF-33)                          |
 | Critical security issues   | None known                                                                                                                                                                                                                     |
 | Next work                  | Review and merge PRs #1 → #2 → #3 and the Phase 7 PR (human decision); Phase 8 forms, activities and interviews under EPIC 09 (CDF-14, title per Linear)                                                                       |
@@ -70,7 +70,9 @@ Linear issue IDs below refer to the CDF workspace, team **CDF** (https://linear.
 | 5 Portal + identity vault | COMPLETE for slice scope (prototype key provider is PRODUCTION_SUBSTITUTION_REQUIRED)                                                                               |
 | 6 Workflow engine         | IN_PROGRESS (states/transitions to INVESTIGATION verified; later states defined, not exercised)                                                                     |
 | 7 Evidence + custody      | COMPLETE for slice scope (local filesystem store and mock scanner are PRODUCTION_SUBSTITUTION_REQUIRED; Supabase Storage adapter untested against a hosted project) |
-| 8–15                      | NOT_STARTED (Phase 8 forms, activities and interviews is next, EPIC 09 CDF-14)                                                                                      |
+| 8 Forms engine (CDF-50)   | COMPLETE for slice scope (19 WB-FRM definitions as versioned data, instances with versions and hashes, prepare/review/approve lifecycle; approvers SOURCE_REQUIRED) |
+| 8 Interviews (CDF-60)     | IN_PROGRESS on a parallel swarm branch (ADR-012)                                                                                                                    |
+| 9–15                      | NOT_STARTED (records and legal hold design in CDF-61/CDF-69)                                                                                                        |
 
 ## Open issues
 
