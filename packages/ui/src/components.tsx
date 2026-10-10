@@ -314,7 +314,7 @@ export function CDFProgressTracker({
   const currentIndex = steps.findIndex((s) => s.code === current);
   return (
     // One labelled region (not navigation). Scrollable on narrow screens, so keyboard focusable (WCAG 2.1.1).
-    <div role="region" aria-label={label} tabIndex={0} className="mb-6 overflow-x-auto">
+    <div role="region" aria-label={label} tabIndex={0} className="relative mb-6 overflow-x-auto">
       <ol className="flex min-w-max gap-1 text-xs">
         {steps.map((s, i) => {
           const state = i < currentIndex ? "done" : i === currentIndex ? "current" : "upcoming";
