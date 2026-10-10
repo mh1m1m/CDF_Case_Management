@@ -34,6 +34,12 @@ export const en = {
     intake: "Intake & Triage",
     cases: "Cases",
   },
+  /** Browser tab titles (WCAG 2.4.2); the layout appends the app name. Never a Report ID, secret or case content. */
+  pageTitles: {
+    overview: "Overview",
+    caseDetail: "Case",
+    intakeDetail: "Intake report",
+  },
   errors: {
     UNAUTHENTICATED: "Your session has ended. Please sign in again.",
     NOT_FOUND: "Not found or not available to you.",
@@ -364,12 +370,6 @@ export const en = {
     STORED: "Stored in the vault",
     REJECTED: "Rejected",
     DOWNLOADED: "Downloaded",
-  },
-  /** Browser tab titles (WCAG 2.4.2); the layout appends the app name. Never a Report ID, secret or case content. */
-  pageTitles: {
-    overview: "Overview",
-    caseDetail: "Case",
-    intakeDetail: "Intake report",
   },
 };
 
