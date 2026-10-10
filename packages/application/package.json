@@ -1,0 +1,20 @@
+{
+  "name": "@cdf/application",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cdf/contracts": "workspace:*",
+    "@cdf/domain": "workspace:*",
+    "@cdf/validation": "workspace:*",
+    "@cdf/workflow": "workspace:*",
+    "@cdf/authorization": "workspace:*",
+    "@cdf/audit": "workspace:*"
+  }
+}

@@ -4,6 +4,7 @@
 - **Protocol:** §6, §7, §67, §85, §86, §94
 
 ## Decision
+
 1. **Security invariants live in PostgreSQL** (RLS, `authz.*`, command functions, audit ledger, identity vault, workflow guards). PostgreSQL is the one component that survives the production migration (Supabase Postgres → RDS PostgreSQL), while the Next.js BFF is expected to be replaced or fronted by ASP.NET Core. Putting invariants in the database preserves them across that change.
 2. **Pure TypeScript domain packages** carry the same rules for the UI and early denial, with no infrastructure imports.
 3. **Ports and adapters** for everything vendor-specific (identity, storage, keys, security sink, malware scanning, rate limiting).

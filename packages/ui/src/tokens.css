@@ -1,0 +1,134 @@
+/*
+ * CDF design tokens (source: CDF_Design_Tokens.json v1.1, traced to the CDF Design Guide).
+ * Primitive values are immutable; components use semantic tokens only.
+ * Theme: [data-theme="light" | "dark"] on <html>. Direction: dir="rtl" | "ltr" on <html>.
+ * Arabic brand font: BRAND_SOURCE_REQUIRED (system fallback stack below).
+ */
+:root {
+  /* primitives */
+  --cdf-cinder-black: #101820;
+  --cdf-warm-gray: #d7d2cb;
+  --cdf-powder-blue: #bbdde6;
+  --cdf-wistful-blue: #a5b0e3;
+  --cdf-chardonnay-yellow: #fdd086;
+  --cdf-light-salmon: #fa9370;
+  --cdf-jetstream-green: #b5e1c4;
+  --cdf-neutral-dark: #19212b;
+  --cdf-neutral-90: #303841;
+  --cdf-neutral-70: #5e646b;
+  --cdf-neutral-50: #8b9095;
+  --cdf-neutral-30: #babdc0;
+  --cdf-neutral-10: #e8e9ea;
+  --cdf-neutral-5: #f3f4f4;
+  --cdf-white: #ffffff;
+
+  /* semantic: light */
+  --cdf-bg: #f3f4f4;
+  --cdf-surface: #ffffff;
+  --cdf-surface-subtle: #f8f8f7;
+  --cdf-text: #101820;
+  --cdf-text-secondary: #5e646b;
+  --cdf-text-muted: #5e646b; /* textMuted #8B9095 fails AA on white for body text; secondary used instead */
+  --cdf-border: #d7d2cb;
+  --cdf-primary: #101820;
+  --cdf-primary-text: #ffffff;
+  --cdf-focus: #4b6fff;
+  --cdf-success: #22633d;
+  --cdf-warning: #7a4a00;
+  --cdf-danger: #8a2f1b;
+  --cdf-info: #245667;
+  --cdf-success-bg: #e6f4ea;
+  --cdf-warning-bg: #fdf3df;
+  --cdf-danger-bg: #fbe9e4;
+  --cdf-info-bg: #e5f2f6;
+  --cdf-elevation: 0 8px 24px rgba(16, 24, 32, 0.08);
+
+  --cdf-radius-sm: 4px;
+  --cdf-radius-md: 6px;
+  --cdf-radius-lg: 8px;
+  --cdf-radius-xl: 12px;
+  --cdf-motion-fast: 120ms;
+  --cdf-motion-standard: 180ms;
+  --cdf-font: "Segoe UI", Tahoma, "Noto Sans Arabic", "Geeza Pro", Arial, sans-serif;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --cdf-bg: #101820;
+  --cdf-surface: #19212b;
+  --cdf-surface-subtle: #303841;
+  --cdf-text: #ffffff;
+  --cdf-text-secondary: #d8dadd;
+  --cdf-text-muted: #babdc0;
+  --cdf-border: #46505a;
+  --cdf-primary: #ffffff;
+  --cdf-primary-text: #101820;
+  --cdf-focus: #bbdde6;
+  --cdf-success: #b5e1c4;
+  --cdf-warning: #fdd086;
+  --cdf-danger: #ffb19a;
+  --cdf-info: #bbdde6;
+  --cdf-success-bg: #1d3327;
+  --cdf-warning-bg: #3a2f1a;
+  --cdf-danger-bg: #3d241d;
+  --cdf-info-bg: #1b3038;
+  --cdf-elevation: 0 10px 28px rgba(0, 0, 0, 0.28);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-cdf-bg: var(--cdf-bg);
+  --color-cdf-surface: var(--cdf-surface);
+  --color-cdf-surface-subtle: var(--cdf-surface-subtle);
+  --color-cdf-text: var(--cdf-text);
+  --color-cdf-text-secondary: var(--cdf-text-secondary);
+  --color-cdf-text-muted: var(--cdf-text-muted);
+  --color-cdf-border: var(--cdf-border);
+  --color-cdf-primary: var(--cdf-primary);
+  --color-cdf-primary-text: var(--cdf-primary-text);
+  --color-cdf-focus: var(--cdf-focus);
+  --color-cdf-success: var(--cdf-success);
+  --color-cdf-warning: var(--cdf-warning);
+  --color-cdf-danger: var(--cdf-danger);
+  --color-cdf-info: var(--cdf-info);
+  --color-cdf-success-bg: var(--cdf-success-bg);
+  --color-cdf-warning-bg: var(--cdf-warning-bg);
+  --color-cdf-danger-bg: var(--cdf-danger-bg);
+  --color-cdf-info-bg: var(--cdf-info-bg);
+  --color-cdf-powder: var(--cdf-powder-blue);
+  --color-cdf-warm: var(--cdf-warm-gray);
+  --radius-cdf-sm: var(--cdf-radius-sm);
+  --radius-cdf-md: var(--cdf-radius-md);
+  --radius-cdf-lg: var(--cdf-radius-lg);
+  --radius-cdf-xl: var(--cdf-radius-xl);
+  --shadow-cdf: var(--cdf-elevation);
+  --font-cdf: var(--cdf-font);
+  --text-cdf-display: 2rem;
+  --text-cdf-display--line-height: 2.4375rem;
+  --text-cdf-h1: 1.5rem;
+  --text-cdf-h1--line-height: 1.8125rem;
+  --text-cdf-h2: 1.25rem;
+  --text-cdf-h2--line-height: 1.5rem;
+  --text-cdf-h3: 1rem;
+  --text-cdf-h3--line-height: 1.25rem;
+}
+
+html {
+  background: var(--cdf-bg);
+  color: var(--cdf-text);
+  font-family: var(--cdf-font);
+}
+
+:focus-visible {
+  outline: 3px solid var(--cdf-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
