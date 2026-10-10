@@ -71,6 +71,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       <CDFProgressTracker
         label={t("cases.progress")}
         current={c.currentState}
+        stateLabels={{
+          done: t("cases.stepDone"),
+          current: t("cases.stepCurrent"),
+          upcoming: t("cases.stepUpcoming"),
+        }}
         steps={STATES.filter((s) => s.sequence <= 150).map((s) => ({
           code: s.code,
           label: t.locale === "ar" ? s.nameAr : s.nameEn,
