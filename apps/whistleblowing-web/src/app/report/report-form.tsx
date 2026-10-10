@@ -159,7 +159,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
   };
 
   return (
-    <form onSubmit={onSubmit} noValidate data-testid="report-form">
+    <form method="post" onSubmit={onSubmit} noValidate data-testid="report-form">
       {result?.status === "error" ? (
         <CDFAlert tone="danger" testId="form-error">
           {t("errors.withReference", { message: t(`errors.${result.kind}` as MessageKey), ref: result.ref })}

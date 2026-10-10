@@ -114,7 +114,7 @@ export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attac
         {report.canReply ? (
           <CDFCard>
             {replySent ? <CDFAlert tone="success">{t("portal.replySent")}</CDFAlert> : null}
-            <form onSubmit={reply}>
+            <form method="post" onSubmit={reply}>
               <CDFField id="body" label={t("portal.reply")}>
                 <textarea
                   id="body"
@@ -162,7 +162,7 @@ export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attac
           {t("errors.withReference", { message: t(`errors.${result.kind}` as MessageKey), ref: result.ref })}
         </CDFAlert>
       ) : null}
-      <form onSubmit={open} data-testid="follow-up-form">
+      <form method="post" onSubmit={open} data-testid="follow-up-form">
         <CDFField id="reportRef" label={t("portal.reportRef")}>
           <input
             id="reportRef"
