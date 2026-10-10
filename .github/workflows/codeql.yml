@@ -21,4 +21,39 @@ jobs:
         with:
           languages: javascript-typescript
           queries: security-extended
+      # A private repository on a personal GitHub plan has no code scanning, so the
+      # SARIF upload would fail there. Upload only while the repository is public,
+      # and gate on the SARIF here so the check means the same either way (CDF-49).
       - uses: github/codeql-action/analyze@v3
+        with:
+          upload: ${{ github.event.repository.private && 'never' || 'always' }}
+          output: codeql-results
+      - name: Fail on high or critical findings
+        run: |
+          node - <<'JS'
+          const fs = require("fs");
+          const path = require("path");
+          const dir = "codeql-results";
+          let blocking = 0;
+          for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".sarif"))) {
+            const sarif = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+            for (const run of sarif.runs ?? []) {
+              const rules = new Map();
+              for (const r of [run.tool?.driver, ...(run.tool?.extensions ?? [])].flatMap((c) => c?.rules ?? [])) {
+                rules.set(r.id, r);
+              }
+              for (const result of run.results ?? []) {
+                const rule = rules.get(result.ruleId);
+                const severity = Number(rule?.properties?.["security-severity"] ?? 0);
+                if (severity >= 7 || (!severity && result.level === "error")) {
+                  blocking += 1;
+                  const loc = result.locations?.[0]?.physicalLocation;
+                  const where = loc ? `${loc.artifactLocation?.uri}:${loc.region?.startLine ?? 1}` : "unknown";
+                  console.log(`::error file=${loc?.artifactLocation?.uri ?? ""},line=${loc?.region?.startLine ?? 1}::${result.ruleId} (${severity || result.level}) at ${where}: ${result.message?.text ?? ""}`);
+                }
+              }
+            }
+          }
+          console.log(`CodeQL high/critical findings: ${blocking}`);
+          process.exit(blocking > 0 ? 1 : 0);
+          JS

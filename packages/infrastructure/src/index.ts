@@ -17,3 +17,11 @@ export { OBJECT_KEY_PATTERN, QUARANTINE_BUCKET, VAULT_BUCKET, assertObjectKey } 
 export { MockMalwareScanner, EICAR_TEST_SIGNATURE } from "./scanning/mock-scanner";
 export { PostgresFormsGateway } from "./db/forms-gateway";
 export { PostgresInterviewGateway } from "./db/interviews-gateway";
+export {
+  REDACTED,
+  isDeniedKey,
+  scrubBreadcrumb,
+  scrubData,
+  scrubSentryEvent,
+  scrubString,
+} from "./observability/scrub";

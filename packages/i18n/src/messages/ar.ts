@@ -21,6 +21,7 @@ export const ar: Messages = {
     submit: "إرسال",
     required: "مطلوب",
     optional: "اختياري",
+    dateHint: "اختر التاريخ من التقويم. عند الكتابة اتبع ترتيب الحقل كما يظهر.",
     yes: "نعم",
     no: "لا",
     none: "لا يوجد",
@@ -36,6 +37,11 @@ export const ar: Messages = {
     intake: "الوارد والفرز",
     cases: "القضايا",
   },
+  pageTitles: {
+    overview: "نظرة عامة",
+    caseDetail: "قضية",
+    intakeDetail: "بلاغ وارد",
+  },
   errors: {
     UNAUTHENTICATED: "انتهت جلستك. يرجى تسجيل الدخول مرة أخرى.",
     NOT_FOUND: "غير موجود أو غير متاح لك.",
@@ -45,6 +51,16 @@ export const ar: Messages = {
     RATE_LIMITED: "محاولات كثيرة. يرجى الانتظار قليلاً ثم المحاولة مجدداً.",
     UNAVAILABLE: "الخدمة غير متاحة مؤقتاً.",
     withReference: "{message} المرجع: {ref}",
+  },
+  session: {
+    warningTitle: "هل ما زلت هنا؟",
+    warningBody:
+      "سيُسجَّل خروجك خلال دقيقتين لعدم وجود أي نشاط. ستُفقد التغييرات غير المحفوظة في هذه الصفحة.",
+    stay: "البقاء متصلاً",
+    endedTitle: "تم تسجيل خروجك",
+    endedBody:
+      "لأسباب أمنية، سُجّل خروجك بعد {minutes} دقيقة دون نشاط. انسخ أي نص غير محفوظ من هذه الصفحة قبل تسجيل الدخول مرة أخرى.",
+    signInAgain: "تسجيل الدخول مرة أخرى",
   },
   codes: {
     NO_ALLEGATION_RECORDED: "لا توجد مخالفة مسجلة.",
@@ -229,6 +245,7 @@ export const ar: Messages = {
     reportRef: "رقم البلاغ",
     secret: "الرمز السري",
     copy: "نسخ",
+    copyItem: "نسخ {item}",
     copied: "تم النسخ",
     savedConfirm: "حفظت رقم البلاغ والرمز السري",
     followUpTitle: "متابعة بلاغك",
@@ -376,6 +393,7 @@ export const ar: Messages = {
     willingToCooperate: "الرغبة في التعاون",
   },
   cases: {
+    homeTitle: "نظرة عامة",
     title: "القضايا",
     intro: "القضايا المصرح لك بالاطلاع عليها.",
     empty: "لا توجد قضايا متاحة لك.",
@@ -387,6 +405,9 @@ export const ar: Messages = {
     updatedAt: "آخر تحديث",
     due: "الاستحقاق",
     progress: "مسار القضية",
+    stepDone: "مكتملة",
+    stepCurrent: "المرحلة الحالية",
+    stepUpcoming: "لم تبدأ",
     summary: "الملخص",
     details: "بيانات القضية",
     editDetails: "تحديث البيانات",
@@ -413,6 +434,9 @@ export const ar: Messages = {
     transitionReason: "المبررات",
     perform: "تأكيد",
     blocked: "غير متاح",
+    workNav: "أعمال القضية",
+    formsLink: "النماذج",
+    interviewsLink: "المقابلات",
     timeline: "سجل التدقيق",
     noTimeline: "لا توجد أحداث.",
     openedAt: "تاريخ فتح التحقيق",
@@ -422,6 +446,7 @@ export const ar: Messages = {
   },
   evidence: {
     title: "الأدلة",
+    tableCaption: "قائمة الأدلة",
     intro: "تُفحص الملفات وتُحسب بصمتها وتُخزَّن بشكل خاص. يُسجَّل كل تنزيل في سلسلة الحيازة.",
     empty: "لا توجد أدلة بعد.",
     number: "الرقم",
@@ -434,6 +459,8 @@ export const ar: Messages = {
     addedBy: "أضافه",
     addedAt: "تاريخ الإضافة",
     download: "تنزيل",
+    downloadItem: "تنزيل {item}",
+    downloadVersion: "تنزيل {item}، الإصدار {no}",
     versions: "الإصدارات وسلسلة الحيازة",
     version: "الإصدار {no}",
     custody: "سلسلة الحيازة",
@@ -443,6 +470,7 @@ export const ar: Messages = {
     uploadIntro:
       "المسموح: PDF ومستندات Office والنصوص وCSV وJSON والبريد الإلكتروني (.eml) والصور والصوت والفيديو، بحد أقصى 25 ميجابايت. ملفات اصطناعية فقط.",
     fileLabel: "الملف",
+    fileFor: "الملف للدليل {item}",
     titleLabel: "العنوان",
     typeLabel: "النوع",
     descriptionLabel: "الوصف",
@@ -455,6 +483,7 @@ export const ar: Messages = {
     uploaded: "تم تخزين الدليل. البصمة SHA-256: {sha}",
     newVersionTitle: "إضافة إصدار جديد لهذا الدليل",
     newVersion: "إصدار جديد",
+    newVersionOf: "إصدار جديد للدليل {item}",
   },
   evidenceType: {
     DOCUMENT: "مستند",

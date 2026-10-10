@@ -13,10 +13,27 @@ export async function contextIn(
   return context;
 }
 
-/** Signs a synthetic user in through the real login form in a fresh browser context. */
+type SessionCookies = Awaited<ReturnType<BrowserContext["cookies"]>>;
+const sessions = new Map<string, SessionCookies>();
+
+/**
+ * Signs a synthetic user in through the real login form in a fresh browser context. Later calls for the same
+ * user reuse that session's cookies in a new context while it is still valid, so the combined e2e and
+ * accessibility suites stay under the per-account login rate limit (10 per 15 minutes) without relaxing it.
+ */
 export async function signIn(browser: Browser, email: string, locale: "ar" | "en" = "en"): Promise<Page> {
   const password = process.env.CDF_DEV_PASSWORD;
   if (!password) throw new Error("CDF_DEV_PASSWORD is not set");
+  const cached = sessions.get(email);
+  if (cached) {
+    const context = await contextIn(browser, locale, APP);
+    await context.addCookies(cached);
+    const page = await context.newPage();
+    await page.goto("/");
+    if (await page.getByTestId("signed-in-as").isVisible()) return page;
+    sessions.delete(email);
+    await context.close();
+  }
   const context = await contextIn(browser, locale, APP);
   const page = await context.newPage();
   await page.goto("/login");
@@ -24,6 +41,10 @@ export async function signIn(browser: Browser, email: string, locale: "ar" | "en
   await page.getByLabel(locale === "en" ? "Password" : "كلمة المرور").fill(password);
   await page.getByTestId("login-submit").click();
   await expect(page.getByTestId("signed-in-as")).toBeVisible();
+  sessions.set(
+    email,
+    (await context.cookies(APP)).filter((c) => c.name !== "cdf_locale"),
+  );
   return page;
 }
 
@@ -61,6 +82,18 @@ export async function submitAndReadReceipt(page: Page) {
   const reportRef = (await page.getByTestId("receipt-ref").textContent())!.trim();
   const secret = (await page.getByTestId("receipt-secret").textContent())!.trim();
   return { reportRef, secret };
+}
+
+let sharedReport: Promise<{ reportRef: string; secret: string }> | undefined;
+
+/**
+ * One synthetic anonymous report shared by the accessibility specs that only need valid credentials. The portal
+ * allows five submissions per client per hour, which the combined e2e and accessibility suites would otherwise
+ * exceed; the limit itself is unchanged.
+ */
+export function sharedAnonymousReport(browser: Browser) {
+  sharedReport ??= submitAnonymousReport(browser, "Synthetic report shared by the accessibility checks.");
+  return sharedReport;
 }
 
 export async function publicStatus(browser: Browser, reportRef: string, secret: string) {

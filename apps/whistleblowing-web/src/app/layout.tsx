@@ -8,7 +8,13 @@ import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
-  return { title: t("common.portalName"), robots: { index: false, follow: false }, referrer: "no-referrer" };
+  const appName = t("common.portalName");
+  // Each page sets its own title; the template keeps the app name after it (WCAG 2.4.2).
+  return {
+    title: { default: appName, template: `%s · ${appName}` },
+    robots: { index: false, follow: false },
+    referrer: "no-referrer",
+  };
 }
 
 export default async function RootLayout({ children }: { children: ReactNode }) {

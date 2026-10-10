@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { CaseListItem } from "@cdf/contracts";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
@@ -5,6 +6,11 @@ import { CDFBadge, CDFPageHeader, CDFTable, classificationTone } from "@cdf/ui";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../app-nav";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("cases.title") };
+}
 
 export default async function CasesPage() {
   const { actor, ctx } = await requireActor();
