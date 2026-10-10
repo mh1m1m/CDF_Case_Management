@@ -2,7 +2,8 @@
 // which are authoritative (ADR-006, ADR-007).
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
-import { ALLOWED_CONTENT_TYPES } from "@cdf/domain";
+import { PERMISSIONS } from "@cdf/contracts";
+import { ALLOWED_CONTENT_TYPES, FORM_DEFINITIONS, FORM_ENTITLEMENTS } from "@cdf/domain";
 import { STATES, TRANSITIONS } from "@cdf/workflow";
 import { admin } from "../support/db";
 
@@ -41,5 +42,56 @@ describe("mirrors", () => {
     const fromDb = Object.fromEntries(rows.map((r) => [r.role, r.perms]));
     const fromTs = Object.fromEntries(Object.entries(ROLE_PERMISSIONS).map(([k, v]) => [k, [...v].sort()]));
     expect(fromDb).toEqual(fromTs);
+  });
+
+  it("form registry matches forms.form_definition and its current version", async () => {
+    const rows = await admin<Record<string, unknown>[]>`
+      select d.code, d.sequence_no as "sequenceNo", d.name_ar as "nameAr", d.name_en as "nameEn",
+             d.purpose_ar as "purposeAr", d.purpose_en as "purposeEn", d.owner_role_hint as "ownerRoleHint",
+             d.source_reference as "sourceReference", d.review_required as "reviewRequired",
+             d.approval_required as "approvalRequired", d.repeatable, v.schema_hash as "schemaHash", v.schema as sections,
+             v.version_no as "versionNo", d.is_enabled as "isEnabled"
+      from forms.form_definition d join forms.form_definition_version v on v.id = d.current_version_id
+      order by d.sequence_no`;
+    expect(rows.map((r) => ({ ...r, versionNo: undefined, isEnabled: undefined }))).toEqual(
+      FORM_DEFINITIONS.map((d) => ({ ...d, versionNo: undefined, isEnabled: undefined })),
+    );
+    expect(rows.every((r) => r.versionNo === 1 && r.isEnabled === true)).toBe(true);
+    // Field rows are the flattened schema.
+    const fields = await admin<{ code: string; name: string; fieldNo: number; sectionNo: number }[]>`
+      select v.form_code as code, f.name, f.field_no as "fieldNo", f.section_no as "sectionNo"
+      from forms.form_field_definition f join forms.form_definition_version v on v.id = f.version_id
+      order by v.form_code, f.field_no`;
+    const expected = FORM_DEFINITIONS.flatMap((d) =>
+      d.sections.flatMap((s) =>
+        s.fields.map((f) => ({ code: d.code, name: f.name, fieldNo: f.no, sectionNo: s.no })),
+      ),
+    ).sort((a, b) => a.code.localeCompare(b.code) || a.fieldNo - b.fieldNo);
+    expect(fields).toEqual(expected);
+  });
+
+  it("form entitlements match forms.form_entitlement and imply the FORM_* permissions", async () => {
+    const rows = await admin<{ formCode: string; roleCode: string; action: string; source: string }[]>`
+      select form_code as "formCode", role_code as "roleCode", action, source
+      from forms.form_entitlement order by form_code, action, role_code`;
+    const key = (e: { formCode: string; action: string; roleCode: string }) =>
+      `${e.formCode}|${e.action}|${e.roleCode}`;
+    expect(rows).toEqual([...FORM_ENTITLEMENTS].sort((a, b) => key(a).localeCompare(key(b))));
+    // Every role entitled to an action holds the matching permission in both mirrors.
+    const permissionFor = {
+      VIEW: "FORM_VIEW",
+      PREPARE: "FORM_PREPARE",
+      REVIEW: "FORM_REVIEW",
+      APPROVE: "FORM_APPROVE",
+    } as const;
+    expect(Object.values(permissionFor).every((p) => (PERMISSIONS as readonly string[]).includes(p))).toBe(
+      true,
+    );
+    for (const e of FORM_ENTITLEMENTS) {
+      const perms = ROLE_PERMISSIONS[e.roleCode as keyof typeof ROLE_PERMISSIONS] as
+        readonly string[] | undefined;
+      expect(perms, `${e.roleCode} exists`).toBeDefined();
+      expect(perms, key(e)).toContain(permissionFor[e.action]);
+    }
   });
 });
