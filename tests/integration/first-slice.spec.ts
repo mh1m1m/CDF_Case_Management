@@ -47,9 +47,14 @@ describe("first vertical slice", () => {
 
     // 1. Anonymous submission through the portal.
     const submitted = await portalService.submitReport({ requestId: randomUUID() }, client, {
-      category: "FINANCIAL_MISCONDUCT",
+      relationship: "EMPLOYEE",
+      category: "FINANCIAL_CORRUPTION",
       subjectDescription: "Employee Alpha (synthetic)",
       description: "SYNTHETIC: Employee Alpha allegedly split purchase orders to avoid approval thresholds.",
+      incidentDate: "2026-09-01",
+      incidentTime: "09:30",
+      location: "Finance department (synthetic)",
+      willingToCooperate: "YES",
       language: "en",
       reporterMode: "ANONYMOUS",
       acknowledgement: true,
