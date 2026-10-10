@@ -7,10 +7,12 @@ import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
   createEvidenceService,
+  createFormsService,
   createInterviewService,
   createInvestigationService,
   type EvidenceService,
   type EvidenceStorage,
+  type FormsService,
   type InterviewService,
   type InvestigationService,
 } from "@cdf/application";
@@ -19,6 +21,7 @@ import {
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
   PostgresEvidenceGateway,
+  PostgresFormsGateway,
   PostgresInterviewGateway,
   PostgresInvestigationGateway,
   PostgresSecurityEventSink,
@@ -34,6 +37,7 @@ const globalForApp = globalThis as unknown as {
   cdfPool?: Sql;
   cdfInvestigation?: InvestigationService;
   cdfEvidence?: EvidenceService;
+  cdfForms?: FormsService;
   cdfInterviews?: InterviewService;
 };
 
@@ -74,6 +78,14 @@ export function evidenceService(): EvidenceService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfEvidence;
+}
+
+export function formsService(): FormsService {
+  globalForApp.cdfForms ??= createFormsService({
+    gateway: new PostgresFormsGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfForms;
 }
 
 /** Interviews (CDF-60, ADR-012): database commands only; no storage of its own (recordings are evidence). */

@@ -55,6 +55,8 @@ export const USERS = {
   dpo: "a0000000-0000-4000-8000-000000000012",
   revoked: "a0000000-0000-4000-8000-000000000013",
   grcDeputy: "a0000000-0000-4000-8000-000000000014",
+  committeeSecretary: "a0000000-0000-4000-8000-000000000015",
+  committeeChair: "a0000000-0000-4000-8000-000000000016",
 } as const;
 export type UserKey = keyof typeof USERS;
 

@@ -71,6 +71,10 @@ export const PERMISSIONS = [
   "ROLE_ADMIN",
   "EVIDENCE_UPLOAD",
   "EVIDENCE_DOWNLOAD",
+  "FORM_VIEW",
+  "FORM_PREPARE",
+  "FORM_REVIEW",
+  "FORM_APPROVE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -291,5 +295,6 @@ export type Result<T> =
   | { ok: true; value: T }
   | { ok: false; error: { kind: AppErrorKind; detail?: string; correlationId: string } };
 
+export * from "./forms";
 // ---- Interviews (EPIC 09, CDF-60) ----------------------------------------------------------------
 export * from "./interviews";
