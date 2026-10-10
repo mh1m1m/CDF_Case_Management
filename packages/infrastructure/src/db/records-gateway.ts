@@ -95,8 +95,10 @@ export class PostgresRecordsGateway implements RecordsGateway {
         where h.case_id = ${caseId} order by h.placed_at desc`;
       const holdRequests = await tx<RequestRow[]>`
         select ${REQUEST_COLUMNS(tx, ctx.userId)}
-        from records.legal_hold_request r
-        left join lateral (select l.case_id, l.case_number from api.list_records(null, r.case_id) l) v on true
+        from records.legal_hold_request_view r
+        left join lateral (
+          select l.case_id, l.case_number from api.list_records(null, r.case_id) l where r.case_id is not null
+        ) v on true
         where r.case_id = ${caseId} order by r.requested_at desc`;
       return {
         ...row,
@@ -135,8 +137,10 @@ export class PostgresRecordsGateway implements RecordsGateway {
     return this.run(ctx, async (tx) => {
       const rows = await tx<RequestRow[]>`
         select ${REQUEST_COLUMNS(tx, ctx.userId)}
-        from records.legal_hold_request r
-        left join lateral (select l.case_id, l.case_number from api.list_records(null, r.case_id) l) v on true
+        from records.legal_hold_request_view r
+        left join lateral (
+          select l.case_id, l.case_number from api.list_records(null, r.case_id) l where r.case_id is not null
+        ) v on true
         order by r.requested_at desc
         limit 200`;
       return rows.map(toRequest);

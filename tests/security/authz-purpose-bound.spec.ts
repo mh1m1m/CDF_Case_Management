@@ -551,8 +551,17 @@ describe("§5, §6, §28.5: legal hold through a controlled, purpose-bound proce
       expect(f.tasks).toBe(0);
       await s.expectError("CDF_NOT_FOUND", (tx) => placeHold(tx, caseA));
       const [req] =
-        await s.tx`select status, origin, requested_by from records.legal_hold_request where id = ${hit.request_id}`;
-      expect(req).toEqual({ status: "SUBMITTED", origin: "CONTROLLED_LOOKUP", requested_by: USERS.legal });
+        await s.tx`select status, origin, requested_by, case_id, assigned_task_id, legal_hold_id from records.legal_hold_request_view where id = ${hit.request_id}`;
+      // CDF-84: the requester sees their request but never which case it reached.
+      expect(req).toEqual({
+        status: "SUBMITTED",
+        origin: "CONTROLLED_LOOKUP",
+        requested_by: USERS.legal,
+        case_id: null,
+        assigned_task_id: null,
+        legal_hold_id: null,
+      });
+      await s.expectError("permission denied", (tx) => tx`select case_id from records.legal_hold_request`);
       const [work] = await s.tx<{ my_legal_hold_requests: number }[]>`select * from api.my_work_summary()`;
       expect(work!.my_legal_hold_requests).toBe(1);
     });
@@ -589,7 +598,7 @@ describe("§5, §6, §28.5: legal hold through a controlled, purpose-bound proce
       const hit = await lookup(s.tx, numberA);
       await s.as("caseManager"); // the case authority sees the request and routes it
       const [visible] =
-        await s.tx`select status from records.legal_hold_request where id = ${hit.request_id}`;
+        await s.tx`select status from records.legal_hold_request_view where id = ${hit.request_id}`;
       expect(visible).toEqual({ status: "SUBMITTED" });
       const [t] = await s.tx<{ id: string }[]>`
         select api.assign_legal_hold_request(${hit.request_id}, ${USERS.legal}) as id`;
@@ -603,7 +612,7 @@ describe("§5, §6, §28.5: legal hold through a controlled, purpose-bound proce
       const [hold] = await s.tx`select status, placed_by from records.legal_hold where id = ${h!.id}`;
       expect(hold).toEqual({ status: "ACTIVE", placed_by: USERS.legal });
       const [req] =
-        await s.tx`select status, legal_hold_id from records.legal_hold_request where id = ${hit.request_id}`;
+        await s.tx`select status, legal_hold_id from records.legal_hold_request_view where id = ${hit.request_id}`;
       expect(req).toEqual({ status: "APPLIED", legal_hold_id: h!.id });
       await s.as("legal"); // the task is complete: the case is gone again
       expect((await footprint(s.tx)).catalogue).toEqual([]);
@@ -640,7 +649,7 @@ describe("§5, §6, §28.5: legal hold through a controlled, purpose-bound proce
       await s.tx`select api.review_legal_hold_request(${r!.id}, false, 'Synthetic: no preservation duty.')`;
       await s.as("grcDirector");
       const [req] =
-        await s.tx`select status, reviewed_by from records.legal_hold_request where id = ${r!.id}`;
+        await s.tx`select status, reviewed_by from records.legal_hold_request_view where id = ${r!.id}`;
       expect(req).toEqual({ status: "REJECTED", reviewed_by: USERS.legalB });
       expect(await s.tx`select 1 from records.legal_hold where case_id = ${caseA}`).toHaveLength(0);
       await s.as("investigatorB"); // no access to case A: cannot request a hold on it
@@ -758,7 +767,7 @@ describe("§15, §28.7, §28.9: RLS and audit coverage of the new tables", () =>
       for (const user of ["legalB", "records", "investigatorB"] as const) {
         await s.as(user);
         expect(await s.tx`select 1 from case_mgmt.case_task`).toHaveLength(0);
-        expect(await s.tx`select 1 from records.legal_hold_request`).toHaveLength(0);
+        expect(await s.tx`select 1 from records.legal_hold_request_view`).toHaveLength(0);
         expect(await s.tx`select 1 from case_mgmt.break_glass_access where id = ${bg!.id}`).toHaveLength(0);
         expect(await s.tx`select * from api.my_case_tasks()`).toHaveLength(0);
       }
