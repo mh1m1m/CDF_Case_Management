@@ -36,6 +36,11 @@ export const ar: Messages = {
     intake: "الوارد والفرز",
     cases: "القضايا",
   },
+  pageTitles: {
+    overview: "نظرة عامة",
+    caseDetail: "قضية",
+    intakeDetail: "بلاغ وارد",
+  },
   errors: {
     UNAUTHENTICATED: "انتهت جلستك. يرجى تسجيل الدخول مرة أخرى.",
     NOT_FOUND: "غير موجود أو غير متاح لك.",

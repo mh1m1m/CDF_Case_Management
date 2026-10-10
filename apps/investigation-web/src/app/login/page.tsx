@@ -1,7 +1,13 @@
+import type { Metadata } from "next";
 import { CDFAlert, CDFCard, CDFPageHeader } from "@cdf/ui";
 import { getTranslator } from "@/server/locale";
 import { env } from "@/server/env";
 import { LoginForm } from "./login-form";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("login.title") };
+}
 
 export default async function LoginPage() {
   const t = await getTranslator();
