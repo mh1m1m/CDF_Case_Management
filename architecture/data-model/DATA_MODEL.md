@@ -26,6 +26,7 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Every user row is const
 | `workflow`           | Workflow definition, states, transitions, per-case instance, transition events                                   | `SELECT` by policy                                         |
 | `evidence`           | Evidence items, immutable file versions, content-type allow-list, chain of custody                               | `SELECT` by policy (column-limited on `evidence_version`)  |
 | `forms`              | WB-FRM form registry (definitions, versions, fields, entitlements) and per-case form instances, versions, events | `SELECT` by policy (column-limited on versions and events) |
+| `records`            | Retention classes and schedules, legal holds, disposition requests and certificates (ADR-013)                    | `SELECT` by policy                                         |
 | `config`             | Settings whose authoritative source is still `SOURCE_REQUIRED`                                                   | `SELECT` for signed-in users                               |
 | `api`                | Authenticated command and query functions                                                                        | `EXECUTE` for `authenticated`                              |
 | `public_api`         | Anonymous portal functions                                                                                       | `EXECUTE` for `anon`                                       |
@@ -160,6 +161,10 @@ Writes happen only through `api.register_evidence_version`, `api.complete_eviden
 
 Writes happen only through `api.start_form`, `api.save_form_draft` (idempotent on an unchanged hash), `api.prepare_form`, `api.review_form`, `api.approve_form` and `api.withdraw_form`; `api.open_form_instance` records every read of an instance. Each command writes its `form_event` and audit event in the same transaction. Migrations: `20261007001100_forms` (schema, RLS, commands) and `20261007001110_form_definitions_seed` (registry data); the `1100–1199` range belongs to the forms engine.
 
+### 4.10 `records`
+
+Tables, constraints, lifecycle and audit events are specified in [`RECORDS_RETENTION.md`](RECORDS_RETENTION.md) and implemented by `…1300_records.sql` and `…1310_records_commands.sql`. Display numbers `CDF-HOLD-YYYY-NNNN` and `CDF-DISP-YYYY-NNNN` come from `records.number_counter`. `case_record.retention_class` references `records.retention_class`; `case_record` itself can no longer be deleted or truncated by any role.
+
 ## 5. Identifiers
 
 | Identifier      | Format                                | Purpose                                                   | Shown to               |
@@ -179,7 +184,7 @@ Writes happen only through `api.start_form`, `api.save_form_draft` (idempotent o
 
 ## 7. Not yet modelled
 
-Findings, committee and decisions, corrective actions, retention and legal hold detail (CDF-69, parallel branch), document generation, notifications, and search are later phases (`NOT_STARTED`). Forms (§4.9) and interviews (below) are modelled; activities are not. Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.
+Findings, committee and decisions, corrective actions, document generation, notifications, and search are later phases (`NOT_STARTED`). Forms are modelled (§4.9) and interviews below. Retention, legal hold and logical disposition are implemented (§4.10); physical destruction is not (ADR-013 D7).
 
 ## Interviews (EPIC 09, ADR-012)
 

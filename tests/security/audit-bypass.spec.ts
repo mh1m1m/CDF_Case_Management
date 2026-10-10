@@ -4,7 +4,17 @@
 // api.* function fail this file until the walk below exercises it.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, admin, caseId, reportId, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  admin,
+  caseId,
+  ownerScenario,
+  reportId,
+  scenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
+import { addShortRetentionClass } from "../support/records";
 
 let caseA: string, caseB: string;
 let receivedReport: string, infoReport: string;
@@ -45,6 +55,8 @@ const NOT_STATE_CHANGING = new Set([
   "open_case",
   "open_report",
   "open_evidence_version",
+  "list_records",
+  "verify_disposition_certificate",
   "open_report_attachment",
 ]);
 
@@ -393,11 +405,74 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.set_user_status(${USERS.investigatorB}, 'SUSPENDED'::core.record_status, ${REASON})`,
       },
+      // Records lifecycle on the walk case (ADR-013): close, archive, hold and release, class, eligibility,
+      // request, approval by someone else, logical execution. The class fixture is added before the walk.
+      {
+        fn: "transition_case",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.transition_case(${ids.case!}, 'SCREEN_OUT', ${REASON})`,
+      },
+      {
+        fn: "transition_case",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.transition_case(${ids.case!}, 'ARCHIVE_CASE', null)`,
+      },
+      {
+        fn: "place_legal_hold",
+        actor: "legal",
+        run: async (s) =>
+          (ids.hold = await one(
+            s,
+            s.tx`select api.place_legal_hold(${ids.case!}, 'CASE', null, 'LITIGATION', 'Synthetic: preservation for the audit walk.', null) as id`,
+          )),
+      },
+      {
+        fn: "request_legal_hold_release",
+        actor: "legal",
+        run: async (s) =>
+          (ids.release = await one(
+            s,
+            s.tx`select api.request_legal_hold_release(${ids.hold!}, 'Synthetic: the walk inquiry has concluded.') as id`,
+          )),
+      },
+      {
+        fn: "decide_legal_hold_release",
+        actor: "legalB",
+        run: (s) => s.tx`select api.decide_legal_hold_release(${ids.release!}, true, ${REASON})`,
+      },
+      {
+        fn: "assign_retention_class",
+        actor: "records",
+        run: (s) => s.tx`select api.assign_retention_class(${ids.case!}, 'TEST_SHORT_RETENTION')`,
+      },
+      {
+        fn: "refresh_disposition_eligibility",
+        actor: "records",
+        run: (s) => s.tx`select api.refresh_disposition_eligibility()`,
+      },
+      {
+        fn: "request_disposition",
+        actor: "records",
+        run: async (s) =>
+          (ids.disposition = await one(s, s.tx`select api.request_disposition(${ids.case!}) as id`)),
+      },
+      {
+        fn: "decide_disposition",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.decide_disposition(${ids.disposition!}, true, ${REASON})`,
+      },
+      {
+        fn: "execute_disposition",
+        actor: "records",
+        run: (s) => s.tx`select api.execute_disposition(${ids.disposition!})`,
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
 
-    await scenario(async (s) => {
+    // Owner connection only for the CONFIGURED class fixture; every step runs as `authenticated`.
+    await ownerScenario(async (s) => {
+      await addShortRetentionClass(s);
       const missing: string[] = [];
       for (const step of steps) {
         const { events } = await audited(s, step);
@@ -512,12 +587,14 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
     // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers
     // (ADR-011: canonical JSON, content hash and terminal status read no data) and the shared rate limiter.
     expect(rows.map((r) => r.fn)).toEqual([
+      "authz.can_apply_legal_hold",
+      "authz.can_approve_disposition",
       "authz.can_approve_form",
       "authz.can_approve_interviews",
       "authz.can_assign_case",
@@ -525,6 +602,8 @@ describe("audit internals are not reachable", () => {
       "authz.can_download_evidence",
       "authz.can_edit_case",
       "authz.can_prepare_form",
+      "authz.can_release_legal_hold",
+      "authz.can_request_disposition",
       "authz.can_reveal_whistleblower_identity",
       "authz.can_review_form",
       "authz.can_review_interviews",
@@ -533,6 +612,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_evidence",
       "authz.can_view_form_instance",
       "authz.can_view_interview",
+      "authz.can_view_records",
       "authz.can_view_report",
       "authz.current_clearance",
       "authz.current_roles",

@@ -14,11 +14,12 @@ Every page in both apps must show the synthetic-data banner. If it is missing on
 | UAT-ENV-02    | Pages are not publicly cached; security headers present      | test lead                           | —    | yes            |
 | UAT-ENV-03    | Portal and workspace are separate deployments                | test lead                           | —    | yes            |
 | UAT-ENV-04    | Hosted sign-in works and the synthetic banner shows          | triage                              | both | —              |
-| UAT-PORTAL-01 | Anonymous report submitted, receipt shown once               | anonymous reporter                  | both | —              |
-| UAT-PORTAL-02 | Report form validation and acknowledgement                   | anonymous reporter                  | both | —              |
+| UAT-PORTAL-01 | Anonymous report with the Drive fields, receipt shown once   | anonymous reporter                  | both | —              |
+| UAT-PORTAL-02 | Report form validation in all three modes                    | anonymous reporter                  | both | —              |
 | UAT-PORTAL-03 | Follow-up with two-way messages                              | reporter, intake, triage            | both | —              |
 | UAT-PORTAL-04 | The portal never reveals whether a report exists             | anonymous reporter, soc             | en   | yes            |
 | UAT-PORTAL-05 | Submission throttling                                        | anonymous reporter                  | en   | yes            |
+| UAT-PORTAL-06 | Email-only report: the email stays in the vault              | email-only reporter, intake, triage | both | yes            |
 | UAT-VAULT-01  | Identified report: identity never shown to the case team     | identified reporter, triage, inv. b | both | yes            |
 | UAT-VAULT-02  | Dual-controlled identity reveal                              | grc.director, grc.deputy            | en   | yes            |
 | UAT-INTAKE-01 | Intake queue and request for information                     | intake, triage, reporter            | both | —              |
@@ -78,37 +79,40 @@ These run first. A failure stops the cycle (UAT plan §6 step 2).
 
 ## Public whistleblowing portal (UAT-PORTAL)
 
-The portal implements two reporting modes (anonymous, identified). The Drive requirements report specifies three modes and 21 fields; the differences are tracked in CDF-63. Until CDF-63 is decided, these scenarios accept the portal **as built** and do not accept it against the Drive report.
+Since CDF-63 (PR #22, migration `20261007001500_portal_intake_alignment.sql`) the portal follows the Drive whistleblowing requirements report: three reporting modes (anonymous, email only, identified) and its intake fields. These scenarios accept the portal against that report. Two Drive items are deliberately not accepted yet: attachments (field 19; the form shows a notice instead, uploads arrive with CDF-72) and the approved city and nationality lists (fields 9 and 10 use placeholder lists, `PRODUCTION_SUBSTITUTION_REQUIRED`). Field values come from [SYNTHETIC_DATA.md §3](SYNTHETIC_DATA.md#3-report-texts-and-field-values).
 
-### UAT-PORTAL-01 Anonymous report submitted, receipt shown once
+### UAT-PORTAL-01 Anonymous report with the Drive field set, receipt shown once
 
-**Actor** anonymous reporter · **Lang** both · **Trace** CDF-INTAKE-001, CDF-SEC (portal), Drive report fields 3, 13, 15, 21; `tests/e2e/first-slice.spec.ts`
+**Actor** anonymous reporter · **Lang** both · **Trace** CDF-INTAKE-001, CDF-SEC (portal), Drive report fields 1–3, 13–18, 20, 21; `tests/e2e/first-slice.spec.ts`, `tests/e2e/portal-intake.spec.ts`
 
-1. Portal → "Submit a report". → The form loads; "anonymous" is the default mode; no identity fields are required.
-2. Choose a category, enter description text R-01 from [SYNTHETIC_DATA.md §3](SYNTHETIC_DATA.md#3-report-texts) (at least 20 characters), optionally a past incident date and a location; tick the acknowledgement; submit. → A receipt shows a Report ID (`WB-…`) and a secret, with a warning that they are shown only once.
+1. Portal → "Submit a report". → The form shows: relationship to the Fund, type of violation, who is being reported, the description, incident date and time, location or entity, a notice that attachments cannot be uploaded yet, the reporting mode with three choices ("Anonymously" selected), willingness to cooperate, and the policy acknowledgement. No identity field is shown in anonymous mode.
+2. Fill relationship F-01, violation type F-03, persons reported F-05, description R-01, date F-06, time F-07, location F-08; choose "Yes" for cooperation (F-09); tick the acknowledgement; submit. → A receipt shows a Report ID (`WB-` and 12 characters) and a secret, with a warning that they are shown only once.
 3. Record the Report ID in the execution record. Record the secret only in the tester's private notes for the follow-up scenarios, never in Linear or the shared folder. → —
 4. Reload the receipt page. → The secret is not shown again.
-5. Workspace as **intake** → Intake queue. → The new report is listed as Received, with category and date, and no reporter identity.
+5. Workspace as **intake** → Intake queue → the new report. → Listed as Received. The detail shows mode "Anonymous", relationship "Employee", violation type "Passing irregular transactions", persons reported, the incident date, time 09:30, the location, willing to cooperate "Yes" and the description. No reporter identity anywhere.
+6. Submit a second anonymous report with relationship "Other" plus text F-02 and violation type "Other" plus text F-04. → Accepted. On the intake detail both "other" texts are shown under their labels.
 
-### UAT-PORTAL-02 Report form validation and acknowledgement
+### UAT-PORTAL-02 Report form validation in all three modes
 
-**Actor** anonymous reporter · **Lang** both · **Trace** CDF-INTAKE-001, `packages/validation` `submitReportSchema`
+**Actor** anonymous reporter · **Lang** both · **Trace** CDF-INTAKE-001, `packages/validation` `submitReportSchema`, `reportIdentitySchema`, `emailOnlyIdentitySchema`; database re-check in `public_api.submit_report`
 
-1. Submit an empty form. → Field errors on category, description and acknowledgement, in the page language; nothing is submitted.
+1. Submit an empty form. → Errors, in the page language, on relationship, violation type, persons reported, description, date, time, location, cooperation and acknowledgement; nothing is submitted.
 2. Enter a description of fewer than 20 characters. → Error on the description.
-3. Enter an incident date in the future. → Error "future date" on the date.
-4. Switch to "identified", leave all identity fields empty, submit. → Error asking for at least a name, email or phone.
-5. Switch back to "anonymous" with identity text still typed in, and submit a valid report. → Submitted; on the intake page the report shows no identity (the typed identity was discarded).
+3. Enter an incident date in the future. → Error "The date cannot be in the future" on the date.
+4. Choose "With my email only" and submit without an email. → Error on the email; only the email field is shown for this mode (no name, ID or phone fields).
+5. Choose "With my contact details" and submit with the identity fields empty. → Errors on each of the four name parts, gender, date of birth, ID type, ID number, city, nationality, mobile number and email.
+6. With ID type "National ID", enter an ID number starting with 2 (V-ID-BAD from [SYNTHETIC_DATA.md §4](SYNTHETIC_DATA.md#4-reporter-personas)). → Error "Enter a valid number for the selected ID type". Choose calendar "Hijri" and enter date of birth `1500-01-01`. → Error on the date of birth.
+7. Switch back to "Anonymously" with identity text still typed in, and submit a valid report. → Submitted; the intake detail shows mode "Anonymous" and none of the typed identity (it was discarded, never sent).
 
 ### UAT-PORTAL-03 Follow-up with two-way messages
 
 **Actor** reporter (credentials from UAT-PORTAL-01), intake · **Lang** both · **Trace** CDF-INTAKE-001, public status mapping (`public_api._public_status`), Drive report "ticket lifecycle"
 
 1. Portal → "Follow up", enter the Report ID and secret. → Status "Received", received date, no messages yet.
-2. Write a reply as the reporter (text R-02) and send. → "Reply sent"; the message appears as "From you".
+2. Write a reply as the reporter (text R-02) and send. → "Your message was sent."; the message appears under "You".
 3. Workspace as **intake** → the report → messages. → The reporter's message is listed. Reply with text M-01. → Reply recorded.
-4. Portal → follow up again. → The CDF reply appears as "From CDF". Nothing about internal state, assignees or case numbers is shown.
-5. Click "sign out of this report". → Credentials are cleared; the follow-up form is empty; the browser holds no Report ID or secret in the address bar, cookies or local storage (check developer tools).
+4. Portal → follow up again. → The reply appears under "Case team". Nothing about internal state, assignees or case numbers is shown.
+5. Click "Close report". → Credentials are cleared; the follow-up form is empty; the browser holds no Report ID or secret in the address bar, cookies or local storage (check developer tools).
 
 ### UAT-PORTAL-04 The portal never reveals whether a report exists
 
@@ -127,16 +131,25 @@ The portal implements two reporting modes (anonymous, identified). The Drive req
 1. From one browser, submit six valid reports within an hour using text R-03. → The sixth is refused with a generic "too many requests" message and a correlation reference; no stack trace or internal detail.
 2. Record that this limit is a demo setting, not a production control (gateway rate limiting is `PRODUCTION_SUBSTITUTION_REQUIRED`). → —
 
+### UAT-PORTAL-06 Email-only report: the email stays in the vault
+
+**Actor** email-only reporter (persona EP-01), intake, triage · **Lang** both · **Trace** CDF-SEC (identity vault, §22), Drive report fields 3 and 12; `architecture/SECURITY_RULES.md` V-5; `tests/security/public-portal.spec.ts` "email-only mode keeps just the email…", `tests/e2e/portal-intake.spec.ts`
+
+1. Portal → submit with the field values of UAT-PORTAL-01 step 2, mode "With my email only", email from persona EP-01. → Receipt with Report ID and secret.
+2. Workspace as **intake** → the report. → Mode "Email only"; the report fields are shown; the email does not appear anywhere on the page.
+3. As **triage**, open the same report; view page source and network responses. → The persona's email does not appear.
+4. Follow up on the portal with the Report ID and secret. → Works the same as an anonymous report (UAT-PORTAL-03 step 1).
+
 ## Identity vault (UAT-VAULT)
 
 ### UAT-VAULT-01 Identified report: identity never shown to the case team
 
-**Actor** identified reporter, triage, investigator.b · **Lang** both · **Trace** CDF-SEC (identity vault, §22), ADR-004; `tests/security/whistleblower-vault.spec.ts`
+**Actor** identified reporter, triage, investigator.b · **Lang** both · **Trace** CDF-SEC (identity vault, §22), ADR-004, Drive report fields 4–12; `architecture/SECURITY_RULES.md` V-5; `tests/security/whistleblower-vault.spec.ts`, `tests/e2e/portal-intake.spec.ts`
 
-1. Portal → submit in "identified" mode with persona IP-01 from [SYNTHETIC_DATA.md §4](SYNTHETIC_DATA.md#4-reporter-personas) (synthetic name, `@example.test` email). → Receipt with Report ID and secret.
-2. Workspace as **triage** → the report. → The report shows that the reporter is identified, but no name, email or phone anywhere on the page.
+1. Portal → submit with the field values of UAT-PORTAL-01 step 2, mode "With my contact details", and every identity field from persona IP-01 in [SYNTHETIC_DATA.md §4](SYNTHETIC_DATA.md#4-reporter-personas). → Receipt with Report ID and secret.
+2. Workspace as **triage** → the report. → Mode "Identified", but none of the persona's values (name parts, ID number, date of birth, mobile, email) anywhere on the page.
 3. Open seed case CDF-DEMO-2026-0002 as **investigator.b**. → Only the opaque WB-ID; no identity field, no reveal button.
-4. View page source and network responses for the case page. → The persona's name and email do not appear.
+4. View page source and network responses for the report and case pages. → None of the persona's values appear.
 
 ### UAT-VAULT-02 Dual-controlled identity reveal
 
@@ -146,7 +159,7 @@ The portal implements two reporting modes (anonymous, identified). The Drive req
 2. **API** as grc.director: request with justification J-01 (20+ characters). → Request recorded, pending.
 3. **API** as grc.director: approve own request. → Refused (requester cannot approve).
 4. **API** as grc.deputy: approve. → Approved.
-5. **API** as grc.director: resolve the identity. → Returns the seeded synthetic identity (persona IP-00 in [SYNTHETIC_DATA.md §4](SYNTHETIC_DATA.md#4-reporter-personas)). Resolving again → refused with `APPROVED_REVEAL_REQUEST_REQUIRED` (single use).
+5. **API** as grc.director: resolve the identity. → Returns only the composed full name and contact details of persona IP-00 in [SYNTHETIC_DATA.md §4](SYNTHETIC_DATA.md#4-reporter-personas) (`Reporter Gamma Synthetic Example`, email, mobile). Gender, date of birth, ID type and number, city and nationality are not returned (CDF-76 data minimisation). Resolving again → refused with `APPROVED_REVEAL_REQUEST_REQUIRED` (single use).
 6. **API** as soc: audit trail. → `REPORTER_IDENTITY_REVEALED` with ids only (no identity values), category SECURITY. As **lead** (case team): the event is not readable.
 
 ## Intake and triage (UAT-INTAKE)
@@ -355,4 +368,4 @@ These scenarios are written against the sources that exist today so the flows ar
 | UAT-W3-06 | Corrective action, closure, archive, reopen | implementation owner, casemanager, grc.director | Phases 10–11; `COMPLETE_CORRECTIVE_ACTIONS`, `ARCHIVE_CASE`, `REOPEN_CASE`    | WB-FRM-19; baseline closure blockers                                                                                                                                       | Closure blocked while forms, actions or grievances are open; reopen needs reason and approval; archive is terminal                                                                                                |
 | UAT-W3-07 | Retention, legal hold and disposition       | records officer, dpo                            | Phase 11–12                                                                   | Records requirements (CDF-REC-001)                                                                                                                                         | Legal hold blocks disposition; disposition audited; retention period is **SOURCE_REQUIRED** (`RETENTION_PERIOD`)                                                                                                  |
 
-Wave 2 also adds, once CDF-63 is decided, a revised UAT-PORTAL set covering the email-only mode and the full Drive field list.
+Wave 2 also adds reporter attachments on the portal (Drive field 19) once CDF-72 lands: upload with the report, malware and type checks, custody from receipt, and no attachment reachable without case access.

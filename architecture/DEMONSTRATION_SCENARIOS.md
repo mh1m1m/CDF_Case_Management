@@ -19,6 +19,10 @@ Switch language with the `ar`/`en` toggle in the header; every scenario works in
 | committee@example.test           | COMMITTEE_MEMBER    | CONFIDENTIAL | No case access                                                     |
 | grc.director@example.test        | GRC_DIRECTOR        | SECRET       | Owner of restricted case 0003                                      |
 | grc.deputy@example.test          | GRC_DIRECTOR        | SECRET       | Second approver for identity reveals                               |
+| records@example.test             | RECORDS_OFFICER     | CONFIDENTIAL | Retention class, disposition request                               |
+| records.b@example.test           | RECORDS_OFFICER     | CONFIDENTIAL | Second records officer                                             |
+| legal@example.test               | LEGAL_REVIEWER      | CONFIDENTIAL | Places and releases legal holds                                    |
+| legal.b@example.test             | LEGAL_REVIEWER      | CONFIDENTIAL | Second hold release approver                                       |
 | admin@example.test               | PLATFORM_ADMIN      | INTERNAL     | No case content                                                    |
 | audit@example.test               | INTERNAL_AUDIT      | INTERNAL     | Audit metadata only                                                |
 | soc@example.test                 | SOC_ANALYST         | INTERNAL     | Security events only                                               |

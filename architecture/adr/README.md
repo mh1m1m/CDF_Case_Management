@@ -14,6 +14,7 @@
 | [ADR-010](ADR-010-identity-and-sessions.md)             | Identity providers and session handling                 | Accepted |
 | [ADR-011](ADR-011-forms-engine.md)                      | Data-driven forms engine for the WB-FRM catalogue       | Accepted |
 | [ADR-012](ADR-012-interviews.md)                        | Interviews domain                                       | Accepted |
+| [ADR-013](ADR-013-records-retention-legal-hold.md)      | Records, retention, legal hold and disposition          | Proposed |
 | [ADR-015](ADR-015-reporter-attachments.md)              | Reporter attachments via public_api                     | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.
