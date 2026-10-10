@@ -1,7 +1,7 @@
 // CDF-56: every page has a title that says what it is, followed by the app name (WCAG 2.4.2).
 // Portal titles never carry a Report ID or secret; internal titles carry no case content.
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { APP, PORTAL, contextIn, signIn, submitAnonymousReport } from "../e2e/support";
+import { APP, PORTAL, contextIn, sharedAnonymousReport, signIn } from "../e2e/support";
 
 const appNames = {
   en: { app: "CDF Case Management & Investigation Platform", portal: "CDF Whistleblowing Portal" },
@@ -65,11 +65,7 @@ for (const locale of ["ar", "en"] as const) {
   });
 
   test(`${locale}: portal pages have distinct titles that never carry credentials`, async ({ browser }) => {
-    const { reportRef, secret } = await submitAnonymousReport(
-      browser,
-      "Synthetic report for the page title check.",
-      locale,
-    );
+    const { reportRef, secret } = await sharedAnonymousReport(browser);
     const page = await anonymousPage(browser, locale, PORTAL);
     const titles: string[] = [];
     for (const path of ["/", "/report", "/follow-up"]) {
