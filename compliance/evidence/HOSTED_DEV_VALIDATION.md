@@ -1,6 +1,6 @@
 # Hosted DEV validation — Supabase `cdf-case-dev`
 
-CDF-32 · CEOM §11 (Supabase holds the prototype database state as executed; the Git migrations remain the intended-state authority) · recorded 2026-10-07 from the Claude Code cloud session, branch `feature/CDF-32-hosted-dev` (base: PR #7 head `54786e4`); merged with PR #16 on 2026-10-10 and re-checked against DEV the same day (§4.2, §4.3, §5). DEV was migrated and seeded by `hosted-dev.yml` run 38053483205 on 2026-10-10 (§3, §4.2).
+CDF-32 · CEOM §11 (Supabase holds the prototype database state as executed; the Git migrations remain the intended-state authority) · recorded 2026-10-07 from the Claude Code cloud session, branch `feature/CDF-32-hosted-dev` (base: PR #7 head `54786e4`); merged with PR #16 on 2026-10-10 and re-checked against DEV the same day (§4.2, §4.3, §5). DEV was migrated and seeded by `hosted-dev.yml` run 38053483205 on 2026-10-10 and has since received every migration that reached `main`, through the same workflow; the suites passed against it in run 38060614633 (§3, §4.2, §4.4, §4.6, §8).
 
 Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. This document carries identifiers and technical metadata only. No key, password, token or connection string appears here or in the linked issues, ever.
 
@@ -25,26 +25,35 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. This document carries i
 | Session pooler | `aws-0-ap-northeast-1.pooler.supabase.com`, port 5432, user `postgres.blycdqjphsxvyiuoommv` (established by the probe in run 37649873035; `aws-1-…` answers "tenant not found")         |
 | Reachability   | The cloud session reaches the Supabase management API through the connector only; the database host and the pooler are not reachable from it, so suites run from GitHub Actions (§4.2)  |
 
-## 3. Migration status (`list_migrations`, 2026-10-07; re-read 2026-10-10 after run 38053483205)
+## 3. Migration status (`list_migrations`, 2026-10-07; re-read 2026-10-10 after runs 38053483205 and 38058158699)
 
-| Git migration                             | DEV     | Applied how                                                           | Note                                                                                    |
-| ----------------------------------------- | ------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `20261007000100_foundation`               | APPLIED | connector `apply_migration`, file verbatim (2026-10-07)               | —                                                                                       |
-| `20261007000200_iam`                      | APPLIED | same                                                                  | —                                                                                       |
-| `20261007000300_authz_core_and_audit`     | APPLIED | same                                                                  | the append-only audit triggers (`before delete or truncate`) are DDL and were not gated |
-| `20261007000400_domain_tables`            | APPLIED | same                                                                  | —                                                                                       |
-| `20261007000500_authz_case_and_policies`  | APPLIED | same                                                                  | —                                                                                       |
-| `20261007000600_workflow_definition`      | APPLIED | same                                                                  | —                                                                                       |
-| `20261007000700_api_commands`             | APPLIED | same                                                                  | —                                                                                       |
-| `20261007000800_public_api`               | APPLIED | CI, `hosted-dev.yml` run 38053483205, `supabase db push` (2026-10-10) | the connector could not apply it (§4.2)                                                 |
-| `20261007000900_evidence`                 | APPLIED | same run                                                              | —                                                                                       |
-| `20261007001000_evidence_storage_buckets` | APPLIED | same run                                                              | buckets verified on DEV (§7)                                                            |
-| `20261007001100_forms`                    | APPLIED | same run                                                              | —                                                                                       |
-| `20261007001110_form_definitions_seed`    | APPLIED | same run                                                              | reference data equal to Git (§5)                                                        |
-| `20261007001200_interviews`               | APPLIED | same run                                                              | —                                                                                       |
-| `20261007001500_portal_intake_alignment`  | APPLIED | same run                                                              | —                                                                                       |
+| Git migration                              | DEV     | Applied how                                                           | Note                                                                                    |
+| ------------------------------------------ | ------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `20261007000100_foundation`                | APPLIED | connector `apply_migration`, file verbatim (2026-10-07)               | —                                                                                       |
+| `20261007000200_iam`                       | APPLIED | same                                                                  | —                                                                                       |
+| `20261007000300_authz_core_and_audit`      | APPLIED | same                                                                  | the append-only audit triggers (`before delete or truncate`) are DDL and were not gated |
+| `20261007000400_domain_tables`             | APPLIED | same                                                                  | —                                                                                       |
+| `20261007000500_authz_case_and_policies`   | APPLIED | same                                                                  | —                                                                                       |
+| `20261007000600_workflow_definition`       | APPLIED | same                                                                  | —                                                                                       |
+| `20261007000700_api_commands`              | APPLIED | same                                                                  | —                                                                                       |
+| `20261007000800_public_api`                | APPLIED | CI, `hosted-dev.yml` run 38053483205, `supabase db push` (2026-10-10) | the connector could not apply it (§4.2)                                                 |
+| `20261007000900_evidence`                  | APPLIED | same run                                                              | —                                                                                       |
+| `20261007001000_evidence_storage_buckets`  | APPLIED | same run                                                              | buckets verified on DEV (§7)                                                            |
+| `20261007001100_forms`                     | APPLIED | same run                                                              | —                                                                                       |
+| `20261007001110_form_definitions_seed`     | APPLIED | same run                                                              | reference data equal to Git (§5)                                                        |
+| `20261007001200_interviews`                | APPLIED | same run                                                              | —                                                                                       |
+| `20261007001300_records`                   | APPLIED | CI, run 38056162850 (`--include-all`, 2026-10-10 13:44 UTC)           | merged after 1500 was applied (§4.4)                                                    |
+| `20261007001310_records_commands`          | APPLIED | same run                                                              | —                                                                                       |
+| `20261007001320_records_guards`            | APPLIED | same run                                                              | —                                                                                       |
+| `20261007001330_records_case_modules`      | APPLIED | same run                                                              | —                                                                                       |
+| `20261007001410_audit_select_policy`       | PENDING | the next run (`--include-all`)                                        | CDF-67, merged to `main` at 14:27 UTC (PR #45), after 1720 was applied (§4.4)           |
+| `20261007001500_portal_intake_alignment`   | APPLIED | run 38053483205                                                       | —                                                                                       |
+| `20261007001600_reporter_attachments`      | APPLIED | CI, run 38058158699 (`--include-all`, 2026-10-10 14:05 UTC)           | merged after 1710 was applied (§4.4)                                                    |
+| `20261007001700_purpose_bound_access`      | APPLIED | CI, run 38057400363 (2026-10-10 13:54 UTC)                            | —                                                                                       |
+| `20261007001710_purpose_bound_commands`    | APPLIED | same run                                                              | —                                                                                       |
+| `20261007001720_hold_request_minimisation` | APPLIED | CI, run 38058158699                                                   | —                                                                                       |
 
-The hosted history (`supabase_migrations.schema_migrations`) lists exactly the fourteen Git versions `20261007000100` … `20261007001500`, in Git order. Observation, no action: the seven rows the CLI wrote carry the CLI's name form (`public_api`, `evidence`, …: the file name without its version), the seven rows of 2026-10-07 the connector's form (`20261007000100_foundation`, …). `supabase db push` and `supabase migration list` compare versions only.
+The hosted history (`supabase_migrations.schema_migrations`) lists exactly the twenty-two Git versions `20261007000100` … `20261007001720` (re-read 2026-10-10 about 14:20 UTC, when they were all of `main` `294f872`). `main` `0ffde83` adds 1410, which the next run applies. Observation, no action: the rows the CLI wrote carry the CLI's name form (`public_api`, `evidence`, …: the file name without its version), the seven rows of 2026-10-07 the connector's form (`20261007000100_foundation`, …). `supabase db push` and `supabase migration list` compare versions only.
 
 ## 4. Drift records (EXPECTED / ACTUAL / DRIFT / CAUSE / REMEDIATION)
 
@@ -84,9 +93,11 @@ The hosted history (`supabase_migrations.schema_migrations`) lists exactly the f
 
 - EXPECTED: DEV applies the Git migrations in file order, as a database built from Git does.
 - ACTUAL: DEV received 1500 (`portal_intake_alignment`) at 12:51 UTC. At 12:55 PR #14 merged `20261007001300_records`, `…1310_records_commands`, `…1320_records_guards` and `…1330_records_case_modules` into `main`. All four sort before 1500. `supabase db push` refuses files older than the newest applied version unless `--include-all` is given.
+- ACTUAL, again: 1700 and 1710 reached DEV at 13:54 UTC (run 38057400363); then PR #39 merged `20261007001600_reporter_attachments`, which sorts before them. Run 38058158699 applied it with `--include-all` at 14:05 UTC, together with 1720. `20261007001410_audit_select_policy` (CDF-67) merged at 14:27 UTC, below 1720, and reaches DEV the same way with the next run; no later migration touches the `audit.audit_event` policies, so its result does not depend on the order.
 - DRIFT: order only. The content is identical.
-- CAUSE: migration numbers are reserved per work stream (1100s forms, 1200s interviews, 1300s records, 1400s CDF-66/67, 1500s CDF-63, …), so files can merge in a different order than their numbers. The 1400s will arrive below 1500 too.
+- CAUSE: migration numbers are reserved per work stream (1100s forms, 1200s interviews, 1300s records, 1400s CDF-66/67, 1500s CDF-63, …), so files can merge in a different order than their numbers. Since 2026-10-10 14:31 UTC the orchestrator numbers every new migration above the highest one on `main` (CDF-66 takes 1800), which ends this for new work; CDF-67's 1410 merged just before the rule.
 - REMEDIATION: `hosted-dev.yml` runs `supabase db push --include-all`, then a drift check: it builds a reference database from Git alone in a PostgreSQL 16 service container (`node scripts/db/reset.mjs`, compatibility shim, file order) and fails the run unless both fingerprint scripts return the same rows for DEV and the reference. Verified locally before the change: a database built in DEV's order (…1200, 1500, 1300–1330) and one built in Git order return identical fingerprints (91 schema buckets including `records`, 13 reference tables). A deliberately added function in the DEV-order copy made the check fail with the differing bucket (`function | api | 60` against `61`).
+- RESULT: the drift check passed on DEV in run 38056162850 (after 1300–1330: 91 of 91 schema buckets, 13 of 13 reference tables), in run 38057400363 (after 1700–1710: the same counts) and in run 38058158699 (after 1600 and 1720: 92 of 92 schema buckets, 13 of 13 reference tables). Locally, DEV's actual order (…1200, 1500, 1300–1330, 1700, 1710, 1600, 1720) and Git order build identical schema (92 buckets) and reference data (13 tables).
 
 ### 4.5 Test bucket left on DEV by `storage-policy.spec.ts` — OPEN (removal waits for the owner)
 
@@ -102,7 +113,7 @@ The hosted history (`supabase_migrations.schema_migrations`) lists exactly the f
 - ACTUAL (run 38058158699, 2026-10-10 14:05–14:31 UTC): 16 users where Git's seed has 20. The two records officers and two legal reviewers (`a0000000-…-000000000019` to `…022`, added with CDF-69 and CDF-73) and their four role assignments were missing. 294 of 380 tests passed; the 86 failures, in eight files (`purpose-bound`, `records-screens`, `api-idor`, `audit-bypass`, `authz-purpose-bound`, `records-case-modules`, `records-disposition`, `records-legal-hold`), all act as one of those users ("no actor for records", `CDF_UNAUTHENTICATED`, `CDF_INVALID:assigned_user_id`). A local database seeded with the file as DEV got it (`3b4cbb9`) fails the same 86 tests and passes the other 294.
 - DRIFT: four synthetic users and their role assignments. Schema and reference data passed the drift check in the same run.
 - CAUSE: the seed step loads the seed files only while `iam.user_profile` is empty, because they are not idempotent (02 onwards act through the `api.*` commands). DEV was seeded at 12:51 UTC (run 38053483205); the four users reached `main` later, with the records and purpose-bound work.
-- REMEDIATION: a new step after the drift check inserts the synthetic users of the database built from Git that DEV lacks, with their role assignments; it never updates or deletes (this branch). Proven locally on a database seeded as DEV was: the step added the four users, a second run added none, users and role assignments then equalled Git's, and 380 of 380 tests passed. Seed changes other than new users (a new case or interview in 02 onwards) still reach DEV only by a decision at the time.
+- REMEDIATION: a new step after the drift check inserts the synthetic users of the database built from Git that DEV lacks, with their role assignments; it never updates or deletes (this branch). Proven locally on a database seeded as DEV was: the step added the four users, a second run added none, users and role assignments then equalled Git's, and 380 of 380 tests passed. Run 38060614633 (`905bac8`) then added the four users on DEV and passed 380 of 380 tests. Seed changes other than new users (a new case or interview in 02 onwards) still reach DEV only by a decision at the time.
 
 ## 5. Verification: DEV schema and reference data equal Git
 
@@ -117,7 +128,7 @@ Re-check (2026-10-10, about 08:45 UTC): a database built locally from the compat
 
 After the apply (2026-10-10, about 12:55 UTC, while the suites of run 38053483205 were running; both scripts now also cover the `forms` schema and the reference data that 0900–1110 add: `evidence.allowed_content_type`, `forms.form_definition`, `forms.form_definition_version`, `forms.form_field_definition`, `forms.form_entitlement`): a database built locally with `node scripts/db/reset.mjs` (compatibility shim, all fourteen Git migrations, seeds) and DEV return identical output. Schema: all 79 (kind, schema) buckets, 790 objects, one md5 over the 79 result rows `aca06481…` on both. Reference data, all 12 tables equal: `iam.role` 21, `iam.permission` 25, `iam.role_permission` 83, `config.setting` 4, `workflow_definition` 1, `workflow_state` 15, `workflow_transition_definition` 20, `evidence.allowed_content_type` 16, `forms.form_definition` 19, `forms.form_definition_version` 19, `forms.form_field_definition` 184, `forms.form_entitlement` 255. No drift.
 
-From 2026-10-10 every run of `hosted-dev.yml` repeats this comparison automatically after applying migrations and seeding, against a reference database built from Git in a service container, and fails on any difference (§4.4). Both scripts now also cover the `records` schema and `records.retention_class`.
+From 2026-10-10 every run of `hosted-dev.yml` repeats this comparison automatically after applying migrations and seeding, against a reference database built from Git in a service container, and fails on any difference (§4.4). Both scripts now also cover the `records` schema and `records.retention_class`. Results: runs 38056162850, 38057400363 and 38058158699 (§4.4).
 
 Observation: DEV collates `en_US.UTF-8`, the local database `C.UTF-8`. Text ordering inside `string_agg` therefore differs unless the sort uses `collate "C"`, which both scripts now do. Anything that orders text for a comparison or a stable hash must do the same.
 
@@ -143,6 +154,17 @@ Re-read 2026-10-10 about 12:55 UTC, all fourteen migrations applied and the seed
 
 No security finding at WARN or ERROR.
 
+Re-read 2026-10-10 about 14:17 UTC, all twenty-two migrations applied (`main` `294f872`):
+
+| Advisor     | Level    | Finding                                                                             | Disposition                                                                                                            |
+| ----------- | -------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| security    | INFO ×5  | `rls_enabled_no_policy`: the four tables above and `records.number_counter` (1300)  | By design: no grants to any application role (checked), reached only through `SECURITY DEFINER` commands. Kept.        |
+| performance | INFO ×96 | `unindexed_foreign_keys` (1300–1330, 1600 and 1700–1720 add 28)                     | CDF-66: indexes on access-path foreign keys in migration 1800.                                                         |
+| performance | INFO ×9  | `unused_index`                                                                      | Expected on a new database. No action.                                                                                 |
+| performance | WARN ×1  | `multiple_permissive_policies` on `audit.audit_event`, SELECT, role `authenticated` | CDF-67: migration 1410 (PR #45, merged 14:27 UTC) replaces the three policies with one; DEV gets it with the next run. |
+
+No security finding at WARN or ERROR.
+
 ## 7. Evidence buckets from Git
 
 `20261007001000_evidence_storage_buckets.sql` declares `evidence-quarantine` and `evidence-vault` in `storage.buckets`: `public = false`, `file_size_limit = 26214400` (`EVIDENCE_MAX_BYTES`, §25) and `allowed_mime_types` = `evidence.allowed_content_type`. It is idempotent (`on conflict … do update` forces the bucket private again) and raises if either bucket ends up missing, public or unlimited. `tests/security/storage-policy.spec.ts` asserts the same on every run: no public bucket anywhere, both evidence buckets present and configured, no storage policy for an application role, RLS on `storage.buckets` and `storage.objects`. The adapter's `ensureBuckets()` stays as a fallback and is a no-op once the migration has run. Verified on the local shim: both buckets private, 25 MiB, 16 allowed types; the suite passes (6 tests). Verified on DEV (read-only through the connector, 2026-10-10 about 13:30 UTC, after run 38053483205): `evidence-quarantine` and `evidence-vault` private, 26214400 bytes, 16 allowed types, no objects; one more bucket, left by a test, is drift record 4.5.
@@ -151,19 +173,19 @@ PRODUCTION_SUBSTITUTION_REQUIRED: in production the buckets are Alibaba Cloud OS
 
 ## 8. DEV validation gates (DEMO is created only when every gate is PASSED)
 
-| Gate                                               | Status               | Evidence or blocker                                                                                                                                                   |
-| -------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Migrations 0100–1000 applied, history equals Git   | IN_PROGRESS          | 7 of 10 (§3, re-read 2026-10-10); `hosted-dev.yml` on `main` waits for the database password (§4.2)                                                                   |
-| Schema equals Git (fingerprints)                   | PASSED for 0100–0700 | §5 (re-checked 2026-10-10); rerun after 0800–1000                                                                                                                     |
-| RLS and security suites against DEV                | NOT_STARTED          | `hosted-dev.yml`, `pnpm test:db` (projects `integration` and `security`)                                                                                              |
-| Authorization-isolation suites                     | NOT_STARTED          | same run                                                                                                                                                              |
-| Storage security (`storage-policy.spec.ts`)        | NOT_STARTED          | same run; needs 1000                                                                                                                                                  |
-| Synthetic seed                                     | NOT_STARTED          | `hosted-dev.yml` seed step; runs only while `iam.user_profile` is empty                                                                                               |
-| Supabase Auth adapter against DEV                  | BLOCKED              | DEV has no auth users: `infrastructure/supabase/seed/01_synthetic_users.sql` refers to `scripts/db/seed-auth-users.mjs`, which does not exist (CDF-65, blocks CDF-32) |
-| Storage adapter (`SupabaseEvidenceStorage`) on DEV | NOT_STARTED          | needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as CI secrets and an adapter test, which does not exist yet                                                      |
-| Evidence workflow end to end on DEV                | NOT_STARTED          | after the storage adapter                                                                                                                                             |
-| Regression (lint, typecheck, unit, build)          | PASSED               | PR #16: all 7 required checks green on its merged head (2026-10-10)                                                                                                   |
-| Advisors clean (no security WARN or ERROR)         | PASSED at 0700       | §6; reread after 1000                                                                                                                                                 |
+| Gate                                               | Status      | Evidence or blocker                                                                                                                                                   |
+| -------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Migrations applied, history equals Git             | PASSED      | all 22 of `main` `294f872` (§3); every run applies what reaches `main`, out-of-order files included (§4.4); 1410 from `main` `0ffde83` follows with the next run      |
+| Schema and reference data equal Git (fingerprints) | PASSED      | automated drift check on every run (§4.4, §5); last in run 38060614633                                                                                                |
+| RLS and security suites against DEV                | PASSED      | run 38060614633 (`905bac8`): 380 of 380 tests passed in 29 files; run 38058158699 failed 86 tests for want of four seed users (§4.6)                                  |
+| Authorization-isolation suites                     | PASSED      | same run (`case-isolation`, `api-idor`, `authorization`, `admin-separation` and the records and purpose-bound suites)                                                 |
+| Storage security (`storage-policy.spec.ts`)        | PASSED      | same run; both evidence buckets private on DEV (§7); one leftover test bucket (§4.5)                                                                                  |
+| Synthetic seed                                     | PASSED      | loaded by run 38053483205 (four seed files); users added to the seed later follow on every run (§4.6); the suites add their own synthetic records (§11)               |
+| Supabase Auth adapter against DEV                  | BLOCKED     | DEV has no auth users: `infrastructure/supabase/seed/01_synthetic_users.sql` refers to `scripts/db/seed-auth-users.mjs`, which does not exist (CDF-65, blocks CDF-32) |
+| Storage adapter (`SupabaseEvidenceStorage`) on DEV | NOT_STARTED | needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as CI secrets and an adapter test, which does not exist yet                                                      |
+| Evidence workflow end to end on DEV                | NOT_STARTED | after the storage adapter                                                                                                                                             |
+| Regression (lint, typecheck, unit, build)          | PASSED      | PR #40: all 7 required checks green on `905bac8` (2026-10-10)                                                                                                         |
+| Advisors clean (no security WARN or ERROR)         | PASSED      | §6, re-read after all 22 migrations                                                                                                                                   |
 
 ## 9. Credentials map (names only)
 
@@ -195,7 +217,7 @@ Historical record of 2026-10-07. The Vercel projects are tracked in CDF-33 from 
 
 ## 12. How to re-run
 
-1. GitHub → Actions → "Hosted DEV (Supabase)" → Run workflow on `main` (inputs `seed` and `test`, both default true), or `POST /repos/mh1m1m/CDF_Case_Management/actions/workflows/hosted-dev.yml/dispatches` with `ref` `main`. Until PR #16 merged (2026-10-10) the workflow ran on pushes to `feature/CDF-32-hosted-dev`.
-2. Read the run summary: migration history before and after, seed result, suite results.
-3. Run `scripts/db/fingerprint-schema.sql` and `scripts/db/fingerprint-data.sql` on DEV (connector `execute_sql`) and locally (`psql -f`); every bucket must match, `evidence` and `public_api` included.
+1. GitHub → Actions → "Hosted DEV (Supabase)" → Run workflow on `main` (inputs `seed` and `test`, both default true), or `POST /repos/mh1m1m/CDF_Case_Management/actions/workflows/hosted-dev.yml/dispatches` with `ref` `main`. It also runs on pushes to `feature/CDF-32-hosted-dev` that touch the workflow, `infrastructure/supabase/**`, `tests/**` or `scripts/db/**`. A manual run on `main` reads the `Subapase` environment once PR #40 has merged.
+2. Read the run's annotations: the drift check ("No drift …" with row counts), "Seed users" and "DB suites on DEV" (totals and failed tests); the run summary has the migration history. The suites take about an hour over the pooler (run 38060614633: 61 minutes), because every statement crosses regions.
+3. The run compares DEV with a database built from Git by itself (§4.4). To repeat it by hand, run `scripts/db/fingerprint-schema.sql` and `scripts/db/fingerprint-data.sql` on DEV (connector `execute_sql`) and locally (`psql -f`); every bucket must match.
 4. Reread the advisors; update §3, §6 and §8 here and the evidence comment on CDF-32 with the run ID and commit.
