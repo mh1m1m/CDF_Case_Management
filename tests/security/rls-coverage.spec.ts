@@ -14,6 +14,7 @@ const APP_SCHEMAS = [
   "workflow",
   "evidence",
   "forms",
+  "records",
   "config",
   "api",
   "public_api",

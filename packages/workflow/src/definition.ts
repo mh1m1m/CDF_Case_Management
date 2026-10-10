@@ -228,6 +228,6 @@ export const TRANSITIONS: readonly WorkflowTransition[] = [
     false,
     10,
   ),
-  t("ARCHIVE_CASE", "CLOSURE", "ARCHIVE", "WORKFLOW_ADVANCE", false, false, [], false, false, 11),
+  t("ARCHIVE_CASE", "CLOSURE", "ARCHIVE", "WORKFLOW_ADVANCE", false, false, [], false, true, 11),
   t("REOPEN_CASE", "CLOSURE", "INVESTIGATION", "INVESTIGATION_APPROVE", true, true, [], false, false, 10),
 ];
