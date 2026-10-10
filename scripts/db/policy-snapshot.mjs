@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const url = process.env.CDF_ADMIN_DATABASE_URL ?? "postgresql://postgres@127.0.0.1:54322/postgres";
 const schemas =
-  "'core','iam','authz','audit','case_mgmt','intake','protected_identity','workflow','evidence','config','api','public_api'";
+  "'core','iam','authz','audit','case_mgmt','intake','protected_identity','workflow','evidence','forms','config','api','public_api'";
 
 // Fields are separated by the ASCII unit separator so a literal "|" inside a policy expression can be
 // escaped for the Markdown table instead of being mistaken for a column boundary.

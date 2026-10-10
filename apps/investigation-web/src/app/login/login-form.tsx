@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { createTranslator, type Locale, type MessageKey } from "@cdf/i18n";
+import { createTranslator, type Locale } from "@cdf/i18n";
 import { CDFAlert, CDFField, buttonClass, inputClass } from "@cdf/ui";
 import type { ActionState } from "@/server/actions-helpers";
 import { signInAction } from "./actions";
@@ -43,9 +43,6 @@ export function LoginForm({ locale }: { locale: Locale }) {
       <button type="submit" className={buttonClass("primary")} disabled={pending} data-testid="login-submit">
         {pending ? t("common.working") : t("login.submit")}
       </button>
-      <p className="sr-only" aria-live="polite">
-        {state.status === "error" ? t(`errors.${state.kind}` as MessageKey) : ""}
-      </p>
     </form>
   );
 }
