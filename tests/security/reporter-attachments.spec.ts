@@ -85,7 +85,10 @@ describe("credentials: a wrong secret is indistinguishable from an unknown Repor
       expect(events.map((e) => [e.action, e.category, e.outcome, e.actor_type])).toEqual(
         Array(4).fill(["REPORT_ACCESS_FAILED", "SECURITY", "DENIED", "ANONYMOUS_REPORTER"]),
       );
-      const [count] = await admin<{ n: number }[]>`select count(*)::int as n from intake.report_attachment`;
+      // The intake team sees every attachment of this pre-case report through RLS: none was stored.
+      await s.as("intake");
+      const [count] = await s.tx<{ n: number }[]>`
+        select count(*)::int as n from intake.report_attachment where report_id = ${intakeReport}`;
       expect(count!.n).toBe(0);
     });
   });
