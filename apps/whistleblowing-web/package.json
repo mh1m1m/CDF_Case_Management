@@ -21,6 +21,7 @@
     "@cdf/validation": "workspace:*",
     "@cdf/workflow": "workspace:*",
     "@hookform/resolvers": "5.9.1",
+    "@sentry/nextjs": "10.75.3",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",

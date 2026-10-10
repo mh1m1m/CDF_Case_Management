@@ -31,6 +31,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
+      - name: Sentry stays server-side only (CDF-81)
+        run: node scripts/security/check-sentry-boundary.mjs
       - run: pnpm typecheck
       - run: pnpm test
 
@@ -94,6 +96,9 @@ jobs:
           done
           echo "CDF_ADMIN_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres" >> "$GITHUB_ENV"
           echo "CDF_IDENTITY_PROVIDER=local-dev" >> "$GITHUB_ENV"
+          # CDF-81: a synthetic, never-resolving DSN, so the build and the bundle scan prove the
+          # server-only DSN does not reach any client bundle, and the apps start with Sentry on.
+          echo "SENTRY_DSN=https://$(openssl rand -hex 16)@o0.ingest.example.test/1" >> "$GITHUB_ENV"
       - run: pnpm db:reset
       - name: App connection strings
         run: |
