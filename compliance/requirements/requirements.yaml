@@ -608,3 +608,375 @@ requirements:
     enforcement: [infrastructure/supabase/migrations/20261007001200_interviews.sql]
     tests: [tests/security/interviews-integrity.spec.ts, tests/e2e/interviews.spec.ts]
     notes: "Mechanism complete; the rights notice wording and versioning are SOURCE_REQUIRED."
+  # Public portal intake field set from the Drive report «تقرير متطلبات خدمة الإبلاغ عن المخالفات»
+  # (19 Jan 2025), fields 1–21 (CDF-63). Identity fields live only in protected_identity.reporter_identity.
+
+  - id: CDF-WB-INTAKE-001
+    title: "Relationship to the Fund (mandatory dropdown)"
+    source: [Drive whistleblowing requirements report field 1, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+        packages/contracts/src/intake.ts,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-002
+    title: "Relationship clarification when Other (optional, conditional)"
+    source: [Drive whistleblowing requirements report field 2, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+    notes: "The Drive table labels field 2 'violation clarification' but places it under field 1's 'Other'; implemented as the relationship clarification."
+
+  - id: CDF-WB-INTAKE-003
+    title: "Reporting mode: anonymous / email only / identified (mandatory)"
+    source: [Drive whistleblowing requirements report field 3, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+        packages/contracts/src/intake.ts,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-004
+    title: "Full four-part name (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 4, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/security/whistleblower-vault.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-005
+    title: "Gender (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 5, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+        packages/contracts/src/intake.ts,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-006
+    title: "Date of birth, Hijri or Gregorian (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 6, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+    notes: "Stored as entered with its calendar; no Hijri/Gregorian conversion in the prototype."
+
+  - id: CDF-WB-INTAKE-007
+    title: "ID type: national ID / Iqama / passport (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 7, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+        packages/contracts/src/intake.ts,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-008
+    title: "ID number matching the ID type (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 8, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+    notes: "Format checks only (prefix and length); PRODUCTION_SUBSTITUTION_REQUIRED: authoritative ID verification."
+
+  - id: CDF-WB-INTAKE-009
+    title: "City from the approved list (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 9, protocol §22, §23]
+    external_ids: []
+    status: PRODUCTION_SUBSTITUTION_REQUIRED
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+        packages/contracts/src/intake.ts,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+    notes: "Prototype list of major cities; replace with CDF's approved city reference list."
+
+  - id: CDF-WB-INTAKE-010
+    title: "Nationality (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 10, protocol §22, §23]
+    external_ids: []
+    status: PRODUCTION_SUBSTITUTION_REQUIRED
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+        packages/contracts/src/intake.ts,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+    notes: "ISO 3166-1 alpha-2 codes with Intl display names; replace with CDF's approved list."
+
+  - id: CDF-WB-INTAKE-011
+    title: "Mobile number (mandatory when identified; vault only)"
+    source: [Drive whistleblowing requirements report field 11, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-012
+    title: "Email (mandatory when identified or email-only; vault only)"
+    source: [Drive whistleblowing requirements report field 12, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+    notes: "The Drive report says the email receives the Report ID; outbound email is Phase 13 (see field 21 lifecycle note)."
+
+  - id: CDF-WB-INTAKE-013
+    title: "Violation type from the Drive list (mandatory)"
+    source: [Drive whistleblowing requirements report field 13, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+        packages/contracts/src/index.ts,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+    notes: "Earlier synthetic categories were mapped onto this list by migration 1500."
+
+  - id: CDF-WB-INTAKE-014
+    title: "Violation clarification when Other (optional, conditional)"
+    source: [Drive whistleblowing requirements report field 14, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests: [packages/validation/src/index.test.ts, tests/security/public-portal.spec.ts]
+
+  - id: CDF-WB-INTAKE-015
+    title: "Detailed description (mandatory)"
+    source: [Drive whistleblowing requirements report field 15, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-016
+    title: "Incident date and time (mandatory)"
+    source: [Drive whistleblowing requirements report field 16, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-017
+    title: "Location or entity (mandatory)"
+    source: [Drive whistleblowing requirements report field 17, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-018
+    title: "Persons reported (mandatory)"
+    source: [Drive whistleblowing requirements report field 18, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-019
+    title: "Supporting attachments from the reporter (optional upload)"
+    source: [Drive whistleblowing requirements report field 19, protocol §22, §23]
+    external_ids: []
+    status: NOT_STARTED
+    enforcement: [apps/whistleblowing-web/src/app/report/report-form.tsx]
+    tests: []
+    notes: "Evidence storage is case-bound (migration 0900); portal uploads need an intake attachment design (private bucket, scan, custody). The form says attachments are not available yet. Tracked as CDF-72."
+
+  - id: CDF-WB-INTAKE-020
+    title: "Willingness to cooperate (mandatory)"
+    source: [Drive whistleblowing requirements report field 20, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001500_portal_intake_alignment.sql,
+        packages/validation/src/index.ts,
+        apps/whistleblowing-web/src/app/report/report-form.tsx,
+      ]
+    tests:
+      [
+        packages/validation/src/index.test.ts,
+        tests/security/public-portal.spec.ts,
+        tests/e2e/portal-intake.spec.ts,
+      ]
+
+  - id: CDF-WB-INTAKE-021
+    title: "Policy and declaration acknowledgement (mandatory)"
+    source: [Drive whistleblowing requirements report field 21, protocol §22, §23]
+    external_ids: []
+    status: COMPLETE
+    enforcement: [packages/validation/src/index.ts, apps/whistleblowing-web/src/app/report/report-form.tsx]
+    tests: [packages/validation/src/index.test.ts, tests/accessibility/a11y.spec.ts]
+    notes: "Ticket lifecycle notices to the reporter by email/SMS are out of scope until notifications (Phase 13); the portal follow-up page is the channel."

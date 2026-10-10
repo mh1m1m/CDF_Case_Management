@@ -9,7 +9,13 @@ import {
   normaliseReporterSecret,
   REPORTER_SECRET_PATTERN,
 } from "@cdf/domain";
-import { reportAccessSchema, reporterMessageSchema, submitReportSchema } from "@cdf/validation";
+import {
+  reportAccessSchema,
+  reporterMessageSchema,
+  submitReportSchema,
+  type ReportIdentity,
+  type SubmitReport,
+} from "@cdf/validation";
 import { AppError, toAppError } from "./errors";
 import type {
   KeyManagementProvider,
@@ -30,6 +36,29 @@ export const PORTAL_LIMITS = {
   submit: { limit: 5, windowSeconds: 3600 },
   access: { limit: 30, windowSeconds: 900 },
 } as const;
+
+/** Maps the validated identity to the vault payload of public_api.submit_report; nothing for anonymous. */
+export function vaultIdentity(input: SubmitReport): Record<string, string> | undefined {
+  if (input.reporterMode === "ANONYMOUS" || !input.identity) return undefined;
+  if (input.reporterMode === "EMAIL_ONLY") return { email: input.identity.email };
+  const i = input.identity as ReportIdentity;
+  return {
+    given_name: i.givenName,
+    father_name: i.fatherName,
+    grandfather_name: i.grandfatherName,
+    family_name: i.familyName,
+    gender: i.gender,
+    birth_date: i.birthDate,
+    birth_date_calendar: i.birthDateCalendar,
+    id_type: i.idType,
+    id_number: i.idNumber,
+    city: i.city,
+    nationality: i.nationality,
+    phone: i.phone,
+    email: i.email,
+    preferred_contact: i.preferredContact,
+  };
+}
 
 export function createPortalService(deps: PortalDeps) {
   async function limit(kind: keyof typeof PORTAL_LIMITS, clientKey: string, ctx: RequestContext) {
@@ -57,18 +86,19 @@ export function createPortalService(deps: PortalDeps) {
           const result = await deps.gateway.submitReport(ctx, {
             reportRef: generateReportRef(),
             secretHmac,
+            reporterMode: input.reporterMode,
+            relationship: input.relationship,
+            relationshipOther: input.relationshipOther,
             category: input.category,
+            categoryOther: input.categoryOther,
             subjectDescription: input.subjectDescription,
             description: input.description,
             incidentDate: input.incidentDate,
+            incidentTime: input.incidentTime,
             location: input.location,
+            willingToCooperate: input.willingToCooperate === "YES",
             language: input.language,
-            identity: input.identity && {
-              full_name: input.identity.fullName,
-              email: input.identity.email,
-              phone: input.identity.phone,
-              preferred_contact: input.identity.preferredContact,
-            },
+            identity: vaultIdentity(input),
           });
           return { ok: true as const, reportRef: result.reportRef, secret, receivedAt: result.receivedAt };
         } catch (error) {
