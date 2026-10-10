@@ -1,10 +1,12 @@
 /**
- * CDF design-system primitives (protocol §41–§44). Server-component safe: no hooks, no browser APIs.
+ * CDF design-system primitives (protocol §41–§44). Server-component safe: no browser APIs, and no hooks other than
+ * `useId`, which React supports in Server Components.
  * Text is always passed in by the caller from @cdf/i18n; components never hard-code copy.
  * Layout uses logical properties (ps/pe/ms/me/start/end) so RTL and LTR both work.
  */
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { CDFFieldError } from "./field-errors";
+import { CDFScrollRegion } from "./scroll-region";
 
 const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
 
@@ -39,8 +41,9 @@ export function CDFShell(props: {
       >
         {props.skipLabel}
       </a>
-      {props.banner}
+      {/* The banner sits inside <header> so all page content is in a landmark (WCAG 1.3.1). */}
       <header className="bg-cdf-surface border-b border-cdf-border">
+        {props.banner}
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-3">
           <div className="flex items-center gap-3">{props.brand}</div>
           {props.nav ? <div className="flex-1">{props.nav}</div> : <div className="flex-1" />}
@@ -224,7 +227,9 @@ export function CDFCard({
   actions?: ReactNode;
   testId?: string;
 }) {
-  const headingId = title ? `card-${title.replace(/\W+/g, "-").toLowerCase()}` : undefined;
+  // useId, not the title: deriving ids from text dropped every Arabic letter, so all cards shared "card--".
+  const id = useId();
+  const headingId = title ? `card-${id}` : undefined;
   return (
     <section
       aria-labelledby={headingId}
@@ -269,11 +274,9 @@ export function CDFTable<T>(props: {
 }) {
   if (props.rows.length === 0) return <p className="text-cdf-text-secondary">{props.empty}</p>;
   return (
-    // Scrollable regions must be keyboard reachable (WCAG 2.1.1).
-    <div
-      role="region"
-      aria-label={props.caption}
-      tabIndex={0}
+    // Focusable and labelled only while it actually scrolls (WCAG 2.1.1, 2.4.3).
+    <CDFScrollRegion
+      label={props.caption}
       className="overflow-x-auto rounded-cdf-lg border border-cdf-border bg-cdf-surface"
     >
       <table className="w-full text-start text-sm" data-testid={props.testId}>
@@ -299,7 +302,7 @@ export function CDFTable<T>(props: {
           ))}
         </tbody>
       </table>
-    </div>
+    </CDFScrollRegion>
   );
 }
 
