@@ -8,11 +8,21 @@ import { signOutAction } from "./login/actions";
 import { SessionTimeout } from "./session/session-timeout";
 
 /** Navigation reflects permissions for usability only; every page enforces access on the server. */
-export function AppNav({ actor, t, current }: { actor: Actor; t: Translator; current?: "intake" | "cases" }) {
+export function AppNav({
+  actor,
+  t,
+  current,
+}: {
+  actor: Actor;
+  t: Translator;
+  current?: "intake" | "cases" | "records";
+}) {
   const nav = navigationFor(actor);
   const items = [
     nav.intake ? { key: "intake", href: "/intake", label: t("nav.intake") } : null,
     nav.cases ? { key: "cases", href: "/cases", label: t("nav.cases") } : null,
+    // Records catalogue and own records/legal work (ADR-014); never a list of all investigations.
+    nav.recordsCatalogue || nav.myWork ? { key: "records", href: "/records", label: t("nav.records") } : null,
   ].filter((x): x is { key: string; href: string; label: string } => x !== null);
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-cdf-border pb-3">

@@ -13,6 +13,13 @@ describe("assertNoSecretsInPublicEnv", () => {
     );
     expect(() => assertNoSecretsInPublicEnv({ NEXT_PUBLIC_DATABASE_URL: "x" })).toThrow();
   });
+  it("rejects any public Sentry variable (CDF-81: the SDK is server-only)", () => {
+    expect(() => assertNoSecretsInPublicEnv({ NEXT_PUBLIC_SENTRY_DSN: "x" })).toThrow(
+      /NEXT_PUBLIC_SENTRY_DSN/,
+    );
+    expect(() => assertNoSecretsInPublicEnv({ NEXT_PUBLIC_SENTRY_ENVIRONMENT: "dev" })).toThrow();
+    expect(() => assertNoSecretsInPublicEnv({ NEXT_PUBLIC_DSN: "x" })).toThrow();
+  });
   it("allows non-credential public variables", () => {
     expect(() => assertNoSecretsInPublicEnv({ NEXT_PUBLIC_CDF_ENVIRONMENT_LABEL: "DEV" })).not.toThrow();
   });

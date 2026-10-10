@@ -86,8 +86,272 @@ export const PERMISSIONS = [
   "LEGAL_HOLD_RELEASE",
   "DISPOSITION_REQUEST",
   "DISPOSITION_APPROVE",
+  // Purpose-bound access (ADR-014, CDF-73). RECORDS_VIEW above is retired: no role holds it.
+  "CASE_DISCOVER",
+  "CASE_VIEW_METADATA",
+  "CASE_VIEW_CONTENT",
+  "CASE_TASK_ASSIGN",
+  "LEGAL_HOLD_REQUEST",
+  "LEGAL_HOLD_REVIEW",
+  "RETENTION_TASK_VIEW",
+  "RETENTION_TASK_EXECUTE",
+  "DISPOSITION_TASK_VIEW",
+  "DISPOSITION_TASK_EXECUTE",
+  "ARCHIVE_RECORD_VIEW",
+  "ARCHIVE_RECORD_ADMINISTER",
+  "RECORDS_LIFECYCLE_ADMIN",
+  "BREAK_GLASS_REQUEST",
+  "BREAK_GLASS_APPROVE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
+
+// ---- Purpose-bound case tasks (ADR-014) -----------------------------------------------------------
+/** Records lifecycle states of a case (case_mgmt.case_record.records_state). */
+export const RECORDS_STATES = [
+  "ACTIVE",
+  "CLOSED",
+  "RETENTION",
+  "ARCHIVED",
+  "DISPOSITION_ELIGIBLE",
+  "DISPOSITION_PENDING",
+  "DISPOSED",
+] as const;
+export type RecordsState = (typeof RECORDS_STATES)[number];
+
+export const CASE_TASK_STATUSES = ["OPEN", "IN_PROGRESS", "COMPLETED", "CANCELLED", "EXPIRED"] as const;
+export type CaseTaskStatus = (typeof CASE_TASK_STATUSES)[number];
+
+export interface CaseTaskTypeDefinition {
+  code: string;
+  category: "LEGAL" | "RECORDS";
+  allowedCapabilities: readonly Permission[];
+  eligibleRoles: readonly string[];
+  /** Records tasks exist only once the case has left ACTIVE. */
+  requiresClosed: boolean;
+}
+
+/** Mirror of case_mgmt.case_task_type (tests/integration/mirrors.spec.ts). No type grants case content. */
+export const CASE_TASK_TYPES = [
+  {
+    code: "ARCHIVE_TRANSFER",
+    category: "RECORDS",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "RETENTION_TASK_VIEW", "ARCHIVE_RECORD_ADMINISTER"],
+    eligibleRoles: ["RECORDS_OFFICER"],
+    requiresClosed: true,
+  },
+  {
+    code: "DISPOSITION_APPROVAL",
+    category: "RECORDS",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "DISPOSITION_TASK_VIEW"],
+    eligibleRoles: ["GRC_DIRECTOR"],
+    requiresClosed: true,
+  },
+  {
+    code: "DISPOSITION_EXECUTION",
+    category: "RECORDS",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "DISPOSITION_TASK_VIEW", "DISPOSITION_TASK_EXECUTE"],
+    eligibleRoles: ["RECORDS_OFFICER"],
+    requiresClosed: true,
+  },
+  {
+    code: "DISPOSITION_REVIEW",
+    category: "RECORDS",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "DISPOSITION_TASK_VIEW", "DISPOSITION_TASK_EXECUTE"],
+    eligibleRoles: ["RECORDS_OFFICER"],
+    requiresClosed: true,
+  },
+  {
+    code: "LEGAL_HOLD_APPLICATION",
+    category: "LEGAL",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "LEGAL_HOLD_APPLY"],
+    eligibleRoles: ["LEGAL_REVIEWER", "RECORDS_OFFICER", "GRC_DIRECTOR"],
+    requiresClosed: false,
+  },
+  {
+    code: "LEGAL_HOLD_ASSESSMENT",
+    category: "LEGAL",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "LEGAL_HOLD_REVIEW", "LEGAL_HOLD_APPLY"],
+    eligibleRoles: ["LEGAL_REVIEWER", "GRC_DIRECTOR"],
+    requiresClosed: false,
+  },
+  {
+    code: "LEGAL_HOLD_RELEASE",
+    category: "LEGAL",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "LEGAL_HOLD_RELEASE"],
+    eligibleRoles: ["LEGAL_REVIEWER", "GRC_DIRECTOR"],
+    requiresClosed: false,
+  },
+  {
+    code: "LEGAL_REVIEW",
+    category: "LEGAL",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "LEGAL_HOLD_REQUEST"],
+    eligibleRoles: ["LEGAL_REVIEWER"],
+    requiresClosed: false,
+  },
+  {
+    code: "RETENTION_REVIEW",
+    category: "RECORDS",
+    allowedCapabilities: ["CASE_VIEW_METADATA", "RETENTION_TASK_VIEW", "RETENTION_TASK_EXECUTE"],
+    eligibleRoles: ["RECORDS_OFFICER"],
+    requiresClosed: true,
+  },
+] as const satisfies readonly CaseTaskTypeDefinition[];
+export type CaseTaskType = (typeof CASE_TASK_TYPES)[number]["code"];
+
+/** One row of records.case_record_catalogue: lifecycle metadata only, never case content. */
+export interface RecordsCatalogueEntry {
+  caseId: string;
+  caseNumber: string;
+  caseType: string;
+  classification: Classification;
+  closedDate: string | null;
+  retentionClass: string;
+  retentionStartDate: string | null;
+  retentionEndDate: string | null;
+  legalHoldStatus: "NONE" | "ACTIVE";
+  archiveStatus: RecordsState;
+  dispositionStatus: string;
+  recordOwner: string | null;
+}
+
+export interface MyCaseTask {
+  taskId: string;
+  caseId: string;
+  caseNumber: string | null;
+  taskType: CaseTaskType;
+  category: "LEGAL" | "RECORDS";
+  purpose: string;
+  scope: Permission[];
+  status: CaseTaskStatus;
+  dueDate: string | null;
+  expiresAt: string;
+  legalHoldStatus: string | null;
+  archiveStatus: string | null;
+}
+
+/** Result of the controlled exact-match lookup (§6): identifies the target, nothing more. */
+export interface CaseDiscoveryResult {
+  outcome: "MATCHED" | "NO_MATCH" | "RATE_LIMITED";
+  /** The hold request filed on a match. Nothing else about the case is returned (CDF-79). */
+  requestId: string | null;
+}
+
+/** Records and legal dashboards: counts of the caller's own work only (§18), never all cases. */
+export interface MyWorkSummary {
+  myRetentionTasks: number;
+  myDispositionTasks: number;
+  pendingArchiveTransfers: number;
+  assignedLegalHolds: number;
+  myLegalReviews: number;
+  myLegalHoldRequests: number;
+}
+
+// ---- Records screens (CDF-71, ADR-013) -----------------------------------------------------------
+export const LEGAL_HOLD_REASON_CODES = [
+  "LITIGATION",
+  "REGULATORY_INQUIRY",
+  "INTERNAL_INVESTIGATION",
+  "AUDIT",
+  "OTHER",
+] as const;
+export type LegalHoldReasonCode = (typeof LEGAL_HOLD_REASON_CODES)[number];
+
+/** A retention class the records officer may assign; values stay SOURCE_REQUIRED until the policy arrives. */
+export interface RetentionClassOption {
+  code: string;
+  nameEn: string;
+  nameAr: string;
+  status: "SOURCE_REQUIRED" | "CONFIGURED";
+}
+
+export interface LegalHoldInfo {
+  id: string;
+  holdNumber: string;
+  scopeType: "CASE" | "EVIDENCE_ITEM";
+  reasonCode: LegalHoldReasonCode;
+  status: "ACTIVE" | "RELEASE_PENDING" | "RELEASED";
+  placedAt: string;
+  releasedAt: string | null;
+  /** The pending release request on this hold, if any. Dual control: its requester cannot decide it. */
+  pendingRelease: { id: string; requestedByMe: boolean; requestedAt: string } | null;
+}
+
+export const LEGAL_HOLD_REQUEST_STATUSES = ["SUBMITTED", "ASSIGNED", "APPLIED", "REJECTED"] as const;
+export type LegalHoldRequestStatus = (typeof LEGAL_HOLD_REQUEST_STATUSES)[number];
+
+export interface LegalHoldRequestInfo {
+  id: string;
+  /** Null when the caller may not see the case (a controlled lookup before assignment, CDF-79). */
+  caseId: string | null;
+  caseNumber: string | null;
+  origin: "CASE_TEAM" | "CONTROLLED_LOOKUP";
+  reasonCode: LegalHoldReasonCode;
+  status: LegalHoldRequestStatus;
+  requestedByMe: boolean;
+  assignedToMe: boolean;
+  requestedAt: string;
+  reviewedAt: string | null;
+}
+
+/** What the database would allow the caller to do on this record now (authz.* predicates, §19). */
+export interface RecordCapabilities {
+  manageRetention: boolean;
+  manageDisposition: boolean;
+  approveDisposition: boolean;
+  applyLegalHold: boolean;
+  releaseLegalHold: boolean;
+  requestLegalHold: boolean;
+}
+
+export interface DispositionRequestInfo {
+  id: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "BLOCKED_BY_HOLD" | "EXECUTED";
+  requestedByMe: boolean;
+  requestedAt: string;
+  decidedAt: string | null;
+}
+
+/**
+ * One case as the records screens see it: lifecycle metadata only (ADR-014 catalogue fields), never title,
+ * summary, people, allegations or evidence descriptions.
+ */
+export interface RecordDetail {
+  caseId: string;
+  caseNumber: string;
+  caseType: string;
+  classification: Classification;
+  recordsState: RecordsState;
+  retentionClass: string;
+  retentionClassStatus: "SOURCE_REQUIRED" | "CONFIGURED";
+  legalHoldStatus: "NONE" | "ACTIVE";
+  closedAt: string | null;
+  retainUntil: string | null;
+  certificateId: string | null;
+  capabilities: RecordCapabilities;
+  dispositionRequests: DispositionRequestInfo[];
+  holds: LegalHoldInfo[];
+  holdRequests: LegalHoldRequestInfo[];
+}
+
+export interface DispositionCertificateView {
+  id: string;
+  certificateNumber: string;
+  caseNumber: string;
+  retentionClass: string;
+  triggerEvent: string;
+  triggerAt: string;
+  retainUntil: string;
+  requestedAt: string;
+  approvedAt: string;
+  issuedAt: string;
+  dispositionAction: string;
+  executionMode: "LOGICAL_ONLY";
+  activeHoldsFound: number;
+  evidenceVersions: number;
+  certificateHash: string;
+  /** Recomputed by the database on every view (api.verify_disposition_certificate). */
+  verified: boolean;
+}
 
 // ---- Evidence (§24–§27, ADR-006) ---------------------------------------------------------------
 export const EVIDENCE_TYPES = [

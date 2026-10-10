@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // CDF-62 · §46–§48, rule B-6: server-only secrets never reach a browser bundle.
 // Scans everything Next.js serves to browsers (`.next/static` of both apps) for
+//   0. (CDF-81) a Sentry DSN or any trace of the Sentry browser SDK, which neither app ships,
 //   1. the VALUES of server-only environment variables present in this process (CI generates throwaway ones),
 //   2. secret-shaped material: connection strings, private keys, Supabase service-role / secret keys,
 //   3. the names of variables that must never be referenced from client code.
@@ -28,6 +29,9 @@ export const SERVER_ONLY_VARS = [
   "CDF_RATE_LIMIT_SALT",
   "CDF_DEV_IDENTITY_SECRET",
   "CDF_DEV_PASSWORD",
+  // CDF-81: Sentry is server-side only; its DSN and any upload token never reach a browser.
+  "SENTRY_DSN",
+  "SENTRY_AUTH_TOKEN",
 ];
 
 const PATTERNS = [
@@ -40,6 +44,9 @@ const PATTERNS = [
     /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?:InNlcnZpY2Vfcm9sZS|JzZXJ2aWNlX3JvbGUi|ic2VydmljZV9yb2xlI)[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+/,
   ],
   ["service-role variable name", /SERVICE_ROLE_KEY/],
+  // CDF-81: no Sentry DSN and no Sentry browser SDK in either app (SENTRY_PLAN.md §3).
+  ["Sentry DSN", /https?:\/\/[A-Za-z0-9]+@[A-Za-z0-9.-]*ingest[A-Za-z0-9.-]*\/\d+/],
+  ["Sentry browser SDK", /sentry\.javascript\.|__SENTRY__|sentry-trace|browserTracingIntegration/],
   [
     "server secret variable name",
     new RegExp(`\\b(?:${SERVER_ONLY_VARS.filter((v) => v !== "SUPABASE_SERVICE_ROLE_KEY").join("|")})\\b`),

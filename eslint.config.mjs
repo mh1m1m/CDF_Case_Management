@@ -17,6 +17,15 @@ const SUPABASE_BOUNDARY = {
   ],
 };
 
+// CDF-81 / SENTRY_PLAN.md §5: the Sentry SDK is imported only by the apps' server-side
+// instrumentation files, so no other code can call Sentry.init, setUser, captureMessage or setTag.
+const SENTRY_PATTERN = {
+  group: ["@sentry/*"],
+  message:
+    "The Sentry SDK may only be imported in apps/*/src/instrumentation.ts (CDF-81). Report errors by throwing; they are captured and scrubbed there.",
+};
+SUPABASE_BOUNDARY.patterns.push(SENTRY_PATTERN);
+
 export default tseslint.config(
   {
     ignores: [
@@ -43,7 +52,17 @@ export default tseslint.config(
   },
   {
     files: ["packages/infrastructure/**/*.ts"],
-    rules: { "no-restricted-imports": "off" },
+    rules: { "no-restricted-imports": ["error", { patterns: [SENTRY_PATTERN] }] },
+  },
+  {
+    // The only Sentry entry points (CDF-81), plus the envelope test that drives the real SDK.
+    files: ["apps/*/src/instrumentation.ts", "apps/*/src/instrumentation.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { paths: [], patterns: SUPABASE_BOUNDARY.patterns.filter((p) => p !== SENTRY_PATTERN) },
+      ],
+    },
   },
   {
     // Developer CLI scripts report progress on stdout.

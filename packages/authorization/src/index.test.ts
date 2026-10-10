@@ -65,6 +65,7 @@ describe("role permission mirror", () => {
       "FORM_PREPARE",
       "FORM_REVIEW",
       "FORM_VIEW",
+      "LEGAL_HOLD_REQUEST",
       "WORKFLOW_ADVANCE",
     ]);
   });
@@ -74,6 +75,8 @@ describe("role permission mirror", () => {
       intake: false,
       cases: false,
       audit: false,
+      myWork: false,
+      recordsCatalogue: false,
       administration: true,
     });
   });

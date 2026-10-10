@@ -8,6 +8,8 @@ import {
   DECISION,
   JUSTIFICATION,
   closeAndArchive,
+  giveTask,
+  legalHoldTasks,
   makeEligible,
   placeHold,
   recordsState,
@@ -99,12 +101,18 @@ describe("retention schedule", () => {
   it("REC-T28, T29: only records officers assign classes; a CONFIGURED class needs its source", async () => {
     await ownerScenario(async (s) => {
       await closeAndArchive(s, caseB);
-      await s.as("investigatorB"); // assigned to case B, no RECORDS_VIEW
+      await s.as("investigatorB"); // assigned to case B (sees its metadata), no retention authority
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.assign_retention_class(${caseB}, 'WB_CASE_INVESTIGATED')`,
+      );
+      await s.as("legal"); // no records catalogue scope and no task: the case does not exist for them
       await s.expectError(
         "CDF_NOT_FOUND",
         (tx) => tx`select api.assign_retention_class(${caseB}, 'WB_CASE_INVESTIGATED')`,
       );
-      await s.as("legal"); // RECORDS_VIEW without RETENTION_CLASS_ASSIGN
+      await giveTask(s, caseB, "legal", "LEGAL_HOLD_APPLICATION");
+      await s.as("legal"); // a legal task shows the metadata but carries no retention authority
       await s.expectError(
         "CDF_FORBIDDEN",
         (tx) => tx`select api.assign_retention_class(${caseB}, 'WB_CASE_INVESTIGATED')`,
@@ -334,8 +342,8 @@ describe("disposition", () => {
         const files = await s.tx`select * from api.open_evidence_version(${ev.versionId})`;
         expect(files).toHaveLength(0);
       }
-      await s.as("legal"); // authz.can_apply_legal_hold is false for a disposed case
-      await s.expectError("CDF_FORBIDDEN", (tx) => placeHold(tx, caseB));
+      await s.as("legal"); // a disposed case is invisible to legal staff (no task can exist on it)
+      await s.expectError("CDF_NOT_FOUND", (tx) => placeHold(tx, caseB));
       await s.as("records");
       await s.expectError("CDF_CONFLICT:RECORDS_DISPOSED", (tx) => requestDisposition(tx, caseB));
       await s.expectError(
@@ -350,16 +358,19 @@ describe("disposition", () => {
     });
   });
 
-  it("REC-T45, T46: the records view never opens case content or restricted cases", async () => {
+  it("REC-T45, T46: the records view never opens case content, active cases or restricted cases (CDF-73)", async () => {
     await scenario(async (s) => {
+      const listed = async () =>
+        (await s.tx<{ case_id: string }[]>`select case_id from api.list_records()`).map((r) => r.case_id);
+      await s.as("records");
+      expect(await listed()).not.toContain(caseB); // still ACTIVE: not discoverable by role alone
+      await closeAndArchive(s, caseB);
       await s.as("records");
       const [opened] = await s.tx<{ ok: boolean }[]>`select api.open_case(${caseB}) as ok`;
       expect(opened!.ok).toBe(false);
       expect(await s.tx`select 1 from case_mgmt.case_overview`).toHaveLength(0);
-      const ids = (await s.tx<{ case_id: string }[]>`select case_id from api.list_records()`).map(
-        (r) => r.case_id,
-      );
-      expect(ids).toContain(caseB);
+      const ids = await listed();
+      expect(ids).toContain(caseB); // archived and non-restricted: within the records catalogue scope
       expect(ids).not.toContain(caseExec);
     });
   });
@@ -368,6 +379,7 @@ describe("disposition", () => {
 describe("legal hold against disposition", () => {
   it("REC-T17: an elapsed case under hold is not marked eligible", async () => {
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseB);
       await s.as("legal");
       await placeHold(s.tx, caseB);
       await makeEligible(s, caseB);
@@ -380,12 +392,14 @@ describe("legal hold against disposition", () => {
 
   it("REC-T18, T19: a hold moves an eligible or pending case back to RETENTION and blocks the request", async () => {
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseB);
       await makeEligible(s, caseB);
       await s.as("legal");
       await placeHold(s.tx, caseB);
       expect((await recordsState(s.tx, caseB)).records_state).toBe("RETENTION");
     });
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseB);
       await makeEligible(s, caseB);
       const reqId = await requestDisposition(s.tx, caseB);
       await s.as("legal");
@@ -405,6 +419,7 @@ describe("legal hold against disposition", () => {
 
   it("REC-T20: a hold placed after approval stops execution; no certificate, not disposed", async () => {
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseB);
       await makeEligible(s, caseB);
       const reqId = await requestDisposition(s.tx, caseB);
       await s.as("grcDirector");
@@ -425,6 +440,7 @@ describe("legal hold against disposition", () => {
 
   it("REC-T12: a hold with a pending release still blocks a disposition request", async () => {
     await ownerScenario(async (s) => {
+      await legalHoldTasks(s, caseB);
       await makeEligible(s, caseB);
       await s.as("legal");
       const holdId = await placeHold(s.tx, caseB);

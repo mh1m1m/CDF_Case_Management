@@ -420,8 +420,63 @@ describe("scrubBreadcrumb", () => {
     });
     expect(out).toEqual({
       category: "ui.input",
-      message: "typed [REDACTED:text]",
+      message: "[REDACTED:text]",
       data: { url: "/report" },
     });
+  });
+});
+
+// CDF-81: the three LOW residuals from the CDF-62 re-review of PR #35.
+describe("CDF-62 LOW residuals (CDF-81)", () => {
+  const [a, b, c, d, e] = SECRET.split("-");
+
+  it.each([
+    ["mixed separators", `${a}-${b} ${c}-${d} ${e}`],
+    ["spaced hyphens", [a, b, c, d, e].join(" - ")],
+    ["dot and slash", `${a}.${b}/${c}.${d}/${e}`],
+    ["lower case, mixed", `${a}_${b}  ${c}-${d}.${e}`.toLowerCase()],
+  ])("redacts a reporter secret with %s", (_name, input) => {
+    expect(scrubString(`secret ${input} rejected`)).toBe("secret [REDACTED:report-secret] rejected");
+  });
+
+  it.each([["WB 7K3MQ9TZ4HXW"], ["WB - 7K3MQ9TZ4HXW"], ["wb 7k3mq9tz4hxw"]])(
+    "redacts the report reference %s",
+    (input) => {
+      expect(scrubString(`lookup ${input} failed`)).toBe("lookup [REDACTED:report-ref] failed");
+    },
+  );
+
+  it("leaves UUIDs and ordinary English alone", () => {
+    for (const s of [
+      "case a0000000-0000-4000-8000-000000000001 not found",
+      "this that with from have been",
+      "wb configuration failed",
+    ]) {
+      expect(scrubString(s)).toBe(s);
+    }
+  });
+
+  it("keeps only scalar values under allow-listed extra and tag keys", () => {
+    const out = scrubSentryEvent({
+      extra: { kind: { witness: "Witness Gamma" }, route: ["/cases", EN_NARRATIVE], correlationId: "c-1" },
+      tags: { errorKind: { nested: EN_NARRATIVE }, handled: false, level: "error" },
+    }) as Record<string, Record<string, unknown>>;
+    expect(out.extra).toEqual({ kind: "[REDACTED:field]", route: "[REDACTED:field]", correlationId: "c-1" });
+    expect(out.tags).toEqual({ errorKind: "[REDACTED:field]", handled: false, level: "error" });
+    expect(serialised(out)).not.toContain("Witness Gamma");
+    expect(serialised(out)).not.toContain("Employee Alpha");
+  });
+
+  it("replaces English free text in non-technical breadcrumb messages", () => {
+    const crumbs = [
+      { category: "sentry.event", message: EN_NARRATIVE },
+      { category: "ui.click", message: "Witness Gamma clicked submit" },
+      { message: EN_NARRATIVE },
+    ].map(scrubBreadcrumb);
+    for (const crumb of crumbs) expect(crumb.message).toBe("[REDACTED:text]");
+  });
+
+  it("keeps technical breadcrumb messages as paths only", () => {
+    expect(scrubBreadcrumb({ category: "navigation", message: "/report?ref=x" }).message).toBe("/report");
   });
 });

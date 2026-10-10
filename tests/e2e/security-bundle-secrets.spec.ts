@@ -34,6 +34,14 @@ test("the scanner detects a planted secret (self-test)", () => {
     const { hits } = runScan({ env: { CDF_REPORT_SECRET_PEPPER: secret }, base, apps: ["apps/fake"] });
     expect(hits.some((h) => h.includes("value of CDF_REPORT_SECRET_PEPPER"))).toBe(true);
     expect(hits.some((h) => h.includes("postgres connection string"))).toBe(true);
+
+    // CDF-81: a planted DSN (as a value and as a literal) and the Sentry browser SDK are caught.
+    const dsn = ["https://", "plantedpublickey", "@", "o0.ingest.example.test", "/1"].join("");
+    writeFileSync(join(dir, "b.js"), `init({dsn:"${dsn}"}); window.__SENTRY__ = {};`);
+    const sentry = runScan({ env: { SENTRY_DSN: dsn }, base, apps: ["apps/fake"] }).hits;
+    expect(sentry.some((h) => h.includes("value of SENTRY_DSN"))).toBe(true);
+    expect(sentry.some((h) => h.includes("Sentry DSN"))).toBe(true);
+    expect(sentry.some((h) => h.includes("Sentry browser SDK"))).toBe(true);
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
