@@ -24,7 +24,8 @@ const DSN_LITERAL = /https?:\/\/[A-Za-z0-9]+@[A-Za-z0-9.-]*ingest[A-Za-z0-9.-]*\
 const SENTRY_IMPORT = /(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)["']@sentry\//;
 const CLIENT_ONLY_API =
   /\b(?:replayIntegration|replayCanvasIntegration|feedbackIntegration|browserTracingIntegration|withSentryConfig)\b/;
-const USE_CLIENT = /^\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*["']use client["']/;
+// Tested after stripComments, so leading comments need no pattern of their own.
+const USE_CLIENT = /^\s*["']use client["']/;
 
 // Comments may name what is prohibited; only code counts for the API and import checks.
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
@@ -76,7 +77,7 @@ export function check({ base = root, apps = APPS } = {}) {
       const text = stripComments(raw);
       if (CLIENT_ONLY_API.test(text)) violations.push(`${r}: browser-only Sentry API or withSentryConfig`);
       if (!SENTRY_IMPORT.test(text)) continue;
-      if (USE_CLIENT.test(raw)) violations.push(`${r}: Sentry SDK imported by a client module`);
+      if (USE_CLIENT.test(text)) violations.push(`${r}: Sentry SDK imported by a client module`);
       else if (!isInstrumentationFile(r))
         violations.push(`${r}: Sentry SDK imported outside src/instrumentation.ts`);
     }

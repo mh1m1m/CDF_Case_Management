@@ -42,7 +42,7 @@ export interface CdfSentryOptions {
 
 /**
  * Default integrations that are removed: console capture (console breadcrumbs, and console calls
- * that can echo user input), local-variable capture (runtime values in stack frames) and source
+ * that can echo user input), local-variable capture (runtime values in stack frames), release-health sessions and source
  * context lines (source code around each frame; file, function and line number are enough, and
  * no source code goes to the processor).
  */
@@ -51,6 +51,8 @@ const REMOVED_INTEGRATIONS: ReadonlySet<string> = new Set([
   "LocalVariables",
   "LocalVariablesAsync",
   "ContextLines",
+  // Release-health sessions are separate envelopes that never pass beforeSend.
+  "ProcessSession",
 ]);
 
 export interface CdfEventFilterIntegration {

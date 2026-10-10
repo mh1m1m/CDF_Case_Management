@@ -14,11 +14,28 @@ const EMAIL = "witness.gamma@example.test";
 const SYNTHETIC = [SECRET, REF, AR_NARRATIVE, EN_NARRATIVE, EMAIL, "Witness Gamma", "0500000003"];
 
 const sent: string[] = [];
+// Item types in every envelope sent so far (lines after the envelope header that carry a type).
+const itemTypes = () =>
+  sent.flatMap((envelope) =>
+    envelope
+      .split("\n")
+      .slice(1)
+      .flatMap((line) => {
+        try {
+          const header = JSON.parse(line) as { type?: unknown };
+          return typeof header.type === "string" && Object.keys(header).length <= 2 ? [header.type] : [];
+        } catch {
+          return [];
+        }
+      }),
+  );
 
 beforeAll(() => {
+  // A release is set, as on Vercel and in CI, so release-health sessions would be sent if enabled.
   const options = buildSentryServerOptions("whistleblowing-web", {
     SENTRY_DSN: DSN,
     CDF_ENVIRONMENT: "test",
+    VERCEL_GIT_COMMIT_SHA: "0000000",
   });
   if (!options) throw new Error("expected Sentry options");
   Sentry.init({
@@ -55,12 +72,35 @@ describe("Sentry envelope (real SDK, transport stub)", () => {
     });
     await Sentry.flush(2000);
 
+    // One error event and nothing else: no session, client report or other envelope.
     expect(sent.length).toBe(1);
+    expect(itemTypes()).toEqual(["event"]);
     const envelope = sent.join("\n");
     expect(envelope).toContain('"type":"Error"');
     expect(envelope).toContain("corr-0001");
     expect(envelope).toContain('"app":"whistleblowing-web"');
     for (const value of SYNTHETIC) expect(envelope).not.toContain(value);
+  });
+
+  it("scrubs fake stack frames injected through an error message", async () => {
+    const before = sent.length;
+    // Postgres echoes input in messages; a newline plus "    at …" becomes frames when parsed.
+    const injected =
+      `invalid input syntax for type uuid: "x\n    at ${EN_NARRATIVE} (/srv/${EMAIL}/${AR_NARRATIVE}:1:1)` +
+      `\n    at ${REF} (${SECRET}:2:2)"`;
+    const error = new Error(injected);
+    error.stack =
+      `Error: ${injected}\n` +
+      "    at real (/app/node_modules/.pnpm/@sentry+core@10.75.3_@opentelemetry+api@1.9.1/x.js:1:1)\n" +
+      `    at fake (/app/node_modules/.pnpm/${EMAIL}/y.js:1:1)`;
+    Sentry.captureException(error);
+    await Sentry.flush(2000);
+
+    expect(sent.length).toBe(before + 1);
+    const envelope = sent.slice(before).join("\n");
+    for (const value of [SECRET, REF, AR_NARRATIVE, EMAIL]) expect(envelope).not.toContain(value);
+    // Real pnpm store paths stay intact so grouping works.
+    expect(envelope).toContain("node_modules/.pnpm/@sentry+core@10.75.3_@opentelemetry+api@1.9.1/x.js");
   });
 
   it("sends nothing for a non-error event type", async () => {

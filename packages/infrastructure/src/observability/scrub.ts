@@ -138,6 +138,8 @@ const ARABIC_RUN = new RegExp(
   "gu",
 );
 
+const EMAIL_RULE = [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, REDACTED("email")] as const;
+
 /**
  * Free-text patterns, applied in order. Earlier patterns must run first where a later one would
  * match a substring (credentials before emails, national IDs before generic digit runs).
@@ -177,8 +179,7 @@ const STRING_RULES: readonly (readonly [RegExp, string | ((...m: string[]) => st
     /\bWB[^0-9A-Z\r\n]{0,3}[0-9A-Z]{12}\b/gi,
     (m) => (/\d/.test(m) || m === m.toUpperCase() ? REDACTED("report-ref") : m),
   ],
-  // Email addresses.
-  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, REDACTED("email")],
+  EMAIL_RULE,
   // Long hex digests (HMACs, hashes of secrets).
   [/\b[0-9a-f]{40,}\b/gi, REDACTED("digest")],
   // IPv4, then IPv6 (needs '::' or eight groups so clock times do not match).
@@ -197,10 +198,21 @@ const STRING_RULES: readonly (readonly [RegExp, string | ((...m: string[]) => st
   [ARABIC_RUN, REDACTED("text")],
 ];
 
+/**
+ * For pnpm store path segments (see scrubCodeLocation): the email rule only spares `name@1.2.3`
+ * version pairs, whose "domain" is all digits and dots. A real address inside a crafted path is
+ * still removed.
+ */
+const STRING_RULES_FOR_PNPM_SEGMENT: typeof STRING_RULES = STRING_RULES.map((rule) =>
+  rule === EMAIL_RULE
+    ? ([EMAIL_RULE[0], (m: string) => (/@\d+(?:\.\d+)+$/.test(m) ? m : REDACTED("email"))] as const)
+    : rule,
+);
+
 /** Removes personal data and credentials from one free-text string. */
-export function scrubString(input: string): string {
+export function scrubString(input: string, rules: typeof STRING_RULES = STRING_RULES): string {
   let out = input;
-  for (const [pattern, replacement] of STRING_RULES) {
+  for (const [pattern, replacement] of rules) {
     out =
       typeof replacement === "string" ? out.replace(pattern, replacement) : out.replace(pattern, replacement);
   }
@@ -266,10 +278,10 @@ function scrubRequest(request: unknown): unknown {
 }
 
 /**
- * Frame fields that locate code (file paths, module and function names, positions). They hold no
- * runtime values, and free-text patterns would mangle them: pnpm store paths such as
- * `@sentry+nextjs@10.75.3_@opentelemetry+api@1.9.1` look like email addresses. Kept as they are
- * so grouping works (CDF-81).
+ * Frame fields that locate code. They are still pattern-scrubbed: the Node stack parser reads
+ * frames from `error.stack`, which starts with the error message, so a message that echoes user
+ * input containing "\n    at …" (Postgres does, for invalid uuid syntax) produces fake frames
+ * whose function, file and module names are user text (CDF-62 review of CDF-81).
  */
 const CODE_LOCATION_FRAME_KEYS: ReadonlySet<string> = new Set([
   "filename",
@@ -277,20 +289,31 @@ const CODE_LOCATION_FRAME_KEYS: ReadonlySet<string> = new Set([
   "module",
   "function",
   "package",
-  "platform",
-  "lineno",
-  "colno",
-  "in_app",
-  "instruction_addr",
 ]);
+
+/**
+ * A pnpm store directory name, e.g. `node_modules/.pnpm/@sentry+nextjs@10.75.3_@opentelemetry+api@1.9.1`.
+ * Its `name@version` pairs look like email addresses, which would mangle real frame paths and
+ * break grouping, so inside it the email rule spares those pairs; every other rule applies. The
+ * character class excludes spaces, Arabic and other free text.
+ */
+const PNPM_STORE_SEGMENT = /(node_modules\/\.pnpm\/[A-Za-z0-9@+._-]+)/;
+
+function scrubCodeLocation(value: unknown): unknown {
+  if (value !== null && typeof value === "object") return REDACTED("field");
+  if (typeof value !== "string") return value;
+  return value
+    .split(PNPM_STORE_SEGMENT)
+    .map((part, i) => (i % 2 === 1 ? scrubString(part, STRING_RULES_FOR_PNPM_SEGMENT) : scrubString(part)))
+    .join("");
+}
 
 function scrubFrame(frame: unknown): unknown {
   if (!isRecord(frame)) return frame;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(frame)) {
     if (key === "vars") out[key] = REDACTED("field");
-    else if (CODE_LOCATION_FRAME_KEYS.has(key))
-      out[key] = value !== null && typeof value === "object" ? REDACTED("field") : value;
+    else if (CODE_LOCATION_FRAME_KEYS.has(key)) out[key] = scrubCodeLocation(value);
     else if (Array.isArray(value)) out[key] = value.map(str);
     else out[key] = str(value);
   }

@@ -129,11 +129,13 @@ describe("beforeSend / beforeSendTransaction", () => {
 });
 
 describe("beforeBreadcrumb", () => {
-  it("removes console, local-variable and source-context integrations and adds the event filter", () => {
+  it("removes console, local-variable, session and source-context integrations and adds the event filter", () => {
     const names = selectIntegrations(
-      ["Console", "LocalVariablesAsync", "ContextLines", "Http", "OnUncaughtException"].map((name) => ({
-        name,
-      })),
+      ["Console", "LocalVariablesAsync", "ContextLines", "ProcessSession", "Http", "OnUncaughtException"].map(
+        (name) => ({
+          name,
+        }),
+      ),
     ).map((i) => i.name);
     expect(names).toEqual(["Http", "OnUncaughtException", "CdfEventFilter"]);
   });
