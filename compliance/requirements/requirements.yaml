@@ -385,9 +385,10 @@ requirements:
     title: "Interviews, findings and investigation plan"
     source: [protocol §37]
     external_ids: []
-    status: NOT_STARTED
+    status: IN_PROGRESS
     enforcement: []
     tests: []
+    notes: "Interviews are covered by CDF-INT-001..006 (ADR-012). Findings and the investigation plan are NOT_STARTED."
 
   - id: CDF-COM-001
     title: "Committee, quorum, votes, decisions and corrective actions"
@@ -533,3 +534,77 @@ requirements:
     enforcement: []
     tests: []
     notes: "Requires a human decision and an approved catalogue before instrumentation."
+
+  # ---- Interviews (EPIC 09, Linear CDF-60, ADR-012) ----------------------------------------
+  - id: CDF-INT-001
+    title: "Interviews are visible only to the case team with need-to-know and clearance"
+    source: [protocol §19, §37, ADR-012]
+    external_ids: [CDF-60]
+    status: COMPLETE
+    enforcement: [infrastructure/supabase/migrations/20261007001200_interviews.sql]
+    tests: [tests/security/interviews-access.spec.ts, tests/integration/interviews.spec.ts]
+
+  - id: CDF-INT-002
+    title: "The reporter is interviewed only by protected reference and contacted only through the portal"
+    source: [protocol §22, ADR-004, ADR-012]
+    external_ids: [CDF-60]
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001200_interviews.sql,
+        packages/validation/src/interviews.ts,
+      ]
+    tests:
+      [
+        tests/security/interviews-access.spec.ts,
+        tests/integration/interviews.spec.ts,
+        tests/e2e/interviews.spec.ts,
+        packages/validation/src/interviews.test.ts,
+      ]
+
+  - id: CDF-INT-003
+    title: "Statements are versioned, hashed by the database and acknowledged against the exact hash"
+    source: [protocol §37, §83, ADR-012]
+    external_ids: [CDF-60]
+    status: COMPLETE
+    enforcement:
+      [infrastructure/supabase/migrations/20261007001200_interviews.sql, packages/domain/src/interviews.ts]
+    tests:
+      [
+        tests/security/interviews-integrity.spec.ts,
+        tests/integration/interviews.spec.ts,
+        packages/domain/src/interviews.test.ts,
+      ]
+
+  - id: CDF-INT-004
+    title: "Interview lifecycle prepared → reviewed → approved with separation of duties"
+    source: [protocol §37, ADR-012]
+    external_ids: [CDF-60]
+    status: COMPLETE
+    enforcement:
+      [infrastructure/supabase/migrations/20261007001200_interviews.sql, packages/domain/src/interviews.ts]
+    tests:
+      [
+        tests/security/interviews-integrity.spec.ts,
+        tests/integration/interviews.spec.ts,
+        tests/e2e/interviews.spec.ts,
+        packages/application/src/interviews.test.ts,
+      ]
+    notes: "Who reviews and approves, and the separation rule itself, are SOURCE_REQUIRED (ADR-012 open points)."
+
+  - id: CDF-INT-005
+    title: "Every interview state change and access is audited; history is append-only"
+    source: [protocol §29, ADR-005, ADR-012]
+    external_ids: [CDF-60]
+    status: COMPLETE
+    enforcement: [infrastructure/supabase/migrations/20261007001200_interviews.sql]
+    tests: [tests/security/interviews-integrity.spec.ts, tests/security/interviews-access.spec.ts]
+
+  - id: CDF-INT-006
+    title: "Interview rights notice is given and recorded before the interview"
+    source: [protocol §37, ADR-012]
+    external_ids: [CDF-60]
+    status: IN_PROGRESS
+    enforcement: [infrastructure/supabase/migrations/20261007001200_interviews.sql]
+    tests: [tests/security/interviews-integrity.spec.ts, tests/e2e/interviews.spec.ts]
+    notes: "Mechanism complete; the rights notice wording and versioning are SOURCE_REQUIRED."

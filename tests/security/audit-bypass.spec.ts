@@ -321,6 +321,86 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select * from api.request_case_for_legal_hold(${c!.n}, 'Synthetic: audit walk controlled lookup.')`;
         },
       },
+      // ---- Interviews (CDF-60, ADR-012): one interview on case A carried from plan to prepared -----------
+      {
+        fn: "plan_interview",
+        actor: "investigatorA",
+        run: async (s) =>
+          (ids.interview = await one(
+            s,
+            s.tx`select api.plan_interview(${caseA}, 'Audit walk interview (synthetic)', null, 'WITNESS',
+              'Witness Walk (synthetic)', null, 'CONFIDENTIAL'::core.classification_level) as id`,
+          )),
+      },
+      {
+        fn: "add_interview_participant",
+        actor: "investigatorA",
+        run: (s) =>
+          s.tx`select api.add_interview_participant(${ids.interview!}, ${USERS.lead}, 'NOTE_TAKER')`,
+      },
+      {
+        fn: "schedule_interview",
+        actor: "investigatorA",
+        run: (s) =>
+          s.tx`select api.schedule_interview(${ids.interview!}, now() - interval '2 hours', 60, 'IN_PERSON', null)`,
+      },
+      {
+        fn: "issue_interview_notice",
+        actor: "investigatorA",
+        run: (s) =>
+          s.tx`select api.issue_interview_notice(${ids.interview!}, 'INVITATION', 'INTERNAL_EMAIL')`,
+      },
+      {
+        fn: "record_interview_rights",
+        actor: "investigatorA",
+        run: (s) =>
+          s.tx`select api.record_interview_rights(${ids.interview!}, 'SIGNED_FORM', 'SYNTHETIC-RIGHTS-V1')`,
+      },
+      {
+        fn: "record_interview_conducted",
+        actor: "investigatorA",
+        run: (s) =>
+          s.tx`select api.record_interview_conducted(${ids.interview!}, now() - interval '2 hours', now() - interval '1 hour')`,
+      },
+      {
+        fn: "record_interview_statement",
+        actor: "investigatorA",
+        run: async (s) => {
+          const [v] = await s.tx<{ id: string; sha: string }[]>`
+            select o_version_id as id, o_sha256 as sha
+            from api.record_interview_statement(${ids.interview!}, 'Synthetic audit walk statement.', 'en')`;
+          ids.statement = v!.id;
+          return (ids.statementSha = v!.sha);
+        },
+      },
+      {
+        fn: "acknowledge_interview_statement",
+        actor: "investigatorA",
+        run: (s) =>
+          s.tx`select api.acknowledge_interview_statement(${ids.statement!}, 'SIGNED_PAPER', ${ids.statementSha!})`,
+      },
+      {
+        fn: "link_interview_recording",
+        actor: "investigatorA",
+        run: async (s) => {
+          const [r] = await s.tx<{ v: string; e: string }[]>`
+            select o_version_id as v, o_evidence_id as e from api.register_evidence_version(${caseA}, null,
+              'Audit walk recording (synthetic)', null, 'DOCUMENT', 'Synthetic source', null,
+              'CONFIDENTIAL'::core.classification_level, 'statement.pdf', 'application/pdf', 512, ${"3".repeat(64)})`;
+          await s.tx`select api.complete_evidence_version(${r!.v}, 'CLEAN', 'walk-scanner')`;
+          return s.tx`select api.link_interview_recording(${ids.interview!}, ${r!.e})`;
+        },
+      },
+      {
+        fn: "transition_interview",
+        actor: "investigatorA",
+        run: (s) => s.tx`select api.transition_interview(${ids.interview!}, 'PREPARE')`,
+      },
+      {
+        fn: "open_interview",
+        actor: "lead",
+        run: (s) => s.tx`select api.open_interview(${ids.interview!})`,
+      },
       // Forms engine (CDF-50): an investigation form through save, prepare and review (its final state), a
       // committee form through review and approval by three different people, a draft withdrawn, and the
       // audited open of an instance.
@@ -625,7 +705,9 @@ describe("audit internals are not reachable", () => {
       "authz.can_apply_legal_hold",
       "authz.can_approve_disposition",
       "authz.can_approve_form",
+      "authz.can_approve_interviews",
       "authz.can_assign_case",
+      "authz.can_conduct_interviews",
       "authz.can_discover_case",
       "authz.can_download_evidence",
       "authz.can_edit_case",
@@ -637,6 +719,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_request_legal_hold",
       "authz.can_reveal_whistleblower_identity",
       "authz.can_review_form",
+      "authz.can_review_interviews",
       "authz.can_review_legal_hold",
       "authz.can_upload_evidence",
       "authz.can_view_case",
@@ -644,6 +727,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_case_metadata",
       "authz.can_view_evidence",
       "authz.can_view_form_instance",
+      "authz.can_view_interview",
       "authz.can_view_records",
       "authz.can_view_records_catalogue",
       "authz.can_view_report",
