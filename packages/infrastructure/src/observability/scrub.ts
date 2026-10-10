@@ -163,13 +163,20 @@ const STRING_RULES: readonly (readonly [RegExp, string | ((...m: string[]) => st
   // same shapes: 5 groups of 4 with one consistent separator, compact or spaced, and the
   // reference with or without its hyphen.
   [/\b[0-9A-Z]{4}([^\sA-Z0-9])[0-9A-Z]{4}(?:\1[0-9A-Z]{4}){3}\b/gi, REDACTED("report-secret")],
-  // Compact or space-separated: only when the run has a digit or is upper case, so ordinary
-  // English (five four-letter words, a 20-letter identifier) is left alone.
+  // Compact, spaced, or with mixed or multi-character separators (`ABCD - EFGH JKMN-…`), which the
+  // secret normaliser also accepts because it drops every non-alphanumeric character. Groups are
+  // either all joined or all separated, so a UUID (8-4-4-4-12) does not match. Only when
+  // the run has a digit or is upper case, so ordinary English (five four-letter words, a
+  // 20-letter identifier) is left alone.
   [
-    /\b[0-9A-Z]{4}(?:\s?[0-9A-Z]{4}){4}\b/gi,
+    /\b(?:[0-9A-Z]{20}|[0-9A-Z]{4}(?:[^0-9A-Z\r\n]{1,3}[0-9A-Z]{4}){4})\b/gi,
     (m) => (/\d/.test(m) || m === m.toUpperCase() ? REDACTED("report-secret") : m),
   ],
-  [/\bWB[^\sA-Z0-9]?[0-9A-Z]{12}\b/gi, REDACTED("report-ref")],
+  // Report reference with or without a separator, including `WB 0123…` and `WB - 0123…`.
+  [
+    /\bWB[^0-9A-Z\r\n]{0,3}[0-9A-Z]{12}\b/gi,
+    (m) => (/\d/.test(m) || m === m.toUpperCase() ? REDACTED("report-ref") : m),
+  ],
   // Email addresses.
   [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, REDACTED("email")],
   // Long hex digests (HMACs, hashes of secrets).
@@ -258,11 +265,32 @@ function scrubRequest(request: unknown): unknown {
   return out;
 }
 
+/**
+ * Frame fields that locate code (file paths, module and function names, positions). They hold no
+ * runtime values, and free-text patterns would mangle them: pnpm store paths such as
+ * `@sentry+nextjs@10.75.3_@opentelemetry+api@1.9.1` look like email addresses. Kept as they are
+ * so grouping works (CDF-81).
+ */
+const CODE_LOCATION_FRAME_KEYS: ReadonlySet<string> = new Set([
+  "filename",
+  "abs_path",
+  "module",
+  "function",
+  "package",
+  "platform",
+  "lineno",
+  "colno",
+  "in_app",
+  "instruction_addr",
+]);
+
 function scrubFrame(frame: unknown): unknown {
   if (!isRecord(frame)) return frame;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(frame)) {
     if (key === "vars") out[key] = REDACTED("field");
+    else if (CODE_LOCATION_FRAME_KEYS.has(key))
+      out[key] = value !== null && typeof value === "object" ? REDACTED("field") : value;
     else if (Array.isArray(value)) out[key] = value.map(str);
     else out[key] = str(value);
   }
@@ -365,6 +393,8 @@ const EXTRA_KEYS: ReadonlySet<string> = new Set([
 ]);
 const TAG_KEYS: ReadonlySet<string> = new Set([
   ...EXTRA_KEYS,
+  // The app name set once in the SDK's initial scope (CDF-81).
+  "app",
   "locale",
   "runtime",
   "runtime.name",
@@ -383,12 +413,23 @@ const TAG_KEYS: ReadonlySet<string> = new Set([
   "device",
 ]);
 
+/**
+ * Allow-listed keys keep scalar values only. An object or array under an allowed key (for
+ * example `kind: { witness: "…" }`) could carry user content that no pattern recognises, so it is
+ * replaced rather than walked.
+ */
+function scalar(key: string, v: unknown): unknown {
+  if (typeof v === "string") return key === "url" ? scrubUrl(v) : scrubString(v);
+  if (typeof v === "number" || typeof v === "boolean" || v === null || v === undefined) return v;
+  return REDACTED("field");
+}
+
 function pick(value: unknown, allowed: ReadonlySet<string>): unknown {
   if (!isRecord(value)) return REDACTED("field");
   const out: Record<string, unknown> = {};
   for (const [key, v] of Object.entries(value)) {
     if (!allowed.has(key)) continue;
-    out[key] = key === "url" ? scrubUrl(v) : scrubData(v);
+    out[key] = scalar(key, v);
   }
   return out;
 }
@@ -403,11 +444,21 @@ function scrubContexts(contexts: unknown): unknown {
   return out;
 }
 
+/**
+ * Breadcrumb categories whose `message` is SDK-generated technical text (a URL or route). Every
+ * other category's message is replaced: English names and narrative cannot be recognised by
+ * pattern, and a breadcrumb message is never needed to group or reproduce an error.
+ */
+const BREADCRUMB_MESSAGE_CATEGORIES: ReadonlySet<string> = new Set(["navigation", "http", "fetch", "xhr"]);
+
 /** Scrubs one breadcrumb. Usable directly as the SDK's `beforeBreadcrumb`. */
 export function scrubBreadcrumb<T>(breadcrumb: T): T {
   if (!isRecord(breadcrumb)) return breadcrumb;
   const out: Record<string, unknown> = { ...breadcrumb };
-  if ("message" in out) out.message = str(out.message);
+  if ("message" in out) {
+    const technical = typeof out.category === "string" && BREADCRUMB_MESSAGE_CATEGORIES.has(out.category);
+    out.message = technical ? scrubUrl(out.message) : REDACTED("text");
+  }
   if ("data" in out) {
     const data = isRecord(out.data) ? { ...out.data } : out.data;
     if (isRecord(data)) {
