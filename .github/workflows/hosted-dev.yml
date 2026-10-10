@@ -74,23 +74,30 @@ jobs:
       - name: Database connection string (session pooler, IPv4; values masked)
         run: |
           echo "::add-mask::$SUPABASE_DB_PASSWORD"
-          # Accept what people paste: the bare password, or the connection string from Dashboard → Connect
-          # (its password part is used). Line breaks and surrounding spaces are dropped; nothing else changes.
+          fail() { echo "::error::SUPABASE_DB_PASSWORD $1"; exit 1; }
+          # Accept what people paste and report which form it was (never the value): the bare password, the
+          # connection string from Dashboard → Connect (its password part is used), the [ ] of that string's
+          # placeholder, surrounding quotes or spaces, a trailing line break.
           pw="${SUPABASE_DB_PASSWORD%%[$'\r\n']*}"
           pw="$(printf '%s' "$pw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          form="a bare value"
           case "$pw" in
-            *YOUR-PASSWORD*)
-              echo "::error::SUPABASE_DB_PASSWORD still contains the [YOUR-PASSWORD] placeholder from the Connect dialog"; exit 1 ;;
-            postgres://*|postgresql://*)
-              pw=$(python3 -c 'import sys,urllib.parse;u=urllib.parse.urlsplit(sys.argv[1]);print(urllib.parse.unquote(u.password or ""))' "$pw")
-              echo "::notice::SUPABASE_DB_PASSWORD held a connection string; only its password part is used" ;;
-            eyJ*)
-              echo "::error::SUPABASE_DB_PASSWORD looks like an API key (JWT), not the database password"; exit 1 ;;
-            sbp_*)
-              echo "::error::SUPABASE_DB_PASSWORD looks like a personal access token, not the database password"; exit 1 ;;
+            *YOUR-PASSWORD*) fail "still contains the [YOUR-PASSWORD] placeholder of the Connect dialog" ;;
+            postgres://* | postgresql://*)
+              case "$pw" in *"$SUPABASE_PROJECT_REF"*) ;; *) fail "is a connection string for a different Supabase project" ;; esac
+              pw=$(python3 -c 'import sys,urllib.parse;c=sys.argv[1].split("://",1)[1].rpartition("@")[0];print(urllib.parse.unquote(c.partition(":")[2]))' "$pw")
+              form="a connection string (its password part is used)" ;;
           esac
-          [ -n "$pw" ] || { echo "::error::SUPABASE_DB_PASSWORD is empty"; exit 1; }
+          case "$pw" in \[*\]) pw="${pw:1:${#pw}-2}"; form="$form, square brackets removed" ;; esac
+          case "$pw" in \"*\" | \'*\') pw="${pw:1:${#pw}-2}"; form="$form, quotes removed" ;; esac
+          case "$pw" in
+            eyJ*) fail "is an API key (JWT), not the database password" ;;
+            sb_secret_* | sb_publishable_*) fail "is an API key (sb_secret_ / sb_publishable_), not the database password" ;;
+            sbp_*) fail "is a personal access token, not the database password" ;;
+          esac
+          [ -n "$pw" ] || fail "is empty"
           echo "::add-mask::$pw"
+          echo "::notice::SUPABASE_DB_PASSWORD was read as $form"
           enc=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$pw")
           echo "::add-mask::$enc"
           # Diagnostics go out as annotations: job logs are not readable from the cloud session.
