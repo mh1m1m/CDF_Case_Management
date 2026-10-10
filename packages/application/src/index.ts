@@ -16,3 +16,5 @@ export { createFormsService } from "./forms";
 export type { FormsDeps, FormsService, SavedFormDraft } from "./forms";
 export { createInterviewService } from "./interviews";
 export type { InterviewDeps, InterviewGateway, InterviewService, RecordedStatement } from "./interviews";
+export { createRecordsService } from "./records";
+export type { RecordsDeps, RecordsGateway, RecordsService } from "./records";

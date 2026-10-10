@@ -374,5 +374,8 @@ export const recordsCatalogueSearchSchema = z.object({
   offset: z.number().int().min(0).default(0),
 });
 
+// ---- Records, retention and legal hold screens (CDF-71) ------------------------------------------
+export * from "./records";
+
 // ---- Interviews (EPIC 09, CDF-60) ----------------------------------------------------------------
 export * from "./interviews";
