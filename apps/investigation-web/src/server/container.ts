@@ -8,10 +8,12 @@ import { join } from "node:path";
 import {
   createEvidenceService,
   createFormsService,
+  createInterviewService,
   createInvestigationService,
   type EvidenceService,
   type EvidenceStorage,
   type FormsService,
+  type InterviewService,
   type InvestigationService,
 } from "@cdf/application";
 import type { Actor } from "@cdf/contracts";
@@ -20,6 +22,7 @@ import {
   MockMalwareScanner,
   PostgresEvidenceGateway,
   PostgresFormsGateway,
+  PostgresInterviewGateway,
   PostgresInvestigationGateway,
   PostgresSecurityEventSink,
   SupabaseEvidenceStorage,
@@ -35,6 +38,7 @@ const globalForApp = globalThis as unknown as {
   cdfInvestigation?: InvestigationService;
   cdfEvidence?: EvidenceService;
   cdfForms?: FormsService;
+  cdfInterviews?: InterviewService;
 };
 
 function pool(): Sql {
@@ -82,6 +86,15 @@ export function formsService(): FormsService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfForms;
+}
+
+/** Interviews (CDF-60, ADR-012): database commands only; no storage of its own (recordings are evidence). */
+export function interviewService(): InterviewService {
+  globalForApp.cdfInterviews ??= createInterviewService({
+    gateway: new PostgresInterviewGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfInterviews;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

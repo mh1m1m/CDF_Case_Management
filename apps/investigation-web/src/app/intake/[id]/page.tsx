@@ -123,7 +123,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             }}
             testId="triage-form"
           >
-            <CDFField id="outcome" label={t("intake.outcome")}>
+            <CDFField id="outcome" label={t("intake.outcome")} requiredLabel={t("common.required")}>
               <select id="outcome" name="outcome" className={inputClass} required>
                 {TRIAGE_OUTCOMES.map((o) => (
                   <option key={o} value={o}>
@@ -132,7 +132,12 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                 ))}
               </select>
             </CDFField>
-            <CDFField id="reason" label={t("intake.reason")} hint={t("intake.reasonHint")}>
+            <CDFField
+              id="reason"
+              label={t("intake.reason")}
+              hint={t("intake.reasonHint")}
+              requiredLabel={t("common.required")}
+            >
               <textarea
                 id="reason"
                 name="reason"
@@ -168,10 +173,10 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             }}
             testId="create-case-form"
           >
-            <CDFField id="title" label={t("intake.caseTitle")}>
+            <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
               <input id="title" name="title" className={inputClass} required minLength={3} maxLength={200} />
             </CDFField>
-            <CDFField id="summary" label={t("intake.caseSummary")}>
+            <CDFField id="summary" label={t("intake.caseSummary")} requiredLabel={t("common.required")}>
               <textarea
                 id="summary"
                 name="summary"
@@ -227,7 +232,12 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
               fieldLabels={{ body: t("intake.reply") }}
               testId="reply-form"
             >
-              <CDFField id="body" label={t("intake.reply")} hint={t("intake.replyHint")}>
+              <CDFField
+                id="body"
+                label={t("intake.reply")}
+                hint={t("intake.replyHint")}
+                requiredLabel={t("common.required")}
+              >
                 <textarea
                   id="body"
                   name="body"
