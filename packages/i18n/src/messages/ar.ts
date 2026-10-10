@@ -52,6 +52,16 @@ export const ar: Messages = {
     UNAVAILABLE: "الخدمة غير متاحة مؤقتاً.",
     withReference: "{message} المرجع: {ref}",
   },
+  session: {
+    warningTitle: "هل ما زلت هنا؟",
+    warningBody:
+      "سيُسجَّل خروجك خلال دقيقتين لعدم وجود أي نشاط. ستُفقد التغييرات غير المحفوظة في هذه الصفحة.",
+    stay: "البقاء متصلاً",
+    endedTitle: "تم تسجيل خروجك",
+    endedBody:
+      "لأسباب أمنية، سُجّل خروجك بعد {minutes} دقيقة دون نشاط. انسخ أي نص غير محفوظ من هذه الصفحة قبل تسجيل الدخول مرة أخرى.",
+    signInAgain: "تسجيل الدخول مرة أخرى",
+  },
   codes: {
     NO_ALLEGATION_RECORDED: "لا توجد مخالفة مسجلة.",
     PRIORITY_NOT_SET: "حدّد الأولوية أولاً.",
