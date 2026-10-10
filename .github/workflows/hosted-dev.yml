@@ -77,7 +77,9 @@ jobs:
           cache: pnpm
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Exact version: "latest" costs an unauthenticated GitHub API lookup that hits the rate limit (CDF-86).
+          # Bumped by hand in ci.yml and hosted-dev.yml together (CONTRIBUTING.md, Dependencies).
+          version: 2.120.0
 
       - name: Check the required secret exists (its value is never printed)
         run: |
