@@ -117,7 +117,7 @@ For steps marked **API** (no screen yet), record:
 | Group      | Scenarios | PASS | FAIL | BLOCKED | NOT_RUN |
 | ---------- | --------- | ---- | ---- | ------- | ------- |
 | UAT-ENV    | 4         |      |      |         |         |
-| UAT-PORTAL | 5         |      |      |         |         |
+| UAT-PORTAL | 6         |      |      |         |         |
 | UAT-VAULT  | 2         |      |      |         |         |
 | UAT-INTAKE | 2         |      |      |         |         |
 | UAT-WF     | 3         |      |      |         |         |
@@ -126,7 +126,7 @@ For steps marked **API** (no screen yet), record:
 | UAT-EVID   | 4         |      |      |         |         |
 | UAT-ADMIN  | 3         |      |      |         |         |
 | UAT-UX     | 2         |      |      |         |         |
-| **Total**  | **29**    |      |      |         |         |
+| **Total**  | **30**    |      |      |         |         |
 
 ## Defects
 
@@ -146,7 +146,7 @@ For steps marked **API** (no screen yet), record:
 
 ## Known limitations observed
 
-<e.g. API-only steps, production substitutions, CDF-63 portal differences>
+<e.g. API-only steps, production substitutions, portal attachments pending CDF-72>
 
 ## Recommendation
 
@@ -165,10 +165,10 @@ platform is production ready.
 | Field            | Value                                            |
 | ---------------- | ------------------------------------------------ |
 | Build accepted   | SHA `<sha>`                                      |
-| Scope            | Wave 1 scenarios UAT-ENV … UAT-UX (29)           |
+| Scope            | Wave 1 scenarios UAT-ENV … UAT-UX (30)           |
 | Decision         | ACCEPTED / ACCEPTED WITH DEFERRALS / REJECTED    |
 | Deferred defects | <Linear ids with owner's reason>                 |
-| Conditions       | <e.g. CDF-63 decision pending for portal fields> |
+| Conditions       | <e.g. portal attachments not yet built (CDF-72)> |
 | Business owner   | <name>, <date UTC>                               |
 | Test lead        | <name>, <date UTC>                               |
 | Linked from      | CDF-51                                           |

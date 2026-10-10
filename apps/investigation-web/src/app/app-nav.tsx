@@ -3,7 +3,9 @@ import { navigationFor } from "@cdf/authorization";
 import type { Actor } from "@cdf/contracts";
 import type { Translator } from "@cdf/i18n";
 import { buttonClass } from "@cdf/ui";
+import { env } from "@/server/env";
 import { signOutAction } from "./login/actions";
+import { SessionTimeout } from "./session/session-timeout";
 
 /** Navigation reflects permissions for usability only; every page enforces access on the server. */
 export function AppNav({ actor, t, current }: { actor: Actor; t: Translator; current?: "intake" | "cases" }) {
@@ -40,6 +42,7 @@ export function AppNav({ actor, t, current }: { actor: Actor; t: Translator; cur
           </button>
         </form>
       </div>
+      <SessionTimeout idleSeconds={env().CDF_SESSION_IDLE_SECONDS} locale={t.locale} />
     </div>
   );
 }
