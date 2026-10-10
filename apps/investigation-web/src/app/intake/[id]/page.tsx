@@ -70,6 +70,20 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
         <CDFDescriptionList
           items={[
             { term: t("intake.category"), value: t(`category.${report.category}` as MessageKey) },
+            ...(report.categoryOther
+              ? [{ term: t("intake.categoryOther"), value: report.categoryOther }]
+              : []),
+            ...(report.relationshipToFund
+              ? [
+                  {
+                    term: t("intake.relationshipToFund"),
+                    value: t(`portal.relationshipOption.${report.relationshipToFund}` as MessageKey),
+                  },
+                ]
+              : []),
+            ...(report.relationshipOther
+              ? [{ term: t("intake.relationshipOther"), value: report.relationshipOther }]
+              : []),
             { term: t("intake.reporterMode"), value: t(`reporterMode.${report.reporterMode}` as MessageKey) },
             { term: t("intake.receivedAt"), value: formatDateTime(t.locale, report.receivedAt) },
             { term: t("intake.subjectDescription"), value: report.subjectDescription ?? t("common.none") },
@@ -77,7 +91,16 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
               term: t("intake.incidentDate"),
               value: report.incidentDate ? formatDate(t.locale, report.incidentDate) : t("common.none"),
             },
+            ...(report.incidentTime ? [{ term: t("intake.incidentTime"), value: report.incidentTime }] : []),
             { term: t("intake.location"), value: report.location ?? t("common.none") },
+            ...(report.willingToCooperate === null
+              ? []
+              : [
+                  {
+                    term: t("intake.willingToCooperate"),
+                    value: t(report.willingToCooperate ? "common.yes" : "common.no"),
+                  },
+                ]),
             {
               term: t("intake.description"),
               value: <span lang={report.language}>{report.description}</span>,
