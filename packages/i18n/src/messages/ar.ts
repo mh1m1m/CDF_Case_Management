@@ -21,6 +21,7 @@ export const ar: Messages = {
     submit: "إرسال",
     required: "مطلوب",
     optional: "اختياري",
+    dateHint: "اختر التاريخ من التقويم. عند الكتابة اتبع ترتيب الحقل كما يظهر.",
     yes: "نعم",
     no: "لا",
     none: "لا يوجد",
