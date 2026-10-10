@@ -207,6 +207,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
         <CDFField id="category" label={t("portal.violationType")} error={e.category}>
           <select
             {...register("category")}
+            aria-required="true"
             {...fieldIds("category", { error: e.category })}
             className={inputClass}
             defaultValue=""
@@ -244,6 +245,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
         >
           <textarea
             {...register("description")}
+            aria-required="true"
             {...fieldIds("description", { hint: "y", error: e.description })}
             className={textareaClass}
             rows={8}
@@ -254,12 +256,22 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
           {t("portal.incidentWhenHint")}
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
-          <CDFField id="incidentDate" label={t("portal.incidentDate")} error={e.incidentDate}>
+          <CDFField
+            id="incidentDate"
+            label={t("portal.incidentDate")}
+            hint={t("common.dateHint")}
+            error={e.incidentDate}
+          >
             <input
               type="date"
               {...register("incidentDate")}
-              {...fieldIds("incidentDate", { error: e.incidentDate })}
-              aria-describedby={["incidentWhen-hint", e.incidentDate ? "incidentDate-error" : null]
+              aria-required="true"
+              {...fieldIds("incidentDate", { hint: "y", error: e.incidentDate })}
+              aria-describedby={[
+                "incidentWhen-hint",
+                "incidentDate-hint",
+                e.incidentDate ? "incidentDate-error" : null,
+              ]
                 .filter(Boolean)
                 .join(" ")}
               className={inputClass}
@@ -269,6 +281,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             <input
               type="time"
               {...register("incidentTime")}
+              aria-required="true"
               {...fieldIds("incidentTime", { error: e.incidentTime })}
               className={inputClass}
             />
@@ -523,6 +536,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
           <input
             type="checkbox"
             {...register("acknowledgement")}
+            aria-required="true"
             {...fieldIds("acknowledgement", { error: e.acknowledgement })}
             className="mt-1 size-5"
           />

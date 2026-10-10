@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { can } from "@cdf/authorization";
 import { ASSIGNMENT_ROLES, PRIORITIES } from "@cdf/contracts";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
@@ -11,6 +12,7 @@ import {
   CDFPageHeader,
   CDFProgressTracker,
   CDFTimeline,
+  buttonClass,
   classificationTone,
   inputClass,
   textareaClass,
@@ -87,6 +89,29 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           label: t.locale === "ar" ? s.nameAr : s.nameEn,
         }))}
       />
+      {/* Entry points to the case's forms (CDF-50) and interviews (CDF-60); both pages enforce case access. */}
+      <nav aria-label={t("cases.workNav")} className="mb-6" data-testid="case-work-nav">
+        <ul className="flex flex-wrap gap-3">
+          <li>
+            <Link
+              href={`/cases/${c.id}/forms`}
+              className={buttonClass("secondary")}
+              data-testid="case-forms-link"
+            >
+              {t("cases.formsLink")}
+            </Link>
+          </li>
+          <li>
+            <Link
+              href={`/cases/${c.id}/interviews`}
+              className={buttonClass("secondary")}
+              data-testid="case-interviews-link"
+            >
+              {t("cases.interviewsLink")}
+            </Link>
+          </li>
+        </ul>
+      </nav>
 
       {/* min-w-0: grid items default to min-width:auto, so a wide table would widen the page (WCAG 1.4.10). */}
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
@@ -131,10 +156,14 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                     successMessage={t("common.saved")}
                   >
                     <input type="hidden" name="expectedVersion" value={c.rowVersion} />
-                    <CDFField id="title" label={t("intake.caseTitle")}>
+                    <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
                       <input id="title" name="title" defaultValue={c.title} className={inputClass} required />
                     </CDFField>
-                    <CDFField id="summary" label={t("intake.caseSummary")}>
+                    <CDFField
+                      id="summary"
+                      label={t("intake.caseSummary")}
+                      requiredLabel={t("common.required")}
+                    >
                       <textarea
                         id="summary"
                         name="summary"
@@ -209,6 +238,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                           id={`reason-${tr.code}`}
                           label={t("cases.transitionReason")}
                           hint={t("intake.reasonHint")}
+                          requiredLabel={t("common.required")}
                         >
                           <textarea
                             id={`reason-${tr.code}`}
@@ -282,7 +312,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   }}
                   testId="assign-form"
                 >
-                  <CDFField id="userId" label={t("cases.person")}>
+                  <CDFField id="userId" label={t("cases.person")} requiredLabel={t("common.required")}>
                     <select id="userId" name="userId" className={inputClass} defaultValue="" required>
                       <option value="" disabled>
                         {t("cases.choosePerson")}
@@ -308,7 +338,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                       ))}
                     </select>
                   </CDFField>
-                  <CDFField id="assignReason" label={t("cases.assignReason")}>
+                  <CDFField
+                    id="assignReason"
+                    label={t("cases.assignReason")}
+                    requiredLabel={t("common.required")}
+                  >
                     <input id="assignReason" name="reason" className={inputClass} required minLength={5} />
                   </CDFField>
                 </ActionForm>
@@ -353,7 +387,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                     </label>
                   </fieldset>
                   <p className="mb-2 text-sm text-cdf-warning">{t("cases.conflictWarning")}</p>
-                  <CDFField id="declaration" label={t("cases.declaration")}>
+                  <CDFField
+                    id="declaration"
+                    label={t("cases.declaration")}
+                    requiredLabel={t("common.required")}
+                  >
                     <textarea
                       id="declaration"
                       name="declaration"
