@@ -10,13 +10,15 @@ name: Hosted DEV (Supabase)
 # The CLI connects with --db-url through the Supavisor session pooler (IPv4; the direct database host
 # is IPv6-only, which GitHub-hosted runners cannot reach), so no Supabase access token is needed.
 #
-# Repository secrets (GitHub → Settings → Secrets and variables → Actions). Values never appear
-# in logs; every secret-derived value is masked.
+# Secrets: the job runs in the GitHub environment "Supabase" (Settings → Environments), so it reads that
+# environment's secrets and variables first and falls back to repository secrets of the same name
+# (Settings → Secrets and variables → Actions). The environment's protection rules (required reviewers,
+# allowed branches) apply to every run. Values never appear in logs; every secret-derived value is masked.
 #   SUPABASE_DB_PASSWORD    DEV project database password (Project Settings → Database)
 #   CDF_BFF_DB_PASSWORD     optional: stable password for the cdf_bff login role (same value as in Vercel)
 #   CDF_PORTAL_DB_PASSWORD  optional: stable password for the cdf_portal login role (same value as in Vercel)
 # Without the optional two, throwaway passwords are generated for the test run and set on the roles.
-# Repository variable (optional): SUPABASE_POOLER_HOST, the session-pooler host shown under
+# Variable (optional, environment or repository): SUPABASE_POOLER_HOST, the session-pooler host shown under
 # Dashboard → Connect → Session pooler, if the probe of the two regional pooler hosts below fails.
 
 on:
@@ -48,12 +50,14 @@ concurrency:
 env:
   SUPABASE_PROJECT_REF: blycdqjphsxvyiuoommv
   SUPABASE_REGION: ap-northeast-1
-  SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
 
 jobs:
   hosted-dev:
     name: Migrate, seed and test DEV
     runs-on: ubuntu-latest
+    environment: Supabase
+    env:
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -68,7 +72,7 @@ jobs:
       - name: Check the required secret exists (its value is never printed)
         run: |
           if [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::error::Repository secret SUPABASE_DB_PASSWORD is not set"; exit 1
+            echo "::error::SUPABASE_DB_PASSWORD is set neither in the Supabase environment nor as a repository secret"; exit 1
           fi
 
       - name: Database connection string (session pooler, IPv4; values masked)
@@ -115,7 +119,7 @@ jobs:
             echo "::warning::$candidate: $(printf '%s' "$err" | tr '\n' ' ')"
           done
           if [ -z "$host" ]; then
-            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the repository variable SUPABASE_POOLER_HOST from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
+            echo "::error::No session-pooler host accepted the connection (see the messages above: 'Tenant or user not found' means the host is wrong, set the variable SUPABASE_POOLER_HOST (Supabase environment or repository) from Dashboard → Connect → Session pooler; 'password authentication failed' means the secret SUPABASE_DB_PASSWORD is not the database password)."
             exit 1
           fi
           echo "Session pooler: $host"
@@ -151,7 +155,7 @@ jobs:
             role=${pair%%:*}; var=${pair#*:}; p=${!var}
             if [ -z "$p" ]; then
               p=$(openssl rand -hex 24)
-              echo "$var is not a repository secret; a throwaway password is used for this run"
+              echo "$var is not set as a secret; a throwaway password is used for this run"
             fi
             echo "::add-mask::$p"
             printf "alter role %s password :'pw';\n" "$role" \
