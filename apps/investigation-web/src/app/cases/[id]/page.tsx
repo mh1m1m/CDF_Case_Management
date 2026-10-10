@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { can } from "@cdf/authorization";
+import { can, navigationFor } from "@cdf/authorization";
 import { ASSIGNMENT_ROLES, PRIORITIES } from "@cdf/contracts";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
+  CDFAlert,
   CDFBadge,
   CDFCard,
   CDFDescriptionList,
@@ -56,6 +57,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           a.userId === actor.userId &&
           ["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"].includes(a.assignmentRole),
       ));
+  // Mirrors the records guards for the UI only (ADR-013 D5, CDF-74): from ARCHIVED on, case content and
+  // new assignments are refused by the database, so they are not offered here either.
+  const contentOpen = c.recordsState === "ACTIVE" || c.recordsState === "CLOSED";
+  const nav = navigationFor(actor);
+  const showRecordsLink = nav.recordsCatalogue || nav.myWork;
   const name = (n: { displayName: string; displayNameAr?: string }) =>
     t.locale === "ar" && n.displayNameAr ? n.displayNameAr : n.displayName;
 
@@ -89,7 +95,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           label: t.locale === "ar" ? s.nameAr : s.nameEn,
         }))}
       />
-      {/* Entry points to the case's forms (CDF-50) and interviews (CDF-60); both pages enforce case access. */}
+      {/* Entry points to the case's forms (CDF-50), interviews (CDF-60) and records (CDF-71); each page enforces access. */}
       <nav aria-label={t("cases.workNav")} className="mb-6" data-testid="case-work-nav">
         <ul className="flex flex-wrap gap-3">
           <li>
@@ -110,8 +116,26 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               {t("cases.interviewsLink")}
             </Link>
           </li>
+          {showRecordsLink ? (
+            <li>
+              <Link
+                href={`/records/${c.id}`}
+                className={buttonClass("secondary")}
+                data-testid="case-records-link"
+              >
+                {t("cases.recordsLink")}
+              </Link>
+            </li>
+          ) : null}
         </ul>
       </nav>
+      {contentOpen ? null : (
+        <div className="mb-6">
+          <CDFAlert tone="info" testId="case-read-only">
+            {t("records.readOnlyNotice")}
+          </CDFAlert>
+        </div>
+      )}
 
       {/* min-w-0: grid items default to min-width:auto, so a wide table would widen the page (WCAG 1.4.10). */}
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
@@ -143,7 +167,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   : []),
               ]}
             />
-            {can(actor, "CASE_EDIT_ALL") ? (
+            {can(actor, "CASE_EDIT_ALL") && contentOpen ? (
               <details className="mt-4">
                 <summary className="cursor-pointer font-semibold">{t("cases.editDetails")}</summary>
                 <div className="mt-3">
@@ -297,7 +321,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                 ))}
               </ul>
             )}
-            {can(actor, "CASE_ASSIGN") ? (
+            {can(actor, "CASE_ASSIGN") && contentOpen ? (
               <div className="border-t border-cdf-border pt-4">
                 <h3 className="mb-2 font-semibold">{t("cases.assignTitle")}</h3>
                 <ActionForm
