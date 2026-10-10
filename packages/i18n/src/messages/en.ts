@@ -44,6 +44,17 @@ export const en = {
     UNAVAILABLE: "The service is temporarily unavailable.",
     withReference: "{message} Reference: {ref}",
   },
+  /** Idle-session warning (CDF-57, WCAG 2.2.1). */
+  session: {
+    warningTitle: "Are you still there?",
+    warningBody:
+      "You will be signed out in {minutes} minutes because there has been no activity. Unsaved changes on this page will be lost.",
+    stay: "Stay signed in",
+    endedTitle: "You have been signed out",
+    endedBody:
+      "For security, you were signed out after {minutes} minutes without activity. Copy any unsaved text from this page before you sign in again.",
+    signInAgain: "Sign in again",
+  },
   codes: {
     NO_ALLEGATION_RECORDED: "No allegation is recorded.",
     PRIORITY_NOT_SET: "Set a priority first.",
@@ -364,17 +375,6 @@ export const en = {
     STORED: "Stored in the vault",
     REJECTED: "Rejected",
     DOWNLOADED: "Downloaded",
-  },
-  /** Idle-session warning (CDF-57, WCAG 2.2.1). */
-  session: {
-    warningTitle: "Are you still there?",
-    warningBody:
-      "You will be signed out in {minutes} minutes because there has been no activity. Unsaved changes on this page will be lost.",
-    stay: "Stay signed in",
-    endedTitle: "You have been signed out",
-    endedBody:
-      "For security, you were signed out after {minutes} minutes without activity. Copy any unsaved text from this page before you sign in again.",
-    signInAgain: "Sign in again",
   },
 };
 
