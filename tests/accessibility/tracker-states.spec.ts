@@ -52,6 +52,18 @@ for (const locale of ["ar", "en"] as const) {
       expect(s.icon).toBe(false);
       expect(s.borderStyle).toBe("dashed");
     }
+
+    // The visually hidden state text is positioned inside the scrolling region, so a long tracker scrolls
+    // within it instead of widening the page at 320 px (WCAG 1.4.10).
+    const escaped = await page
+      .getByRole("region", { name: expected.label, exact: true })
+      .evaluate(
+        (region) =>
+          Array.from(region.querySelectorAll<HTMLElement>(".sr-only")).filter(
+            (el) => !el.offsetParent || !region.contains(el.offsetParent),
+          ).length,
+      );
+    expect(escaped).toBe(0);
     await page.context().close();
   });
 }
