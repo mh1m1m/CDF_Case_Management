@@ -745,6 +745,7 @@ describe("audit internals are not reachable", () => {
       "forms.terminal_status",
       "public_api.consume_rate_limit",
       "records.catalogue_rows",
+      "records.hold_request_rows",
     ]);
   });
 });

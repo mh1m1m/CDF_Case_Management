@@ -57,7 +57,7 @@ Test ids: `PBA-Tnn` = `tests/security/authz-purpose-bound.spec.ts`; `INT-PB` = `
 
 ## Known limitations
 
-- A `MATCHED` lookup still confirms that a request reached a case (it returns no case id, state or hold status since CDF-79). The rate limit bounds guessing to a few confirmations an hour per user; burst alerting on `NO_MATCH` is the SIEM's (CDF-39).
+- A `MATCHED` lookup still confirms that a request reached a case (it returns no case id, state or hold status since CDF-79, and the filed request shows its requester no case, task or hold id since CDF-84; PBA-T17). The rate limit bounds guessing to a few confirmations an hour per user; burst alerting on `NO_MATCH` is the SIEM's (CDF-39).
 - The lookup's response time differs slightly between a match and no match. The answer itself is identical for unknown, restricted, conflicted and out-of-clearance cases, and the rate limit bounds probing.
 - There are no records or legal UI pages yet; the application services, gateway and navigation keys are ready for them.
 - `INTERNAL_AUDIT` keeps `ARCHIVE_RECORD_VIEW` (catalogue metadata of closed, non-restricted cases), matching its ADR-013 oversight role. Narrowing it is a policy decision.
