@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "[ -z \"$VERCEL_GIT_PREVIOUS_SHA\" ] && exit 1; git diff --quiet \"$VERCEL_GIT_PREVIOUS_SHA\" HEAD -- . ../../packages ../../pnpm-lock.yaml ../../package.json ../../pnpm-workspace.yaml ../../tsconfig.base.json",
+  "git": {
+    "deploymentEnabled": {
+      "dependabot/**": false,
+      "claude/swarm-status-*": false
+    }
+  }
+}
