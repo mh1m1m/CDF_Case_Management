@@ -22,8 +22,13 @@ as $$
 declare v_id uuid;
 begin
   perform set_config('request.jwt.claims', '', true);
+  -- Drive intake field set (CDF-63, migration 1500): mode follows the identity supplied.
   perform public_api.submit_report(p_ref, encode(sha256(convert_to('unusable-seed-secret:' || p_ref, 'UTF8')), 'hex'),
-    p_category, 'Synthetic subject (Employee Alpha)', p_description, current_date - 30, 'Riyadh office (synthetic)', 'en', p_identity);
+    case when p_identity is null then 'ANONYMOUS'
+         when p_identity ?& array['given_name', 'id_number'] then 'IDENTIFIED'
+         else 'EMAIL_ONLY' end,
+    'EMPLOYEE', null, p_category, null, 'Synthetic subject (Employee Alpha)', p_description, current_date - 30,
+    time '10:30', 'Riyadh office (synthetic)', true, 'en', p_identity);
   select id into v_id from intake.report where report_ref = p_ref;
   return v_id;
 end;
@@ -39,18 +44,23 @@ declare
   u_lead  uuid := 'a0000000-0000-4000-8000-000000000006';
   u_cm    uuid := 'a0000000-0000-4000-8000-000000000003';
   u_grc   uuid := 'a0000000-0000-4000-8000-000000000008';
+  u_sec   uuid := 'a0000000-0000-4000-8000-000000000015';
+  u_chair uuid := 'a0000000-0000-4000-8000-000000000016';
 begin
   -- Reports -------------------------------------------------------------------
-  r1 := pg_temp.seed_report('WB-SEED00000001', 'FRAUD',
+  r1 := pg_temp.seed_report('WB-SEED00000001', 'FINANCIAL_CORRUPTION',
     'SYNTHETIC: Employee Alpha is alleged to have approved duplicate invoices from Vendor Omega during Q2.');
-  r2 := pg_temp.seed_report('WB-SEED00000002', 'PROCUREMENT',
+  r2 := pg_temp.seed_report('WB-SEED00000002', 'IRREGULAR_TRANSACTIONS',
     'SYNTHETIC: Tender evaluation for Project Sigma allegedly favoured Vendor Tau without documented scoring.',
-    jsonb_build_object('full_name', 'Reporter Gamma (synthetic)', 'email', 'reporter.gamma@example.test', 'preferred_contact', 'EMAIL'));
-  r3 := pg_temp.seed_report('WB-SEED00000003', 'CONFLICT_OF_INTEREST',
+    jsonb_build_object('given_name', 'Reporter', 'father_name', 'Gamma', 'grandfather_name', 'Synthetic',
+      'family_name', 'Example', 'gender', 'FEMALE', 'birth_date', '1990-04-15', 'birth_date_calendar', 'GREGORIAN',
+      'id_type', 'NATIONAL_ID', 'id_number', '1000000001', 'city', 'RIYADH', 'nationality', 'SA',
+      'phone', '+966 500000001', 'email', 'reporter.gamma@example.test', 'preferred_contact', 'EMAIL'));
+  r3 := pg_temp.seed_report('WB-SEED00000003', 'ABUSE_OF_AUTHORITY',
     'SYNTHETIC: Executive Kappa allegedly holds an undisclosed interest in a grant recipient.');
-  r4 := pg_temp.seed_report('WB-SEED00000004', 'BEHAVIOURAL_MISCONDUCT',
+  r4 := pg_temp.seed_report('WB-SEED00000004', 'POLICY_BREACH',
     'SYNTHETIC: Manager Rho allegedly retaliated against Witness Gamma after a prior complaint.');
-  r5 := pg_temp.seed_report('WB-SEED00000005', 'ADMINISTRATIVE_VIOLATION',
+  r5 := pg_temp.seed_report('WB-SEED00000005', 'ADMINISTRATIVE_CORRUPTION',
     'SYNTHETIC: Attendance records in Department Upsilon allegedly altered for overtime claims.');
   r6 := pg_temp.seed_report('WB-SEED00000006', 'OTHER',
     'SYNTHETIC: Unclear allegation about misuse of a pool vehicle; more detail needed.');
@@ -83,6 +93,10 @@ begin
   perform api.declare_conflict(c_a, false, 'Synthetic: no relationship with the parties.');
   perform pg_temp.act_as('grc.director@example.test');
   perform api.transition_case(c_a, 'APPROVE_INVESTIGATION', 'Synthetic: approved for full investigation.');
+  -- Committee access to case A so committee forms (WB-FRM-13/14) can be prepared, reviewed and approved (Phase 8).
+  perform pg_temp.act_as('casemanager@example.test');
+  perform api.grant_case_access(c_a, u_sec, 'COMMITTEE', 'Synthetic: committee secretary for case A', null);
+  perform api.grant_case_access(c_a, u_chair, 'COMMITTEE', 'Synthetic: committee chair for case A', null);
 
   -- Case B (0002): identified reporter, investigator B assigned, in SCREENING --------------
   perform pg_temp.act_as('triage@example.test');

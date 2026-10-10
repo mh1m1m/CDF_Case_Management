@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { can } from "@cdf/authorization";
@@ -23,6 +24,11 @@ import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { assignAction, declareConflictAction, transitionAction, updateDetailsAction } from "./actions";
 import { EvidencePanel } from "./evidence-panel";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.caseDetail") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -73,6 +79,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       <CDFProgressTracker
         label={t("cases.progress")}
         current={c.currentState}
+        stateLabels={{
+          done: t("cases.stepDone"),
+          current: t("cases.stepCurrent"),
+          upcoming: t("cases.stepUpcoming"),
+        }}
         steps={STATES.filter((s) => s.sequence <= 150).map((s) => ({
           code: s.code,
           label: t.locale === "ar" ? s.nameAr : s.nameEn,
@@ -102,8 +113,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         </ul>
       </nav>
 
+      {/* min-w-0: grid items default to min-width:auto, so a wide table would widen the page (WCAG 1.4.10). */}
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div>
+        <div className="min-w-0">
           <CDFCard title={t("cases.details")}>
             <CDFDescriptionList
               items={[
@@ -116,9 +128,12 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                 {
                   term: t("cases.reporterRef"),
                   value: c.reporterWbId ? (
-                    <span dir="ltr" title={t("cases.reporterRefHint")}>
-                      {c.reporterWbId}
-                    </span>
+                    <>
+                      <span dir="ltr">{c.reporterWbId}</span>
+                      <span className="block text-sm text-cdf-text-secondary">
+                        {t("cases.reporterRefHint")}
+                      </span>
+                    </>
                   ) : (
                     "—"
                   ),
@@ -141,10 +156,14 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                     successMessage={t("common.saved")}
                   >
                     <input type="hidden" name="expectedVersion" value={c.rowVersion} />
-                    <CDFField id="title" label={t("intake.caseTitle")}>
+                    <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
                       <input id="title" name="title" defaultValue={c.title} className={inputClass} required />
                     </CDFField>
-                    <CDFField id="summary" label={t("intake.caseSummary")}>
+                    <CDFField
+                      id="summary"
+                      label={t("intake.caseSummary")}
+                      requiredLabel={t("common.required")}
+                    >
                       <textarea
                         id="summary"
                         name="summary"
@@ -219,6 +238,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                           id={`reason-${tr.code}`}
                           label={t("cases.transitionReason")}
                           hint={t("intake.reasonHint")}
+                          requiredLabel={t("common.required")}
                         >
                           <textarea
                             id={`reason-${tr.code}`}
@@ -263,7 +283,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           </CDFCard>
         </div>
 
-        <div>
+        <div className="min-w-0">
           <CDFCard title={t("cases.team")} testId="team-card">
             {c.assignments.length === 0 ? (
               <p className="text-cdf-text-secondary">{t("cases.noTeam")}</p>
@@ -292,7 +312,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   }}
                   testId="assign-form"
                 >
-                  <CDFField id="userId" label={t("cases.person")}>
+                  <CDFField id="userId" label={t("cases.person")} requiredLabel={t("common.required")}>
                     <select id="userId" name="userId" className={inputClass} defaultValue="" required>
                       <option value="" disabled>
                         {t("cases.choosePerson")}
@@ -318,7 +338,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                       ))}
                     </select>
                   </CDFField>
-                  <CDFField id="assignReason" label={t("cases.assignReason")}>
+                  <CDFField
+                    id="assignReason"
+                    label={t("cases.assignReason")}
+                    requiredLabel={t("common.required")}
+                  >
                     <input id="assignReason" name="reason" className={inputClass} required minLength={5} />
                   </CDFField>
                 </ActionForm>
@@ -363,7 +387,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                     </label>
                   </fieldset>
                   <p className="mb-2 text-sm text-cdf-warning">{t("cases.conflictWarning")}</p>
-                  <CDFField id="declaration" label={t("cases.declaration")}>
+                  <CDFField
+                    id="declaration"
+                    label={t("cases.declaration")}
+                    requiredLabel={t("common.required")}
+                  >
                     <textarea
                       id="declaration"
                       name="declaration"
