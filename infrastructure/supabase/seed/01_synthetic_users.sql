@@ -22,10 +22,10 @@ insert into iam.user_profile (id, email, display_name, display_name_ar, departme
   -- Second identity-reveal holder so dual control (requester ≠ approver) can be demonstrated.
   ('a0000000-0000-4000-8000-000000000014', 'grc.deputy@example.test',     'GRC Deputy Mu',            'نائب مدير الحوكمة مو',     'GRC (synthetic)',           'ACTIVE',  'SECRET'),
   -- Records and legal hold actors (ADR-013); two of each so dual control can be demonstrated.
-  ('a0000000-0000-4000-8000-000000000015', 'records@example.test',        'Records Officer Nu',       'مسؤول السجلات نو',         'Records (synthetic)',       'ACTIVE',  'CONFIDENTIAL'),
-  ('a0000000-0000-4000-8000-000000000016', 'records.b@example.test',      'Records Officer Xi',       'مسؤول السجلات كساي',       'Records (synthetic)',       'ACTIVE',  'CONFIDENTIAL'),
-  ('a0000000-0000-4000-8000-000000000017', 'legal@example.test',          'Legal Reviewer Omicron',   'المراجع القانوني أوميكرون', 'Legal (synthetic)',         'ACTIVE',  'CONFIDENTIAL'),
-  ('a0000000-0000-4000-8000-000000000018', 'legal.b@example.test',        'Legal Reviewer Pi',        'المراجع القانوني باي',      'Legal (synthetic)',         'ACTIVE',  'CONFIDENTIAL');
+  ('a0000000-0000-4000-8000-000000000019', 'records@example.test',        'Records Officer Nu',       'مسؤول السجلات نو',         'Records (synthetic)',       'ACTIVE',  'CONFIDENTIAL'),
+  ('a0000000-0000-4000-8000-000000000020', 'records.b@example.test',      'Records Officer Xi',       'مسؤول السجلات كساي',       'Records (synthetic)',       'ACTIVE',  'CONFIDENTIAL'),
+  ('a0000000-0000-4000-8000-000000000021', 'legal@example.test',          'Legal Reviewer Omicron',   'المراجع القانوني أوميكرون', 'Legal (synthetic)',         'ACTIVE',  'CONFIDENTIAL'),
+  ('a0000000-0000-4000-8000-000000000022', 'legal.b@example.test',        'Legal Reviewer Pi',        'المراجع القانوني باي',      'Legal (synthetic)',         'ACTIVE',  'CONFIDENTIAL');
 
 insert into iam.user_role_assignment (user_id, role_code, justification, source_reference, status, revoked_at, revocation_reason) values
   ('a0000000-0000-4000-8000-000000000001', 'INTAKE_OFFICER',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
@@ -42,7 +42,7 @@ insert into iam.user_role_assignment (user_id, role_code, justification, source_
   ('a0000000-0000-4000-8000-000000000012', 'PRIVACY_DPO',        'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
   ('a0000000-0000-4000-8000-000000000013', 'INVESTIGATOR',       'Synthetic demo seed', 'SEED', 'REVOKED', now(), 'Synthetic: left the department'),
   ('a0000000-0000-4000-8000-000000000014', 'GRC_DIRECTOR',       'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
-  ('a0000000-0000-4000-8000-000000000015', 'RECORDS_OFFICER',    'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
-  ('a0000000-0000-4000-8000-000000000016', 'RECORDS_OFFICER',    'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
-  ('a0000000-0000-4000-8000-000000000017', 'LEGAL_REVIEWER',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
-  ('a0000000-0000-4000-8000-000000000018', 'LEGAL_REVIEWER',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null);
+  ('a0000000-0000-4000-8000-000000000019', 'RECORDS_OFFICER',    'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
+  ('a0000000-0000-4000-8000-000000000020', 'RECORDS_OFFICER',    'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
+  ('a0000000-0000-4000-8000-000000000021', 'LEGAL_REVIEWER',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
+  ('a0000000-0000-4000-8000-000000000022', 'LEGAL_REVIEWER',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null);
