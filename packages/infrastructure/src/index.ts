@@ -16,3 +16,11 @@ export { SupabaseEvidenceStorage } from "./storage/supabase";
 export { OBJECT_KEY_PATTERN, QUARANTINE_BUCKET, VAULT_BUCKET, assertObjectKey } from "./storage/object-key";
 export { MockMalwareScanner, EICAR_TEST_SIGNATURE } from "./scanning/mock-scanner";
 export { PostgresFormsGateway } from "./db/forms-gateway";
+export {
+  REDACTED,
+  isDeniedKey,
+  scrubBreadcrumb,
+  scrubData,
+  scrubSentryEvent,
+  scrubString,
+} from "./observability/scrub";
