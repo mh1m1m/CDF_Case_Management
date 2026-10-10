@@ -2,10 +2,11 @@ name: Hosted DEV (Supabase)
 
 # CDF-32 / CEOM §11: the hosted DEV database (Supabase project blycdqjphsxvyiuoommv, "cdf-case-dev")
 # changes only from Git. This workflow applies infrastructure/supabase/migrations with the Supabase
-# CLI, seeds the synthetic demo data once, and runs the database, RLS and security suites against
-# DEV. It runs on pushes to the branch named below that touch the database or the tests, and manually
-# (workflow_dispatch) once the file exists on the default branch, because GitHub resolves manual
-# dispatch against main. It never resets, drops or truncates anything on the hosted project.
+# CLI, seeds the synthetic demo data once (later only users added to the seed), and runs the database,
+# RLS and security suites against DEV. It runs on pushes to the branch named below that touch the
+# database or the tests, and manually (workflow_dispatch) once the file exists on the default branch,
+# because GitHub resolves manual dispatch against main. It never resets, drops or truncates anything
+# on the hosted project.
 #
 # The CLI connects with --db-url through the Supavisor session pooler (IPv4; the direct database host
 # is IPv6-only, which GitHub-hosted runners cannot reach), so no Supabase access token is needed.
@@ -32,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       seed:
-        description: Seed synthetic data if the DEV database is still empty
+        description: Seed synthetic data (all of it into an empty DEV, afterwards only users added to the seed)
         type: boolean
         default: true
       test:
@@ -182,6 +183,47 @@ jobs:
           done
           [ "$drift" = 0 ] || { echo "::error::DEV differs from a database built from Git"; exit 1; }
           echo "::notice::No drift: DEV schema and reference data equal a database built from Git"
+
+      - name: Synthetic users added to the seed since DEV was seeded (insert only)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
+        env:
+          REFERENCE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: |
+          # The seed files run only while DEV is empty, because they are not idempotent (02 onwards act through
+          # the api.* commands). Users added to 01_synthetic_users.sql later therefore never reached DEV: run
+          # 38058158699 lacked the records and legal actors of CDF-69/CDF-73, and the 86 tests acting as them
+          # failed. So the users of the database the drift check has just built from Git that DEV lacks are
+          # inserted here, with their role assignments. Nothing on DEV is updated or deleted, and the drift check
+          # has just shown both tables identical, column order included.
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select * from iam.user_profile) to 'seed-users.csv' csv"
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select user_id, role_code, status, effective_from, effective_to, justification, source_reference, granted_by, granted_at, revoked_by, revoked_at, revocation_reason from iam.user_role_assignment) to 'seed-roles.csv' csv"
+          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 <<'SQL'
+          begin;
+          create temp table seed_user (like iam.user_profile) on commit drop;
+          \copy seed_user from 'seed-users.csv' csv
+          create temp table seed_role (like iam.user_role_assignment) on commit drop;
+          alter table seed_role drop column id;
+          \copy seed_role from 'seed-roles.csv' csv
+          create temp table added (id uuid primary key) on commit drop;
+          with ins as (
+            insert into iam.user_profile
+            select s.* from seed_user s where not exists (select 1 from iam.user_profile u where u.id = s.id)
+            returning id
+          )
+          insert into added select id from ins;
+          insert into iam.user_role_assignment (user_id, role_code, status, effective_from, effective_to, justification,
+            source_reference, granted_by, granted_at, revoked_by, revoked_at, revocation_reason)
+          select * from seed_role where user_id in (select id from added);
+          select count(*) || ' ' || coalesce(string_agg(u.email, ', ' order by u.email), '') from added a join iam.user_profile u using (id);
+          commit;
+          SQL
+          )
+          rm -f seed-users.csv seed-roles.csv
+          if [ "${added%% *}" = 0 ]; then
+            echo "::notice::Seed users: DEV already has every synthetic user of the seed in Git"
+          else
+            echo "::notice::Seed users: ${added%% *} synthetic users of the seed in Git added to DEV (${added#* })"
+          fi
 
       - name: Login-role passwords for the test run (stable from secrets, else throwaway)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
