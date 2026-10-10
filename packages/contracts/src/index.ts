@@ -75,6 +75,13 @@ export const PERMISSIONS = [
   "FORM_PREPARE",
   "FORM_REVIEW",
   "FORM_APPROVE",
+  // Records, retention and legal hold (ADR-013 D9)
+  "RECORDS_VIEW",
+  "RETENTION_CLASS_ASSIGN",
+  "LEGAL_HOLD_APPLY",
+  "LEGAL_HOLD_RELEASE",
+  "DISPOSITION_REQUEST",
+  "DISPOSITION_APPROVE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
