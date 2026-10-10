@@ -9,6 +9,9 @@ test("Arabic portal: anonymous, email-only and identified reports reach intake w
   browser,
 }) => {
   const context = await contextIn(browser, "ar", PORTAL);
+  // Three submissions here: use a synthetic client address of our own (RFC 5737 documentation range) so the
+  // portal's 5-per-hour submit limit is not shared with the other e2e specs' submissions.
+  await context.setExtraHTTPHeaders({ "x-forwarded-for": "198.51.100.63" });
   const page = await context.newPage();
 
   // Anonymous.
