@@ -62,6 +62,7 @@ const NOT_STATE_CHANGING = new Set([
   "my_work_summary",
   "open_case_metadata",
   "search_records_catalogue",
+  "open_report_attachment",
 ]);
 
 interface Step {

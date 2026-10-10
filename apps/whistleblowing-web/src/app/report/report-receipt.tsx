@@ -3,16 +3,19 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { createTranslator, type Locale } from "@cdf/i18n";
 import { CDFAlert, CDFCard, buttonClass } from "@cdf/ui";
+import { AttachmentUploader } from "./attachment-uploader";
 
 /** Shows the Report ID and secret exactly once. Nothing is written to storage or the URL. */
 export function ReportReceipt({
   locale,
   reportRef,
   secret,
+  attachmentsEnabled,
 }: {
   locale: Locale;
   reportRef: string;
   secret: string;
+  attachmentsEnabled: boolean;
 }) {
   const t = createTranslator(locale);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -62,6 +65,9 @@ export function ReportReceipt({
           {copied ? t("portal.copied") : ""}
         </p>
       </CDFCard>
+      {attachmentsEnabled ? (
+        <AttachmentUploader locale={locale} reportRef={reportRef} secret={secret} source="REPORT" />
+      ) : null}
       <Link href="/" className={buttonClass("primary")}>
         {t("portal.savedConfirm")}
       </Link>

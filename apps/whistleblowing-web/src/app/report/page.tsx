@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CDFPageHeader } from "@cdf/ui";
+import { portalService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { ReportForm } from "./report-form";
 
@@ -13,7 +14,7 @@ export default async function ReportPage() {
   return (
     <div className="mx-auto max-w-2xl">
       <CDFPageHeader title={t("portal.formTitle")} intro={t("portal.formIntro")} />
-      <ReportForm locale={t.locale} />
+      <ReportForm locale={t.locale} attachmentsEnabled={portalService().attachmentsEnabled} />
     </div>
   );
 }

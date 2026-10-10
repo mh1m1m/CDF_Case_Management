@@ -95,16 +95,20 @@ describe("RLS coverage", () => {
     expect(rows.map((r) => r.fn)).toEqual([]);
   });
 
-  it("anon can execute exactly the four public portal functions", async () => {
+  it("anon can execute exactly the public portal functions", async () => {
     const rows = await admin<{ fn: string }[]>`
       select p.oid::regprocedure::text as fn
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname = any(${APP_SCHEMAS}) and has_function_privilege('anon', p.oid, 'EXECUTE')
-      order by 1`;
-    expect(rows.map((r) => r.fn)).toEqual([
+      where n.nspname = any(${APP_SCHEMAS}) and has_function_privilege('anon', p.oid, 'EXECUTE')`;
+    // Sorted here, not in SQL: "_" orders differently under the C and en_US collations CI and local use.
+    expect(rows.map((r) => r.fn).sort()).toEqual([
+      "public_api.complete_report_attachment(text,text,uuid,text,text)",
       "public_api.consume_rate_limit(text,integer,integer)",
+      "public_api.consume_rate_limit_amount(text,integer,integer,integer)",
       "public_api.get_report_status(text,text)",
       "public_api.post_reporter_message(text,text,text)",
+      "public_api.register_report_attachment(text,text,text,text,text,bigint,text)",
+      "public_api.reject_report_attachment(text,text,uuid,text,text,text)",
       "public_api.submit_report(text,text,text,text,text,text,text,text,text,date,time without time zone,text,boolean,text,jsonb)",
     ]);
   });

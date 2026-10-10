@@ -196,6 +196,44 @@ export function createEvidenceService(deps: EvidenceDeps) {
       };
     },
 
+    /** Reporter attachments on a report the caller can view (CDF-72); RLS decides visibility. */
+    listReportAttachments: async (ctx: UserRequestContext, reportId: string) => {
+      try {
+        return await gateway.listReportAttachments(ctx, reportId);
+      } catch (cause) {
+        throw toAppError(cause, ctx.requestId);
+      }
+    },
+
+    /**
+     * Streams a reporter attachment after the database gate (clean scan, report visibility, download
+     * right). Null when missing, hidden, quarantined or rejected (all alike, §40).
+     */
+    async openReportAttachment(
+      ctx: UserRequestContext,
+      attachmentId: string,
+    ): Promise<EvidenceDownload | null> {
+      let record;
+      try {
+        record = await gateway.openReportAttachment(ctx, attachmentId);
+      } catch (cause) {
+        throw toAppError(cause, ctx.requestId);
+      }
+      if (!record) return null;
+      try {
+        const stream = await storage.openReadStream(record.objectKey);
+        return {
+          stream,
+          fileName: record.displayName,
+          contentType: record.contentType,
+          sizeBytes: record.sizeBytes,
+          sha256: record.sha256,
+        };
+      } catch (cause) {
+        throw new AppError("UNAVAILABLE", ctx.requestId, "STORAGE_FAILURE", { cause });
+      }
+    },
+
     /** Null when the version is missing, not visible, not downloadable or not yet available (all alike). */
     async openDownload(ctx: UserRequestContext, versionId: string): Promise<EvidenceDownload | null> {
       let record;
