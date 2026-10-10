@@ -9,7 +9,7 @@ import type { Actor, Classification, Permission, Role } from "@cdf/contracts";
 import { CLASSIFICATION_LEVELS } from "@cdf/contracts";
 
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
-  INTAKE_OFFICER: ["INTAKE_VIEW", "REPORT_MESSAGE_REPLY"],
+  INTAKE_OFFICER: ["INTAKE_VIEW", "REPORT_MESSAGE_REPLY", "FORM_VIEW", "FORM_PREPARE"],
   TRIAGE_OFFICER: [
     "INTAKE_VIEW",
     "REPORT_MESSAGE_REPLY",
@@ -17,6 +17,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "CASE_CREATE",
     "WORKFLOW_SCREEN",
     "CONFLICT_DECLARE",
+    "FORM_VIEW",
+    "FORM_PREPARE",
   ],
   CASE_MANAGER: [
     "CASE_VIEW_ALL",
@@ -31,6 +33,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "CLASSIFICATION_CHANGE",
     "EVIDENCE_UPLOAD",
     "EVIDENCE_DOWNLOAD",
+    "FORM_VIEW",
+    "FORM_PREPARE",
+    "FORM_REVIEW",
   ],
   LEAD_INVESTIGATOR: [
     "CASE_ASSIGN",
@@ -38,19 +43,23 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "CONFLICT_DECLARE",
     "EVIDENCE_UPLOAD",
     "EVIDENCE_DOWNLOAD",
+    "FORM_VIEW",
+    "FORM_PREPARE",
+    "FORM_REVIEW",
   ],
-  INVESTIGATOR: ["CONFLICT_DECLARE", "EVIDENCE_UPLOAD", "EVIDENCE_DOWNLOAD"],
-  COMMITTEE_SECRETARY: ["CONFLICT_DECLARE"],
-  COMMITTEE_CHAIR: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD"],
-  COMMITTEE_MEMBER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD"],
+  INVESTIGATOR: ["CONFLICT_DECLARE", "EVIDENCE_UPLOAD", "EVIDENCE_DOWNLOAD", "FORM_VIEW", "FORM_PREPARE"],
+  COMMITTEE_SECRETARY: ["CONFLICT_DECLARE", "FORM_VIEW", "FORM_PREPARE"],
+  COMMITTEE_CHAIR: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW", "FORM_REVIEW", "FORM_APPROVE"],
+  COMMITTEE_MEMBER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW"],
   LEGAL_REVIEWER: [
     "CONFLICT_DECLARE",
     "EVIDENCE_DOWNLOAD",
+    "FORM_VIEW",
     "RECORDS_VIEW",
     "LEGAL_HOLD_APPLY",
     "LEGAL_HOLD_RELEASE",
   ],
-  HR_REVIEWER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD"],
+  HR_REVIEWER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW"],
   GRC_DIRECTOR: [
     "CASE_VIEW_ALL",
     "CASE_ASSIGN",
@@ -62,6 +71,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "CONFLICT_DECLARE",
     "EVIDENCE_UPLOAD",
     "EVIDENCE_DOWNLOAD",
+    "FORM_VIEW",
+    "FORM_REVIEW",
+    "FORM_APPROVE",
     "RECORDS_VIEW",
     "LEGAL_HOLD_APPLY",
     "LEGAL_HOLD_RELEASE",
@@ -71,12 +83,13 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   INTERNAL_AUDIT: ["AUDIT_VIEW", "RECORDS_VIEW"],
   SOC_ANALYST: ["SECURITY_EVENT_VIEW"],
   PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN"],
+  // Form entitlements (ADR-011) give these roles their first permissions; the rest come in later phases.
+  // DB_ADMIN never receives application permissions (§21).
+  COMPLIANCE: ["FORM_VIEW", "FORM_PREPARE", "FORM_REVIEW"],
+  DECISION_AUTHORITY: ["FORM_VIEW", "FORM_APPROVE"],
+  IMPLEMENTATION_OWNER: ["FORM_VIEW", "FORM_PREPARE"],
   // Records authority is SOURCE_REQUIRED (Delegation of Authority); this is the prototype default (ADR-013 D9).
   RECORDS_OFFICER: ["RECORDS_VIEW", "RETENTION_CLASS_ASSIGN", "LEGAL_HOLD_APPLY", "DISPOSITION_REQUEST"],
-  // Defined in later phases; DB_ADMIN never receives application permissions (§21).
-  COMPLIANCE: [],
-  DECISION_AUTHORITY: [],
-  IMPLEMENTATION_OWNER: [],
   REFERRER: [],
   DB_ADMIN: [],
 };

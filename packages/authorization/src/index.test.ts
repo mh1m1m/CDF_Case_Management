@@ -16,6 +16,20 @@ describe("role permission mirror", () => {
     }
   });
 
+  it("gives technical and oversight roles no form access (§21, ADR-011)", () => {
+    for (const role of [
+      "PLATFORM_ADMIN",
+      "DB_ADMIN",
+      "SOC_ANALYST",
+      "INTERNAL_AUDIT",
+      "PRIVACY_DPO",
+      "RECORDS_OFFICER",
+      "REFERRER",
+    ] as const) {
+      expect(ROLE_PERMISSIONS[role].filter((p) => p.startsWith("FORM_"))).toEqual([]);
+    }
+  });
+
   it("only GRC holds identity reveal", () => {
     const holders = Object.entries(ROLE_PERMISSIONS)
       .filter(([, p]) => p.includes("REPORTER_IDENTITY_REVEAL"))
@@ -48,6 +62,9 @@ describe("role permission mirror", () => {
       "CONFLICT_DECLARE",
       "EVIDENCE_DOWNLOAD",
       "EVIDENCE_UPLOAD",
+      "FORM_PREPARE",
+      "FORM_REVIEW",
+      "FORM_VIEW",
       "WORKFLOW_ADVANCE",
     ]);
   });

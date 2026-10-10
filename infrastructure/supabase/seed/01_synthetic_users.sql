@@ -21,6 +21,9 @@ insert into iam.user_profile (id, email, display_name, display_name_ar, departme
   ('a0000000-0000-4000-8000-000000000013', 'revoked@example.test',        'Former Investigator Lambda','المحقق السابق لامدا',     'Investigations (synthetic)', 'REVOKED', 'CONFIDENTIAL'),
   -- Second identity-reveal holder so dual control (requester ≠ approver) can be demonstrated.
   ('a0000000-0000-4000-8000-000000000014', 'grc.deputy@example.test',     'GRC Deputy Mu',            'نائب مدير الحوكمة مو',     'GRC (synthetic)',           'ACTIVE',  'SECRET'),
+  -- Committee secretary and chair so the form lifecycle (prepare → review → approve) can be demonstrated (Phase 8).
+  ('a0000000-0000-4000-8000-000000000015', 'committee.secretary@example.test', 'Committee Secretary Nu', 'أمين سر اللجنة نو',     'Committee (synthetic)',     'ACTIVE',  'CONFIDENTIAL'),
+  ('a0000000-0000-4000-8000-000000000016', 'committee.chair@example.test', 'Committee Chair Xi',       'رئيس اللجنة كسي',          'Committee (synthetic)',     'ACTIVE',  'CONFIDENTIAL'),
   -- Records and legal hold actors (ADR-013); two of each so dual control can be demonstrated.
   ('a0000000-0000-4000-8000-000000000019', 'records@example.test',        'Records Officer Nu',       'مسؤول السجلات نو',         'Records (synthetic)',       'ACTIVE',  'CONFIDENTIAL'),
   ('a0000000-0000-4000-8000-000000000020', 'records.b@example.test',      'Records Officer Xi',       'مسؤول السجلات كساي',       'Records (synthetic)',       'ACTIVE',  'CONFIDENTIAL'),
@@ -42,6 +45,8 @@ insert into iam.user_role_assignment (user_id, role_code, justification, source_
   ('a0000000-0000-4000-8000-000000000012', 'PRIVACY_DPO',        'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
   ('a0000000-0000-4000-8000-000000000013', 'INVESTIGATOR',       'Synthetic demo seed', 'SEED', 'REVOKED', now(), 'Synthetic: left the department'),
   ('a0000000-0000-4000-8000-000000000014', 'GRC_DIRECTOR',       'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
+  ('a0000000-0000-4000-8000-000000000015', 'COMMITTEE_SECRETARY','Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
+  ('a0000000-0000-4000-8000-000000000016', 'COMMITTEE_CHAIR',    'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
   ('a0000000-0000-4000-8000-000000000019', 'RECORDS_OFFICER',    'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
   ('a0000000-0000-4000-8000-000000000020', 'RECORDS_OFFICER',    'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
   ('a0000000-0000-4000-8000-000000000021', 'LEGAL_REVIEWER',     'Synthetic demo seed', 'SEED', 'ACTIVE', null, null),
