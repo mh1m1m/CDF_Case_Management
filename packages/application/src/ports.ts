@@ -22,6 +22,7 @@ import type {
   RecordsCatalogueEntry,
   ReportDetail,
   ReportMessage,
+  ReporterMode,
   UserDirectoryEntry,
 } from "@cdf/contracts";
 
@@ -248,13 +249,21 @@ export interface PortalGateway {
     input: {
       reportRef: string;
       secretHmac: string;
+      reporterMode: ReporterMode;
+      relationship: string;
+      relationshipOther?: string;
       category: string;
-      subjectDescription?: string;
+      categoryOther?: string;
+      subjectDescription: string;
       description: string;
-      incidentDate?: string;
-      location?: string;
+      incidentDate: string;
+      /** HH:MM */
+      incidentTime: string;
+      location: string;
+      willingToCooperate: boolean;
       language: "ar" | "en";
-      identity?: { full_name?: string; email?: string; phone?: string; preferred_contact: string };
+      /** Vault-bound only (snake_case keys of public_api.submit_report); absent for anonymous reports. */
+      identity?: Record<string, string>;
     },
   ): Promise<{ reportRef: string; receivedAt: string }>;
   getReportStatus(

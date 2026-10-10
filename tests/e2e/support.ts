@@ -35,14 +35,31 @@ export async function submitAnonymousReport(
   const context = await contextIn(browser, locale, PORTAL);
   const page = await context.newPage();
   await page.goto("/report");
-  await page.locator("#category").selectOption("PROCUREMENT");
+  await fillReportFields(page, description);
+  await page.getByTestId("mode-anonymous").check();
+  const receipt = await submitAndReadReceipt(page);
+  await context.close();
+  return receipt;
+}
+
+/** Fills the mandatory, mode-independent fields of the Drive intake field set (CDF-63). */
+export async function fillReportFields(page: Page, description: string) {
+  await page.locator("#relationship").selectOption("EMPLOYEE");
+  await page.locator("#category").selectOption("IRREGULAR_TRANSACTIONS");
   await page.locator("#description").fill(description);
+  await page.locator("#incidentDate").fill("2026-09-01");
+  await page.locator("#incidentTime").fill("09:30");
+  await page.locator("#location").fill("Procurement department (synthetic)");
+  await page.locator("#subjectDescription").fill("Employee Alpha (synthetic)");
+  await page.getByTestId("cooperate-yes").check();
   await page.locator('input[name="acknowledgement"]').check();
+}
+
+export async function submitAndReadReceipt(page: Page) {
   await page.getByTestId("submit-report").click();
   await expect(page.getByTestId("report-receipt")).toBeVisible();
   const reportRef = (await page.getByTestId("receipt-ref").textContent())!.trim();
   const secret = (await page.getByTestId("receipt-secret").textContent())!.trim();
-  await context.close();
   return { reportRef, secret };
 }
 

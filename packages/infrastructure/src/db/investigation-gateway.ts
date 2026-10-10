@@ -69,7 +69,10 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
       const [r] = await tx`
         select id, report_ref as "reportRef", category, reporter_mode as "reporterMode", status, classification,
                received_at as "receivedAt", case_id as "caseId", subject_description as "subjectDescription",
-               description, incident_date::text as "incidentDate", location, language
+               description, incident_date::text as "incidentDate",
+               to_char(incident_time, 'HH24:MI') as "incidentTime", location,
+               relationship_to_fund as "relationshipToFund", relationship_other as "relationshipOther",
+               category_other as "categoryOther", willing_to_cooperate as "willingToCooperate", language
         from intake.report where id = ${reportId}`;
       if (!r) return null;
       const messages = await tx<
