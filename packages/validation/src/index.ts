@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   ASSIGNMENT_ROLES,
   CLASSIFICATION_LEVELS,
+  EVIDENCE_TYPES,
   PRIORITIES,
   REPORT_CATEGORIES,
   TRIAGE_OUTCOMES,
@@ -158,6 +159,41 @@ export const transitionCaseSchema = z.object({
 });
 
 export const replyToReporterSchema = z.object({ reportId: uuid, body: text(1, 4000) });
+
+const pastDate = z
+  .string()
+  .optional()
+  .transform((v) => (v ? v : undefined))
+  .pipe(
+    z.iso
+      .date({ message: "validation.invalid" })
+      .refine((d) => d <= new Date().toISOString().slice(0, 10), { message: "validation.futureDate" })
+      .optional(),
+  );
+
+/** Evidence metadata. The file itself is checked by @cdf/domain checkEvidenceFile (§25). */
+export const uploadEvidenceSchema = z
+  .object({
+    caseId: uuid,
+    // Present when adding a version to an existing item; the item's metadata is then not editable here.
+    evidenceId: uuid.optional(),
+    title: optionalText(200),
+    description: optionalText(2000),
+    evidenceType: z.enum(EVIDENCE_TYPES).optional(),
+    sourceDescription: optionalText(500),
+    collectedAt: pastDate,
+    classification: z.enum(CLASSIFICATION_LEVELS).optional(),
+  })
+  .refine((v) => v.evidenceId || (v.title && v.title.length >= 3), {
+    message: "validation.tooShort",
+    path: ["title"],
+  })
+  .refine((v) => v.evidenceId || v.evidenceType, { message: "validation.required", path: ["evidenceType"] })
+  .refine((v) => v.evidenceId || v.classification, {
+    message: "validation.required",
+    path: ["classification"],
+  });
+export type UploadEvidenceInput = z.output<typeof uploadEvidenceSchema>;
 
 export const revealRequestSchema = z.object({ caseId: uuid, justification: text(20, 2000) });
 

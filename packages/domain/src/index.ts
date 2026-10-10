@@ -61,3 +61,17 @@ export function clearanceCovers(clearance: Classification, classification: Class
 // ---- Synthetic data guard (§2) -----------------------------------------------------------------
 export const SYNTHETIC_EMAIL_PATTERN = /^[a-z0-9._+-]+@example\.test$/;
 export const SYNTHETIC_CASE_NUMBER_PATTERN = /^CDF-DEMO-\d{4}-\d{4,5}$/;
+
+// ---- Evidence files (§25; ADR-006) ---------------------------------------------------------------
+export {
+  ALLOWED_CONTENT_TYPES,
+  EVIDENCE_MAX_BYTES,
+  allowedTypeForExtension,
+  checkEvidenceFile,
+  detectContentType,
+  evidenceDisplayNumber,
+  extensionOf,
+  formatBytes,
+  sanitizeFileName,
+} from "./evidence";
+export type { AllowedContentType, EvidenceFileCheck, EvidenceFileRejection } from "./evidence";

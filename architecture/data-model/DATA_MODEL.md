@@ -14,19 +14,20 @@ Classification: SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Every user row is const
 
 ## 2. Schemas
 
-| Schema               | Purpose                                                                                                         | Application access                                 |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `core`               | Cross-cutting types and the rate-limit bucket                                                                   | `consume_rate_limit` via `public_api` wrapper only |
-| `iam`                | Users, roles, permissions, role assignments                                                                     | `SELECT` by policy                                 |
-| `authz`              | Authorization predicates used by RLS and commands                                                               | `EXECUTE` for `authenticated`                      |
-| `audit`              | Append-only, hash-chained ledger                                                                                | `SELECT` by category policy                        |
-| `intake`             | Reports from the public portal, reporter messages, triage decisions                                             | `SELECT` by policy (column-limited on `report`)    |
-| `protected_identity` | Reporter identity vault and reveal requests                                                                     | **none** (functions only)                          |
-| `case_mgmt`          | Case master, persons, allegations, assignments, access grants, conflict checks, numbering, `case_overview` view | `SELECT` by policy                                 |
-| `workflow`           | Workflow definition, states, transitions, per-case instance, transition events                                  | `SELECT` by policy                                 |
-| `config`             | Settings whose authoritative source is still `SOURCE_REQUIRED`                                                  | `SELECT` for signed-in users                       |
-| `api`                | Authenticated command and query functions                                                                       | `EXECUTE` for `authenticated`                      |
-| `public_api`         | Anonymous portal functions                                                                                      | `EXECUTE` for `anon`                               |
+| Schema               | Purpose                                                                                                         | Application access                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `core`               | Cross-cutting types and the rate-limit bucket                                                                   | `consume_rate_limit` via `public_api` wrapper only        |
+| `iam`                | Users, roles, permissions, role assignments                                                                     | `SELECT` by policy                                        |
+| `authz`              | Authorization predicates used by RLS and commands                                                               | `EXECUTE` for `authenticated`                             |
+| `audit`              | Append-only, hash-chained ledger                                                                                | `SELECT` by category policy                               |
+| `intake`             | Reports from the public portal, reporter messages, triage decisions                                             | `SELECT` by policy (column-limited on `report`)           |
+| `protected_identity` | Reporter identity vault and reveal requests                                                                     | **none** (functions only)                                 |
+| `case_mgmt`          | Case master, persons, allegations, assignments, access grants, conflict checks, numbering, `case_overview` view | `SELECT` by policy                                        |
+| `workflow`           | Workflow definition, states, transitions, per-case instance, transition events                                  | `SELECT` by policy                                        |
+| `evidence`           | Evidence items, immutable file versions, content-type allow-list, chain of custody                              | `SELECT` by policy (column-limited on `evidence_version`) |
+| `config`             | Settings whose authoritative source is still `SOURCE_REQUIRED`                                                  | `SELECT` for signed-in users                              |
+| `api`                | Authenticated command and query functions                                                                       | `EXECUTE` for `authenticated`                             |
+| `public_api`         | Anonymous portal functions                                                                                      | `EXECUTE` for `anon`                                      |
 
 ## 3. Entity overview
 
@@ -45,6 +46,9 @@ case_mgmt.case_record 1──* case_mgmt.case_access_grant        (ACTIVE / REVO
 case_mgmt.case_record 1──* case_mgmt.conflict_check           (is_current flag)
 case_mgmt.case_record 1──* protected_identity.reveal_request
 case_mgmt.case_record 1──1 workflow.workflow_instance 1──* workflow.workflow_transition_event
+case_mgmt.case_record 1──* evidence.evidence 1──* evidence.evidence_version *──1 evidence.allowed_content_type
+evidence.evidence 0..1──1 evidence.evidence_version                 (current_version_id = latest AVAILABLE)
+evidence.evidence 1──* evidence.custody_event                      (seq; version_id nullable)
 
 workflow.workflow_definition 1──* workflow.workflow_state
 workflow.workflow_definition 1──* workflow.workflow_transition_definition (from_state, to_state, required_permission)
@@ -124,15 +128,28 @@ See [`../WORKFLOW.md`](../WORKFLOW.md) for the state machine.
 | `config.setting`         | `key` PK; `value`; `status` (`SOURCE_REQUIRED`, `CONFIGURED`); `source_reference`; `CONFIGURED` requires both value and source. Holds rules whose CDF authority is still unconfirmed (for example quorum). |
 | `core.rate_limit_bucket` | `(bucket_key, window_start)` PK; `bucket_key` `^[a-z_]{2,32}:[0-9a-zA-Z_-]{1,128}$`; `hits`. Fixed-window counter used by `core.consume_rate_limit()`.                                                     |
 
+### 4.8 `evidence`
+
+| Table                           | Key columns and constraints                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `evidence.allowed_content_type` | `content_type` PK, `extensions text[]`, `evidence_type`. 16 rows of reference data, mirrored by `ALLOWED_CONTENT_TYPES` in `@cdf/domain` (`tests/integration/mirrors.spec.ts`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `evidence.evidence`             | `id`; `case_id` FK; `sequence_no` ≥ 1, unique per case (display `EV-001`); `title` 3–200; `description` ≤ 2000; `evidence_type` (`DOCUMENT`, `IMAGE`, `AUDIO`, `VIDEO`, `EMAIL`, `DATA_EXPORT`, `OTHER`); `source_description` ≤ 500; `collected_at` ≤ today; `classification core.classification_level` (≥ case classification, ≤ uploader clearance); `status` (`PENDING`, `AVAILABLE`, `REJECTED`); `current_version_id` FK; `created_by`, `created_at`, `updated_at`. No `DELETE`/`TRUNCATE` for any role.                                                                                                                                                                                                                                                              |
+| `evidence.evidence_version`     | `id`; `evidence_id` FK; `version_no` ≥ 1 unique per item; `object_key` unique, check `cases/{uuid}/evidence/{uuid}/{uuid}`, **not selectable by application roles**; `original_file_name` 1–255 without separators or control characters; `content_type` FK; `size_bytes` 1–26 214 400; `sha256` 64 hex; `status` (`QUARANTINED`, `AVAILABLE`, `REJECTED`); `scan_status` (`PENDING`, `CLEAN`, `INFECTED`, `UNSCANNED`); `scanner`; `rejection_code`; `uploaded_by`, `uploaded_at`, `stored_at`; `request_id` (not selectable). Checks: `AVAILABLE` ⇔ `stored_at` set ⇒ `CLEAN`; `REJECTED` ⇔ `rejection_code`. Partial unique `(evidence_id, sha256)` where not `REJECTED`. Updates allowed only while `QUARANTINED` and never to content columns; no `DELETE`/`TRUNCATE`. |
+| `evidence.custody_event`        | `id`; `seq` identity (strict order within a transaction); `evidence_id` FK; `version_id` FK nullable; `event_type` (`RECEIVED`, `STORED`, `REJECTED`, `DOWNLOADED`); `actor_id` FK; `occurred_at`; `request_id`; `details jsonb` ≤ 1024 bytes of technical facts. Append-only: `UPDATE`/`DELETE`/`TRUNCATE` rejected for every role.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+Writes happen only through `api.register_evidence_version`, `api.complete_evidence_version`, `api.reject_evidence_version` and `api.open_evidence_version`, each recording its custody event and audit event in the same transaction. The immutability triggers bind to the table owner too, so `SECURITY DEFINER` commands cannot overwrite history either.
+
 ## 5. Identifiers
 
-| Identifier      | Format                         | Purpose                                                   | Shown to               |
-| --------------- | ------------------------------ | --------------------------------------------------------- | ---------------------- |
-| `report_ref`    | `WB-` + 12 Crockford base32    | Reporter's follow-up reference (60 bits, not secret)      | Reporter, intake staff |
-| reporter secret | 20 Crockford chars in 5 groups | Reporter's credential (100 bits); only its HMAC is stored | Reporter, once         |
-| `wb_id`         | `WBID-` + 16 hex               | Opaque join key to the identity vault                     | Internal only          |
-| `case_number`   | `CDF-DEMO-YYYY-NNNN`           | Display number for cases                                  | Case team              |
-| `id`            | UUID v4                        | The only lookup key the application uses                  | URLs (unguessable)     |
+| Identifier      | Format                                | Purpose                                                   | Shown to               |
+| --------------- | ------------------------------------- | --------------------------------------------------------- | ---------------------- |
+| `report_ref`    | `WB-` + 12 Crockford base32           | Reporter's follow-up reference (60 bits, not secret)      | Reporter, intake staff |
+| reporter secret | 20 Crockford chars in 5 groups        | Reporter's credential (100 bits); only its HMAC is stored | Reporter, once         |
+| `wb_id`         | `WBID-` + 16 hex                      | Opaque join key to the identity vault                     | Internal only          |
+| `case_number`   | `CDF-DEMO-YYYY-NNNN`                  | Display number for cases                                  | Case team              |
+| `sequence_no`   | `EV-NNN` (per case)                   | Display number for evidence items; never a lookup key     | Case team              |
+| `object_key`    | `cases/{uuid}/evidence/{uuid}/{uuid}` | Storage location, generated by the database               | Server code only       |
+| `id`            | UUID v4                               | The only lookup key the application uses                  | URLs (unguessable)     |
 
 ## 6. Report status lifecycle
 
@@ -140,4 +157,4 @@ See [`../WORKFLOW.md`](../WORKFLOW.md) for the state machine.
 
 ## 7. Not yet modelled
 
-Evidence and chain of custody, interviews, findings, committee and decisions, corrective actions, retention and legal hold detail, document generation, notifications, and search are later phases (`NOT_STARTED`). Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.
+Interviews, findings, committee and decisions, corrective actions, retention and legal hold detail, document generation, notifications, and search are later phases (`NOT_STARTED`). Columns reserved for them (`retention_class`, `legal_hold_status`, `records_state`) exist on `case_record` so Phase 11 can add behaviour without a destructive migration.

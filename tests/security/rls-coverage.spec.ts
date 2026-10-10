@@ -12,6 +12,7 @@ const APP_SCHEMAS = [
   "intake",
   "protected_identity",
   "workflow",
+  "evidence",
   "config",
   "api",
   "public_api",

@@ -26,6 +26,11 @@ export const investigationServerEnvSchema = base.extend({
   CDF_SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(300).max(43_200).default(28_800),
   CDF_SESSION_IDLE_SECONDS: z.coerce.number().int().min(60).max(7_200).default(1_800),
   CDF_RATE_LIMIT_SALT: secret("CDF_RATE_LIMIT_SALT"),
+  // Evidence storage adapter (ADR-006). local-fs refuses to run on Vercel or outside local/test.
+  CDF_EVIDENCE_STORAGE: z.enum(["local-fs", "supabase"]).default("local-fs"),
+  CDF_EVIDENCE_LOCAL_DIR: z.string().min(1).optional(),
+  // Server-only. Used exclusively by the storage adapter; never reaches the browser (§46, §47).
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
 });
 export type InvestigationServerEnv = z.infer<typeof investigationServerEnvSchema>;
 
@@ -78,6 +83,12 @@ export function loadInvestigationServerEnv(env: Record<string, string | undefine
     (!parsed.CDF_DEV_IDENTITY_SECRET || !parsed.CDF_DEV_PASSWORD)
   ) {
     throw new ConfigurationError("Invalid server configuration: CDF_DEV_IDENTITY_SECRET, CDF_DEV_PASSWORD");
+  }
+  if (
+    parsed.CDF_EVIDENCE_STORAGE === "supabase" &&
+    (!parsed.SUPABASE_URL || !parsed.SUPABASE_SERVICE_ROLE_KEY)
+  ) {
+    throw new ConfigurationError("Invalid server configuration: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY");
   }
   return parsed;
 }
