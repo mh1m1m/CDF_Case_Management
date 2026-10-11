@@ -226,6 +226,23 @@ requirements:
     enforcement: [case_mgmt.case_record.case_number, api.open_case]
     tests: [tests/security/authorization.spec.ts, tests/security/case-isolation.spec.ts]
 
+  - id: CDF-SEC-019
+    title: "A restricted case names an accountable authority at creation; no orphaned restricted case"
+    source: [ADR-016 D1, UX audit 2026-10-10 UX-003, decision DEC-01 (approved 2026-10-11)]
+    external_ids: []
+    linear_issues: [CDF-176]
+    status: COMPLETE
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001810_restricted_case_authority.sql,
+        api.create_case_from_report,
+        api.list_restricted_case_authorities,
+        authz.is_restricted_case_authority,
+        "apps/investigation-web/src/app/intake/[id]/restricted-case-fields.tsx",
+      ]
+    tests: [tests/security/restricted-case-authority.spec.ts, tests/e2e/restricted-case.spec.ts]
+    notes: "Ordinary (non-restricted) cases keep the creator's TRIAGE grant until grant scope lands (S3, DEC-02/DEC-03)."
+
   - id: CDF-DATA-001
     title: "Synthetic data only; constraints prevent non-synthetic users and case numbers"
     source: [protocol §2]
@@ -281,13 +298,42 @@ requirements:
     tests: [tests/accessibility/a11y.spec.ts, tests/e2e/first-slice.spec.ts]
 
   - id: CDF-UX-002
-    title: "Accessibility (WCAG 2.1 AA) checked automatically"
+    title: "Accessibility (WCAG 2.2 AA) checked automatically"
     source: [protocol §43]
     external_ids: []
     status: IN_PROGRESS
     enforcement: [packages/ui/src/components.tsx]
     tests: [tests/accessibility/a11y.spec.ts]
     notes: "axe-core passes on the slice pages; manual screen-reader review not yet done."
+
+  - id: CDF-UX-003
+    title: "The public portal works without JavaScript and never loses what the reporter typed"
+    source: [protocol §23, UX audit 2026-10-10 UX-002, CDF-87]
+    external_ids: []
+    linear_issues: [CDF-140]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        apps/whistleblowing-web/src/app/report,
+        apps/whistleblowing-web/src/app/follow-up,
+        apps/whistleblowing-web/src/server/form-post-origin.ts,
+      ]
+    tests: [tests/e2e/portal-no-js.spec.ts, tests/e2e/security-no-js-forms.spec.ts]
+    notes: "Stays open until POST is verified on a running hosted build (DEC-59). Reloading the receipt page resubmits; an idempotency key is planned with CDF-146."
+
+  - id: CDF-UX-004
+    title: "A refused command keeps every value and choice; consequential choices are never preselected; controlled acts are confirmed"
+    source: [UX audit 2026-10-10 UX-001, UX-019, UX-031]
+    external_ids: []
+    linear_issues: [CDF-132, CDF-133, CDF-183]
+    status: COMPLETE
+    enforcement:
+      [
+        packages/ui/src/command-form.tsx,
+        packages/ui/src/confirm-dialog.tsx,
+        apps/investigation-web/src/app/confirmations.ts,
+      ]
+    tests: [tests/e2e/command-form.spec.ts, packages/ui/src/command-form-fields.test.ts]
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
