@@ -8,6 +8,7 @@ import { formatDate, formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFPageHeader,
@@ -19,7 +20,6 @@ import {
 } from "@cdf/ui";
 import { evidenceService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { createCaseAction, replyAction, triageAction } from "./actions";
 import { RestrictedCaseFields } from "./restricted-case-fields";
@@ -179,7 +179,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
 
       {canTriage ? (
         <CDFCard title={t("intake.triageTitle")} testId="triage-card">
-          <ActionForm
+          <CDFCommandForm
             action={triageAction.bind(null, report.id)}
             locale={t.locale}
             submitLabel={t("intake.recordDecision")}
@@ -227,13 +227,13 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                 <input id="duplicateOf" name="duplicateOf" className={inputClass} dir="ltr" />
               </CDFField>
             </div>
-          </ActionForm>
+          </CDFCommandForm>
         </CDFCard>
       ) : null}
 
       {canCreate ? (
         <CDFCard title={t("intake.createCaseTitle")} testId="create-case-card">
-          <ActionForm
+          <CDFCommandForm
             action={createCaseAction.bind(null, report.id)}
             locale={t.locale}
             submitLabel={t("intake.createCase")}
@@ -278,7 +278,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                 required: t("common.required"),
               }}
             />
-          </ActionForm>
+          </CDFCommandForm>
         </CDFCard>
       ) : null}
 
@@ -295,7 +295,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
         />
         {canReply ? (
           <div className="mt-4 border-t border-cdf-border pt-4">
-            <ActionForm
+            <CDFCommandForm
               action={replyAction.bind(null, report.id)}
               locale={t.locale}
               submitLabel={t("intake.sendReply")}
@@ -318,7 +318,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                   maxLength={4000}
                 />
               </CDFField>
-            </ActionForm>
+            </CDFCommandForm>
           </div>
         ) : null}
       </CDFCard>
