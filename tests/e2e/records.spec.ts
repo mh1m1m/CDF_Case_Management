@@ -124,9 +124,10 @@ test("legal files a hold request by exact case number in Arabic; no justificatio
   await form.locator("#lookup-justification").fill(JUSTIFICATION);
   await submit(legal, "lookup-form");
   await expect(form.getByTestId("error-summary")).toContainText("رقم القضية الكامل");
-  // React resets the form after each submit, so every attempt fills its fields again.
+  // A refused submit keeps what was typed (UX-001): only the wrong value needs correcting.
+  await expect(form.locator("#caseReference")).toHaveValue("CDF-DEMO-%");
+  await expect(form.locator("#lookup-justification")).toHaveValue(JUSTIFICATION);
   await form.locator("#caseReference").fill("CDF-DEMO-2026-0001");
-  await form.locator("#lookup-justification").fill(JUSTIFICATION);
   await submit(legal, "lookup-form");
   await expect(form.getByRole("status")).toContainText("قُدّم طلب حجز");
   // The filed request shows no case until a reviewer is assigned (CDF-79).

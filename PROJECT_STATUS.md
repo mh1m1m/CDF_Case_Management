@@ -74,6 +74,17 @@ Linear issue IDs below refer to the CDF workspace, team **CDF** (https://linear.
 | 8 Interviews (CDF-60)     | IN_PROGRESS on a parallel swarm branch (ADR-012)                                                                                                                    |
 | 9–15                      | NOT_STARTED (records and legal hold design in CDF-61/CDF-69)                                                                                                        |
 
+## UX redesign (CDF-UX-AUDIT 2026-10-10; implementation approved 2026-10-11)
+
+Target: work-led, case-homed, purpose-bound (ADR-016). Decisions DEC-01/02/03/06/08/09/10 APPROVED and recorded in ADR-016.
+
+| Stage                                   | Status                                                                                                                                                       |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| S0 safety floor + shared foundation     | IN_REVIEW: UX-001, UX-003 (DEC-01, migration 1810), UX-014, UX-019, UX-031 done; UX-002 (no-JS portal) IN_PROGRESS until verified on a hosted build (DEC-59) |
+| S1 shell, My Work, Oversight, Admin     | IN_PROGRESS (read models, migration 1820, built on a local branch; follows the S0 merge)                                                                     |
+| S2 case workspace                       | NOT_STARTED                                                                                                                                                  |
+| S3–S6 grants, forms, packets, committee | NOT_STARTED                                                                                                                                                  |
+
 ## Open issues
 
 - Repository: https://github.com/mh1m1m/CDF_Case_Management. PRs #1 (Phase 0, CDF-28), #2 (Phase 1, CDF-29), #3 (Phases 2–6, CDF-30) are stacked drafts with CI green, awaiting review. PR #5 (CDF-31) carries the connected-systems baseline.

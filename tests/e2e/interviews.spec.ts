@@ -73,6 +73,9 @@ test("an interview is planned, recorded, reviewed and approved in Arabic", async
   await ack.locator("#attestedSha256").fill("0".repeat(64));
   await ack.locator('button[type="submit"]').click();
   await expect(ack.getByTestId("action-error")).toContainText("البصمة لا تطابق");
+  // The refusal keeps what was entered (UX-001): only the wrong fingerprint needs correcting.
+  await expect(ack.locator("#ackMethod")).toHaveValue("SIGNED_PAPER");
+  await expect(ack.locator("#attestedSha256")).toHaveValue("0".repeat(64));
   await ack.locator("#attestedSha256").fill(sha);
   await submit(investigator, "ack-form");
   await expect(investigator.getByTestId("statement-ack-v1")).toContainText("توقيع ورقي");

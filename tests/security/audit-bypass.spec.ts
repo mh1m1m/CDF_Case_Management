@@ -63,6 +63,8 @@ const NOT_STATE_CHANGING = new Set([
   "open_case_metadata",
   "search_records_catalogue",
   "open_report_attachment",
+  // DEC-01 (ADR-016): names of the people a restricted case may be handed to; opening the report is audited.
+  "list_restricted_case_authorities",
 ]);
 
 interface Step {

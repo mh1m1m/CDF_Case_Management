@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
 import type { IntakeReportItem } from "@cdf/contracts";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
-import { CDFBadge, CDFPageHeader, CDFTable, classificationTone } from "@cdf/ui";
+import { CDFAlert, CDFBadge, CDFPageHeader, CDFTable, classificationTone } from "@cdf/ui";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../app-nav";
@@ -14,7 +14,12 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t("intake.title") };
 }
 
-export default async function IntakePage() {
+export default async function IntakePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ handedOver?: string }>;
+}) {
+  const { handedOver } = await searchParams;
   const { actor, ctx } = await requireActor();
   if (!can(actor, "INTAKE_VIEW")) notFound();
   const t = await getTranslator();
@@ -23,6 +28,14 @@ export default async function IntakePage() {
     <>
       <AppNav actor={actor} t={t} current="intake" />
       <CDFPageHeader title={t("intake.title")} intro={t("intake.intro")} />
+      {handedOver === "1" ? (
+        // Carries no case or report data: only that the caller's own restricted creation succeeded (DEC-01).
+        <div role="status" className="mb-4">
+          <CDFAlert tone="success" testId="restricted-created">
+            {t("intake.restrictedCreated")}
+          </CDFAlert>
+        </div>
+      ) : null}
       <CDFTable<IntakeReportItem>
         caption={t("intake.title")}
         testId="intake-table"

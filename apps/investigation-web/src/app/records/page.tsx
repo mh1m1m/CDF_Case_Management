@@ -10,6 +10,7 @@ import { formatDate, formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFPageHeader,
@@ -20,7 +21,6 @@ import {
 } from "@cdf/ui";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../action-form";
 import { AppNav } from "../app-nav";
 import { refreshEligibilityAction } from "./actions";
 import { LegalHoldBadge, RecordsStateBadge } from "./badges";
@@ -237,7 +237,7 @@ export default async function RecordsPage({
       {can(actor, "DISPOSITION_REQUEST") ? (
         <CDFCard title={t("records.refreshTitle")} testId="refresh-card">
           <p className="mb-3 text-sm text-cdf-text-secondary">{t("records.refreshIntro")}</p>
-          <ActionForm
+          <CDFCommandForm
             action={refreshEligibilityAction}
             locale={t.locale}
             submitLabel={t("records.refresh")}

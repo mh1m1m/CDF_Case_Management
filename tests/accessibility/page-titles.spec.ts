@@ -14,11 +14,12 @@ const appNames = {
 /** Returns the page-specific part of the title and checks the app name follows it. */
 async function pagePart(page: Page, appName: string) {
   await page.waitForLoadState("load");
-  const title = await page.title();
   const suffix = ` · ${appName}`;
-  expect(title, `title "${title}" should end with the app name`).toMatch(
+  // A client navigation sets the title just after the URL changes, so wait for it instead of reading it once.
+  await expect(page, "the title should end with the app name").toHaveTitle(
     new RegExp(`.+${suffix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
   );
+  const title = await page.title();
   return title.slice(0, -suffix.length);
 }
 
@@ -62,6 +63,36 @@ for (const locale of ["ar", "en"] as const) {
     await admin.context().close();
 
     expect(new Set(titles).size).toBe(titles.length);
+  });
+
+  test(`${locale}: case sub-pages have their own titles (UX-082)`, async ({ browser }) => {
+    const expected = {
+      en: ["Case", "Case forms", "Form details", "Case interviews", "Interview details"],
+      ar: ["قضية", "نماذج القضية", "تفاصيل النموذج", "مقابلات القضية", "تفاصيل المقابلة"],
+    }[locale];
+    const lead = await signIn(browser, "lead@example.test", locale);
+    await lead.goto("/cases");
+    await lead.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
+    await lead.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
+    const caseUrl = lead.url();
+    const titles = [await pagePart(lead, names.app)];
+    await lead.getByTestId("case-forms-link").click();
+    await lead.waitForURL(/\/forms$/);
+    titles.push(await pagePart(lead, names.app));
+    await lead.locator('[data-testid^="form-instance-"]').first().click();
+    await lead.waitForURL(/\/forms\/[0-9a-f-]{36}$/);
+    titles.push(await pagePart(lead, names.app));
+    await lead.goto(caseUrl);
+    await lead.getByTestId("case-interviews-link").click();
+    await lead.waitForURL(/\/interviews$/);
+    titles.push(await pagePart(lead, names.app));
+    await lead.locator('[data-testid^="interview-"]').first().click();
+    await lead.waitForURL(/\/interviews\/[0-9a-f-]{36}$/);
+    titles.push(await pagePart(lead, names.app));
+    expect(titles).toEqual(expected);
+    // No case number or case content in any of them.
+    for (const title of titles) expect(title).not.toMatch(/CDF-DEMO-|WB-/);
+    await lead.context().close();
   });
 
   test(`${locale}: portal pages have distinct titles that never carry credentials`, async ({ browser }) => {

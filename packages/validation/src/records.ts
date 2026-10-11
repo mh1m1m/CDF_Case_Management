@@ -32,9 +32,9 @@ const justification = text(20, 2000);
 /** Decision reasons are bounded like api._require_text(…, 10, 2000). */
 const decisionReason = text(10, 2000);
 
-/** A two-way decision from a radio group, as the boolean the database command takes. */
+/** A two-way decision from a radio group, as the boolean the database command takes. No default (UX-019). */
 const decision = (yes: string, no: string) =>
-  z.enum([yes, no], { message: "validation.required" }).transform((v) => v === yes);
+  z.enum([yes, no], { message: "validation.chooseOne" }).transform((v) => v === yes);
 
 export const assignRetentionClassSchema = z.object({
   caseId: uuid,

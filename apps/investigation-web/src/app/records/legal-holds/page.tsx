@@ -7,10 +7,9 @@ import { notFound } from "next/navigation";
 import { can, canDiscoverCase, navigationFor } from "@cdf/authorization";
 import { LEGAL_HOLD_REASON_CODES } from "@cdf/contracts";
 import type { MessageKey } from "@cdf/i18n";
-import { CDFCard, CDFField, CDFPageHeader, inputClass, textareaClass } from "@cdf/ui";
+import { CDFCard, CDFCommandForm, CDFField, CDFPageHeader, inputClass, textareaClass } from "@cdf/ui";
 import { investigationService, recordsService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { caseLookupAction } from "../actions";
 import { HoldRequestList } from "../hold-requests";
@@ -59,7 +58,7 @@ export default async function LegalHoldsPage() {
       {canDiscoverCase(actor) && can(actor, "LEGAL_HOLD_REQUEST") ? (
         <CDFCard title={t("records.lookupTitle")} testId="lookup-card">
           <p className="mb-3 text-sm text-cdf-text-secondary">{t("records.lookupIntro")}</p>
-          <ActionForm
+          <CDFCommandForm
             action={caseLookupAction}
             locale={t.locale}
             submitLabel={t("records.lookup")}
@@ -123,7 +122,7 @@ export default async function LegalHoldsPage() {
                 maxLength={2000}
               />
             </CDFField>
-          </ActionForm>
+          </CDFCommandForm>
         </CDFCard>
       ) : null}
 

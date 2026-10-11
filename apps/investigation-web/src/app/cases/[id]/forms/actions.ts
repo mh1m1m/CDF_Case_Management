@@ -26,7 +26,7 @@ export async function startFormAction(
     refresh(caseId);
     redirect(`/cases/${caseId}/forms/${result.value.instanceId}`);
   }
-  return toActionState(result);
+  return toActionState(result, form);
 }
 
 export async function saveDraftAction(
@@ -46,7 +46,7 @@ export async function saveDraftAction(
       message: t("forms.savedDetail", { no: result.value.versionNo, hash: result.value.contentHash }),
     };
   }
-  const state = toActionState(result);
+  const state = toActionState(result, form);
   // Domain field issues arrive under data.<field>; show them against the field itself.
   if (state.status === "invalid") {
     state.fieldErrors = Object.fromEntries(
@@ -83,7 +83,7 @@ export async function reviewFormAction(
   const { actor, ctx } = await requireActor();
   const result = await formsService().review(ctx, actor, { ...formObject(form), instanceId, formCode });
   if (result.ok) refresh(caseId, instanceId);
-  return toActionState(result);
+  return toActionState(result, form);
 }
 
 export async function approveFormAction(
@@ -96,7 +96,7 @@ export async function approveFormAction(
   const { actor, ctx } = await requireActor();
   const result = await formsService().approve(ctx, actor, { ...formObject(form), instanceId, formCode });
   if (result.ok) refresh(caseId, instanceId);
-  return toActionState(result);
+  return toActionState(result, form);
 }
 
 export async function withdrawFormAction(
@@ -109,5 +109,5 @@ export async function withdrawFormAction(
   const { actor, ctx } = await requireActor();
   const result = await formsService().withdraw(ctx, actor, { ...formObject(form), instanceId, formCode });
   if (result.ok) refresh(caseId, instanceId);
-  return toActionState(result);
+  return toActionState(result, form);
 }

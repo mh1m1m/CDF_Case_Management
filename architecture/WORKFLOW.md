@@ -89,7 +89,7 @@ A refused transition raises a `CDF_*` error and rolls back; the application laye
 
 1. Reporter submits through the portal → `intake.report` (`RECEIVED`), vault row if email-only (email only) or identified (Drive identity fields, CDF-63), `REPORT_SUBMITTED` audit as `ANONYMOUS_REPORTER`.
 2. Triage officer records `OPEN_CASE` → report `ACCEPTED`, `REPORT_TRIAGED`.
-3. Triage officer or case manager runs `api.create_case_from_report()` → `case_record`, `workflow_instance` at `REGISTERED` (system transition `REGISTER`), a `TRIAGE`-scope access grant for the creator, `CASE_CREATED`; report becomes `CASE_OPENED`.
+3. Triage officer or case manager runs `api.create_case_from_report()` → `case_record`, `workflow_instance` at `REGISTERED` (system transition `REGISTER`), a `TRIAGE`-scope access grant for the creator, `CASE_CREATED`; report becomes `CASE_OPENED`. A restricted case instead names an eligible restricted-case authority, who becomes the owner in the same transaction; the creator keeps no grant unless they are that authority (DEC-01, ADR-016; `CASE_ASSIGNED`, `CASE_HANDED_OVER`).
 4. Screening: `START_SCREENING`; record an allegation; `COMPLETE_SCREENING`.
 5. Conflict check: each participant declares; `CLEAR_CONFLICT_CHECK`.
 6. `COMPLETE_TRIAGE` after setting priority; `CONFIRM_JURISDICTION` with reason.

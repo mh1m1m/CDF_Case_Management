@@ -1,8 +1,8 @@
-// Field groups shared by the records forms. Plain inputs inside ActionForm; the shared Zod schemas validate
+// Field groups shared by the records forms. Plain inputs inside CDFCommandForm; the shared Zod schemas validate
 // them on the server and the api.* commands validate them again (§45).
 import { LEGAL_HOLD_REASON_CODES } from "@cdf/contracts";
 import type { MessageKey, Translator } from "@cdf/i18n";
-import { CDFField, inputClass, textareaClass } from "@cdf/ui";
+import { CDFField, CDFFieldError, inputClass, textareaClass } from "@cdf/ui";
 
 /** Reason code + justification (+ optional authority reference) for hold placement and hold requests. */
 export function HoldReasonFields({
@@ -66,7 +66,10 @@ export function HoldReasonFields({
   );
 }
 
-/** A two-way decision (radio group with a legend) and its reason. */
+/**
+ * A two-way decision (radio group with a legend) and its reason. Nothing is pre-selected (UX-019): an unanswered
+ * decision is refused with a field error, which the first option carries.
+ */
 export function DecisionFields({
   id,
   t,
@@ -84,19 +87,21 @@ export function DecisionFields({
     <>
       <fieldset className="mb-3" id={`${id}-decision`}>
         <legend className="mb-1 font-semibold">{t("records.decisionLabel")}</legend>
-        {[yes, no].map((o, i) => (
+        {[yes, no].map((o) => (
           <label key={o.value} className="mb-2 flex items-center gap-2">
             <input
+              id={`${id}-${o.value.toLowerCase()}`}
               type="radio"
               name={name}
               value={o.value}
-              defaultChecked={i === 0}
+              required
               className="size-5"
               data-testid={`${id}-${o.value.toLowerCase()}`}
             />{" "}
             {o.label}
           </label>
         ))}
+        <CDFFieldError id={`${id}-${yes.value.toLowerCase()}`} />
       </fieldset>
       <CDFField
         id={`${id}-reason`}

@@ -1,6 +1,7 @@
 // One form instance (Phase 8; ADR-011): fields, draft saving, prepare / review / approve / withdraw as the
 // database allows this user, the immutable version list with hashes and the lifecycle trail.
 // api.open_form_instance audits FORM_VIEWED or a SECURITY denial; invisible and missing instances are alike.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formDisplayNumber } from "@cdf/domain";
@@ -8,8 +9,10 @@ import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
+  CDFFieldError,
   CDFPageHeader,
   CDFTimeline,
   classificationTone,
@@ -18,8 +21,8 @@ import {
 } from "@cdf/ui";
 import { formsService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../../../action-form";
 import { AppNav } from "../../../../app-nav";
+import { actLabel, confirmation } from "../../../../confirmations";
 import {
   approveFormAction,
   prepareFormAction,
@@ -28,6 +31,12 @@ import {
   withdrawFormAction,
 } from "../actions";
 import { FormFields, fieldLabels, statusTone } from "../form-fields";
+
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.formInstance") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -50,7 +59,7 @@ export default async function FormInstancePage({
     A extends (caseId: string, instanceId: string, formCode: string, ...rest: never[]) => unknown,
   >(
     a: A,
-  ) => a.bind(null, f.caseId, f.id, f.formCode) as unknown as Parameters<typeof ActionForm>[0]["action"];
+  ) => a.bind(null, f.caseId, f.id, f.formCode) as unknown as Parameters<typeof CDFCommandForm>[0]["action"];
 
   return (
     <>
@@ -84,7 +93,7 @@ export default async function FormInstancePage({
         <div>
           <CDFCard title={t("forms.fields")} testId="form-fields">
             {f.capabilities.canSave ? (
-              <ActionForm
+              <CDFCommandForm
                 action={bind(saveDraftAction)}
                 locale={t.locale}
                 submitLabel={t("forms.saveDraft")}
@@ -93,7 +102,7 @@ export default async function FormInstancePage({
                 successMessage={t("forms.saved", { message: "{message}" })}
               >
                 <FormFields sections={f.definition.sections} data={f.data} editable t={t} />
-              </ActionForm>
+              </CDFCommandForm>
             ) : (
               <>
                 <p className="mb-3 text-sm text-cdf-text-secondary" data-testid="form-read-only">
@@ -180,7 +189,7 @@ export default async function FormInstancePage({
           {f.capabilities.canPrepare ? (
             <CDFCard title={t("forms.prepareTitle")} testId="prepare-card">
               <p className="mb-3 text-sm text-cdf-text-secondary">{t("forms.prepareHint")}</p>
-              <ActionForm
+              <CDFCommandForm
                 action={bind(prepareFormAction)}
                 locale={t.locale}
                 submitLabel={t("forms.prepare")}
@@ -200,7 +209,7 @@ export default async function FormInstancePage({
               <p className="mb-3 text-sm text-cdf-text-secondary">
                 {f.capabilities.canReview ? t("forms.reviewHint") : t("forms.approveHint")}
               </p>
-              <ActionForm
+              <CDFCommandForm
                 action={bind(f.capabilities.canReview ? reviewFormAction : approveFormAction)}
                 locale={t.locale}
                 submitLabel={t("forms.decide")}
@@ -209,14 +218,16 @@ export default async function FormInstancePage({
                 fieldLabels={{ outcome: t("forms.decision"), reason: t("forms.reason") }}
                 successMessage={t("forms.decided")}
               >
+                {/* No default answer (UX-019): the reviewer or approver chooses; an unanswered submit is refused. */}
                 <fieldset className="mb-3">
                   <legend className="mb-1 font-semibold">{t("forms.decision")}</legend>
                   <label className="mb-2 flex items-center gap-2">
                     <input
+                      id="outcome-accept"
                       type="radio"
                       name="outcome"
                       value={f.capabilities.canReview ? "REVIEWED" : "APPROVED"}
-                      defaultChecked
+                      required
                       className="size-5"
                       data-testid="outcome-accept"
                     />
@@ -227,11 +238,13 @@ export default async function FormInstancePage({
                       type="radio"
                       name="outcome"
                       value="RETURNED"
+                      required
                       className="size-5"
                       data-testid="outcome-return"
                     />
                     {t("forms.return")}
                   </label>
+                  <CDFFieldError id="outcome-accept" />
                 </fieldset>
                 <CDFField id="decision-reason" label={t("forms.reason")} hint={t("forms.reasonHint")}>
                   <textarea
@@ -242,21 +255,22 @@ export default async function FormInstancePage({
                     aria-describedby="decision-reason-hint"
                   />
                 </CDFField>
-              </ActionForm>
+              </CDFCommandForm>
             </CDFCard>
           ) : null}
 
           {f.capabilities.canWithdraw ? (
             <CDFCard title={t("forms.withdrawTitle")} testId="withdraw-card">
               <p className="mb-3 text-sm text-cdf-text-secondary">{t("forms.withdrawHint")}</p>
-              <ActionForm
+              <CDFCommandForm
                 action={bind(withdrawFormAction)}
                 locale={t.locale}
-                submitLabel={t("forms.withdraw")}
+                submitLabel={actLabel(t, "withdrawForm")}
                 variant="danger"
                 testId="withdraw-form"
                 fieldLabels={{ reason: t("forms.reason") }}
                 successMessage={t("forms.withdrawn")}
+                confirm={confirmation(t, "withdrawForm")}
               >
                 <CDFField id="withdraw-reason" label={t("forms.reason")}>
                   <input
@@ -268,7 +282,7 @@ export default async function FormInstancePage({
                     maxLength={2000}
                   />
                 </CDFField>
-              </ActionForm>
+              </CDFCommandForm>
             </CDFCard>
           ) : null}
         </div>

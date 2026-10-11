@@ -1,20 +1,12 @@
-// WCAG 2.1 AA checks (§43, REC-T51) on the records screens (CDF-71) in Arabic (RTL) and English (LTR): the
+// WCAG 2.2 AA checks (§43, REC-T51) on the records screens (CDF-71) in Arabic (RTL) and English (LTR): the
 // queue, a record with a hold and every records form open, the legal-hold requests page with a validation
 // error, and a disposition certificate.
-import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { audit } from "./axe";
 import { signIn } from "../e2e/support";
 import { archivedCase, closeFixtureConnections, eligibleCase } from "../e2e/records-fixture";
 
 test.afterAll(closeFixtureConnections);
-
-async function audit(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-  const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
-  expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
-}
 
 for (const locale of ["ar", "en"] as const) {
   test(`records pages (${locale})`, async ({ browser }) => {
@@ -52,6 +44,8 @@ for (const locale of ["ar", "en"] as const) {
     await expect(director.getByTestId("decide-disposition-form")).toBeVisible();
     await audit(director);
     const decide = director.getByTestId("decide-disposition-form");
+    // Nothing is pre-selected (UX-019): the decision is chosen explicitly.
+    await decide.locator('input[value="APPROVE"]').check();
     await decide.locator("textarea").fill("Synthetic decision reason.");
     await decide.locator('button[type="submit"]').click();
     await expect(director.getByTestId("disposition-status-APPROVED")).toBeVisible();

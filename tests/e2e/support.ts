@@ -108,12 +108,16 @@ export async function publicStatus(browser: Browser, reportRef: string, secret: 
   return status;
 }
 
-/** Performs a workflow transition from the case page and waits for the stage badge to change. */
-export async function transition(page: Page, code: string, reason?: string) {
+/**
+ * Performs a workflow transition from the case page and waits for the stage badge to change. Closing, archiving
+ * and returning a case ask for confirmation first (UX-031): pass `confirm` to accept the dialog.
+ */
+export async function transition(page: Page, code: string, reason?: string, confirm = false) {
   const item = page.getByTestId(`transition-${code}`);
   await expect(item).toBeVisible();
   if (reason) await item.locator("textarea").fill(reason);
   const before = await page.getByTestId("case-state").textContent();
   await item.getByRole("button").click();
+  if (confirm) await page.getByRole("dialog").getByTestId("confirm-submit").click();
   await expect(page.getByTestId("case-state")).not.toHaveText(before ?? "");
 }

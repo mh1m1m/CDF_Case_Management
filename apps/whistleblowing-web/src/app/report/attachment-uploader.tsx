@@ -1,12 +1,25 @@
 "use client";
 // Reporter attachments (Drive field 19; CDF-72, ADR-015). Uploads one file per request to the portal's
 // own server, with the Report ID and secret held only in memory. File names stay in this browser.
-import { useRef, useState } from "react";
+// Uploading needs JavaScript: without it (a receipt rendered for a native POST, UX-002) the controls stay
+// disabled and a <noscript> line says where files can be added. There is no other upload path.
+import { useRef, useState, useSyncExternalStore } from "react";
 import { ALLOWED_CONTENT_TYPES } from "@cdf/domain";
 import { createTranslator, type Locale, type MessageKey } from "@cdf/i18n";
 import { CDFAlert, CDFCard, buttonClass } from "@cdf/ui";
 
 const ACCEPT = ALLOWED_CONTENT_TYPES.flatMap((t) => t.extensions.map((e) => `.${e}`)).join(",");
+
+const noSubscription = () => () => {};
+
+/** False in server-rendered markup and until hydration; true once this component runs in the browser. */
+function useScriptRunning(): boolean {
+  return useSyncExternalStore(
+    noSubscription,
+    () => true,
+    () => false,
+  );
+}
 
 interface UploadOutcome {
   file: string;
@@ -30,6 +43,7 @@ export function AttachmentUploader({
   const [busy, setBusy] = useState(false);
   const [outcomes, setOutcomes] = useState<UploadOutcome[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const scriptRunning = useScriptRunning();
 
   const describe = (
     body: { ok: boolean; displayName?: string; code?: string; reason?: string },
@@ -81,6 +95,11 @@ export function AttachmentUploader({
   return (
     <CDFCard title={t("portal.attachments.title")} testId="attachment-uploader">
       <p className="mb-3">{t("portal.attachments.intro")}</p>
+      <noscript>
+        <p className="mb-3 font-semibold" data-testid="attachments-need-javascript">
+          {t("portal.attachments.needsJavaScript")}
+        </p>
+      </noscript>
       <div className="mb-3">
         <label htmlFor="attachments" className="mb-1 block font-semibold">
           {t("portal.attachments.label")}
@@ -100,7 +119,7 @@ export function AttachmentUploader({
           aria-describedby={`attachments-hint attachments-warning${error ? " attachments-error" : ""}`}
           aria-invalid={error ? true : undefined}
           data-testid="attachment-input"
-          disabled={busy}
+          disabled={busy || !scriptRunning}
         />
         {error ? (
           <p id="attachments-error" className="mt-1 text-sm text-cdf-danger" role="alert">
@@ -112,7 +131,7 @@ export function AttachmentUploader({
         type="button"
         className={buttonClass("secondary")}
         onClick={upload}
-        disabled={busy}
+        disabled={busy || !scriptRunning}
         data-testid="upload-attachments"
       >
         {busy ? t("portal.attachments.uploading") : t("portal.attachments.upload")}

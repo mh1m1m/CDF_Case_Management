@@ -29,7 +29,7 @@ export function fieldLabel(field: FormFieldDefinition, locale: string) {
   return locale === "ar" ? field.labelAr : field.labelEn;
 }
 
-/** Field → label map for the ActionForm error summary. */
+/** Field → label map for the CDFCommandForm error summary. */
 export function fieldLabels(sections: FormSectionDefinition[], locale: string): Record<string, string> {
   return Object.fromEntries(sections.flatMap((s) => s.fields.map((f) => [f.name, fieldLabel(f, locale)])));
 }
@@ -80,9 +80,11 @@ function Input({
           maxLength={24}
         />
       );
+    // Keyed by the stored value: React never updates a select's default after mount, so a saved change would
+    // otherwise snap back to the old value when the form resets after the save (UX-030, E04-02).
     case "boolean":
       return (
-        <select {...common} defaultValue={value ?? ""}>
+        <select key={value ?? ""} {...common} defaultValue={value ?? ""}>
           <option value="">{t("forms.select")}</option>
           <option value="true">{t("common.yes")}</option>
           <option value="false">{t("common.no")}</option>
@@ -90,7 +92,7 @@ function Input({
       );
     case "select":
       return (
-        <select {...common} defaultValue={value ?? ""}>
+        <select key={value ?? ""} {...common} defaultValue={value ?? ""}>
           <option value="">{t("forms.select")}</option>
           {field.options.map((o) => (
             <option key={o.value} value={o.value}>

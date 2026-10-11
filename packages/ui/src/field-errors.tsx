@@ -2,7 +2,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 /**
- * Server-side field errors keyed by control id, provided by a form (e.g. the investigation app's ActionForm)
+ * Server-side field errors keyed by control id, provided by a form (e.g. CDFCommandForm)
  * so `CDFField` can render each message next to its control (WCAG 3.3.1). Messages arrive already translated.
  */
 const FieldErrorsContext = createContext<Readonly<Record<string, string>>>({});
