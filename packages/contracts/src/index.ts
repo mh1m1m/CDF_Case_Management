@@ -721,3 +721,13 @@ export interface UserRegisterEntry {
   status: "ACTIVE" | "SUSPENDED" | "REVOKED";
   roles: Role[];
 }
+
+/** A declared conflict waiting for a decision, as a conflict manager on the case sees it (RLS conflict_check_read). */
+export interface PendingConflict {
+  id: string;
+  userId: string;
+  displayName: string;
+  displayNameAr: string;
+  declaration: string | null;
+  declaredAt: string;
+}

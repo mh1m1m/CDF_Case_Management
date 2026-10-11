@@ -13,6 +13,7 @@ import type {
   MyArea,
   MyCaseTask,
   MyWorkSummary,
+  PendingConflict,
   RecordsCatalogueEntry,
   ReportDetail,
   RestrictedCaseAuthority,
@@ -222,6 +223,27 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
       const [row] = await tx<
         { id: string }[]
       >`select api.declare_conflict(${i.caseId}, ${i.hasConflict}, ${i.declaration}) as id`;
+      return row!.id;
+    });
+  }
+
+  pendingConflicts(ctx: UserRequestContext, caseId: string): Promise<PendingConflict[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<(Omit<PendingConflict, "declaredAt"> & { declaredAt: Date })[]>`
+        select k.id, k.user_id as "userId", u.display_name as "displayName", u.display_name_ar as "displayNameAr",
+               k.declaration, k.declared_at as "declaredAt"
+        from case_mgmt.conflict_check k join iam.user_profile u on u.id = k.user_id
+        where k.case_id = ${caseId} and k.is_current and k.status = 'CONFLICT_DECLARED'
+        order by k.declared_at`;
+      return rows.map((r) => ({ ...r, declaredAt: iso(r.declaredAt)! }));
+    });
+  }
+
+  decideConflict(ctx: UserRequestContext, i: { conflictId: string; decision: string; reason: string }) {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<
+        { id: string }[]
+      >`select api.decide_conflict(${i.conflictId}, ${i.decision}, ${i.reason}) as id`;
       return row!.id;
     });
   }

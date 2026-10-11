@@ -22,6 +22,7 @@ import type {
   MyArea,
   MyCaseTask,
   MyWorkSummary,
+  PendingConflict,
   PublicReportStatus,
   RecordsCatalogueEntry,
   ReportAttachmentItem,
@@ -278,6 +279,11 @@ export interface InvestigationGateway {
   myAreas(ctx: UserRequestContext): Promise<MyArea[]>;
   myWorkItems(ctx: UserRequestContext): Promise<WorkItem[]>;
   myAccess(ctx: UserRequestContext): Promise<MyAccessEntry[]>;
+  pendingConflicts(ctx: UserRequestContext, caseId: string): Promise<PendingConflict[]>;
+  decideConflict(
+    ctx: UserRequestContext,
+    input: { conflictId: string; decision: string; reason: string },
+  ): Promise<string>;
   // Read-only Oversight and Administration (S1). Row-level security decides every row.
   auditLedger(
     ctx: UserRequestContext,

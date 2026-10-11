@@ -13,6 +13,7 @@ import {
   caseDiscoverySchema,
   createCaseSchema,
   declareConflictSchema,
+  decideConflictSchema,
   recordsCatalogueSearchSchema,
   replyToReporterSchema,
   transitionCaseSchema,
@@ -228,6 +229,25 @@ export function createInvestigationService(deps: InvestigationDeps) {
         (i) => i.caseId,
       ),
 
+    // Conflict decisions (RC-10, S1): today's rules as api.decide_conflict enforces them (no self-decision, case
+    // visible, CONFLICT_MANAGE). DEC-05 changes who decides on named-access cases at S3.
+    pendingConflicts: (ctx: UserRequestContext, actor: Actor, caseId: string) =>
+      can(actor, "CONFLICT_MANAGE")
+        ? query(ctx, () => gateway.pendingConflicts(ctx, caseId)).then((rows) =>
+            rows.filter((r) => r.userId !== actor.userId),
+          )
+        : Promise.resolve([]),
+    decideConflict: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "decide_conflict",
+        decideConflictSchema,
+        raw,
+        "CONFLICT_MANAGE",
+        (i) => gateway.decideConflict(ctx, i),
+        (i) => i.caseId,
+      ),
     declareConflict: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(
         ctx,
