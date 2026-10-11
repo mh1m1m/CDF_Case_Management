@@ -68,7 +68,9 @@ for (const locale of ["ar", "en"] as const) {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAccessibleName(t.archiveTitle);
-    await expect(dialog).toHaveAccessibleDescription(new RegExp(t.archiveBody.replace(/[.?]/g, "\\$&")));
+    await expect(dialog).toHaveAccessibleDescription(
+      new RegExp(t.archiveBody.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
     await expect(dialog).toHaveCSS("direction", locale === "ar" ? "rtl" : "ltr");
     await expect(dialog.getByTestId("confirm-what")).toContainText(t.archiveBody);
     await expect(dialog.getByTestId("confirm-undo")).toHaveText(t.archiveUndo);
