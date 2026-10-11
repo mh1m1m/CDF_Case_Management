@@ -152,6 +152,9 @@ for (const locale of ["ar", "en"] as const) {
     await startButton.click();
     await dialog.getByTestId("confirm-submit").click();
     await expect(page).toHaveURL(/\/forms\/[0-9a-f-]{36}$/);
+    // The new form's page, with its integrity details open (UX-123), passes axe too.
+    await page.getByTestId("integrity-details").locator("summary").click();
+    await audit(page);
 
     // Withdrawing a form is final: the trigger names it and the dialog asks; confirming withdraws it.
     const withdraw = page.getByTestId("withdraw-form");

@@ -884,6 +884,9 @@ export const en = {
     withdrawn: "Form withdrawn.",
     versions: "Versions",
     noVersions: "Nothing saved yet.",
+    integrity: "Integrity details",
+    integrityHint:
+      "Each saved version has a SHA-256 hash of its content and the form definition it was filled against. A changed version would have a different hash.",
     events: "Lifecycle",
     sensitive: "Sensitive",
     preparedBy: "Prepared by",

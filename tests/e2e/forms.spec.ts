@@ -41,7 +41,11 @@ test("a form is started, saved, prepared, reviewed and kept from outsiders", asy
   await draft.locator('button[type="submit"]').click();
   await expect(draft.getByRole("status")).toContainText("Draft saved");
   await expect(draft.getByRole("status")).toContainText("Version 1");
-  await expect(investigator.getByTestId("form-version-1")).toContainText(/[0-9a-f]{64}/);
+  // The hash is kept one step away, under Integrity details (UX-123).
+  await expect(investigator.getByTestId("form-hash-1")).toBeHidden();
+  await investigator.getByTestId("integrity-details").locator("summary").click();
+  await expect(investigator.getByTestId("form-hash-1")).toContainText(/[0-9a-f]{64}/);
+  await expect(investigator.getByTestId("field-evidence_scope")).toHaveAttribute("aria-required", "true");
   await investigator.getByTestId("prepare-form").locator('button[type="submit"]').click();
   await expect(investigator.getByTestId("form-status")).toHaveText("Prepared");
   await expect(investigator.getByTestId("form-read-only")).toBeVisible();

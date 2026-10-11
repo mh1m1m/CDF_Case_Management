@@ -80,11 +80,13 @@ export default async function FormInstancePage({
           { label: <CDFIdentifier>{formDisplayNumber(f.formCode, f.instanceNo)}</CDFIdentifier> },
         ]}
       />
+      {/* The form leads, not its codes (UX-123): its name and purpose; the number sits with the status. */}
       <CDFPageHeader
-        title={`${f.caseNumber} · ${formDisplayNumber(f.formCode, f.instanceNo)}`}
-        intro={`${name} — ${t.locale === "ar" ? f.definition.purposeAr : f.definition.purposeEn}`}
+        title={name}
+        intro={t.locale === "ar" ? f.definition.purposeAr : f.definition.purposeEn}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <CDFIdentifier testId="form-number">{formDisplayNumber(f.formCode, f.instanceNo)}</CDFIdentifier>
             <CDFBadge tone={statusTone(f.status)} testId="form-status">
               {status(f.status)}
             </CDFBadge>
@@ -151,21 +153,42 @@ export default async function FormInstancePage({
                     <span className="font-semibold">
                       {t("forms.version")} {v.versionNo}
                     </span>{" "}
-                    · {v.savedByName ?? "—"} · {formatDateTime(t.locale, v.savedAt)}
+                    · <bdi>{v.savedByName ?? "—"}</bdi> · <bdi>{formatDateTime(t.locale, v.savedAt)}</bdi>
                     {f.preparedVersionNo === v.versionNo ? (
                       <>
                         {" "}
                         <CDFBadge tone="info">{status("PREPARED")}</CDFBadge>
                       </>
                     ) : null}
-                    <br />
-                    <code className="break-all text-xs" dir="ltr">
-                      {t("forms.hash")}: {v.contentHash}
-                    </code>
                   </li>
                 ))}
               </ol>
             )}
+            {/* Hashes prove what was saved; they are kept, one step away (UX-123). */}
+            <details className="mt-3 border-t border-cdf-border pt-3" data-testid="integrity-details">
+              <summary className="cursor-pointer font-semibold">{t("forms.integrity")}</summary>
+              <p className="mt-2 text-sm text-cdf-text-secondary">{t("forms.integrityHint")}</p>
+              <dl className="mt-2 grid gap-2 text-sm">
+                <div>
+                  <dt className="font-semibold">
+                    {t("forms.definitionVersion", { no: f.definition.versionNo })}
+                  </dt>
+                  <dd>
+                    <CDFIdentifier variant="hash">{f.definition.schemaHash}</CDFIdentifier>
+                  </dd>
+                </div>
+                {f.versions.map((v) => (
+                  <div key={v.id}>
+                    <dt className="font-semibold">
+                      {t("forms.version")} {v.versionNo} · {t("forms.hash")}
+                    </dt>
+                    <dd data-testid={`form-hash-${v.versionNo}`}>
+                      <CDFIdentifier variant="hash">{v.contentHash}</CDFIdentifier>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
           </CDFCard>
 
           <CDFCard title={t("forms.events")}>
@@ -188,14 +211,6 @@ export default async function FormInstancePage({
               items={[
                 { term: t("forms.status"), value: status(f.status) },
                 { term: t("forms.finalState"), value: status(f.finalStatus) },
-                {
-                  term: t("forms.definitionVersion", { no: f.definition.versionNo }),
-                  value: (
-                    <code className="break-all text-xs" dir="ltr">
-                      {f.definition.schemaHash}
-                    </code>
-                  ),
-                },
                 {
                   term: t("forms.version"),
                   value: f.currentVersionNo ? `v${f.currentVersionNo}` : t("forms.notSet"),

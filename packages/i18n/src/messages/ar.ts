@@ -867,6 +867,9 @@ export const ar: Messages = {
     withdrawn: "تم سحب النموذج.",
     versions: "الإصدارات",
     noVersions: "لم يُحفظ شيء بعد.",
+    integrity: "تفاصيل السلامة",
+    integrityHint:
+      "لكل إصدار محفوظ بصمة SHA-256 لمحتواه ولتعريف النموذج الذي عُبّئ وفقه. أي تغيير في الإصدار يُنتج بصمة مختلفة.",
     events: "دورة الحياة",
     sensitive: "حساس",
     preparedBy: "أعدّه",
