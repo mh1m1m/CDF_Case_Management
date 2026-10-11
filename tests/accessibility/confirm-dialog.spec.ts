@@ -32,6 +32,8 @@ const T = {
     withdrawn: "Withdrawn",
     conflictTitle: "Declare a conflict of interest?",
     noDeclaration: "You have not declared yet.",
+    startTitle: /^Start .+\?$/,
+    startConfirm: "Start form",
   },
   ar: {
     archive: "أرشفة القضية",
@@ -47,6 +49,8 @@ const T = {
     withdrawn: "مسحوب",
     conflictTitle: "الإفصاح عن تعارض مصالح؟",
     noDeclaration: "لم تقدم إقرارك بعد.",
+    startTitle: /^بدء .+؟$/,
+    startConfirm: "بدء النموذج",
   },
 } as const;
 
@@ -104,7 +108,9 @@ for (const locale of ["ar", "en"] as const) {
     await page.context().close();
   });
 
-  test(`${locale}: withdrawing a form and declaring a conflict ask first`, async ({ browser }) => {
+  test(`${locale}: starting and withdrawing a form and declaring a conflict ask first`, async ({
+    browser,
+  }) => {
     const fresh = await screeningCase(`confirm-acts-${locale}`);
     const page = await signIn(browser, "casemanager@example.test", locale);
 
@@ -126,10 +132,28 @@ for (const locale of ["ar", "en"] as const) {
     await page.reload();
     await expect(page.getByTestId("my-conflict-status")).toHaveText(t.noDeclaration);
 
-    // Withdrawing a form is final: the trigger names it and the dialog asks; confirming withdraws it.
+    // Starting a form creates a permanent record (UX-068): it asks first; Cancel creates nothing.
     await page.goto(`/cases/${fresh.caseId}/forms`);
-    await page.locator('[data-testid^="start-WB-FRM-"]').first().locator('button[type="submit"]').click();
+    const start = page.getByTestId("start-another-form");
+    await start.locator("summary").click();
+    const startButton = start
+      .locator('[data-testid^="start-WB-FRM-"]')
+      .first()
+      .locator('button[type="submit"]');
+    await startButton.click();
+    await expect(dialog).toHaveAccessibleName(t.startTitle);
+    await expect(dialog.getByTestId("confirm-submit")).toHaveText(t.startConfirm);
+    await expect(dialog.getByTestId("confirm-cancel")).toBeFocused();
+    await audit(page);
+    await dialog.getByTestId("confirm-cancel").click();
+    await expect(dialog).toBeHidden();
+    await expect(startButton).toBeFocused();
+    await expect(page).toHaveURL(/\/forms$/);
+    await startButton.click();
+    await dialog.getByTestId("confirm-submit").click();
     await expect(page).toHaveURL(/\/forms\/[0-9a-f-]{36}$/);
+
+    // Withdrawing a form is final: the trigger names it and the dialog asks; confirming withdraws it.
     const withdraw = page.getByTestId("withdraw-form");
     await withdraw.locator("#withdraw-reason").fill("Synthetic: opened by mistake.");
     await withdraw.getByRole("button", { name: t.withdraw }).click();

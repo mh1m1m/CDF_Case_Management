@@ -63,6 +63,24 @@ export function formatDate(locale: Locale, value: string | Date): string {
 }
 
 /**
+ * Wraps a value (a name, a date, a list) in first-strong isolates (U+2068 … U+2069) before it goes into a translated
+ * sentence, so it keeps its own direction: an Arabic date or a Latin name does not reorder the words around it.
+ * In JSX, use <bdi> instead.
+ */
+export function isolate(value: string): string {
+  return `\u2068${value}\u2069`;
+}
+
+/** "A, B or C" («أ أو ب أو ج») with the locale's own words and punctuation. */
+export function formatList(
+  locale: Locale,
+  items: readonly string[],
+  type: "conjunction" | "disjunction" = "conjunction",
+): string {
+  return new Intl.ListFormat(locale, { style: "long", type }).format(items);
+}
+
+/**
  * Translates a dynamic code (e.g. an enum value or blocking-reason code) under a catalog section,
  * falling back to `fallback` when the code has no message.
  */

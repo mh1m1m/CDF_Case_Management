@@ -21,7 +21,7 @@ import {
   transitionBlockers,
   type InterviewStep,
 } from "@cdf/domain";
-import { formatDateTime, type MessageKey } from "@cdf/i18n";
+import { formatDateTime, isolate, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
@@ -106,7 +106,6 @@ export default async function InterviewDetailPage({
     t.locale === "ar" && n.displayNameAr ? n.displayNameAr : n.displayName;
   // Names, dates and references sit inside translated sentences: each is a direction isolate (FSI…PDI), so a
   // Latin name or reference never reorders an Arabic date around it (CDF-68).
-  const isolate = (v: string) => `\u2068${v}\u2069`;
   const when = (iso: string | null) => (iso ? isolate(formatDateTime(t.locale, iso)) : "—");
   /** A panel member's name in the page's language; anyone else by the name read with the interview. */
   const byName = (userId: string | null, fallback: string | null) => {

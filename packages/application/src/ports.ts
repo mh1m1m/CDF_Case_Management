@@ -17,7 +17,7 @@ import type {
   FormData,
   FormDefinitionListItem,
   FormInstanceDetail,
-  FormInstanceSummary,
+  FormInstanceListItem,
   FormReviewOutcome,
   IntakeReportItem,
   LedgerEntry,
@@ -202,7 +202,7 @@ export interface SavedFormVersion {
 export interface FormsGateway {
   /** The registry with the caller's right to start each form on this case (authz.can_prepare_form). */
   listDefinitions(ctx: UserRequestContext, caseId: string): Promise<FormDefinitionListItem[]>;
-  listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceSummary[]>;
+  listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceListItem[]>;
   /** Calls api.open_form_instance (audit) and returns the instance, or null when denied or missing. */
   getInstance(ctx: UserRequestContext, instanceId: string): Promise<FormInstanceDetail | null>;
   startForm(

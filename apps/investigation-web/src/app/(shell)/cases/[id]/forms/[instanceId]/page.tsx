@@ -4,8 +4,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { formDisplayNumber } from "@cdf/domain";
-import { formatDateTime, type MessageKey } from "@cdf/i18n";
+import { formatDateTime, isolate, type MessageKey } from "@cdf/i18n";
 import {
+  CDFAlert,
   CDFBadge,
   CDFBreadcrumbs,
   CDFCard,
@@ -47,7 +48,7 @@ export default async function FormInstancePage({
 }) {
   const { id, instanceId } = await params;
   if (!UUID.test(id) || !UUID.test(instanceId)) notFound();
-  const { ctx } = await requireActor();
+  const { actor, ctx } = await requireActor();
   const t = await getTranslator();
   const f = await formsService().getInstance(ctx, instanceId);
   if (!f || f.caseId !== id) notFound();
@@ -55,6 +56,11 @@ export default async function FormInstancePage({
   const labels = fieldLabels(f.definition.sections, t.locale);
   const status = (s: string) => t(`formStatus.${s}` as MessageKey);
   const who = (n: string | null, at: string | null) => (n ? `${n} · ${formatDateTime(t.locale, at!)}` : "—");
+  // A draft that was returned says so first, with the reason (UX-086). The return is derived from the events: the
+  // latest RETURNED one while the form is a draft again. It came back to whoever prepared the returned version.
+  const returned = f.status === "DRAFT" ? f.events.findLast((e) => e.eventType === "RETURNED") : undefined;
+  const returnedToMe =
+    returned !== undefined && f.events.findLast((e) => e.eventType === "PREPARED")?.actorId === actor.userId;
   const bind = <
     A extends (caseId: string, instanceId: string, formCode: string, ...rest: never[]) => unknown,
   >(
@@ -88,6 +94,28 @@ export default async function FormInstancePage({
           </div>
         }
       />
+
+      {returned ? (
+        <CDFAlert
+          tone="warning"
+          title={returnedToMe ? t("forms.tab.returnedToYou") : t("forms.tab.returnedForChanges")}
+          testId="form-returned-banner"
+        >
+          {returned.reason ? (
+            <p>
+              <q dir="auto" className="break-words">
+                {returned.reason}
+              </q>
+            </p>
+          ) : null}
+          <p className="text-sm">
+            {t("forms.tab.returnedBy", {
+              name: isolate(returned.actorName ?? "—"),
+              date: isolate(formatDateTime(t.locale, returned.occurredAt)),
+            })}
+          </p>
+        </CDFAlert>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div>

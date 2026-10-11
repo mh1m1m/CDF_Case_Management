@@ -1,7 +1,7 @@
 // WCAG 2.2 AA on the S2 case workspace (CDF-125; audit §22) in Arabic and English, at a desktop and a phone width
-// and at 320 px: the header on every tab and on an evidence item's page, the overflow menu open, the stage panel
-// and each tab's content. Also checks what the overview must answer on first paint: where the case is, since
-// when, by when, and what next.
+// and at 320 px: the header on every tab and on an evidence item's page, the overflow menu open, the stage panel,
+// each tab's content, and the forms tab with its disclosures open. Also checks what the overview must answer on
+// first paint: where the case is, since when, by when, and what next.
 import { expect, test } from "@playwright/test";
 import { audit } from "./axe";
 import { openEvidenceItem, signIn } from "../e2e/support";
@@ -32,6 +32,17 @@ for (const locale of ["ar", "en"] as const) {
       await page.getByTestId("case-overflow").locator("summary").click();
       await expect(page.getByTestId("case-overflow-myDeclaration")).toBeVisible();
       if (width !== 320) await audit(page);
+      // The forms tab with its disclosures open: the forms this viewer may start, and the register (S2g).
+      await page.goto(`${caseUrl}/forms`);
+      for (const id of ["start-another-form", "form-registry"]) {
+        await page.getByTestId(id).locator("summary").click();
+      }
+      await expect(page.getByTestId("form-registry-table")).toBeVisible();
+      if (width !== 320) await audit(page);
+      const formsOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth,
+      );
+      expect(formsOverflow, `horizontal overflow on the open forms tab at ${width}px`).toBe(false);
     }
     await page.context().close();
   });
