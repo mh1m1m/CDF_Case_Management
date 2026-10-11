@@ -32,6 +32,15 @@ export const evidenceItemHref = (caseId: string, evidenceId: string) =>
 const evidenceDownloadHref = (caseId: string, versionId: string) =>
   `/cases/${caseId}/evidence/${versionId}/download`;
 
+/** A person and a time, each isolated so a Latin name never reorders an Arabic date (or the reverse). */
+function ByAt({ name, at, t }: { name: string | null; at: string; t: Translator }) {
+  return (
+    <>
+      <bdi>{name ?? "—"}</bdi> · <bdi>{formatDateTime(t.locale, at)}</bdi>
+    </>
+  );
+}
+
 function statusTone(status: string) {
   return status === "AVAILABLE" ? "success" : status === "REJECTED" ? "danger" : "neutral";
 }
@@ -130,7 +139,7 @@ export function EvidencePanel({
           },
           {
             header: t("evidence.addedBy"),
-            cell: (e) => `${e.createdByName ?? "—"} · ${formatDateTime(t.locale, e.createdAt)}`,
+            cell: (e) => <ByAt name={e.createdByName} at={e.createdAt} t={t} />,
           },
           {
             header: t("evidence.download"),
@@ -312,7 +321,7 @@ export function EvidenceItemView({
                 { term: t("evidence.type"), value: t(`evidenceType.${e.evidenceType}` as MessageKey) },
                 {
                   term: t("evidence.addedBy"),
-                  value: `${e.createdByName ?? "—"} · ${formatDateTime(t.locale, e.createdAt)}`,
+                  value: <ByAt name={e.createdByName} at={e.createdAt} t={t} />,
                 },
                 ...(e.sourceDescription
                   ? [{ term: t("evidence.sourceLabel"), value: <bdi dir="auto">{e.sourceDescription}</bdi> }]
@@ -345,7 +354,7 @@ export function EvidenceItemView({
                   ) : null}
                   <br />
                   <span className="text-cdf-text-secondary">
-                    {v.uploadedByName ?? "—"} · {formatDateTime(t.locale, v.uploadedAt)}
+                    <ByAt name={v.uploadedByName} at={v.uploadedAt} t={t} />
                     {v.scanner ? ` · ${t("evidence.scanner")}: ${v.scanner}` : ""}
                   </span>
                   <br />
@@ -374,8 +383,8 @@ export function EvidenceItemView({
             <ol className="list-decimal break-words ps-5 text-sm">
               {e.custody.map((ev) => (
                 <li key={ev.id}>
-                  {t(`custodyEvent.${ev.eventType}` as MessageKey)} · {ev.actorName ?? "—"} ·{" "}
-                  {formatDateTime(t.locale, ev.occurredAt)}
+                  {t(`custodyEvent.${ev.eventType}` as MessageKey)} ·{" "}
+                  <ByAt name={ev.actorName} at={ev.occurredAt} t={t} />
                 </li>
               ))}
             </ol>
