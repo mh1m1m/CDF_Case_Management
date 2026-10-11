@@ -103,6 +103,9 @@ export const PERMISSIONS = [
   "RECORDS_LIFECYCLE_ADMIN",
   "BREAK_GLASS_REQUEST",
   "BREAK_GLASS_APPROVE",
+  // Reporter conversation (ADR-016 D4, DEC-06)
+  "REPORTER_CONVERSATION_HOLD",
+  "REPORTER_CONVERSATION_OVERSEE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -488,7 +491,9 @@ export interface ReportDetail extends IntakeReportItem {
   categoryOther: string | null;
   willingToCooperate: boolean | null;
   language: "ar" | "en";
+  /** Empty unless the caller may read the conversation (DEC-06: once a case exists it belongs to the case). */
   messages: ReportMessage[];
+  conversation: ConversationAccess;
 }
 
 /** A person who may be named as a restricted case's accountable authority (DEC-01). Names only. */
@@ -539,6 +544,28 @@ export interface CaseDetail extends CaseListItem {
   assignments: CaseAssignment[];
   transitions: TransitionOption[];
   myConflictStatus: string | null;
+  /** The caller's part in the reporter conversation, from the database (DEC-06): it decides the Reporter tab. */
+  reporterConversation: ConversationAccess;
+}
+
+/** NONE: no thread; READ: read only (oversight); SEND: may also write to the reporter. */
+export type ConversationAccess = "NONE" | "READ" | "SEND";
+
+/** The Reporter tab (ADR-016 D4, DEC-06): the conversation of each report behind the case, and who may write. */
+export interface CaseReporterView {
+  conversations: { reportId: string; canSend: boolean; messages: ReportMessage[] }[];
+  /** Active REPORTER_COMMUNICATE delegations: all of them for those who manage the team, else only the caller's. */
+  delegations: ReporterDelegation[];
+  /** The caller manages the team (authz.can_assign_case) and so may delegate and end delegations. */
+  canDelegate: boolean;
+}
+
+export interface ReporterDelegation {
+  id: string;
+  userId: string;
+  displayName: string;
+  displayNameAr: string | null;
+  delegatedAt: string;
 }
 
 export interface CasePathStep {

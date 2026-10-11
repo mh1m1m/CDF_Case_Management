@@ -197,6 +197,21 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.reply_to_reporter(${infoReport}, 'Synthetic follow-up question for the reporter.')`,
       },
+      // DEC-06 (migration 1840): the case manager lets case B's investigator write to the reporter, then ends it.
+      {
+        fn: "delegate_reporter_communication",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.delegation = await one(
+            s,
+            s.tx`select api.delegate_reporter_communication(${caseB}, ${USERS.investigatorB}, ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "end_reporter_communication",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.end_reporter_communication(${ids.delegation!}, ${REASON})`,
+      },
       {
         fn: "request_identity_reveal",
         actor: "grcDirector",
@@ -723,7 +738,9 @@ describe("audit internals are not reachable", () => {
       "authz.can_edit_case",
       "authz.can_manage_disposition",
       "authz.can_manage_retention",
+      "authz.can_message_reporter",
       "authz.can_prepare_form",
+      "authz.can_read_reporter_conversation",
       "authz.can_release_legal_hold",
       "authz.can_request_disposition",
       "authz.can_request_legal_hold",
@@ -748,6 +765,7 @@ describe("audit internals are not reachable", () => {
       "authz.form_entitled",
       "authz.has_permission",
       "authz.in_records_catalogue_scope",
+      "authz.is_reporter_correspondent",
       "authz.task_grants",
       "forms.canonical_json",
       "forms.content_hash",

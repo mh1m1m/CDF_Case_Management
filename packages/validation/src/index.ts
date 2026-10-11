@@ -267,6 +267,18 @@ export const transitionCaseSchema = z.object({
 
 export const replyToReporterSchema = z.object({ reportId: uuid, body: text(1, 4000) });
 
+/** DEC-06: an assigned investigator may write to the reporter on this case (REPORTER_COMMUNICATE). */
+export const delegateReporterCommunicationSchema = z.object({
+  caseId: uuid,
+  userId: uuid,
+  reason: text(10, 500),
+});
+export const endReporterCommunicationSchema = z.object({
+  caseId: uuid,
+  delegationId: uuid,
+  reason: text(10, 500),
+});
+
 const pastDate = z
   .string()
   .optional()

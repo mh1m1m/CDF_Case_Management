@@ -48,8 +48,8 @@ export function itemHref(i: WorkItem): string {
   const onCase = i.caseId ? `/cases/${i.caseId}` : null;
   switch (i.targetType) {
     case "REPORT":
-      // A reply on a report that already has a case is answered from the case.
-      return i.category === "REPORTER_REPLIED" && onCase ? onCase : `/intake/${i.targetId}`;
+      // A reply on a report that already has a case is answered on the case's Reporter tab (DEC-06).
+      return i.category === "REPORTER_REPLIED" && onCase ? `${onCase}/reporter` : `/intake/${i.targetId}`;
     case "CASE":
       return i.category === "DECLARE_CONFLICT"
         ? `/cases/${i.targetId}/people#conflict`

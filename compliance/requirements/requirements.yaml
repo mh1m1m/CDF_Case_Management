@@ -398,6 +398,27 @@ requirements:
     tests: [tests/security/case-history-roster.spec.ts, tests/e2e/case-workspace.spec.ts]
     notes: "The audit_event_read table policy still admits every BUSINESS row of a viewable case to direct SQL; the app reads only through api.case_history. Narrowing the policy is a follow-up decision. Packet-bound reviewer evidence (DEC-09, S5) will narrow authz.can_view_evidence, which history already follows."
 
+  - id: CDF-UX-009
+    title: "The reporter conversation belongs to the case: the case manager, owner and lead write, an investigator only when delegated, the GRC Director reads; seeing the case is never enough"
+    source: [UX audit 2026-10-10 UX-026, RC-20; ADR-016 D4; DEC-06]
+    external_ids: []
+    linear_issues: [CDF-119]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001840_reporter_conversation.sql,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/reporter/page.tsx",
+        "apps/investigation-web/src/app/(shell)/intake/[id]/page.tsx",
+      ]
+    tests:
+      [
+        tests/security/reporter-conversation.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+        tests/e2e/case-workspace.spec.ts,
+      ]
+    notes: "Interview invitations to the reporter through the channel are not built yet (S3 interviews). The triage officer stops writing at case creation; DEC-03 ends the TRIAGE grant itself later."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

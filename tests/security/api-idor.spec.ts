@@ -42,6 +42,8 @@ interface Targets {
   statementVersion: string;
   formInstance: string;
   attachment: string;
+  // Reporter conversation (DEC-06, migration 1840)
+  reporterDelegation: string;
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
@@ -121,6 +123,17 @@ const PROBES: Probe[] = [
     fn: "decide_identity_reveal",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.decide_identity_reveal(${t.revealRequest}, true, ${REASON})`,
+  },
+  // DEC-06 (migration 1840): delegating the reporter conversation, to oneself or anyone, and ending a delegation.
+  {
+    fn: "delegate_reporter_communication",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.delegate_reporter_communication(${t.case}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "end_reporter_communication",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.end_reporter_communication(${t.reporterDelegation}, ${REASON})`,
   },
   {
     fn: "declare_conflict",
@@ -565,6 +578,18 @@ async function purposeObjects(
   return { task: task!.id, holdRequest: req!.id, breakGlass };
 }
 
+/**
+ * A REPORTER_COMMUNICATE delegation (DEC-06) on case B: the case manager lets the assigned investigator write to
+ * the reporter. The executive case has no investigator to delegate to, so its probe gets a random id.
+ */
+async function reporterDelegation(s: Scenario, which: "B" | "EXEC", target: string): Promise<string> {
+  if (which === "EXEC") return randomUUID();
+  await s.as("caseManager");
+  const [d] = await s.tx<{ id: string }[]>`
+    select api.delegate_reporter_communication(${target}, ${USERS.investigatorB}, ${REASON}) as id`;
+  return d!.id;
+}
+
 async function outcomeOf<T>(s: Scenario, probe: Probe<T>, t: T, self: string): Promise<string> {
   let result: readonly Record<string, unknown>[] | undefined;
   let error: string | undefined;
@@ -598,6 +623,7 @@ const randomTargets = (): Targets => ({
   statementVersion: randomUUID(),
   formInstance: randomUUID(),
   attachment: randomUUID(),
+  reporterDelegation: randomUUID(),
 });
 
 describe("catalog guard", () => {
@@ -643,6 +669,8 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
         which === "B"
           ? await purposeObjects(s, target, "caseManager", "legal", true)
           : await purposeObjects(s, target, "grcDirector", "grcDirector", false);
+      // Before the insider objects too: the investigator's conflict declaration removes its case access.
+      const delegation = await reporterDelegation(s, which, target);
       const inside =
         which === "B"
           ? await insiderObjects(
@@ -656,7 +684,14 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
             )
           : await insiderObjects(s, target, "grcDirector", "grcDirector", "grcDirector", "SECRET");
       const attachment = await reporterAttachment(s, seeded.reportRef);
-      const real: Targets = { case: target, ...seeded, ...inside, ...purpose, attachment };
+      const real: Targets = {
+        case: target,
+        ...seeded,
+        ...inside,
+        ...purpose,
+        attachment,
+        reporterDelegation: delegation,
+      };
       await s.as(actor);
       const self = USERS[actor];
       const mismatches: string[] = [];
@@ -940,6 +975,7 @@ describe("non-object commands", () => {
     const seeded = await seedObjects("0002");
     await scenario(async (s) => {
       const purpose = await purposeObjects(s, caseB, "caseManager", "legal", true);
+      const delegation = await reporterDelegation(s, "B", caseB);
       const inside = await insiderObjects(
         s,
         caseB,
@@ -956,7 +992,7 @@ describe("non-object commands", () => {
         const got = await outcomeOf(
           s,
           probe,
-          { case: caseB, ...seeded, ...inside, ...purpose, attachment },
+          { case: caseB, ...seeded, ...inside, ...purpose, attachment, reporterDelegation: delegation },
           USERS.revoked,
         );
         if (!["EMPTY", "FALSE", "NOT_FOUND"].includes(got) && !got.startsWith("ERROR CDF_UNAUTHENTICATED"))

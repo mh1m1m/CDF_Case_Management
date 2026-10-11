@@ -9,6 +9,7 @@ import type {
   CaseDetail,
   CaseDiscoveryResult,
   CaseListItem,
+  CaseReporterView,
   EvidenceItem,
   EvidenceRejectionCode,
   FormApprovalOutcome,
@@ -264,6 +265,16 @@ export interface InvestigationGateway {
   // Case history and access roster (UX redesign S2, migration 1830): the database applies each event's audience.
   caseTimeline(ctx: UserRequestContext, caseId: string, limit?: number): Promise<AuditTimelineEntry[]>;
   caseAccessRoster(ctx: UserRequestContext, caseId: string): Promise<CaseAccessRosterEntry[]>;
+  // The conversation with the reporter on a case (UX redesign S2, migration 1840, DEC-06).
+  caseReporterView(ctx: UserRequestContext, caseId: string): Promise<CaseReporterView>;
+  delegateReporterCommunication(
+    ctx: UserRequestContext,
+    input: { caseId: string; userId: string; reason: string },
+  ): Promise<string>;
+  endReporterCommunication(
+    ctx: UserRequestContext,
+    input: { caseId: string; delegationId: string; reason: string },
+  ): Promise<void>;
   directory(ctx: UserRequestContext): Promise<UserDirectoryEntry[]>;
   // Purpose-bound records and legal access (ADR-014): authorised rows, counts and own work only.
   searchRecordsCatalogue(

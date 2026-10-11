@@ -1,19 +1,38 @@
 // CDF-77, UX redesign S2 (audit §22.6): every case page carries one labelled navigation of the case's sections,
-// each a URL, with the current section marked. The forms and interviews sections keep their routes.
+// each a URL, with the current section marked. The forms and interviews sections keep their routes. The case
+// manager holds the reporter conversation (DEC-06), so the Reporter section is among them.
 import { expect, test } from "@playwright/test";
 import { signIn } from "../e2e/support";
 
 const text = {
   en: {
     nav: "Case sections",
-    tabs: ["Overview", "Allegations", "Evidence", "Interviews", "Forms", "People & access", "History"],
+    tabs: [
+      "Overview",
+      "Allegations",
+      "Evidence",
+      "Interviews",
+      "Forms",
+      "Reporter",
+      "People & access",
+      "History",
+    ],
   },
   ar: {
     nav: "أقسام القضية",
-    tabs: ["نظرة عامة", "الادعاءات", "الأدلة", "المقابلات", "النماذج", "الفريق والصلاحيات", "مجريات القضية"],
+    tabs: [
+      "نظرة عامة",
+      "الادعاءات",
+      "الأدلة",
+      "المقابلات",
+      "النماذج",
+      "المبلّغ",
+      "الفريق والصلاحيات",
+      "مجريات القضية",
+    ],
   },
 } as const;
-const PATHS = ["", "/allegations", "/evidence", "/interviews", "/forms", "/people", "/history"];
+const PATHS = ["", "/allegations", "/evidence", "/interviews", "/forms", "/reporter", "/people", "/history"];
 
 for (const locale of ["ar", "en"] as const) {
   test(`${locale}: every case section is a link in one labelled navigation`, async ({ browser }) => {

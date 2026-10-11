@@ -93,6 +93,13 @@ begin
   perform api.declare_conflict(c_a, false, 'Synthetic: no relationship with the parties.');
   perform pg_temp.act_as('grc.director@example.test');
   perform api.transition_case(c_a, 'APPROVE_INVESTIGATION', 'Synthetic: approved for full investigation.');
+  -- The reporter follows up through the portal and the lead investigator answers on the case (DEC-06, 1840).
+  perform set_config('request.jwt.claims', '', true);
+  perform public_api.post_reporter_message('WB-SEED00000001',
+    encode(sha256(convert_to('unusable-seed-secret:WB-SEED00000001', 'UTF8')), 'hex'),
+    'SYNTHETIC: As far as I recall, the duplicate invoices were approved in the same week.');
+  perform pg_temp.act_as('lead@example.test');
+  perform api.reply_to_reporter(r1, 'Thank you. Please share the approximate dates of the approvals if you can (synthetic).');
   -- Committee access to case A so committee forms (WB-FRM-13/14) can be prepared, reviewed and approved (Phase 8).
   perform pg_temp.act_as('casemanager@example.test');
   perform api.grant_case_access(c_a, u_sec, 'COMMITTEE', 'Synthetic: committee secretary for case A', null);

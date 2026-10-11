@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import { audit } from "./axe";
 import { signIn } from "../e2e/support";
 
-const TABS = ["", "/allegations", "/evidence", "/interviews", "/forms", "/people", "/history"];
+const TABS = ["", "/allegations", "/evidence", "/interviews", "/forms", "/reporter", "/people", "/history"];
 const WIDTHS = [1280, 390, 320] as const;
 
 for (const locale of ["ar", "en"] as const) {

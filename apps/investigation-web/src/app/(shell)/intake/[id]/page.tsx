@@ -44,7 +44,8 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
   const canTriage =
     can(actor, "REPORT_TRIAGE") && ["RECEIVED", "INFO_REQUESTED"].includes(report.status) && !report.caseId;
   const canCreate = can(actor, "CASE_CREATE") && report.status === "ACCEPTED" && !report.caseId;
-  const canReply = can(actor, "REPORT_MESSAGE_REPLY");
+  // DEC-06: the database decides who reads and who writes; once a case exists the conversation belongs to it.
+  const canReply = report.conversation === "SEND";
   // Classification never drops below the report's and never exceeds the initiator's clearance (DEC-01).
   const level = (c: string) => CLASSIFICATION_LEVELS.indexOf(c as (typeof CLASSIFICATION_LEVELS)[number]);
   const classifications = CLASSIFICATION_LEVELS.filter(
@@ -281,16 +282,33 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
       ) : null}
 
       <CDFCard title={t("intake.messages")}>
-        <CDFTimeline
-          testId="report-messages"
-          empty={t("intake.noMessages")}
-          items={report.messages.map((m, i) => ({
-            id: String(i),
-            title: m.direction === "FROM_REPORTER" ? t("intake.fromReporter") : t("intake.toReporter"),
-            meta: formatDateTime(t.locale, m.createdAt),
-            body: m.body,
-          }))}
-        />
+        {report.conversation === "NONE" ? (
+          <p className="text-sm text-cdf-text-secondary" data-testid="conversation-moved">
+            {report.caseId ? t("intake.conversationMoved") : t("intake.conversationHidden")}
+          </p>
+        ) : (
+          <CDFTimeline
+            testId="report-messages"
+            empty={t("intake.noMessages")}
+            items={report.messages.map((m, i) => ({
+              id: String(i),
+              title: m.direction === "FROM_REPORTER" ? t("intake.fromReporter") : t("intake.toReporter"),
+              meta: formatDateTime(t.locale, m.createdAt),
+              body: m.body,
+            }))}
+          />
+        )}
+        {report.caseId && report.conversation !== "NONE" ? (
+          <p className="mt-3 text-sm">
+            <Link
+              href={`/cases/${report.caseId}/reporter`}
+              className="font-semibold underline underline-offset-4"
+              data-testid="conversation-on-case"
+            >
+              {t("intake.conversationOnCase")}
+            </Link>
+          </p>
+        ) : null}
         {canReply ? (
           <div className="mt-4 border-t border-cdf-border pt-4">
             <CDFCommandForm

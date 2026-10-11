@@ -34,6 +34,7 @@ export const CASE_TABS = [
   "evidence",
   "interviews",
   "forms",
+  "reporter",
   "people",
   "history",
 ] as const;
@@ -115,6 +116,12 @@ function historyTitle(t: Translator, e: AuditTimelineEntry): string {
       break;
     case "CONFLICT_DECIDED":
       if (name) return t("caseWorkspace.history.conflictDecided", { name });
+      break;
+    case "REPORTER_COMMUNICATION_DELEGATED":
+      if (name) return t("caseWorkspace.history.reporterDelegated", { name });
+      break;
+    case "REPORTER_COMMUNICATION_ENDED":
+      if (name) return t("caseWorkspace.history.reporterDelegationEnded", { name });
       break;
     case "CLASSIFICATION_CHANGED":
       // The database names a level only when it is within the viewer's clearance.
@@ -368,7 +375,11 @@ export async function CaseWorkspace({
         itemTestIdPrefix="case-tab-"
         wrap
         current={tab}
-        items={CASE_TABS.map((k) => ({ key: k, href: tabHref(c.id, k), label: tabLabel(k) }))}
+        items={CASE_TABS.filter((k) => k !== "reporter" || c.reporterConversation !== "NONE").map((k) => ({
+          key: k,
+          href: tabHref(c.id, k),
+          label: tabLabel(k),
+        }))}
       />
       {children}
     </>

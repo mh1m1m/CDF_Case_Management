@@ -1,10 +1,18 @@
 // The S2 case workspace (CDF-119; audit §22.2–§22.4): progress follows the case's own path, a branch ending is
 // named, a blocked step says who can take it (roles, never people), and the header states the viewer's own
-// relationship. History and the access roster keep their audiences (migration 1830; DEC-08, DEC-10).
+// relationship. History and the access roster keep their audiences (migration 1830; DEC-08, DEC-10). The
+// reporter conversation belongs to the case's correspondents (migration 1840; DEC-06).
 // Synthetic cases only.
 import { randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
-import { closeFixtureConnections, closedCase, heldCase, screeningCase } from "./records-fixture";
+import { expect, test, type Browser } from "@playwright/test";
+import {
+  closeFixtureConnections,
+  closedCase,
+  endInvestigatorAssignment,
+  heldCase,
+  reporterCase,
+  screeningCase,
+} from "./records-fixture";
 import { signIn } from "./support";
 
 test.afterAll(closeFixtureConnections);
@@ -102,3 +110,84 @@ test("a legal hold shows to the case team as status only, and in full to the hol
   await expect(full).toContainText("LITIGATION");
   await director.context().close();
 });
+
+test("the reporter conversation is on the case for its correspondents, and a delegation opens and closes it", async ({
+  browser,
+}) => {
+  const c = await reporterCase(`workspace-reporter-${randomUUID().slice(0, 8)}`);
+  // The fixture puts Investigator Alpha on a new case; take it off again, so My Work keeps the seed's cases.
+  try {
+    await reporterJourney(browser, c);
+  } finally {
+    await endInvestigatorAssignment(c.caseId);
+  }
+});
+
+async function reporterJourney(
+  browser: Browser,
+  c: { caseId: string; caseNumber: string; reportId: string; message: string },
+) {
+  const reporterUrl = `/cases/${c.caseId}/reporter`;
+  const investigatorA = "a0000000-0000-4000-8000-000000000004";
+
+  // The case manager holds the conversation: reads the reporter's message and answers it.
+  const manager = await signIn(browser, "casemanager@example.test");
+  await manager.goto(`/cases/${c.caseId}`);
+  await manager.getByTestId("case-tab-reporter").click();
+  await expect(manager).toHaveURL(new RegExp(`${reporterUrl}$`));
+  await expect(manager.getByTestId("reporter-messages")).toContainText(c.message);
+  const answer = "Thank you, we have received it (synthetic e2e).";
+  await manager.getByTestId("reporter-reply-form").locator("textarea").fill(answer);
+  await manager.getByTestId("reporter-reply-form").getByRole("button").click();
+  await expect(manager.getByTestId("reporter-messages")).toContainText(answer);
+  await expect(manager.getByTestId("reporter-no-delegations")).toBeVisible();
+
+  // The assigned investigator sees the case but not the conversation: no tab, and the page is a 404.
+  const investigator = await signIn(browser, "investigator.a@example.test");
+  await investigator.goto(`/cases/${c.caseId}`);
+  await expect(investigator.getByTestId("case-tabs")).toBeVisible();
+  await expect(investigator.getByTestId("case-tab-reporter")).toHaveCount(0);
+  const hidden = await investigator.goto(reporterUrl);
+  expect(hidden?.status()).toBe(404);
+
+  // The case manager delegates; the investigator can now write, and sees its own delegation.
+  await manager.locator("#userId").selectOption(investigatorA);
+  await manager.locator("#delegateReason").fill("Synthetic: the investigator follows up the dates.");
+  await manager.getByTestId("reporter-delegate-form").getByRole("button").click();
+  await expect(manager.getByTestId(`reporter-delegation-${investigatorA}`)).toContainText(
+    "Investigator Alpha",
+  );
+  await investigator.goto(`/cases/${c.caseId}`);
+  await investigator.getByTestId("case-tab-reporter").click();
+  await expect(investigator.getByTestId("reporter-messages")).toContainText(answer);
+  await expect(investigator.getByTestId("reporter-reply-form")).toBeVisible();
+  await expect(investigator.getByTestId(`reporter-delegation-${investigatorA}`)).toContainText("(you)");
+  await expect(investigator.getByTestId("reporter-delegate-form")).toHaveCount(0);
+
+  // Ending the delegation closes the conversation to the investigator again.
+  const end = manager.getByTestId(`reporter-end-${investigatorA}`);
+  await end.locator("input").fill("Synthetic: the dates are now on file.");
+  await end.getByRole("button").click();
+  await expect(manager.getByTestId("reporter-no-delegations")).toBeVisible();
+  expect((await investigator.goto(reporterUrl))?.status()).toBe(404);
+
+  // History tells the team who was delegated and when it ended.
+  await manager.goto(`/cases/${c.caseId}/history`);
+  await expect(manager.getByTestId("history-REPORTER_COMMUNICATION_DELEGATED")).toContainText(
+    "Investigator Alpha may write to the reporter",
+  );
+  await expect(manager.getByTestId("history-REPORTER_COMMUNICATION_ENDED")).toContainText(
+    "Investigator Alpha no longer writes to the reporter",
+  );
+  await manager.context().close();
+  await investigator.context().close();
+
+  // The triage officer opened the case and keeps its grant, but the conversation moved to the case team.
+  const triage = await signIn(browser, "triage@example.test");
+  await triage.goto(`/intake/${c.reportId}`);
+  await expect(triage.getByTestId("conversation-moved")).toContainText("moved to the case team");
+  await expect(triage.getByTestId("reply-form")).toHaveCount(0);
+  await triage.goto(`/cases/${c.caseId}`);
+  await expect(triage.getByTestId("case-tab-reporter")).toHaveCount(0);
+  await triage.context().close();
+}

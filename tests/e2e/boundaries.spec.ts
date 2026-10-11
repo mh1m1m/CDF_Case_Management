@@ -41,7 +41,16 @@ for (const locale of ["ar", "en"] as const) {
     // A real case the investigator has no relationship with.
     const hidden = await screeningCase(`hidden-404-${locale}`);
     const outsider = await signIn(browser, "investigator.a@example.test", locale);
-    for (const suffix of ["", "/allegations", "/evidence", "/interviews", "/forms", "/people", "/history"]) {
+    for (const suffix of [
+      "",
+      "/allegations",
+      "/evidence",
+      "/interviews",
+      "/forms",
+      "/reporter",
+      "/people",
+      "/history",
+    ]) {
       const missing = await visit(outsider, `/cases/${MISSING}${suffix}`);
       const inaccessible = await visit(outsider, `/cases/${hidden.caseId}${suffix}`);
       expect(missing.status, suffix).toBe(404);

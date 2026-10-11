@@ -8,6 +8,8 @@ import type {
   CaseDetail,
   CaseDiscoveryResult,
   CaseListItem,
+  CaseReporterView,
+  ConversationAccess,
   CasePathStep,
   IntakeReportItem,
   LedgerEntry,
@@ -18,6 +20,7 @@ import type {
   PendingConflict,
   RecordsCatalogueEntry,
   ReportDetail,
+  ReportMessage,
   RestrictedCaseAuthority,
   TransitionOption,
   UserDirectoryEntry,
@@ -84,14 +87,20 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
                category_other as "categoryOther", willing_to_cooperate as "willingToCooperate", language
         from intake.report where id = ${reportId}`;
       if (!r) return null;
+      // DEC-06: row-level security returns the messages only to the conversation's readers.
       const messages = await tx<
         { direction: "FROM_REPORTER" | "TO_REPORTER"; body: string; createdAt: Date }[]
       >`
         select direction, body, created_at as "createdAt" from intake.report_message where report_id = ${reportId} order by created_at`;
+      const [access] = await tx<{ access: ConversationAccess }[]>`
+        select case when authz.can_message_reporter(${reportId}) then 'SEND'
+                    when authz.can_read_reporter_conversation(${reportId}) then 'READ'
+                    else 'NONE' end as access`;
       return {
         ...(r as unknown as ReportDetail),
         receivedAt: iso(r.receivedAt as Date)!,
         messages: messages.map((m) => ({ ...m, createdAt: iso(m.createdAt)! })),
+        conversation: access?.access ?? "NONE",
       };
     });
   }
@@ -199,6 +208,12 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         from api.available_transitions(${caseId}) t`;
       const [conflict] = await tx<{ status: string }[]>`
         select status from case_mgmt.conflict_check where case_id = ${caseId} and user_id = authz.current_user_id() and is_current`;
+      // The caller's part in the reporter conversation (DEC-06), over the reports behind the case.
+      const [conversation] = await tx<{ access: ConversationAccess }[]>`
+        select case when bool_or(authz.can_message_reporter(r.id)) then 'SEND'
+                    when bool_or(authz.can_read_reporter_conversation(r.id)) then 'READ'
+                    else 'NONE' end as access
+        from intake.report r where r.case_id = ${caseId}`;
       return {
         ...toCaseItem(c),
         summary: c.summary as string,
@@ -217,6 +232,7 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         assignments: assignments.map((a) => ({ ...a, assignedAt: iso(a.assignedAt)! })),
         transitions: [...transitions],
         myConflictStatus: conflict?.status ?? null,
+        reporterConversation: conversation?.access ?? "NONE",
       };
     });
   }
@@ -316,6 +332,63 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         untilAt: iso(r.untilAt),
         endedAt: iso(r.endedAt),
       }));
+    });
+  }
+
+  // The conversation with the reporter (DEC-06). The database decides who reads and who writes; row-level security
+  // filters the messages and the delegations again.
+  caseReporterView(ctx: UserRequestContext, caseId: string): Promise<CaseReporterView> {
+    return this.run(ctx, async (tx) => {
+      const reports = await tx<{ reportId: string; canSend: boolean }[]>`
+        select r.id as "reportId", authz.can_message_reporter(r.id) as "canSend"
+        from intake.report r
+        where r.case_id = ${caseId} and authz.can_read_reporter_conversation(r.id)
+        order by r.received_at, r.id`;
+      const ids = reports.map((r) => r.reportId);
+      const messages = ids.length
+        ? await tx<(Omit<ReportMessage, "createdAt"> & { reportId: string; createdAt: Date })[]>`
+            select report_id as "reportId", direction, body, created_at as "createdAt"
+            from intake.report_message where report_id = any(${ids}::uuid[]) order by created_at, id`
+        : [];
+      const delegations = await tx<
+        (Omit<CaseReporterView["delegations"][number], "delegatedAt"> & { delegatedAt: Date })[]
+      >`
+        select d.id, d.user_id as "userId", coalesce(u.display_name, '—') as "displayName",
+               u.display_name_ar as "displayNameAr", d.delegated_at as "delegatedAt"
+        from case_mgmt.reporter_communication_delegation d left join iam.user_profile u on u.id = d.user_id
+        where d.case_id = ${caseId} and d.ended_at is null order by d.delegated_at, d.id`;
+      const [manage] = await tx<{ ok: boolean }[]>`select authz.can_assign_case(${caseId}) as ok`;
+      return {
+        conversations: reports.map((r) => ({
+          reportId: r.reportId,
+          canSend: r.canSend,
+          messages: messages
+            .filter((m) => m.reportId === r.reportId)
+            .map(({ direction, body, createdAt }) => ({ direction, body, createdAt: iso(createdAt)! })),
+        })),
+        delegations: delegations.map((d) => ({ ...d, delegatedAt: iso(d.delegatedAt)! })),
+        canDelegate: manage?.ok === true,
+      };
+    });
+  }
+
+  delegateReporterCommunication(
+    ctx: UserRequestContext,
+    i: { caseId: string; userId: string; reason: string },
+  ) {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<{ id: string }[]>`
+        select api.delegate_reporter_communication(${i.caseId}, ${i.userId}, ${i.reason}) as id`;
+      return row!.id;
+    });
+  }
+
+  endReporterCommunication(
+    ctx: UserRequestContext,
+    i: { caseId: string; delegationId: string; reason: string },
+  ) {
+    return this.run(ctx, async (tx) => {
+      await tx`select api.end_reporter_communication(${i.delegationId}, ${i.reason})`;
     });
   }
 

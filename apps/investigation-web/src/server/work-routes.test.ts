@@ -47,7 +47,7 @@ describe("routes", () => {
     expect(itemHref(item({ targetType: "REPORT", category: "NEW_REPORT", targetId: "r" }))).toBe("/intake/r");
     expect(
       itemHref(item({ targetType: "REPORT", category: "REPORTER_REPLIED", targetId: "r", caseId: "c" })),
-    ).toBe("/cases/c");
+    ).toBe("/cases/c/reporter");
     expect(itemHref(item({ targetType: "CONFLICT", targetId: "k", caseId: "c" }))).toBe(
       "/cases/c/people#conflict-decisions",
     );

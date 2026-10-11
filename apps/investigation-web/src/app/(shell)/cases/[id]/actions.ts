@@ -48,6 +48,49 @@ export async function assignAction(caseId: string, _: ActionState, form: FormDat
   return toActionState(result, form);
 }
 
+// The conversation with the reporter (DEC-06). The database decides who may write and who may delegate.
+export async function reporterReplyAction(
+  caseId: string,
+  reportId: string,
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await investigationService().replyToReporter(ctx, actor, { ...formObject(form), reportId });
+  if (result.ok) revalidatePath(`/cases/${caseId}/reporter`);
+  return toActionState(result, form);
+}
+
+export async function delegateReporterAction(
+  caseId: string,
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await investigationService().delegateReporterCommunication(ctx, actor, {
+    ...formObject(form),
+    caseId,
+  });
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
+  return toActionState(result, form);
+}
+
+export async function endReporterDelegationAction(
+  caseId: string,
+  delegationId: string,
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await investigationService().endReporterCommunication(ctx, actor, {
+    ...formObject(form),
+    caseId,
+    delegationId,
+  });
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
+  return toActionState(result, form);
+}
+
 export async function declareConflictAction(
   caseId: string,
   _: ActionState,
