@@ -976,6 +976,38 @@ export const en = {
     reasonLabel: "Reason",
     reasonHint: "At least 10 characters.",
     noActions: "No review step is available to you now.",
+    steps: {
+      label: "Interview steps",
+      now: "Now: {step}",
+      name: {
+        SCHEDULE: "Schedule",
+        INVITE: "Invite",
+        RIGHTS: "Rights",
+        CONDUCT: "Hold the interview",
+        STATEMENT: "Statement",
+        PREPARE: "Prepare",
+        REVIEW: "Review",
+        APPROVE: "Approve",
+      },
+      who: {
+        SCHEDULE:
+          "The case manager, the case's owner, its lead or an investigator on the case schedules the interview.",
+        INVITE:
+          "The case manager, the case's owner, its lead or an investigator on the case records the invitation.",
+        RIGHTS: "An interviewer on the interview panel records the rights acknowledgement.",
+        CONDUCT: "An interviewer on the interview panel records that the interview was held.",
+        STATEMENT: "A member of the interview panel records the statement and its acknowledgement.",
+        PREPARE:
+          "The case manager, the case's owner, its lead or an investigator on the case marks it as prepared.",
+        REVIEW:
+          "The case manager, the case's owner, its lead or a reviewer on the case reviews it, but not the person who prepared it.",
+        APPROVE:
+          "The case manager, the case's owner or its lead approves it, but not the person who prepared or reviewed it.",
+      },
+      changeSchedule: "Change the date or send a rescheduling notice",
+      changeDate: "Change the date",
+      newStatementVersion: "Record a new version of the statement",
+    },
     saved: "Saved.",
     action: {
       PREPARE: "Mark as prepared",

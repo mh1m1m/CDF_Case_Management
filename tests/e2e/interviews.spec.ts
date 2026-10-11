@@ -1,6 +1,7 @@
 // EPIC 09 through the browser, in Arabic (CDF-60, ADR-012): an investigator plans, schedules and records
 // a witness interview with a hashed statement; the lead reviews; the case manager approves; outsiders get
-// a 404 and the reporter is never named.
+// a 404 and the reporter is never named. The page is a stepper (UX-033): one current step with its form,
+// completed steps read-only, later steps only named.
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "./support";
 
@@ -39,6 +40,10 @@ test("an interview is planned, recorded, reviewed and approved in Arabic", async
   const interviewUrl = new URL(investigator.url()).pathname;
   expect(interviewUrl).toMatch(/^\/cases\/[0-9a-f-]{36}\/interviews\/[0-9a-f-]{36}$/);
   await expect(investigator.getByTestId("interviewee")).toContainText("الشاهد كابا");
+  const steps = investigator.getByTestId("interview-steps");
+  const currentStep = steps.locator('[aria-current="step"]');
+  await expect(currentStep).toHaveText(/الجدولة/);
+  await expect(steps.locator("li")).toHaveCount(8);
 
   // 2. Schedule, invite, record the rights acknowledgement and the conduct.
   const schedule = investigator.getByTestId("schedule-form");
@@ -48,10 +53,17 @@ test("an interview is planned, recorded, reviewed and approved in Arabic", async
   await submit(investigator, "schedule-form");
   await expect(investigator.getByTestId("interview-status")).toHaveText("مجدولة");
 
-  // The conduct step stays blocked until the invitation and the rights are on record.
+  // One step at a time: the invitation is open; the rights and the conduct are named but have no form yet,
+  // and the schedule moves behind "Change the date".
+  await expect(currentStep).toHaveText(/الدعوة/);
+  await expect(investigator.getByTestId("rights-form")).toHaveCount(0);
+  await expect(investigator.getByTestId("conduct-form")).toHaveCount(0);
+  await expect(investigator.getByTestId("schedule-form")).toBeHidden();
+  await expect(investigator.getByTestId("reschedule")).toBeVisible();
   await investigator.getByTestId("notice-form").locator("#channel").selectOption("INTERNAL_EMAIL");
   await submit(investigator, "notice-form");
   await expect(investigator.getByTestId("notice-list")).toContainText("دعوة");
+  await expect(currentStep).toHaveText(/الحقوق/);
   await investigator.getByTestId("rights-form").locator("#noticeVersion").fill("SYNTHETIC-RIGHTS-V1");
   await submit(investigator, "rights-form");
   await expect(investigator.getByTestId("rights-status")).toContainText("SYNTHETIC-RIGHTS-V1");
@@ -82,11 +94,20 @@ test("an interview is planned, recorded, reviewed and approved in Arabic", async
   await ack.locator("#attestedSha256").fill(sha);
   await submit(investigator, "ack-form");
   await expect(investigator.getByTestId("statement-ack-v1")).toContainText("توقيع ورقي");
+  await expect(currentStep).toHaveText(/الإعداد/);
+  // The completed steps stay on the page, read-only.
+  await expect(investigator.getByTestId("rights-card")).toContainText("SYNTHETIC-RIGHTS-V1");
+  await expect(investigator.getByTestId("ack-form")).toHaveCount(0);
 
   // 4. Investigator A prepares; the review step is not theirs.
   await investigator.getByTestId("interview-action-PREPARE").locator('button[type="submit"]').click();
   await expect(investigator.getByTestId("interview-status")).toHaveText("مُعدّة");
   await expect(investigator.getByTestId("interview-action-REVIEW")).toHaveCount(0);
+  // The review is someone else's: the step says who, by role.
+  await expect(currentStep).toHaveText(/المراجعة/);
+  await expect(investigator.getByTestId("current-step").getByTestId("step-who")).toContainText(
+    "على ألا يكون من أعدّها",
+  );
   await investigator.context().close();
 
   // 5. The lead reviews; the approval is then closed to them (separation of duties).
@@ -103,6 +124,8 @@ test("an interview is planned, recorded, reviewed and approved in Arabic", async
   await manager.getByTestId("interview-action-APPROVE").locator('button[type="submit"]').click();
   await expect(manager.getByTestId("interview-status")).toHaveText("معتمدة");
   await expect(manager.getByTestId("statement-form")).toHaveCount(0);
+  await expect(manager.getByTestId("current-step")).toHaveCount(0);
+  await expect(manager.getByTestId("interview-steps").locator('[data-state="done"]')).toHaveCount(8);
   await expect(manager.getByTestId("lifecycle-card")).toContainText("لا توجد خطوة مراجعة متاحة لك الآن.");
   await manager.goto(`${caseUrl}/interviews`);
   await expect(manager.getByTestId("interviews-table")).toContainText(`مقابلة الشاهد كابا ${stamp}`);
