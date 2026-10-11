@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  approveFormSchema,
+  declareConflictSchema,
+  decideDispositionSchema,
+  decideHoldReleaseSchema,
   fieldErrors,
   isValidBirthDate,
   reportAttachmentUploadSchema,
+  reviewFormSchema,
+  reviewHoldRequestSchema,
   submitReportSchema,
   triageReportSchema,
 } from "./index";
@@ -201,6 +207,54 @@ describe("triageReportSchema", () => {
       reason: "Synthetic: belongs to another authority.",
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("decisions have no default answer (UX-019)", () => {
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const errors = (r: { success: boolean; error?: Parameters<typeof fieldErrors>[0] }) =>
+    r.success || !r.error ? {} : fieldErrors(r.error);
+
+  it("refuses an unanswered decision with 'choose one' on that field, at every former default", () => {
+    const cases = [
+      ["outcome", triageReportSchema.safeParse({ reportId: id, reason: "Synthetic: a long enough reason." })],
+      ["hasConflict", declareConflictSchema.safeParse({ caseId: id, declaration: "Synthetic declaration." })],
+      ["outcome", reviewFormSchema.safeParse({ instanceId: id, formCode: "WB-FRM-13" })],
+      ["outcome", approveFormSchema.safeParse({ instanceId: id, formCode: "WB-FRM-13" })],
+      [
+        "approve",
+        decideHoldReleaseSchema.safeParse({ releaseId: id, reason: "Synthetic: a long enough reason." }),
+      ],
+      [
+        "apply",
+        reviewHoldRequestSchema.safeParse({ requestId: id, reason: "Synthetic: a long enough reason." }),
+      ],
+      [
+        "approve",
+        decideDispositionSchema.safeParse({ requestId: id, reason: "Synthetic: a long enough reason." }),
+      ],
+    ] as const;
+    for (const [field, result] of cases) {
+      expect(result.success, field).toBe(false);
+      expect(errors(result)[field], field).toBe("validation.chooseOne");
+    }
+  });
+
+  it("still accepts an explicit answer, including the one that used to be pre-selected", () => {
+    expect(
+      declareConflictSchema.safeParse({
+        caseId: id,
+        hasConflict: false,
+        declaration: "Synthetic declaration.",
+      }).success,
+    ).toBe(true);
+    expect(
+      triageReportSchema.safeParse({
+        reportId: id,
+        outcome: "OPEN_CASE",
+        reason: "Synthetic: within mandate.",
+      }).success,
+    ).toBe(true);
   });
 });
 

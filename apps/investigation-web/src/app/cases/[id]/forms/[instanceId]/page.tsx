@@ -11,6 +11,7 @@ import {
   CDFCommandForm,
   CDFDescriptionList,
   CDFField,
+  CDFFieldError,
   CDFPageHeader,
   CDFTimeline,
   classificationTone,
@@ -209,14 +210,16 @@ export default async function FormInstancePage({
                 fieldLabels={{ outcome: t("forms.decision"), reason: t("forms.reason") }}
                 successMessage={t("forms.decided")}
               >
+                {/* No default answer (UX-019): the reviewer or approver chooses; an unanswered submit is refused. */}
                 <fieldset className="mb-3">
                   <legend className="mb-1 font-semibold">{t("forms.decision")}</legend>
                   <label className="mb-2 flex items-center gap-2">
                     <input
+                      id="outcome-accept"
                       type="radio"
                       name="outcome"
                       value={f.capabilities.canReview ? "REVIEWED" : "APPROVED"}
-                      defaultChecked
+                      required
                       className="size-5"
                       data-testid="outcome-accept"
                     />
@@ -227,11 +230,13 @@ export default async function FormInstancePage({
                       type="radio"
                       name="outcome"
                       value="RETURNED"
+                      required
                       className="size-5"
                       data-testid="outcome-return"
                     />
                     {t("forms.return")}
                   </label>
+                  <CDFFieldError id="outcome-accept" />
                 </fieldset>
                 <CDFField id="decision-reason" label={t("forms.reason")} hint={t("forms.reasonHint")}>
                   <textarea

@@ -1,11 +1,18 @@
 // RC-01 command-form contract in the browser, in Arabic (RTL) and English (LTR):
 // - UX-001: a refused submit keeps every typed value and every choice (text, textarea, select, radio);
+// - UX-019: a decision has no default, and a submit without a choice gets a translated field error and runs
+//   nothing;
 // - UX-030: the case-details form sends only what the user changed.
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "./support";
 import { closeFixtureConnections, receivedReport, reportStatus, screeningCase } from "./records-fixture";
 
 test.afterAll(closeFixtureConnections);
+
+const TEXT = {
+  en: { chooseOne: "Choose one option.", noDeclaration: "You have not declared yet." },
+  ar: { chooseOne: "اختر أحد الخيارات.", noDeclaration: "لم تقدم إقرارك بعد." },
+} as const;
 
 async function openSeedCase(page: Page, suffix: string) {
   await page.goto("/cases");
@@ -64,9 +71,20 @@ for (const locale of ["ar", "en"] as const) {
     await expect(assign.locator("#assignmentRole")).toHaveValue("REVIEWER");
     await expect(assign.locator("#assignReason")).toHaveValue("abc");
 
-    // 4. A refusal by the database, not the schema (the closing reason is too short): the reason stays.
-    const fresh = await screeningCase(`keep-reason-${locale}`);
+    // 4. Radios and textarea (conflict declaration): a too-short declaration is refused; the answer stays.
+    const fresh = await screeningCase(`keep-choice-${locale}`);
     await manager.goto(`/cases/${fresh.caseId}`);
+    const conflict = manager.getByTestId("conflict-form");
+    await conflict.getByTestId("conflict-no").check();
+    await conflict.locator("#declaration").fill("abc");
+    await submit(manager, "conflict-form");
+    await expect(conflict.getByTestId("error-summary")).toBeVisible();
+    await expect(conflict.getByTestId("conflict-no")).toBeChecked();
+    await expect(conflict.getByTestId("conflict-yes")).not.toBeChecked();
+    await expect(conflict.locator("#declaration")).toHaveValue("abc");
+    await expect(manager.getByTestId("my-conflict-status")).toHaveText(TEXT[locale].noDeclaration);
+
+    // 5. A refusal by the database, not the schema (the closing reason is too short): the reason stays.
     const close = manager.getByTestId("transition-SCREEN_OUT");
     await close.locator("textarea").fill("short");
     await close.getByRole("button").click();
@@ -75,6 +93,42 @@ for (const locale of ["ar", "en"] as const) {
     await expect(manager.getByTestId("case-state")).toHaveText(
       locale === "ar" ? "الفحص الأولي" : "Screening",
     );
+    await manager.context().close();
+  });
+
+  test(`${locale}: no choice returns a field error and changes nothing`, async ({ browser }) => {
+    // Triage: the decision starts unanswered; submitting without one is refused and the report stays RECEIVED.
+    const report = await receivedReport(`no-choice-${locale}`);
+    const triage = await signIn(browser, "triage@example.test", locale);
+    await triage.goto(`/intake/${report.reportId}`);
+    const form = triage.getByTestId("triage-form");
+    await expect(form.locator("#outcome")).toHaveValue("");
+    await form.locator("#reason").fill("Synthetic: a reason without a decision.");
+    await submit(triage, "triage-form");
+    await expect(form.getByTestId("error-summary")).toContainText(TEXT[locale].chooseOne);
+    await expect(form.locator("#outcome-error")).toHaveText(TEXT[locale].chooseOne);
+    await expect(form.locator("#outcome")).toHaveAttribute("aria-invalid", "true");
+    expect(await reportStatus(report.reportId)).toBe("RECEIVED");
+    await triage.reload();
+    await expect(triage.getByTestId("create-case-card")).toHaveCount(0);
+    await triage.context().close();
+
+    // Conflict declaration: neither answer is pre-selected; an unanswered declaration records nothing.
+    const fresh = await screeningCase(`no-choice-${locale}`);
+    const manager = await signIn(browser, "casemanager@example.test", locale);
+    await manager.goto(`/cases/${fresh.caseId}`);
+    const conflict = manager.getByTestId("conflict-form");
+    await expect(conflict.getByTestId("conflict-no")).not.toBeChecked();
+    await expect(conflict.getByTestId("conflict-yes")).not.toBeChecked();
+    await conflict.locator("#declaration").fill("Synthetic: declaration text without an answer.");
+    await submit(manager, "conflict-form");
+    await expect(conflict.getByTestId("error-summary")).toContainText(TEXT[locale].chooseOne);
+    await expect(conflict.locator("#hasConflict-no-error")).toHaveText(TEXT[locale].chooseOne);
+    await expect(conflict.locator("#declaration")).toHaveValue(
+      "Synthetic: declaration text without an answer.",
+    );
+    await manager.reload();
+    await expect(manager.getByTestId("my-conflict-status")).toHaveText(TEXT[locale].noDeclaration);
     await manager.context().close();
   });
 }

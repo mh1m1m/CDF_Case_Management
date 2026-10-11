@@ -54,7 +54,9 @@ export async function declareConflictAction(
   form: FormData,
 ): Promise<ActionState> {
   const { actor, ctx } = await requireActor();
-  const hasConflict = form.get("hasConflict") === "true";
+  // No default answer (UX-019): an unanswered declaration is refused by the shared schema, never read as "no".
+  const answer = form.get("hasConflict");
+  const hasConflict = answer === "true" ? true : answer === "false" ? false : undefined;
   const result = await investigationService().declareConflict(ctx, actor, {
     ...formObject(form),
     hasConflict,

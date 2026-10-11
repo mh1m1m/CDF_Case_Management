@@ -141,6 +141,7 @@ export const en = {
     acknowledgementRequired: "Please confirm the statement.",
     idNumber: "Enter a valid number for the selected ID type.",
     birthDate: "Enter the date as YYYY-MM-DD in the selected calendar.",
+    chooseOne: "Choose one option.",
   },
   category: {
     FINANCIAL_MISCONDUCT: "Financial misconduct",
@@ -451,6 +452,7 @@ export const en = {
     sendReply: "Send message",
     triageTitle: "Triage decision",
     outcome: "Decision",
+    chooseOutcome: "Choose a decision",
     reason: "Reason",
     reasonHint: "At least 10 characters. Recorded in the audit trail.",
     referredTo: "Referred to",

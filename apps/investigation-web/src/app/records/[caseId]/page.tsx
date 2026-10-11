@@ -253,6 +253,10 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                         submitLabel={t("records.decide")}
                         testId={`decide-release-${h.holdNumber}`}
                         successMessage={t("records.decided")}
+                        fieldLabels={{
+                          approve: t("records.decisionLabel"),
+                          reason: t("records.decisionReasonLabel"),
+                        }}
                       >
                         <DecisionFields
                           id={`release-decision-${h.id}`}
@@ -365,6 +369,10 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                   submitLabel={t("records.decide")}
                   testId="decide-disposition-form"
                   successMessage={t("records.decided")}
+                  fieldLabels={{
+                    approve: t("records.decisionLabel"),
+                    reason: t("records.decisionReasonLabel"),
+                  }}
                 >
                   <DecisionFields
                     id="disposition-decision"

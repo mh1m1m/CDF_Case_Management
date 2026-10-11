@@ -41,6 +41,8 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
   await manager.locator("#priority").selectOption("HIGH");
   await manager.getByTestId("details-form").getByRole("button").click();
   await expect(manager.getByTestId("details-form").getByRole("status")).toBeVisible();
+  // Nothing is pre-selected (UX-019): the declarant answers the question explicitly.
+  await manager.getByTestId("conflict-form").getByTestId("conflict-no").check();
   await manager
     .getByTestId("conflict-form")
     .locator("#declaration")
@@ -64,6 +66,7 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
   await investigator.goto("/cases");
   await expect(investigator.getByTestId(`case-${caseNumber}`)).toBeVisible();
   await investigator.goto(caseUrl);
+  await investigator.getByTestId("conflict-form").getByTestId("conflict-no").check();
   await investigator
     .getByTestId("conflict-form")
     .locator("#declaration")

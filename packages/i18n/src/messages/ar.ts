@@ -140,6 +140,7 @@ export const ar: Messages = {
     acknowledgementRequired: "يرجى تأكيد الإقرار.",
     idNumber: "أدخل رقماً صحيحاً لنوع الهوية المختار.",
     birthDate: "أدخل التاريخ بالصيغة YYYY-MM-DD حسب التقويم المختار.",
+    chooseOne: "اختر أحد الخيارات.",
   },
   category: {
     FINANCIAL_MISCONDUCT: "مخالفة مالية",
@@ -446,6 +447,7 @@ export const ar: Messages = {
     sendReply: "إرسال الرسالة",
     triageTitle: "قرار الفرز",
     outcome: "القرار",
+    chooseOutcome: "اختر قراراً",
     reason: "المبررات",
     reasonHint: "١٠ أحرف على الأقل. يُسجل في سجل التدقيق.",
     referredTo: "الجهة المحال إليها",

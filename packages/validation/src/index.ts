@@ -205,7 +205,8 @@ export type ReportAttachmentUpload = z.infer<typeof reportAttachmentUploadSchema
 export const triageReportSchema = z
   .object({
     reportId: uuid,
-    outcome: z.enum(TRIAGE_OUTCOMES),
+    // No default answer (UX-019): an unanswered decision is refused with a field error, never assumed.
+    outcome: z.enum(TRIAGE_OUTCOMES, { message: "validation.chooseOne" }),
     reason: text(10, 4000),
     referredTo: optionalText(200),
     duplicateOf: uuid.optional(),
@@ -244,7 +245,8 @@ export const assignCaseSchema = z.object({
 
 export const declareConflictSchema = z.object({
   caseId: uuid,
-  hasConflict: z.boolean(),
+  // No default answer (UX-019): the declarant must say yes or no.
+  hasConflict: z.boolean({ message: "validation.chooseOne" }),
   declaration: text(5, 2000),
 });
 
@@ -317,11 +319,21 @@ const returnNeedsReason = (v: { outcome: string; reason?: string }) =>
   v.outcome !== "RETURNED" || (v.reason !== undefined && v.reason.length >= 10);
 
 export const reviewFormSchema = z
-  .object({ instanceId: uuid, formCode, outcome: z.enum(FORM_REVIEW_OUTCOMES), reason: decisionReason })
+  .object({
+    instanceId: uuid,
+    formCode,
+    outcome: z.enum(FORM_REVIEW_OUTCOMES, { message: "validation.chooseOne" }),
+    reason: decisionReason,
+  })
   .refine(returnNeedsReason, { message: "validation.tooShort", path: ["reason"] });
 
 export const approveFormSchema = z
-  .object({ instanceId: uuid, formCode, outcome: z.enum(FORM_APPROVAL_OUTCOMES), reason: decisionReason })
+  .object({
+    instanceId: uuid,
+    formCode,
+    outcome: z.enum(FORM_APPROVAL_OUTCOMES, { message: "validation.chooseOne" }),
+    reason: decisionReason,
+  })
   .refine(returnNeedsReason, { message: "validation.tooShort", path: ["reason"] });
 
 export const withdrawFormSchema = z.object({ instanceId: uuid, formCode, reason: text(5, 2000) });

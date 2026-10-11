@@ -11,6 +11,7 @@ import {
   CDFCommandForm,
   CDFDescriptionList,
   CDFField,
+  CDFFieldError,
   CDFPageHeader,
   CDFProgressTracker,
   CDFTimeline,
@@ -406,25 +407,36 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   locale={t.locale}
                   submitLabel={t("cases.declare")}
                   variant="secondary"
-                  fieldLabels={{ declaration: t("cases.declaration") }}
+                  fieldLabels={{ hasConflict: t("cases.conflictTitle"), declaration: t("cases.declaration") }}
                   testId="conflict-form"
                 >
+                  {/* No default answer (UX-019): the declarant chooses; an unanswered submit is refused. */}
                   <fieldset className="mb-3">
                     <legend className="sr-only">{t("cases.conflictTitle")}</legend>
                     <label className="mb-2 flex items-center gap-2">
                       <input
+                        id="hasConflict-no"
                         type="radio"
                         name="hasConflict"
                         value="false"
-                        defaultChecked
+                        required
                         className="size-5"
+                        data-testid="conflict-no"
                       />{" "}
                       {t("cases.noConflict")}
                     </label>
                     <label className="flex items-center gap-2">
-                      <input type="radio" name="hasConflict" value="true" className="size-5" />{" "}
+                      <input
+                        type="radio"
+                        name="hasConflict"
+                        value="true"
+                        required
+                        className="size-5"
+                        data-testid="conflict-yes"
+                      />{" "}
                       {t("cases.hasConflict")}
                     </label>
+                    <CDFFieldError id="hasConflict-no" />
                   </fieldset>
                   <p className="mb-2 text-sm text-cdf-warning">{t("cases.conflictWarning")}</p>
                   <CDFField

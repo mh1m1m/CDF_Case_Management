@@ -52,6 +52,8 @@ for (const locale of ["ar", "en"] as const) {
     await expect(director.getByTestId("decide-disposition-form")).toBeVisible();
     await audit(director);
     const decide = director.getByTestId("decide-disposition-form");
+    // Nothing is pre-selected (UX-019): the decision is chosen explicitly.
+    await decide.locator('input[value="APPROVE"]').check();
     await decide.locator("textarea").fill("Synthetic decision reason.");
     await decide.locator('button[type="submit"]').click();
     await expect(director.getByTestId("disposition-status-APPROVED")).toBeVisible();
