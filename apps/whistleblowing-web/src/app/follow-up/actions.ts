@@ -9,6 +9,10 @@ export type StatusResult =
   | { status: "not_found" }
   | { status: "error"; kind: string; ref: string };
 
+/** What a native (no-JavaScript) sign-in or reply renders. Never carries the secret. */
+export type FollowUpFormState =
+  null | StatusResult | { status: "ok"; report: PortalReportStatus; replySent: true };
+
 async function guarded<T>(
   fn: (requestId: string, key: string) => Promise<T>,
 ): Promise<T | { status: "error"; kind: string; ref: string }> {
@@ -40,4 +44,25 @@ export async function postMessageAction(
     const report = await portalService().getStatus({ requestId }, key, { reportRef, secret });
     return report ? { status: "ok" as const, report } : { status: "not_found" as const };
   });
+}
+
+/**
+ * Sign-in and reply from the forms' native POST, before hydration or with JavaScript off (UX-002). Both go
+ * through the same actions as the JavaScript path, so an unknown Report ID and a wrong secret still give the
+ * same answer (§23). The secret comes from the POST body each time and is never returned or rendered: the
+ * no-JavaScript reply form asks for it again.
+ */
+export async function followUpFormAction(
+  _previous: FollowUpFormState,
+  form: FormData,
+): Promise<FollowUpFormState> {
+  const field = (name: string) => {
+    const v = form.get(name);
+    return typeof v === "string" ? v : "";
+  };
+  if (form.has("body")) {
+    const r = await postMessageAction(field("reportRef"), field("secret"), field("body"));
+    return r.status === "ok" ? { ...r, replySent: true } : r;
+  }
+  return getStatusAction(field("reportRef"), field("secret"));
 }

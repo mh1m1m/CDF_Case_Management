@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import { createTranslator, formatDateTime, type Locale, type MessageKey } from "@cdf/i18n";
 import {
   CDFAlert,
@@ -12,11 +12,19 @@ import {
   textareaClass,
 } from "@cdf/ui";
 import { AttachmentUploader } from "../report/attachment-uploader";
-import { getStatusAction, postMessageAction, type StatusResult } from "./actions";
+import { followUpFormAction, getStatusAction, postMessageAction, type StatusResult } from "./actions";
 
-/** Credentials live only in component state for this page view; never in storage, cookies or URLs. */
+/**
+ * Credentials live only in component state for this page view; never in storage, cookies or URLs.
+ *
+ * Without JavaScript (or before hydration) the sign-in form posts natively and the server answers with the
+ * status and conversation (UX-002). That answer holds no credentials, so its reply form asks for the secret
+ * again; the secret is never written into the page, not even into a hidden field.
+ */
 export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attachmentsEnabled: boolean }) {
   const t = createTranslator(locale);
+  const [formState, formAction] = useActionState(followUpFormAction, null);
+  const [serverViewClosed, setServerViewClosed] = useState(false);
   const [creds, setCreds] = useState<{ reportRef: string; secret: string } | null>(null);
   const [result, setResult] = useState<StatusResult | null>(null);
   const [replySent, setReplySent] = useState(false);
@@ -25,6 +33,11 @@ export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attac
   // pending, so focus would fall to <body>. Say where it goes after each swap (WCAG 2.4.3).
   const focusNext = useRef<"status" | "reportRef" | "body" | null>(null);
   const statusView = useRef<HTMLDivElement>(null);
+
+  // The JavaScript path's own result wins; otherwise the server's answer to a native POST.
+  const view = result ?? (serverViewClosed ? null : formState);
+  // Opened by a native POST: this page holds no credentials.
+  const openedOnServer = result === null && view?.status === "ok";
 
   useEffect(() => {
     const target = focusNext.current;
@@ -69,24 +82,33 @@ export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attac
     });
   };
 
-  if (result?.status === "ok" && creds) {
-    const report = result.report;
+  if (view?.status === "ok" && (creds || openedOnServer)) {
+    const report = view.report;
+    const sent = openedOnServer ? "replySent" in view : replySent;
     return (
       <div ref={statusView} data-testid="report-status">
         <CDFCard
           title={`${t("portal.reportRef")}: ${report.reportRef}`}
           actions={
-            <button
-              type="button"
-              className={buttonClass("ghost")}
-              onClick={() => {
-                focusNext.current = "reportRef";
-                setCreds(null);
-                setResult(null);
-              }}
-            >
-              {t("portal.signOutFollowUp")}
-            </button>
+            openedOnServer ? (
+              // A plain link also works without JavaScript: it opens an empty follow-up page.
+              <a href="/follow-up" className={buttonClass("ghost")}>
+                {t("portal.signOutFollowUp")}
+              </a>
+            ) : (
+              <button
+                type="button"
+                className={buttonClass("ghost")}
+                onClick={() => {
+                  focusNext.current = "reportRef";
+                  setCreds(null);
+                  setResult(null);
+                  setServerViewClosed(true);
+                }}
+              >
+                {t("portal.signOutFollowUp")}
+              </button>
+            )
           }
         >
           <p className="mb-2">
@@ -113,38 +135,83 @@ export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attac
         </CDFCard>
         {report.canReply ? (
           <CDFCard>
-            {replySent ? <CDFAlert tone="success">{t("portal.replySent")}</CDFAlert> : null}
-            <form method="post" onSubmit={reply}>
-              <CDFField id="body" label={t("portal.reply")}>
-                <textarea
-                  id="body"
-                  name="body"
-                  required
-                  maxLength={4000}
-                  className={textareaClass}
-                  rows={4}
-                />
-              </CDFField>
-              <button
-                type="submit"
-                className={buttonClass("primary")}
-                disabled={pending}
-                data-testid="send-reply"
-              >
-                {t("portal.sendReply")}
-              </button>
-            </form>
+            {sent ? (
+              <CDFAlert tone="success" testId="reply-sent">
+                {t("portal.replySent")}
+              </CDFAlert>
+            ) : null}
+            {openedOnServer ? (
+              <form action={formAction} data-testid="reply-form">
+                <p className="mb-3 text-sm text-cdf-text-secondary">
+                  {t("portal.noScript.replyCredentials")}
+                </p>
+                {/* The Report ID is already shown above; the secret is typed again and never rendered. */}
+                <input type="hidden" name="reportRef" defaultValue={report.reportRef} />
+                <CDFField id="secret" label={t("portal.secret")}>
+                  <input
+                    id="secret"
+                    name="secret"
+                    type="password"
+                    required
+                    autoComplete="off"
+                    spellCheck={false}
+                    dir="ltr"
+                    className={inputClass}
+                  />
+                </CDFField>
+                <CDFField id="body" label={t("portal.reply")}>
+                  <textarea
+                    id="body"
+                    name="body"
+                    required
+                    maxLength={4000}
+                    className={textareaClass}
+                    rows={4}
+                  />
+                </CDFField>
+                <button type="submit" className={buttonClass("primary")} data-testid="send-reply">
+                  {t("portal.sendReply")}
+                </button>
+              </form>
+            ) : (
+              <form method="post" onSubmit={reply}>
+                <CDFField id="body" label={t("portal.reply")}>
+                  <textarea
+                    id="body"
+                    name="body"
+                    required
+                    maxLength={4000}
+                    className={textareaClass}
+                    rows={4}
+                  />
+                </CDFField>
+                <button
+                  type="submit"
+                  className={buttonClass("primary")}
+                  disabled={pending}
+                  data-testid="send-reply"
+                >
+                  {t("portal.sendReply")}
+                </button>
+              </form>
+            )}
           </CDFCard>
         ) : (
           <CDFAlert tone="info">{t("portal.closedNotice")}</CDFAlert>
         )}
         {report.canReply && attachmentsEnabled ? (
-          <AttachmentUploader
-            locale={locale}
-            reportRef={creds.reportRef}
-            secret={creds.secret}
-            source="FOLLOW_UP"
-          />
+          creds ? (
+            <AttachmentUploader
+              locale={locale}
+              reportRef={creds.reportRef}
+              secret={creds.secret}
+              source="FOLLOW_UP"
+            />
+          ) : (
+            <CDFAlert tone="info" testId="attachments-need-javascript">
+              {t("portal.attachments.needsJavaScript")}
+            </CDFAlert>
+          )
         ) : null}
       </div>
     );
@@ -152,17 +219,18 @@ export function FollowUp({ locale, attachmentsEnabled }: { locale: Locale; attac
 
   return (
     <CDFCard>
-      {result?.status === "not_found" ? (
+      {view?.status === "not_found" ? (
         <CDFAlert tone="danger" testId="follow-up-error">
           {t("portal.invalidCredentials")}
         </CDFAlert>
       ) : null}
-      {result?.status === "error" ? (
+      {view?.status === "error" ? (
         <CDFAlert tone="danger" testId="follow-up-error">
-          {t("errors.withReference", { message: t(`errors.${result.kind}` as MessageKey), ref: result.ref })}
+          {t("errors.withReference", { message: t(`errors.${view.kind}` as MessageKey), ref: view.ref })}
         </CDFAlert>
       ) : null}
-      <form method="post" onSubmit={open} data-testid="follow-up-form">
+      {/* React renders method="POST" and the action fields for the native submission, so no method prop here. */}
+      <form action={formAction} onSubmit={open} data-testid="follow-up-form">
         <CDFField id="reportRef" label={t("portal.reportRef")}>
           <input
             id="reportRef"
