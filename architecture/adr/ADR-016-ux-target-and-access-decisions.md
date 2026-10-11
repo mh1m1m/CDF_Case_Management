@@ -301,6 +301,11 @@ UX-002 is re-rated only after that.
 - the hosted check is not done (the deployment URL was unreachable from the build environment);
 - without JavaScript a report or follow-up sign-in is dropped silently, with no message to the reporter.
 
+**Update 2026-10-11, `main` at `0034f47` (after #51).** On a local production build of `main`, a report and a follow-up sign-in without JavaScript now answer in the POST response with the receipt and the status page, in Arabic and English. All five points pass again (the repository's no-JS and portal specs, 15 of 15, and a request and log scan). Two items remain:
+
+- UX-002 stays open for the hosted check, which still could not be reached from the build environment;
+- reloading the receipt page re-submits the report, which is CDF-146.
+
 ## Delivery governance
 
 - **Unit path.** Every unit of work follows Requirement → Decision → Linear → Branch → PR → Test → Hosted validation. Delivery goes through the redesign epics and coherent capabilities, not one ticket per debt item.
