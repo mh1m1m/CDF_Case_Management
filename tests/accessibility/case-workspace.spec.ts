@@ -1,9 +1,10 @@
 // WCAG 2.2 AA on the S2 case workspace (CDF-119; audit §22) in Arabic and English, at a desktop and a phone width
-// and at 320 px: the header on every tab, the overflow menu open, the stage panel and each tab's content. Also
-// checks what the overview must answer on first paint: where the case is, since when, by when, and what next.
+// and at 320 px: the header on every tab and on an evidence item's page, the overflow menu open, the stage panel
+// and each tab's content. Also checks what the overview must answer on first paint: where the case is, since
+// when, by when, and what next.
 import { expect, test } from "@playwright/test";
 import { audit } from "./axe";
-import { signIn } from "../e2e/support";
+import { openEvidenceItem, signIn } from "../e2e/support";
 
 const TABS = ["", "/allegations", "/evidence", "/interviews", "/forms", "/reporter", "/people", "/history"];
 const WIDTHS = [1280, 390, 320] as const;
@@ -15,9 +16,11 @@ for (const locale of ["ar", "en"] as const) {
     await page.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
     await page.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
     const caseUrl = page.url();
+    // An evidence item's own page (UX-075) is checked with the tabs.
+    const itemPath = (await openEvidenceItem(page, caseUrl)).slice(caseUrl.length);
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });
-      for (const tab of TABS) {
+      for (const tab of [...TABS, itemPath]) {
         await page.goto(`${caseUrl}${tab}`);
         await expect(page.getByTestId("case-header")).toBeVisible();
         if (width !== 320) await audit(page);

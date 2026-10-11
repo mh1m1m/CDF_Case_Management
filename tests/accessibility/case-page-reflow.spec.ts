@@ -1,4 +1,5 @@
-// CDF-53: the case's evidence tab reflows at 320 CSS px (WCAG 1.4.10) and repeated evidence controls have distinct names.
+// CDF-53: the case's evidence tab and an evidence item's page (UX-075) reflow at 320 CSS px (WCAG 1.4.10), and
+// repeated evidence controls have distinct names.
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "../e2e/support";
 
@@ -28,34 +29,40 @@ for (const locale of ["ar", "en"] as const) {
     const page = await signIn(browser, "casemanager@example.test", locale);
     await openCaseWithEvidence(page);
     await page.setViewportSize({ width: 320, height: 640 });
-    const width = await page.evaluate(() => document.documentElement.scrollWidth);
-    expect(width).toBeLessThanOrEqual(320);
+    const width = () => page.evaluate(() => document.documentElement.scrollWidth);
+    expect(await width()).toBeLessThanOrEqual(320);
+    await page.locator('[data-testid^="evidence-row-"]').first().click();
+    await expect(page.getByTestId("evidence-item")).toBeVisible();
+    expect(await width()).toBeLessThanOrEqual(320);
     await page.context().close();
   });
 
   test(`${locale}: evidence links and buttons have distinct accessible names`, async ({ browser }) => {
     const page = await signIn(browser, "casemanager@example.test", locale);
     await openCaseWithEvidence(page);
-    await page
-      .locator('[data-testid^="evidence-versions-"]')
-      .evaluateAll((ds) => ds.forEach((d) => ((d as HTMLDetailsElement).open = true)));
-    const card = page.getByTestId("evidence-card");
-    const names = async (selector: "a[href]" | "button") =>
-      Promise.all(
-        (await card.locator(selector).all()).map(async (l) =>
-          (await l.evaluate((e) => e.getAttribute("aria-label") || e.textContent || "")).trim(),
-        ),
-      );
-    const links = await names("a[href]");
-    expect(links.length).toBeGreaterThan(0);
-    expect(new Set(links).size).toBe(links.length);
-    const buttons = await names("button");
-    expect(new Set(buttons).size).toBe(buttons.length);
-    // Each file input has its own label (file inputs expose a role of button, so they are checked by label).
-    const fileLabels = await card
-      .locator('input[type="file"]')
-      .evaluateAll((inputs) => inputs.map((i) => (i as HTMLInputElement).labels?.[0]?.textContent ?? ""));
-    expect(new Set(fileLabels).size).toBe(fileLabels.length);
+    const distinct = async (testId: string) => {
+      const card = page.getByTestId(testId);
+      const names = async (selector: "a[href]" | "button") =>
+        Promise.all(
+          (await card.locator(selector).all()).map(async (l) =>
+            (await l.evaluate((e) => e.getAttribute("aria-label") || e.textContent || "")).trim(),
+          ),
+        );
+      const links = await names("a[href]");
+      expect(links.length).toBeGreaterThan(0);
+      expect(new Set(links).size).toBe(links.length);
+      const buttons = await names("button");
+      expect(new Set(buttons).size).toBe(buttons.length);
+      // Each file input has its own label (file inputs expose a role of button, so they are checked by label).
+      const fileLabels = await card
+        .locator('input[type="file"]')
+        .evaluateAll((inputs) => inputs.map((i) => (i as HTMLInputElement).labels?.[0]?.textContent ?? ""));
+      expect(new Set(fileLabels).size).toBe(fileLabels.length);
+    };
+    await distinct("evidence-card");
+    // The item page carries the versions, the restriction and the new-version form (UX-075).
+    await page.locator('[data-testid^="evidence-row-"]').first().click();
+    await distinct("evidence-item");
     await page.context().close();
   });
 }

@@ -1,6 +1,7 @@
 // Second vertical slice through the browser (§24–§27): an assigned investigator uploads evidence, the
-// scanner rejects a test-virus file, downloads are audited and outsiders get nothing. DEC-09 (migration 1850):
-// only the investigation team sees the register, and the lead can limit an item to the case leads.
+// scanner rejects a test-virus file, downloads are audited and outsiders get nothing. Each item has its own page
+// (UX-075). DEC-09 (migration 1850): only the investigation team sees the register, and the lead can limit an
+// item to the case leads.
 import { expect, test } from "@playwright/test";
 import { signIn } from "./support";
 
@@ -46,12 +47,23 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   expect(res.headers()["x-content-type-options"]).toBe("nosniff");
   expect(res.headers()["cache-control"]).toContain("no-store");
   expect((await res.body()).toString()).toContain(`synthetic e2e evidence ${stamp}`);
+  // The number opens the item's own page (UX-075): its versions and its chain of custody, with the download.
   await investigator.reload();
-  const details = investigator.locator('[data-testid^="evidence-versions-"]').last();
-  await details.locator("summary").click();
-  await expect(details).toContainText("Received");
-  await expect(details).toContainText("Stored in the vault");
-  await expect(details).toContainText("Downloaded");
+  await investigator.getByTestId(`evidence-row-${seq}`).click();
+  await expect(investigator).toHaveURL(/\/cases\/[0-9a-f-]{36}\/evidence\/items\/[0-9a-f-]{36}$/);
+  const itemUrl = investigator.url();
+  await expect(investigator.getByTestId("evidence-item")).toContainText(`Synthetic invoice batch ${stamp}`);
+  await expect(investigator.getByTestId("evidence-about")).toContainText("Finance shared drive (synthetic)");
+  await expect(investigator.getByTestId(`evidence-versions-${seq}`)).toContainText(
+    `synthetic-invoice-${stamp}.pdf`,
+  );
+  const custody = investigator.getByTestId(`custody-${seq}`);
+  await expect(custody).toContainText("Received");
+  await expect(custody).toContainText("Stored in the vault");
+  await expect(custody).toContainText("Downloaded");
+  await expect(investigator.getByTestId(`new-version-form-${seq}`)).toBeVisible();
+  // Only the case leads change who sees an item.
+  await expect(investigator.getByTestId(`restriction-form-${seq}`)).toHaveCount(0);
   await investigator.getByTestId("case-tab-history").click();
   await expect(investigator.getByTestId("audit-timeline")).toContainText("Evidence stored");
   await investigator.getByTestId("case-tab-evidence").click();
@@ -82,6 +94,7 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   const outsider = await signIn(browser, "investigator.b@example.test");
   expect((await outsider.request.get(href)).status()).toBe(404);
   expect((await outsider.goto(caseUrl))?.status()).toBe(404);
+  expect((await outsider.goto(itemUrl))?.status()).toBe(404);
   await outsider.context().close();
 
   const triage = await signIn(browser, "triage@example.test");
@@ -92,21 +105,22 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   await expect(triage.getByTestId("evidence-form")).toHaveCount(0);
   await expect(triage.locator("main")).not.toContainText(`Synthetic invoice batch ${stamp}`);
   expect((await triage.request.get(href)).status()).toBe(404);
+  expect((await triage.goto(itemUrl))?.status()).toBe(404);
   await triage.context().close();
 
   const grc = await signIn(browser, "grc.director@example.test");
   expect((await grc.goto(caseUrl))?.status()).toBe(404);
+  expect((await grc.goto(itemUrl))?.status()).toBe(404);
   await grc.goto(caseUrl.replace(/\/evidence$/, ""));
   await expect(grc.getByTestId("case-header")).toBeVisible();
   await expect(grc.getByTestId("case-tab-evidence")).toHaveCount(0);
   await grc.context().close();
 
   // 6. The lead limits the item to the case leads: the investigator who added it no longer sees it or its
-  //    download; opened again, it is back. Both changes carry a reason and reach the history.
+  //    item page or download; opened again, it is back. Both changes carry a reason and reach the history.
   const lead = await signIn(browser, "lead@example.test");
   const change = async (reason: string) => {
-    await lead.goto(caseUrl);
-    await lead.getByTestId(`evidence-versions-${seq}`).locator("summary").click();
+    await lead.goto(itemUrl);
     const f = lead.getByTestId(`restriction-form-${seq}`);
     await f.locator('input[name="reason"]').fill(reason);
     await f.locator('button[type="submit"]').click();
@@ -120,6 +134,7 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
     `Synthetic invoice batch ${stamp}`,
   );
   expect((await investigatorAgain.request.get(href)).status()).toBe(404);
+  expect((await investigatorAgain.goto(itemUrl))?.status()).toBe(404);
   await change("Synthetic: source checked, the team needs it.");
   await expect(lead.getByTestId(`evidence-leads-${seq}`)).toHaveCount(0);
   await lead.getByTestId("case-tab-history").click();
@@ -129,7 +144,7 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   await expect(lead.getByTestId("audit-timeline")).toContainText(
     `EV-${seq.padStart(3, "0")} open to the investigation team`,
   );
-  await investigatorAgain.reload();
+  await investigatorAgain.goto(caseUrl);
   await expect(investigatorAgain.getByTestId("evidence-table")).toContainText(
     `Synthetic invoice batch ${stamp}`,
   );

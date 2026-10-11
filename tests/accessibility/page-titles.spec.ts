@@ -1,7 +1,7 @@
 // CDF-56: every page has a title that says what it is, followed by the app name (WCAG 2.4.2).
 // Portal titles never carry a Report ID or secret; internal titles carry no case content.
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { APP, PORTAL, contextIn, sharedAnonymousReport, signIn } from "../e2e/support";
+import { APP, PORTAL, contextIn, openEvidenceItem, sharedAnonymousReport, signIn } from "../e2e/support";
 
 const appNames = {
   en: { app: "CDF Case Management & Investigation Platform", portal: "CDF Whistleblowing Portal" },
@@ -77,6 +77,7 @@ for (const locale of ["ar", "en"] as const) {
         "Case evidence",
         "Case people and access",
         "Case history",
+        "Evidence item details",
       ],
       ar: [
         "قضية",
@@ -88,6 +89,7 @@ for (const locale of ["ar", "en"] as const) {
         "أدلة القضية",
         "فريق القضية وصلاحياتها",
         "مجريات القضية",
+        "تفاصيل الدليل",
       ],
     }[locale];
     const lead = await signIn(browser, "lead@example.test", locale);
@@ -113,9 +115,12 @@ for (const locale of ["ar", "en"] as const) {
       await lead.goto(`${caseUrl}/${tab}`);
       titles.push(await pagePart(lead, names.app));
     }
+    // An evidence item's own page (UX-075): neither its number nor its title is in the page title.
+    await openEvidenceItem(lead, caseUrl);
+    titles.push(await pagePart(lead, names.app));
     expect(titles).toEqual(expected);
     // No case number or case content in any of them.
-    for (const title of titles) expect(title).not.toMatch(/CDF-DEMO-|WB-/);
+    for (const title of titles) expect(title).not.toMatch(/CDF-DEMO-|WB-|EV-|Synthetic/);
     await lead.context().close();
   });
 

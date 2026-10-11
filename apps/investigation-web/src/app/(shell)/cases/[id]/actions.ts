@@ -148,10 +148,6 @@ export async function transitionAction(
   return toActionState(result, form);
 }
 
-/**
- * Evidence upload (§24–§27). The file travels only server-side: bytes → checks → quarantine → scan → vault.
- * `evidenceId` is set when adding a version to an existing item.
- */
 /** DEC-09: limit an item to the case leads, or open it to the team again. The database decides who may. */
 export async function setEvidenceRestrictionAction(
   caseId: string,
@@ -171,6 +167,10 @@ export async function setEvidenceRestrictionAction(
   return toActionState(result, form);
 }
 
+/**
+ * Evidence upload (§24–§27). The file travels only server-side: bytes → checks → quarantine → scan → vault.
+ * `evidenceId` is set when adding a version to an existing item.
+ */
 export async function uploadEvidenceAction(
   caseId: string,
   evidenceId: string | null,

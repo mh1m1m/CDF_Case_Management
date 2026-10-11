@@ -45,6 +45,7 @@ import {
   transitionInterviewAction,
 } from "../actions";
 import { interviewStatusTone } from "../status-tone";
+import { evidenceItemHref } from "../../evidence-panel";
 import { CaseWorkspace, loadCase } from "../../workspace";
 
 /** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
@@ -95,6 +96,8 @@ export default async function InterviewDetailPage({
       (INTERVIEW_RECORDING_EVIDENCE_TYPES as readonly string[]).includes(e.evidenceType) &&
       !i.recordings.some((r) => r.evidenceId === e.id),
   );
+  // RLS lists a recording only with its evidence item, which only the team sees (DEC-09); link it to the item's page.
+  const register = c.evidenceAccess === "TEAM" || c.evidenceAccess === "LEADS";
   const current = i.statements.find((s) => s.id === i.currentStatementVersionId) ?? null;
   const name = (n: { displayName: string; displayNameAr?: string }) =>
     t.locale === "ar" && n.displayNameAr ? n.displayNameAr : n.displayName;
@@ -548,9 +551,20 @@ export default async function InterviewDetailPage({
               <ul className="mb-3 list-disc ps-5 text-sm" data-testid="recording-list">
                 {i.recordings.map((r) => (
                   <li key={r.id}>
-                    <span dir="ltr">{evidenceDisplayNumber(r.evidenceSequenceNo)}</span> · {r.evidenceTitle} ·{" "}
-                    {t.code("evidenceType", r.evidenceType, "common.none")} · {r.linkedByName ?? "—"} ·{" "}
-                    {when(r.linkedAt)}
+                    {register ? (
+                      <a
+                        href={evidenceItemHref(c.id, r.evidenceId)}
+                        dir="ltr"
+                        className="underline underline-offset-4"
+                        data-testid={`recording-evidence-${r.evidenceSequenceNo}`}
+                      >
+                        {evidenceDisplayNumber(r.evidenceSequenceNo)}
+                      </a>
+                    ) : (
+                      <span dir="ltr">{evidenceDisplayNumber(r.evidenceSequenceNo)}</span>
+                    )}{" "}
+                    · {r.evidenceTitle} · {t.code("evidenceType", r.evidenceType, "common.none")} ·{" "}
+                    {r.linkedByName ?? "—"} · {when(r.linkedAt)}
                   </li>
                 ))}
               </ul>
