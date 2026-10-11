@@ -81,6 +81,7 @@ export function CDFUserMenu({
     <details className="relative" data-testid="user-menu">
       <summary
         aria-label={summaryLabel}
+        data-testid="signed-in-as"
         className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-cdf-md px-2 hover:bg-cdf-hover [&::-webkit-details-marker]:hidden"
       >
         <span
@@ -89,7 +90,7 @@ export function CDFUserMenu({
         >
           {name.trim().charAt(0)}
         </span>
-        <span className="hidden max-w-48 truncate sm:inline" data-testid="signed-in-as">
+        <span className="hidden max-w-48 truncate sm:inline">
           {name}
         </span>
         <svg
