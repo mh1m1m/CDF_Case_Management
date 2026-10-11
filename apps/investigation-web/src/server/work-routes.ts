@@ -51,9 +51,11 @@ export function itemHref(i: WorkItem): string {
       // A reply on a report that already has a case is answered from the case.
       return i.category === "REPORTER_REPLIED" && onCase ? onCase : `/intake/${i.targetId}`;
     case "CASE":
-      return i.category === "DECLARE_CONFLICT" ? `/cases/${i.targetId}#conflict` : `/cases/${i.targetId}`;
+      return i.category === "DECLARE_CONFLICT"
+        ? `/cases/${i.targetId}/people#conflict`
+        : `/cases/${i.targetId}`;
     case "CONFLICT":
-      return onCase ? `${onCase}#conflict-decisions` : "/my-work";
+      return onCase ? `${onCase}/people#conflict-decisions` : "/my-work";
     case "FORM_INSTANCE":
       return onCase ? `${onCase}/forms/${i.targetId}` : "/my-work";
     case "INTERVIEW":
@@ -92,4 +94,9 @@ export function overdueKeys(items: readonly WorkItem[], now: number = Date.now()
       .filter((i) => i.dueAt !== null && Date.parse(i.dueAt) < now)
       .map((i) => `${i.category}:${i.targetId}`),
   );
+}
+
+/** Whether a due date has passed (a case's stage target, for example). */
+export function isPast(iso: string | null, now: number = Date.now()): boolean {
+  return iso !== null && Date.parse(iso) < now;
 }

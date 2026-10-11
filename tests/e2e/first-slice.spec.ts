@@ -27,7 +27,7 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
   await triage.getByTestId("create-case-form").getByRole("button").click();
   await expect(triage).toHaveURL(/\/cases\/[0-9a-f-]{36}$/);
   const caseUrl = triage.url();
-  const caseNumber = ((await triage.locator("h1").textContent()) ?? "").split(" · ")[0]!;
+  const caseNumber = ((await triage.getByTestId("case-number").textContent()) ?? "").trim();
   expect(caseNumber).toMatch(/^CDF-DEMO-\d{4}-\d{4,5}$/);
   await transition(triage, "START_SCREENING");
   await transition(triage, "COMPLETE_SCREENING");
@@ -41,7 +41,8 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
   await manager.locator("#priority").selectOption("HIGH");
   await manager.getByTestId("details-form").getByRole("button").click();
   await expect(manager.getByTestId("details-form").getByRole("status")).toBeVisible();
-  // Nothing is pre-selected (UX-019): the declarant answers the question explicitly.
+  // Nothing is pre-selected (UX-019): the declarant answers the question explicitly (People & access tab).
+  await manager.getByTestId("case-tab-people").click();
   await manager.getByTestId("conflict-form").getByTestId("conflict-no").check();
   await manager
     .getByTestId("conflict-form")
@@ -49,12 +50,14 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
     .fill("Synthetic: no relationship with the parties.");
   await manager.getByTestId("conflict-form").getByRole("button").click();
   await expect(manager.getByTestId("my-conflict-status")).toContainText("No conflict declared");
+  await manager.getByTestId("case-tab-overview").click();
   await transition(manager, "CLEAR_CONFLICT_CHECK");
   await transition(manager, "COMPLETE_TRIAGE");
   await transition(manager, "CONFIRM_JURISDICTION", "Synthetic: procurement misconduct is within mandate.");
   await expect(manager.getByTestId("blocked-APPROVE_INVESTIGATION")).toContainText(
     "Assign an investigator first.",
   );
+  await manager.getByTestId("case-tab-people").click();
   await manager.locator("#userId").selectOption({ label: "Investigator Beta" });
   await manager.locator("#assignReason").fill("Synthetic: procurement experience");
   await manager.getByTestId("assign-form").getByRole("button").click();
@@ -65,7 +68,7 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
   const investigator = await signIn(browser, "investigator.b@example.test");
   await investigator.goto("/cases");
   await expect(investigator.getByTestId(`case-${caseNumber}`)).toBeVisible();
-  await investigator.goto(caseUrl);
+  await investigator.goto(`${caseUrl}/people`);
   await investigator.getByTestId("conflict-form").getByTestId("conflict-no").check();
   await investigator
     .getByTestId("conflict-form")
@@ -89,6 +92,7 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
   await grc.goto(caseUrl);
   await transition(grc, "APPROVE_INVESTIGATION", "Synthetic: approved for full investigation.");
   await expect(grc.getByTestId("case-state")).toHaveText("Investigation");
+  await grc.getByTestId("case-tab-history").click();
   await expect(grc.getByTestId("audit-timeline")).toContainText("Case created");
   await expect(grc.getByTestId("audit-timeline")).toContainText("Person assigned");
   await grc.context().close();

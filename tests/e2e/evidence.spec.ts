@@ -11,6 +11,7 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   const investigator = await signIn(browser, "investigator.a@example.test");
   await investigator.goto("/cases");
   await investigator.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
+  await investigator.getByTestId("case-tab-evidence").click();
   await expect(investigator.getByTestId("evidence-card")).toBeVisible();
   const caseUrl = investigator.url();
 
@@ -46,7 +47,9 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   await expect(details).toContainText("Received");
   await expect(details).toContainText("Stored in the vault");
   await expect(details).toContainText("Downloaded");
+  await investigator.getByTestId("case-tab-history").click();
   await expect(investigator.getByTestId("audit-timeline")).toContainText("Evidence stored");
+  await investigator.getByTestId("case-tab-evidence").click();
 
   // 3. The EICAR test file is rejected by the scanner and recorded as a rejected version.
   await form

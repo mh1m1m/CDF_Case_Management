@@ -1,10 +1,11 @@
-// CDF-53: the case page reflows at 320 CSS px (WCAG 1.4.10) and repeated evidence controls have distinct names.
+// CDF-53: the case's evidence tab reflows at 320 CSS px (WCAG 1.4.10) and repeated evidence controls have distinct names.
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "../e2e/support";
 
 async function openCaseWithEvidence(page: Page) {
   await page.goto("/cases");
   await page.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
+  await page.getByTestId("case-tab-evidence").click();
   await expect(page.getByTestId("evidence-card")).toBeVisible();
   // The table only renders once an item exists; add one synthetic file so its width is part of the check.
   if ((await page.getByTestId("evidence-table").count()) === 0) {

@@ -109,7 +109,7 @@ for (const locale of ["ar", "en"] as const) {
     const page = await signIn(browser, "casemanager@example.test", locale);
 
     // Declaring "I have a conflict" removes the declarant's own access, so it asks; Cancel records nothing.
-    await page.goto(`/cases/${fresh.caseId}`);
+    await page.goto(`/cases/${fresh.caseId}/people`);
     const conflict = page.getByTestId("conflict-form");
     await conflict.getByTestId("conflict-yes").check();
     await conflict.locator("#declaration").fill("Synthetic: a declaration that is cancelled.");

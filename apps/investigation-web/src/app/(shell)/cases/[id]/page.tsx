@@ -1,47 +1,41 @@
+// Case overview «نظرة عامة» (UX redesign S2; audit §22.3; CDF-119). Answers where the case is, what comes next,
+// who can do it and by when, on first paint: the stage panel, the viewer's own items here, key facts, the team
+// and the latest business events. Everything shown is what the database returned for this viewer; every step
+// is re-checked by api.transition_case.
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import Link from "next/link";
-import { can, navigationFor } from "@cdf/authorization";
-import { ASSIGNMENT_ROLES, PRIORITIES } from "@cdf/contracts";
+import { can } from "@cdf/authorization";
+import { PRIORITIES, type TransitionOption } from "@cdf/contracts";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
-  CDFAlert,
   CDFBadge,
   CDFCard,
   CDFCommandForm,
-  CDFDecisionPanel,
+  CDFDateTime,
   CDFDescriptionList,
   CDFField,
-  CDFFieldError,
-  CDFPageHeader,
+  CDFIdentifier,
   CDFProgressTracker,
+  CDFStagePanel,
   CDFTimeline,
-  buttonClass,
-  classificationTone,
+  CDFWorkList,
   inputClass,
   textareaClass,
 } from "@cdf/ui";
-import { STATES } from "@cdf/workflow";
-import { evidenceService, investigationService, requireActor } from "@/server/container";
+import { lastReturn, progressSteps, stateByCode } from "@cdf/workflow";
+import { investigationService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { actLabel, confirmation, transitionAct } from "../../confirmations";
-import {
-  assignAction,
-  decideConflictAction,
-  declareConflictAction,
-  transitionAction,
-  updateDetailsAction,
-} from "./actions";
-import { EvidencePanel } from "./evidence-panel";
+import { overdueKeys } from "@/server/work-routes";
+import { confirmation, transitionAct } from "../../confirmations";
+import { WorkItemRow } from "../../work-item-row";
+import { transitionAction, updateDetailsAction } from "./actions";
+import { CaseWorkspace, contentOpen, loadCase, personName, stateName, stepVerb, tabHref } from "./workspace";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
   return { title: t("pageTitles.caseDetail") };
 }
 
-const UUID = /^[0-9a-f-]{36}$/i;
-
-export default async function CaseDetailPage({
+export default async function CaseOverviewPage({
   params,
   searchParams,
 }: {
@@ -49,299 +43,303 @@ export default async function CaseDetailPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
-  const decided = (await searchParams).decided === "conflict";
-  if (!UUID.test(id)) notFound();
-  const { actor, ctx } = await requireActor();
-  const t = await getTranslator();
+  const editing = (await searchParams).edit === "details";
+  const { actor, ctx, t, c } = await loadCase(id);
   const service = investigationService();
-  // open_case audits CASE_VIEWED or a SECURITY denial; invisible and missing cases are indistinguishable.
-  const c = await service.getCase(ctx, id);
-  if (!c) notFound();
-  const [timeline, directory, evidence, pendingConflicts] = await Promise.all([
-    service.caseTimeline(ctx, id),
-    can(actor, "CASE_ASSIGN") ? service.directory(ctx) : Promise.resolve([]),
-    evidenceService().listEvidence(ctx, id),
-    // Other people's open declarations, for CONFLICT_MANAGE holders only (the service filters out the caller's).
-    service.pendingConflicts(ctx, actor, id),
-  ]);
-  // Mirrors authz.can_upload_evidence for the UI only; the database decides (§19).
-  const canUpload =
-    can(actor, "EVIDENCE_UPLOAD") &&
-    c.recordsState === "ACTIVE" &&
-    (can(actor, "CASE_EDIT_ALL") ||
-      c.assignments.some(
-        (a) =>
-          a.userId === actor.userId &&
-          ["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"].includes(a.assignmentRole),
-      ));
-  // Mirrors the records guards for the UI only (ADR-013 D5, CDF-74): from ARCHIVED on, case content and
-  // new assignments are refused by the database, so they are not offered here either.
-  const contentOpen = c.recordsState === "ACTIVE" || c.recordsState === "CLOSED";
-  const nav = navigationFor(actor);
-  const showRecordsLink = nav.recordsCatalogue || nav.myWork;
-  const name = (n: { displayName: string; displayNameAr?: string }) =>
-    t.locale === "ar" && n.displayNameAr ? n.displayNameAr : n.displayName;
+  const [timeline, work] = await Promise.all([service.caseTimeline(ctx, id), service.myWorkItems(ctx)]);
+  const open = contentOpen(c);
+  const mine = work.filter((i) => i.caseId === c.id);
+  const overdue = overdueKeys(mine);
+  const stateLabel = (code: string) => {
+    const s = stateByCode(code);
+    return s ? (t.locale === "ar" ? s.nameAr : s.nameEn) : code;
+  };
+  const list = (xs: string[]) => xs.join(t.locale === "ar" ? "، " : ", ");
+
+  const steps = progressSteps(c.currentState, c.path).map((s) => ({
+    code: s.code,
+    state: s.state,
+    label: s.skipped ? t("caseWorkspace.skippedSteps", { count: s.skipped.length }) : stateLabel(s.code),
+  }));
+  const back = lastReturn(c.path);
+  const last = c.path.at(-1);
+  const ended = last && stateByCode(last.toState)?.recordsState !== "ACTIVE" ? last : undefined;
+
+  const enabled = c.transitions.filter((tr) => tr.enabled);
+  const canDo = enabled.filter((tr) => tr.allowed);
+  const blocked = enabled.filter((tr) => !tr.allowed);
+  const later = c.transitions.filter((tr) => !tr.enabled);
+  // Forward steps first, controlled acts (close, return, archive) after them.
+  const ordered = [...canDo].sort(
+    (a, b) => Number(!!transitionAct(a.code, a.toState)) - Number(!!transitionAct(b.code, b.toState)),
+  );
+  const stepName = (tr: TransitionOption) => (t.locale === "ar" ? tr.nameAr : tr.nameEn);
 
   return (
-    <>
-      {decided ? (
-        <CDFAlert tone="success" testId="conflict-decided">
-          {t("cases.conflictDecided")}
-        </CDFAlert>
-      ) : null}
-      <CDFPageHeader
-        title={`${c.caseNumber} · ${c.title}`}
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <CDFBadge tone={classificationTone(c.classification)} testId="case-classification">
-              {t(`classification.${c.classification}` as MessageKey)}
-            </CDFBadge>
-            {c.isRestricted ? <CDFBadge tone="danger">{t("classification.restrictedCase")}</CDFBadge> : null}
-            <CDFBadge tone="info" testId="case-state">
-              {(t.locale === "ar" ? c.stateNameAr : c.stateNameEn) ?? "—"}
-            </CDFBadge>
-          </div>
-        }
-      />
-      <CDFProgressTracker
-        label={t("cases.progress")}
-        current={c.currentState}
-        stateLabels={{
-          done: t("cases.stepDone"),
-          current: t("cases.stepCurrent"),
-          upcoming: t("cases.stepUpcoming"),
-        }}
-        steps={STATES.filter((s) => s.sequence <= 150).map((s) => ({
-          code: s.code,
-          label: t.locale === "ar" ? s.nameAr : s.nameEn,
-        }))}
-      />
-      {/* Entry points to the case's forms (CDF-50), interviews (CDF-60) and records (CDF-71); each page enforces access. */}
-      <nav aria-label={t("cases.workNav")} className="mb-6" data-testid="case-work-nav">
-        <ul className="flex flex-wrap gap-3">
-          <li>
-            <Link
-              href={`/cases/${c.id}/forms`}
-              className={buttonClass("secondary")}
-              data-testid="case-forms-link"
-            >
-              {t("cases.formsLink")}
-            </Link>
-          </li>
-          <li>
-            <Link
-              href={`/cases/${c.id}/interviews`}
-              className={buttonClass("secondary")}
-              data-testid="case-interviews-link"
-            >
-              {t("cases.interviewsLink")}
-            </Link>
-          </li>
-          {showRecordsLink ? (
-            <li>
-              <Link
-                href={`/records/${c.id}`}
-                className={buttonClass("secondary")}
-                data-testid="case-records-link"
-              >
-                {t("cases.recordsLink")}
-              </Link>
-            </li>
-          ) : null}
-        </ul>
-      </nav>
-      {contentOpen ? null : (
-        <div className="mb-6">
-          <CDFAlert tone="info" testId="case-read-only">
-            {t("records.readOnlyNotice")}
-          </CDFAlert>
-        </div>
-      )}
-
+    <CaseWorkspace c={c} actor={actor} t={t} tab="overview">
       {/* min-w-0: grid items default to min-width:auto, so a wide table would widen the page (WCAG 1.4.10). */}
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="min-w-0">
-          <CDFCard title={t("cases.details")}>
-            <CDFDescriptionList
-              items={[
-                { term: t("cases.summary"), value: c.summary },
-                {
-                  term: t("cases.priority"),
-                  value: c.priority ? t(`priority.${c.priority}` as MessageKey) : "—",
-                },
-                { term: t("cases.source"), value: c.source },
-                {
-                  term: t("cases.reporterRef"),
-                  value: c.reporterWbId ? (
-                    <>
-                      <span dir="ltr">{c.reporterWbId}</span>
-                      <span className="block text-sm text-cdf-text-secondary">
-                        {t("cases.reporterRefHint")}
-                      </span>
-                    </>
-                  ) : (
-                    "—"
-                  ),
-                },
-                ...(c.openedAt
-                  ? [{ term: t("cases.openedAt"), value: formatDateTime(t.locale, c.openedAt) }]
-                  : []),
-              ]}
-            />
-            {can(actor, "CASE_EDIT_ALL") && contentOpen ? (
-              <details className="mt-4">
-                <summary className="cursor-pointer font-semibold">{t("cases.editDetails")}</summary>
-                <div className="mt-3">
-                  <CDFCommandForm
-                    // UX-030: the version and values this page rendered travel with the form; only changed
-                    // fields are sent, so an untouched field can never write an older value back.
-                    action={updateDetailsAction.bind(null, c.id, {
-                      rowVersion: c.rowVersion,
-                      title: c.title,
-                      summary: c.summary,
-                      priority: c.priority,
-                    })}
-                    locale={t.locale}
-                    submitLabel={t("common.save")}
-                    variant="secondary"
-                    testId="details-form"
-                    successMessage={t("common.saved")}
-                    changedOnly={["title", "summary", "priority"]}
-                  >
-                    {/* Keyed by version: after a save every field starts again from the stored values. */}
-                    <div key={c.rowVersion}>
-                      <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
-                        <input
-                          id="title"
-                          name="title"
-                          defaultValue={c.title}
-                          className={inputClass}
-                          required
-                        />
-                      </CDFField>
-                      <CDFField
-                        id="summary"
-                        label={t("intake.caseSummary")}
-                        requiredLabel={t("common.required")}
+          <CDFStagePanel
+            title={t("caseWorkspace.stageTitle")}
+            tracker={
+              <CDFProgressTracker
+                label={t("cases.progress")}
+                current={c.currentState}
+                testId="case-progress"
+                stateLabels={{
+                  done: t("cases.stepDone"),
+                  current: t("cases.stepCurrent"),
+                  upcoming: t("cases.stepUpcoming"),
+                  skipped: t("caseWorkspace.stepSkipped"),
+                }}
+                steps={steps}
+              />
+            }
+            now={
+              <p data-testid="stage-now">
+                <span className="font-semibold">{t("caseWorkspace.now")}:</span> {stateName(t, c)}
+                {c.enteredStateAt ? (
+                  <>
+                    {" · "}
+                    {t("caseWorkspace.since")}{" "}
+                    <CDFDateTime value={c.enteredStateAt} locale={t.locale} dateOnly />
+                  </>
+                ) : null}
+                {" · "}
+                {c.stateDueAt ? (
+                  <>
+                    {t("caseWorkspace.target")}{" "}
+                    <CDFDateTime value={c.stateDueAt} locale={t.locale} dateOnly />{" "}
+                    {t("caseWorkspace.targetProvisional")}
+                  </>
+                ) : (
+                  t("caseWorkspace.noTarget")
+                )}
+              </p>
+            }
+            notes={
+              back ? (
+                <p data-testid="stage-returned">
+                  {t("caseWorkspace.returnedTo", { state: stateLabel(back.toState) })} ·{" "}
+                  <CDFDateTime value={back.occurredAt} locale={t.locale} dateOnly />
+                </p>
+              ) : ended ? (
+                <p data-testid="stage-ended">
+                  {t.code("caseWorkspace.ended", ended.transitionCode, "caseWorkspace.endedOther")} ·{" "}
+                  <CDFDateTime value={ended.occurredAt} locale={t.locale} dateOnly />
+                </p>
+              ) : null
+            }
+          >
+            {ordered.length === 0 && blocked.length === 0 && later.length === 0 ? (
+              <p className="text-cdf-text-secondary" data-testid="no-next-steps">
+                {t("caseWorkspace.nothingForYou")}
+              </p>
+            ) : null}
+            {ordered.length > 0 ? (
+              <>
+                <h3 className="mb-2 font-semibold">{t("caseWorkspace.youCan")}</h3>
+                <ul data-testid="transitions-card">
+                  {ordered.map((tr) => {
+                    // UX-031: closing, archiving and returning a case are verb-labelled and confirmed first.
+                    const act = transitionAct(tr.code, tr.toState);
+                    return (
+                      <li
+                        key={tr.code}
+                        className="mb-4 border-b border-cdf-border pb-4 last:border-0"
+                        data-testid={`transition-${tr.code}`}
                       >
-                        <textarea
-                          id="summary"
-                          name="summary"
-                          defaultValue={c.summary}
-                          className={textareaClass}
-                          required
-                        />
-                      </CDFField>
-                      <CDFField id="priority" label={t("cases.priority")}>
-                        <select
-                          id="priority"
-                          name="priority"
-                          defaultValue={c.priority ?? ""}
-                          className={inputClass}
+                        <CDFCommandForm
+                          action={transitionAction.bind(null, c.id, tr.code)}
+                          locale={t.locale}
+                          submitLabel={stepVerb(t, tr)}
+                          variant={act ? "danger" : tr === ordered[0] ? "primary" : "secondary"}
+                          fieldLabels={{ reason: t("cases.transitionReason") }}
+                          confirm={act ? confirmation(t, act) : undefined}
                         >
-                          <option value="">—</option>
-                          {PRIORITIES.map((p) => (
-                            <option key={p} value={p}>
-                              {t(`priority.${p}` as MessageKey)}
-                            </option>
-                          ))}
-                        </select>
-                      </CDFField>
-                    </div>
-                  </CDFCommandForm>
-                </div>
-              </details>
-            ) : null}
-          </CDFCard>
-
-          <CDFCard title={t("cases.allegations")}>
-            <ul className="list-disc ps-5">
-              {c.allegations.map((a) => (
-                <li key={a.id} className="mb-2">
-                  <span className="font-semibold">{t.code("category", a.category, "common.none")}</span>:{" "}
-                  {a.description}
-                </li>
-              ))}
-            </ul>
-          </CDFCard>
-
-          <EvidencePanel
-            c={c}
-            items={evidence}
-            canUpload={canUpload}
-            canDownload={can(actor, "EVIDENCE_DOWNLOAD")}
-            clearance={actor.clearance}
-            t={t}
-          />
-
-          <CDFCard title={t("cases.transitionsTitle")} testId="transitions-card">
-            {c.transitions.length === 0 ? (
-              <p className="text-cdf-text-secondary">{t("cases.noTransitions")}</p>
-            ) : null}
-            <ul>
-              {c.transitions.map((tr) => {
-                const step = t.locale === "ar" ? tr.nameAr : tr.nameEn;
-                // UX-031: closing, archiving and returning a case are verb-labelled and confirmed first.
-                const act = transitionAct(tr.code, tr.toState);
-                return (
-                  <li
-                    key={tr.code}
-                    className="mb-4 border-b border-cdf-border pb-4 last:border-0"
-                    data-testid={`transition-${tr.code}`}
-                  >
-                    <p className="mb-2 font-semibold">{step}</p>
-                    {tr.allowed ? (
-                      <CDFCommandForm
-                        action={transitionAction.bind(null, c.id, tr.code)}
-                        locale={t.locale}
-                        submitLabel={act ? actLabel(t, act) : t("cases.perform")}
-                        submitName={act ? undefined : t("cases.performNamed", { step })}
-                        variant={act ? "danger" : "secondary"}
-                        fieldLabels={{ reason: t("cases.transitionReason") }}
-                        confirm={act ? confirmation(t, act) : undefined}
-                      >
-                        {tr.reasonRequired ? (
-                          <CDFField
-                            id={`reason-${tr.code}`}
-                            label={t("cases.transitionReason")}
-                            hint={t("intake.reasonHint")}
-                            requiredLabel={t("common.required")}
-                          >
-                            <textarea
+                          {tr.reasonRequired ? (
+                            <CDFField
                               id={`reason-${tr.code}`}
-                              name="reason"
-                              aria-describedby={`reason-${tr.code}-hint`}
-                              className={textareaClass}
-                              required
-                              minLength={10}
-                            />
-                          </CDFField>
-                        ) : null}
-                      </CDFCommandForm>
-                    ) : (
-                      <div>
-                        <CDFBadge tone="neutral">{t("cases.blocked")}</CDFBadge>
-                        <ul
-                          className="mt-1 list-disc ps-5 text-sm text-cdf-text-secondary"
-                          data-testid={`blocked-${tr.code}`}
-                        >
-                          {tr.blockingReasons.map((r) => (
-                            <li key={r}>{t.code("codes", r, "errors.CONFLICT")}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </CDFCard>
+                              label={t("cases.transitionReason")}
+                              hint={t("intake.reasonHint")}
+                              requiredLabel={t("common.required")}
+                            >
+                              <textarea
+                                id={`reason-${tr.code}`}
+                                name="reason"
+                                aria-describedby={`reason-${tr.code}-hint`}
+                                className={textareaClass}
+                                required
+                                minLength={10}
+                              />
+                            </CDFField>
+                          ) : null}
+                        </CDFCommandForm>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : null}
+            {blocked.length > 0 ? (
+              <>
+                <h3 className="mb-2 font-semibold">{t("caseWorkspace.waitingOn")}</h3>
+                <ul className="mb-4 grid gap-3">
+                  {blocked.map((tr) => (
+                    <li key={tr.code} data-testid={`transition-${tr.code}`}>
+                      <p className="font-semibold">
+                        {stepName(tr)} <CDFBadge tone="neutral">{t("cases.blocked")}</CDFBadge>
+                      </p>
+                      <ul
+                        className="mt-1 list-disc ps-5 text-sm text-cdf-text-secondary"
+                        data-testid={`blocked-${tr.code}`}
+                      >
+                        {tr.blockingReasons.map((r) => (
+                          <li key={r}>{t.code("codes", r, "errors.CONFLICT")}</li>
+                        ))}
+                      </ul>
+                      {tr.blockingReasons.includes("MISSING_PERMISSION") && tr.eligibleRoles.length > 0 ? (
+                        <p className="mt-1 text-sm" data-testid={`who-can-${tr.code}`}>
+                          {t("caseWorkspace.whoCan", {
+                            roles: list(tr.eligibleRoles.map((r) => t.code("role", r))),
+                          })}
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {later.length > 0 ? (
+              <>
+                <h3 className="mb-2 font-semibold">{t("caseWorkspace.later")}</h3>
+                <ul className="list-disc ps-5 text-sm text-cdf-text-secondary">
+                  {later.map((tr) => (
+                    <li key={tr.code} data-testid={`later-${tr.code}`}>
+                      {stepName(tr)}: {t("caseWorkspace.laterNote")}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </CDFStagePanel>
 
-          <CDFCard title={t("cases.timeline")}>
+          <section id="case-details" tabIndex={-1}>
+            <CDFCard title={t("caseWorkspace.keyFacts")} testId="key-facts">
+              <CDFDescriptionList
+                items={[
+                  { term: t("cases.summary"), value: <bdi dir="auto">{c.summary}</bdi> },
+                  { term: t("cases.source"), value: t.code("caseWorkspace.source", c.source, "common.none") },
+                  {
+                    term: t("cases.reporterRef"),
+                    value: c.reporterWbId ? (
+                      <>
+                        <CDFIdentifier>{c.reporterWbId}</CDFIdentifier>
+                        <span className="block text-sm text-cdf-text-secondary">
+                          {t("cases.reporterRefHint")}
+                        </span>
+                      </>
+                    ) : (
+                      "—"
+                    ),
+                  },
+                  ...(c.openedAt
+                    ? [
+                        {
+                          term: t("cases.openedAt"),
+                          value: <CDFDateTime value={c.openedAt} locale={t.locale} />,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+              {can(actor, "CASE_EDIT_ALL") && open ? (
+                <details className="mt-4" open={editing}>
+                  <summary className="cursor-pointer font-semibold">{t("cases.editDetails")}</summary>
+                  <div className="mt-3">
+                    <CDFCommandForm
+                      // UX-030: the version and values this page rendered travel with the form; only changed
+                      // fields are sent, so an untouched field can never write an older value back.
+                      action={updateDetailsAction.bind(null, c.id, {
+                        rowVersion: c.rowVersion,
+                        title: c.title,
+                        summary: c.summary,
+                        priority: c.priority,
+                      })}
+                      locale={t.locale}
+                      submitLabel={t("common.save")}
+                      variant="secondary"
+                      testId="details-form"
+                      successMessage={t("common.saved")}
+                      changedOnly={["title", "summary", "priority"]}
+                    >
+                      {/* Keyed by version: after a save every field starts again from the stored values. */}
+                      <div key={c.rowVersion}>
+                        <CDFField
+                          id="title"
+                          label={t("intake.caseTitle")}
+                          requiredLabel={t("common.required")}
+                        >
+                          <input
+                            id="title"
+                            name="title"
+                            defaultValue={c.title}
+                            className={inputClass}
+                            required
+                          />
+                        </CDFField>
+                        <CDFField
+                          id="summary"
+                          label={t("intake.caseSummary")}
+                          requiredLabel={t("common.required")}
+                        >
+                          <textarea
+                            id="summary"
+                            name="summary"
+                            defaultValue={c.summary}
+                            className={textareaClass}
+                            required
+                          />
+                        </CDFField>
+                        <CDFField id="priority" label={t("cases.priority")}>
+                          <select
+                            id="priority"
+                            name="priority"
+                            defaultValue={c.priority ?? ""}
+                            className={inputClass}
+                          >
+                            <option value="">—</option>
+                            {PRIORITIES.map((p) => (
+                              <option key={p} value={p}>
+                                {t(`priority.${p}` as MessageKey)}
+                              </option>
+                            ))}
+                          </select>
+                        </CDFField>
+                      </div>
+                    </CDFCommandForm>
+                  </div>
+                </details>
+              ) : null}
+            </CDFCard>
+          </section>
+
+          <CDFCard
+            title={t("caseWorkspace.recentHistory")}
+            testId="recent-history"
+            actions={
+              <a
+                href={tabHref(c.id, "history")}
+                className="text-sm font-semibold underline underline-offset-4"
+              >
+                {t("caseWorkspace.allHistory")}
+              </a>
+            }
+          >
             <CDFTimeline
-              testId="audit-timeline"
               empty={t("cases.noTimeline")}
-              items={timeline.map((e) => ({
+              items={timeline.slice(0, 5).map((e) => ({
                 id: String(e.seq),
                 title: t.code("auditAction", e.action, "common.none"),
                 meta: `${formatDateTime(t.locale, e.occurredAt)} · ${e.actorName ?? "—"}`,
@@ -352,217 +350,51 @@ export default async function CaseDetailPage({
         </div>
 
         <div className="min-w-0">
-          <CDFCard title={t("cases.team")} testId="team-card">
+          <CDFCard title={t("caseWorkspace.yourItems")} testId="your-items">
+            {mine.length === 0 ? (
+              <p className="text-cdf-text-secondary">{t("caseWorkspace.noYourItems")}</p>
+            ) : (
+              <CDFWorkList label={t("caseWorkspace.yourItems")}>
+                {mine.map((i) => (
+                  <WorkItemRow
+                    key={`${i.category}:${i.targetId}`}
+                    t={t}
+                    item={i}
+                    overdue={overdue.has(`${i.category}:${i.targetId}`)}
+                    showCase={false}
+                  />
+                ))}
+              </CDFWorkList>
+            )}
+          </CDFCard>
+
+          <CDFCard
+            title={t("caseWorkspace.teamTitle")}
+            testId="team-summary"
+            actions={
+              <a
+                href={tabHref(c.id, "people")}
+                className="text-sm font-semibold underline underline-offset-4"
+              >
+                {t("caseWorkspace.tabs.people")}
+              </a>
+            }
+          >
             {c.assignments.length === 0 ? (
               <p className="text-cdf-text-secondary">{t("cases.noTeam")}</p>
             ) : (
-              <ul className="mb-4" data-testid="team-list">
+              <ul>
                 {c.assignments.map((a) => (
                   <li key={a.id} className="mb-1">
-                    <span className="font-semibold">{a.displayName}</span> ·{" "}
+                    <bdi className="font-semibold">{personName(t, a)}</bdi> ·{" "}
                     {t(`assignmentRole.${a.assignmentRole}` as MessageKey)}
                   </li>
                 ))}
               </ul>
             )}
-            {can(actor, "CASE_ASSIGN") && contentOpen ? (
-              <div className="border-t border-cdf-border pt-4">
-                <h3 className="mb-2 font-semibold">{t("cases.assignTitle")}</h3>
-                <CDFCommandForm
-                  action={assignAction.bind(null, c.id)}
-                  locale={t.locale}
-                  submitLabel={t("cases.assign")}
-                  variant="secondary"
-                  fieldLabels={{
-                    userId: t("cases.person"),
-                    assignmentRole: t("cases.role"),
-                    reason: t("cases.assignReason"),
-                  }}
-                  testId="assign-form"
-                >
-                  <CDFField id="userId" label={t("cases.person")} requiredLabel={t("common.required")}>
-                    <select id="userId" name="userId" className={inputClass} defaultValue="" required>
-                      <option value="" disabled>
-                        {t("cases.choosePerson")}
-                      </option>
-                      {directory.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {name(u)}
-                        </option>
-                      ))}
-                    </select>
-                  </CDFField>
-                  <CDFField id="assignmentRole" label={t("cases.role")}>
-                    <select
-                      id="assignmentRole"
-                      name="assignmentRole"
-                      className={inputClass}
-                      defaultValue="INVESTIGATOR"
-                    >
-                      {ASSIGNMENT_ROLES.map((r) => (
-                        <option key={r} value={r}>
-                          {t(`assignmentRole.${r}` as MessageKey)}
-                        </option>
-                      ))}
-                    </select>
-                  </CDFField>
-                  <CDFField
-                    id="assignReason"
-                    label={t("cases.assignReason")}
-                    requiredLabel={t("common.required")}
-                  >
-                    <input id="assignReason" name="reason" className={inputClass} required minLength={5} />
-                  </CDFField>
-                </CDFCommandForm>
-              </div>
-            ) : null}
           </CDFCard>
-
-          {pendingConflicts.length > 0 ? (
-            // My Work links here (#conflict-decisions) for each open declaration the caller may decide.
-            <div id="conflict-decisions" tabIndex={-1}>
-              <CDFCard title={t("cases.conflictDecisionsTitle")} testId="conflict-decisions">
-                <p className="mb-3 text-sm">{t("cases.conflictDecisionsIntro")}</p>
-                {pendingConflicts.map((k) => {
-                  const who = name(k);
-                  return (
-                    <div
-                      key={k.id}
-                      className="mb-4 border-t border-cdf-border pt-4 first-of-type:border-t-0 first-of-type:pt-0"
-                      data-testid={`conflict-decision-${k.id}`}
-                    >
-                      <h3 className="font-semibold">{t("cases.conflictDeclaredBy", { name: who })}</h3>
-                      <CDFDescriptionList
-                        items={[
-                          {
-                            term: t("cases.conflictDeclaredOn"),
-                            value: formatDateTime(t.locale, k.declaredAt),
-                          },
-                          ...(k.declaration
-                            ? [{ term: t("cases.conflictDeclarationText"), value: k.declaration }]
-                            : []),
-                        ]}
-                      />
-                      <CDFCommandForm
-                        action={decideConflictAction.bind(null, c.id, k.id)}
-                        locale={t.locale}
-                        submitLabel={t("cases.conflictDecide")}
-                        submitName={`${t("cases.conflictDecide")}: ${who}`}
-                        fieldLabels={{
-                          decision: t("cases.conflictDecision"),
-                          reason: t("cases.conflictReason"),
-                        }}
-                        testId={`conflict-decide-form-${k.id}`}
-                      >
-                        <CDFDecisionPanel
-                          id={`decision-${k.id}`}
-                          name="decision"
-                          legend={t("cases.conflictDecision")}
-                          requiredLabel={t("common.required")}
-                          options={[
-                            {
-                              value: "CONFLICT_CONFIRMED",
-                              label: t("cases.conflictConfirm"),
-                              consequence: t("cases.conflictConfirmConsequence", { name: who }),
-                              testId: "conflict-confirm",
-                            },
-                            {
-                              value: "CONFLICT_CLEARED",
-                              label: t("cases.conflictClear"),
-                              consequence: t("cases.conflictClearConsequence", { name: who }),
-                              testId: "conflict-clear",
-                            },
-                          ]}
-                          reason={{
-                            name: "reason",
-                            label: t("cases.conflictReason"),
-                            hint: t("cases.conflictReasonHint"),
-                            requiredLabel: t("common.required"),
-                            minLength: 10,
-                            maxLength: 2000,
-                            always: true,
-                          }}
-                        />
-                      </CDFCommandForm>
-                    </div>
-                  );
-                })}
-              </CDFCard>
-            </div>
-          ) : null}
-
-          {can(actor, "CONFLICT_DECLARE") ? (
-            <CDFCard title={t("cases.conflictTitle")} testId="conflict-card">
-              <p className="mb-2 text-sm">{t("cases.conflictIntro")}</p>
-              <p className="mb-3 font-semibold" data-testid="my-conflict-status">
-                {c.myConflictStatus
-                  ? t("cases.yourDeclaration", {
-                      status: t(`conflictStatus.${c.myConflictStatus}` as MessageKey),
-                    })
-                  : t("cases.noDeclaration")}
-              </p>
-              {!c.myConflictStatus ? (
-                <CDFCommandForm
-                  action={declareConflictAction.bind(null, c.id)}
-                  locale={t.locale}
-                  submitLabel={t("cases.declare")}
-                  variant="secondary"
-                  fieldLabels={{ hasConflict: t("cases.conflictTitle"), declaration: t("cases.declaration") }}
-                  testId="conflict-form"
-                  // Declaring a conflict removes the declarant's own access at once: confirm that answer only.
-                  confirm={{
-                    ...confirmation(t, "declareConflict"),
-                    when: { field: "hasConflict", equals: "true" },
-                  }}
-                >
-                  {/* No default answer (UX-019): the declarant chooses; an unanswered submit is refused. */}
-                  <fieldset className="mb-3">
-                    <legend className="sr-only">{t("cases.conflictTitle")}</legend>
-                    <label className="mb-2 flex items-center gap-2">
-                      <input
-                        id="hasConflict-no"
-                        type="radio"
-                        name="hasConflict"
-                        value="false"
-                        required
-                        className="size-5"
-                        data-testid="conflict-no"
-                      />{" "}
-                      {t("cases.noConflict")}
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="hasConflict"
-                        value="true"
-                        required
-                        className="size-5"
-                        data-testid="conflict-yes"
-                      />{" "}
-                      {t("cases.hasConflict")}
-                    </label>
-                    <CDFFieldError id="hasConflict-no" />
-                  </fieldset>
-                  <p className="mb-2 text-sm text-cdf-warning">{t("cases.conflictWarning")}</p>
-                  <CDFField
-                    id="declaration"
-                    label={t("cases.declaration")}
-                    requiredLabel={t("common.required")}
-                  >
-                    <textarea
-                      id="declaration"
-                      name="declaration"
-                      className={textareaClass}
-                      required
-                      minLength={5}
-                    />
-                  </CDFField>
-                </CDFCommandForm>
-              ) : null}
-            </CDFCard>
-          ) : null}
         </div>
       </div>
-    </>
+    </CaseWorkspace>
   );
 }

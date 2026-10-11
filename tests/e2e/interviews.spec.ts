@@ -23,7 +23,10 @@ test("an interview is planned, recorded, reviewed and approved in Arabic", async
   const caseUrl = new URL(investigator.url()).pathname;
   await investigator.goto(`${caseUrl}/interviews`);
   await expect(investigator.locator("html")).toHaveAttribute("dir", "rtl");
-  await expect(investigator.getByRole("heading", { level: 1 })).toContainText("المقابلات");
+  // The case header stays the page's h1; the interviews section is the current case tab.
+  const tab = investigator.getByTestId("case-tab-interviews");
+  await expect(tab).toHaveAttribute("aria-current", "page");
+  await expect(tab).toContainText("المقابلات");
 
   // 1. Plan: a pseudonymous working label, never a real name.
   const plan = investigator.getByTestId("plan-interview-form");

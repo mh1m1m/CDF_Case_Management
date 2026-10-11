@@ -528,16 +528,31 @@ export interface CaseDetail extends CaseListItem {
   createdAt: string;
   openedAt: string | null;
   rowVersion: number;
+  /** When the case entered its current state (`workflow_instance.entered_state_at`). */
+  enteredStateAt: string | null;
+  owner: { userId: string; displayName: string; displayNameAr: string | null } | null;
+  /** Status only (ADR-016 D5, DEC-10): who asked for a hold and why stay with legal, records and GRC. */
+  legalHoldStatus: "NONE" | "ACTIVE";
+  /** The case's own route through the workflow, oldest first (`workflow_transition_event`), for path-aware progress. */
+  path: CasePathStep[];
   allegations: { id: string; category: string; description: string; status: string }[];
   assignments: CaseAssignment[];
   transitions: TransitionOption[];
   myConflictStatus: string | null;
 }
 
+export interface CasePathStep {
+  transitionCode: string;
+  fromState: string;
+  toState: string;
+  occurredAt: string;
+}
+
 export interface CaseAssignment {
   id: string;
   userId: string;
   displayName: string;
+  displayNameAr?: string | null;
   assignmentRole: AssignmentRole;
   assignedAt: string;
 }
@@ -548,8 +563,12 @@ export interface TransitionOption {
   nameEn: string;
   nameAr: string;
   reasonRequired: boolean;
+  /** False for steps of a later phase: shown as "later in this case", never hidden (UX-006). */
+  enabled: boolean;
   allowed: boolean;
   blockingReasons: string[];
+  /** Roles that may take this step, never people (audit §22.4.4). Reference data, readable by every user. */
+  eligibleRoles: string[];
 }
 
 export interface AuditTimelineEntry {

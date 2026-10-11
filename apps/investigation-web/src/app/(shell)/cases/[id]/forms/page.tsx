@@ -2,7 +2,6 @@
 // for every form the database would let this user prepare (hidden ≠ forbidden: api.start_form re-checks).
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { CLASSIFICATION_LEVELS, type FormDefinitionListItem, type FormInstanceSummary } from "@cdf/contracts";
 import { formDisplayNumber } from "@cdf/domain";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
@@ -11,15 +10,15 @@ import {
   CDFCard,
   CDFCommandForm,
   CDFField,
-  CDFPageHeader,
   CDFTable,
   classificationTone,
   inputClass,
 } from "@cdf/ui";
-import { formsService, investigationService, requireActor } from "@/server/container";
+import { formsService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { startFormAction } from "./actions";
 import { statusTone } from "./form-fields";
+import { CaseWorkspace, loadCase } from "../workspace";
 
 /** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -27,15 +26,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t("pageTitles.caseForms") };
 }
 
-const UUID = /^[0-9a-f-]{36}$/i;
-
 export default async function CaseFormsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  if (!UUID.test(id)) notFound();
-  const { actor, ctx } = await requireActor();
-  const t = await getTranslator();
-  const c = await investigationService().getCase(ctx, id);
-  if (!c) notFound();
+  const { actor, ctx, t, c } = await loadCase(id);
   const [definitions, instances] = await Promise.all([
     formsService().listDefinitions(ctx, id),
     formsService().listInstances(ctx, id),
@@ -48,26 +41,8 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
   );
 
   return (
-    <>
-      <CDFPageHeader
-        title={`${c.caseNumber} · ${t("forms.title")}`}
-        intro={t("forms.intro")}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <CDFBadge tone={classificationTone(c.classification)}>
-              {t(`classification.${c.classification}` as MessageKey)}
-            </CDFBadge>
-            <Link
-              href={`/cases/${c.id}`}
-              className="font-semibold underline underline-offset-4"
-              data-testid="back-to-case"
-            >
-              {t("forms.backToCase")}
-            </Link>
-          </div>
-        }
-      />
-
+    <CaseWorkspace c={c} actor={actor} t={t} tab="forms">
+      <p className="mb-4 text-cdf-text-secondary">{t("forms.intro")}</p>
       <CDFCard title={t("forms.instances")} testId="form-instances">
         <CDFTable<FormInstanceSummary>
           caption={t("forms.instances")}
@@ -194,6 +169,6 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
           ]}
         />
       </CDFCard>
-    </>
+    </CaseWorkspace>
   );
 }

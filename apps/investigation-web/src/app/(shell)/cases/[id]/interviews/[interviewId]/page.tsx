@@ -2,7 +2,6 @@
 // invisible interviews are both 404. Forms appear only where the lifecycle and the viewer's case relationship
 // allow them; every command is re-checked by the database.
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
 import {
@@ -28,12 +27,11 @@ import {
   CDFCommandForm,
   CDFDescriptionList,
   CDFField,
-  CDFPageHeader,
   classificationTone,
   inputClass,
   textareaClass,
 } from "@cdf/ui";
-import { evidenceService, interviewService, investigationService, requireActor } from "@/server/container";
+import { evidenceService, interviewService, investigationService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { confirmation } from "../../../../confirmations";
 import {
@@ -48,6 +46,7 @@ import {
   transitionInterviewAction,
 } from "../actions";
 import { interviewStatusTone } from "../status-tone";
+import { CaseWorkspace, loadCase } from "../../workspace";
 
 /** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -71,11 +70,8 @@ export default async function InterviewDetailPage({
   params: Promise<{ id: string; interviewId: string }>;
 }) {
   const { id, interviewId } = await params;
-  if (!UUID.test(id) || !UUID.test(interviewId)) notFound();
-  const { actor, ctx } = await requireActor();
-  const t = await getTranslator();
-  const c = await investigationService().getCase(ctx, id);
-  if (!c) notFound();
+  if (!UUID.test(interviewId)) notFound();
+  const { actor, ctx, t, c } = await loadCase(id);
   const i = await interviewService().getInterview(ctx, interviewId);
   if (!i || i.caseId !== c.id) notFound();
 
@@ -120,27 +116,21 @@ export default async function InterviewDetailPage({
   const reporter = i.intervieweeKind === "REPORTER";
 
   return (
-    <>
-      <CDFPageHeader
-        title={`${c.caseNumber} · ${number} · ${i.title}`}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <CDFBadge tone={classificationTone(i.classification)}>
-              {t(`classification.${i.classification}` as MessageKey)}
-            </CDFBadge>
-            <CDFBadge tone={interviewStatusTone(i.status)} testId="interview-status">
-              {t(`interviews.statusName.${i.status}` as MessageKey)}
-            </CDFBadge>
-            <Link
-              href={`/cases/${c.id}/interviews`}
-              className="font-semibold underline underline-offset-4"
-              data-testid="back-to-interviews"
-            >
-              {t("interviews.title")}
-            </Link>
-          </div>
-        }
-      />
+    <CaseWorkspace c={c} actor={actor} t={t} tab="interviews" item={<bdi dir="ltr">{number}</bdi>}>
+      {/* The case header is the page's h1; the interview is this tab's item (audit §22.1). */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-cdf-h2 font-semibold">
+          <bdi dir="ltr">{number}</bdi> · <bdi dir="auto">{i.title}</bdi>
+        </h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <CDFBadge tone={classificationTone(i.classification)}>
+            {t(`classification.${i.classification}` as MessageKey)}
+          </CDFBadge>
+          <CDFBadge tone={interviewStatusTone(i.status)} testId="interview-status">
+            {t(`interviews.statusName.${i.status}` as MessageKey)}
+          </CDFBadge>
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="min-w-0">
@@ -743,6 +733,6 @@ export default async function InterviewDetailPage({
           </CDFCard>
         </div>
       </div>
-    </>
+    </CaseWorkspace>
   );
 }

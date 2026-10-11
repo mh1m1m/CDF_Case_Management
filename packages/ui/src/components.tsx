@@ -330,25 +330,36 @@ export function CDFTable<T>(props: {
 }
 
 // ---- Workflow progress and timeline ----------------------------------------------------------------------
+export type CDFProgressState = "done" | "current" | "upcoming" | "skipped";
+
+/**
+ * Case progress. Each step states its status in text and by shape, not colour alone (WCAG 1.4.1, 1.3.1): done
+ * steps carry a check, the current step is filled, upcoming steps are dashed, and a run of steps the case never
+ * went through is dotted with a skip mark. When steps carry no `state`, position decides (legacy callers). The
+ * list wraps instead of scrolling, so it fits at 320 px without a horizontal scrollbar (UX-109, WCAG 1.4.10).
+ */
 export function CDFProgressTracker({
   label,
   steps,
   current,
   stateLabels,
+  testId,
 }: {
   label: string;
-  steps: { code: string; label: string }[];
+  steps: { code: string; label: string; state?: CDFProgressState }[];
   current: string | null;
   /** Visually hidden state for each step, so progress is not conveyed by colour alone (WCAG 1.4.1, 1.3.1). */
-  stateLabels: { done: string; current: string; upcoming: string };
+  stateLabels: { done: string; current: string; upcoming: string; skipped?: string };
+  testId?: string;
 }) {
   const currentIndex = steps.findIndex((s) => s.code === current);
   return (
-    // One labelled region (not navigation). Scrollable on narrow screens, so keyboard focusable (WCAG 2.1.1).
-    <div role="region" aria-label={label} tabIndex={0} className="relative mb-6 overflow-x-auto">
-      <ol className="flex min-w-max gap-1 text-xs">
+    // One labelled region (not navigation). Positioned, so the visually hidden labels stay inside it.
+    <div role="region" aria-label={label} data-testid={testId} className="relative mb-4">
+      <ol className="flex flex-wrap gap-1 text-xs">
         {steps.map((s, i) => {
-          const state = i < currentIndex ? "done" : i === currentIndex ? "current" : "upcoming";
+          const state: CDFProgressState =
+            s.state ?? (i < currentIndex ? "done" : i === currentIndex ? "current" : "upcoming");
           return (
             <li
               key={s.code}
@@ -360,6 +371,7 @@ export function CDFProgressTracker({
                 state === "current" &&
                   "border-cdf-primary bg-cdf-primary text-cdf-primary-text font-semibold",
                 state === "upcoming" && "border-dashed border-cdf-border text-cdf-text-secondary",
+                state === "skipped" && "border-dotted border-cdf-border text-cdf-text-secondary",
               )}
             >
               {state === "done" ? (
@@ -367,8 +379,21 @@ export function CDFProgressTracker({
                   <path d="M3 8.5l3 3 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                 </svg>
               ) : null}
+              {state === "skipped" ? (
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  className="size-3 shrink-0 rtl:-scale-x-100"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                >
+                  <path d="M2 11c2-5 8-5 10 0M10 11h2.5V8.5" />
+                </svg>
+              ) : null}
               {s.label}
-              <span className="sr-only"> ({stateLabels[state]})</span>
+              <span className="sr-only"> ({stateLabels[state] ?? stateLabels.upcoming})</span>
             </li>
           );
         })}

@@ -161,8 +161,11 @@ test("records access is refused without records capabilities and outside the cat
   await manager.goto(`/cases/${c.caseId}`);
   await expect(manager.getByTestId("case-read-only")).toBeVisible();
   await expect(manager.getByTestId("details-form")).toHaveCount(0);
+  await manager.getByTestId("case-tab-people").click();
+  await expect(manager.getByTestId("case-read-only")).toBeVisible();
   await expect(manager.locator("#assignee, [data-testid='assign-form']")).toHaveCount(0);
-  await manager.getByTestId("case-records-link").click();
+  await manager.getByTestId("case-overflow").locator("summary").click();
+  await manager.getByTestId("case-overflow-openRecord").click();
   await expect(manager.getByTestId("record-state")).toHaveText("Archived");
   await manager.context().close();
 });

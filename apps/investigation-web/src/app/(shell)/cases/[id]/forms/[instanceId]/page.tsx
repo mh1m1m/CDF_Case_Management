@@ -2,17 +2,18 @@
 // database allows this user, the immutable version list with hashes and the lifecycle trail.
 // api.open_form_instance audits FORM_VIEWED or a SECURITY denial; invisible and missing instances are alike.
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formDisplayNumber } from "@cdf/domain";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
+  CDFBreadcrumbs,
   CDFCard,
   CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFFieldError,
+  CDFIdentifier,
   CDFPageHeader,
   CDFTimeline,
   classificationTone,
@@ -62,6 +63,17 @@ export default async function FormInstancePage({
 
   return (
     <>
+      {/* No case header here: a form is reached by its own access check, which from S3 can be purpose-bound
+          rather than case-wide (ADR-016 D2). The breadcrumbs carry the place. */}
+      <CDFBreadcrumbs
+        label={t("shell.breadcrumb")}
+        items={[
+          { label: t("shell.area.CASES"), href: "/cases" },
+          { label: <CDFIdentifier>{f.caseNumber}</CDFIdentifier>, href: `/cases/${f.caseId}` },
+          { label: t("caseWorkspace.tabs.forms"), href: `/cases/${f.caseId}/forms` },
+          { label: <CDFIdentifier>{formDisplayNumber(f.formCode, f.instanceNo)}</CDFIdentifier> },
+        ]}
+      />
       <CDFPageHeader
         title={`${f.caseNumber} · ${formDisplayNumber(f.formCode, f.instanceNo)}`}
         intro={`${name} — ${t.locale === "ar" ? f.definition.purposeAr : f.definition.purposeEn}`}
@@ -73,16 +85,6 @@ export default async function FormInstancePage({
             <CDFBadge tone={classificationTone(f.classification)}>
               {t(`classification.${f.classification}` as MessageKey)}
             </CDFBadge>
-            <Link
-              href={`/cases/${f.caseId}/forms`}
-              className="font-semibold underline underline-offset-4"
-              data-testid="back-to-forms"
-            >
-              {t("forms.backToForms")}
-            </Link>
-            <Link href={`/cases/${f.caseId}`} className="font-semibold underline underline-offset-4">
-              {t("forms.backToCase")}
-            </Link>
           </div>
         }
       />

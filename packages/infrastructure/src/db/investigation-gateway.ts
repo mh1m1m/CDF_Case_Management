@@ -7,6 +7,7 @@ import type {
   CaseDetail,
   CaseDiscoveryResult,
   CaseListItem,
+  CasePathStep,
   IntakeReportItem,
   LedgerEntry,
   MyAccessEntry,
@@ -161,20 +162,40 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
       if (!opened?.ok) return null;
       const [c] = await tx<(CaseRow & Record<string, unknown>)[]>`
         select ${CASE_COLUMNS(tx)}, summary, source, source_report_id as "sourceReportId", reporter_wb_id as "reporterWbId",
-               records_state as "recordsState", created_at as "createdAt", opened_at as "openedAt", row_version as "rowVersion"
+               records_state as "recordsState", created_at as "createdAt", opened_at as "openedAt", row_version as "rowVersion",
+               entered_state_at as "enteredStateAt", legal_hold_status as "legalHoldStatus", owner_id as "ownerId"
         from case_mgmt.case_overview where id = ${caseId}`;
       if (!c) return null;
+      const [owner] = c.ownerId
+        ? await tx<NonNullable<CaseDetail["owner"]>[]>`
+            select id as "userId", display_name as "displayName", display_name_ar as "displayNameAr"
+            from iam.user_profile where id = ${c.ownerId as string}`
+        : [];
+      const path = await tx<(Omit<CasePathStep, "occurredAt"> & { occurredAt: Date })[]>`
+        select transition_code as "transitionCode", from_state as "fromState", to_state as "toState",
+               occurred_at as "occurredAt"
+        from workflow.workflow_transition_event where case_id = ${caseId} order by occurred_at, id`;
       const allegations = await tx<CaseDetail["allegations"]>`
         select id, category, description, status from case_mgmt.allegation where case_id = ${caseId} order by created_at`;
       const assignments = await tx<(Omit<CaseAssignment, "assignedAt"> & { assignedAt: Date })[]>`
         select a.id, a.user_id as "userId", coalesce(u.display_name, '—') as "displayName",
-               a.assignment_role as "assignmentRole", a.assigned_at as "assignedAt"
+               u.display_name_ar as "displayNameAr", a.assignment_role as "assignmentRole", a.assigned_at as "assignedAt"
         from case_mgmt.case_assignment a left join iam.user_profile u on u.id = a.user_id
         where a.case_id = ${caseId} and a.status = 'ACTIVE' order by a.assigned_at`;
+      // Disabled steps come back too, so the page can say "later in this case" instead of "no steps" (UX-006).
+      // Eligible roles are reference data (role_permission is readable by every signed-in user); never people.
       const transitions = await tx<TransitionOption[]>`
-        select code, to_state as "toState", name_en as "nameEn", name_ar as "nameAr", reason_required as "reasonRequired",
-               allowed, coalesce(blocking_reasons, '{}') as "blockingReasons"
-        from api.available_transitions(${caseId}) where is_enabled`;
+        select t.code, t.to_state as "toState", t.name_en as "nameEn", t.name_ar as "nameAr",
+               t.reason_required as "reasonRequired", t.is_enabled as enabled, t.allowed,
+               coalesce(t.blocking_reasons, '{}') as "blockingReasons",
+               coalesce((select array_agg(distinct rp.role_code order by rp.role_code)
+                           from workflow.workflow_instance wi
+                           join workflow.workflow_transition_definition d
+                             on d.workflow_code = wi.workflow_code and d.code = t.code
+                           join iam.role_permission rp on rp.permission_code = d.required_permission
+                           join iam.role r on r.code = rp.role_code and not r.is_technical
+                          where wi.case_id = ${caseId}), '{}') as "eligibleRoles"
+        from api.available_transitions(${caseId}) t`;
       const [conflict] = await tx<{ status: string }[]>`
         select status from case_mgmt.conflict_check where case_id = ${caseId} and user_id = authz.current_user_id() and is_current`;
       return {
@@ -187,6 +208,10 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         createdAt: iso(c.createdAt as Date)!,
         openedAt: iso(c.openedAt as Date | null),
         rowVersion: c.rowVersion as number,
+        enteredStateAt: iso(c.enteredStateAt as Date | null),
+        owner: owner ?? null,
+        legalHoldStatus: c.legalHoldStatus === "ACTIVE" ? "ACTIVE" : "NONE",
+        path: path.map((p) => ({ ...p, occurredAt: iso(p.occurredAt)! })),
         allegations: [...allegations],
         assignments: assignments.map((a) => ({ ...a, assignedAt: iso(a.assignedAt)! })),
         transitions: [...transitions],
@@ -257,13 +282,14 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
     });
   }
 
+  // Page views leave the case story (ADR-016 D5, DEC-08): they stay in the ledger for Oversight.
   caseTimeline(ctx: UserRequestContext, caseId: string): Promise<AuditTimelineEntry[]> {
     return this.run(ctx, async (tx) => {
       const rows = await tx<(Omit<AuditTimelineEntry, "occurredAt"> & { occurredAt: Date })[]>`
         select e.seq::int as seq, e.occurred_at as "occurredAt", e.action, e.actor_id as "actorId",
                u.display_name as "actorName", e.reason
         from audit.audit_event e left join iam.user_profile u on u.id = e.actor_id
-        where e.case_id = ${caseId} and e.category = 'BUSINESS' and e.action <> 'CASE_VIEWED'
+        where e.case_id = ${caseId} and e.category = 'BUSINESS' and right(e.action, 7) <> '_VIEWED'
         order by e.seq desc limit 200`;
       return rows.map((r) => ({ ...r, occurredAt: iso(r.occurredAt)! }));
     });

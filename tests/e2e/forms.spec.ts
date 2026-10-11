@@ -9,7 +9,7 @@ test("a form is started, saved, prepared, reviewed and kept from outsiders", asy
   const investigator = await signIn(browser, "investigator.a@example.test");
   await investigator.goto("/cases");
   await investigator.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
-  await expect(investigator.getByTestId("evidence-card")).toBeVisible();
+  await expect(investigator.getByTestId("stage-panel")).toBeVisible();
   const caseUrl = investigator.url();
 
   // 1. The registry lists every form; only forms this role may prepare offer a start button.
@@ -70,7 +70,7 @@ test("a form is started, saved, prepared, reviewed and kept from outsiders", asy
   await expect(lead.getByTestId("form-events")).toContainText("Reviewed");
   await lead.goto(`${caseUrl}/forms`);
   await expect(lead.getByTestId("form-instances-table")).toContainText("Reviewed");
-  await lead.goto(caseUrl);
+  await lead.goto(`${caseUrl}/history`);
   await expect(lead.getByTestId("audit-timeline")).toContainText("Form started");
   await expect(lead.getByTestId("audit-timeline")).toContainText("Form reviewed");
   await lead.context().close();
