@@ -1,3 +1,6 @@
+// The portal has no loading.tsx on purpose (UX-002, CDF-140). A loading boundary streams its fallback first and
+// the page behind it in a hidden block that only JavaScript reveals, so a reporter without JavaScript would be
+// left on "Loading…" after posting a report. portal-no-js.spec.ts fails if one is added.
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { CDFClassificationBanner, CDFLocaleProvider, CDFShell } from "@cdf/ui";
