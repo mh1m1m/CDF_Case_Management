@@ -3,10 +3,9 @@
 // relationship, never from a role name; the application floor (shellAreas) can only remove one. Counts are the
 // caller's own actionable items, never case counts. The shell explains access; every page still enforces it.
 import type { ReactNode } from "react";
-import { shellAreas } from "@cdf/authorization";
 import type { MessageKey } from "@cdf/i18n";
 import { CDFAppShell, CDFEnvironmentStrip, CDFUserMenu, buttonClass } from "@cdf/ui";
-import { investigationService, requireActor } from "@/server/container";
+import { myShellAreas, requireActor } from "@/server/container";
 import { env } from "@/server/env";
 import { getTranslator } from "@/server/locale";
 import { areaHref } from "@/server/work-routes";
@@ -28,10 +27,10 @@ const NAV_KEY = {
 } as const;
 
 export default async function ShellLayout({ children }: { children: ReactNode }) {
-  const { actor, ctx } = await requireActor();
-  const [t, areas] = await Promise.all([getTranslator(), investigationService().myAreas(ctx)]);
+  const { actor } = await requireActor();
+  const [t, areas] = await Promise.all([getTranslator(), myShellAreas()]);
   const name = t.locale === "ar" ? actor.displayNameAr : actor.displayName;
-  const items = shellAreas(actor, areas).map((a) => ({
+  const items = areas.map((a) => ({
     key: NAV_KEY[a.area],
     area: a.area,
     href: areaHref(a),
@@ -50,9 +49,9 @@ export default async function ShellLayout({ children }: { children: ReactNode })
         />
       }
       brand={
-        <a href="/" className="flex items-center gap-3">
+        <a href="/" className="flex min-w-0 items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/cdf-logo.png" alt="" width={32} height={32} />
+          <img src="/cdf-logo.png" alt="" width={32} height={32} className="shrink-0" />
           <span className="truncate font-semibold">{t("common.appName")}</span>
         </a>
       }

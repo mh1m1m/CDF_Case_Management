@@ -41,8 +41,15 @@ export async function generateMetadata(): Promise<Metadata> {
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
-export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CaseDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
+  const decided = (await searchParams).decided === "conflict";
   if (!UUID.test(id)) notFound();
   const { actor, ctx } = await requireActor();
   const t = await getTranslator();
@@ -77,6 +84,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <>
+      {decided ? (
+        <CDFAlert tone="success" testId="conflict-decided">
+          {t("cases.conflictDecided")}
+        </CDFAlert>
+      ) : null}
       <CDFPageHeader
         title={`${c.caseNumber} · ${c.title}`}
         actions={
@@ -436,7 +448,6 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                         locale={t.locale}
                         submitLabel={t("cases.conflictDecide")}
                         submitName={`${t("cases.conflictDecide")}: ${who}`}
-                        successMessage={t("cases.conflictDecided")}
                         fieldLabels={{
                           decision: t("cases.conflictDecision"),
                           reason: t("cases.conflictReason"),

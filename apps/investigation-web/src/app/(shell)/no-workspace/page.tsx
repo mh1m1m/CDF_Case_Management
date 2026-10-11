@@ -2,9 +2,8 @@
 // permission nor a live relationship opens any area, so there is nothing to show and no count to give.
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { shellAreas } from "@cdf/authorization";
 import { CDFEmptyState, CDFIdentifier, CDFPageHeader } from "@cdf/ui";
-import { investigationService, requireActor } from "@/server/container";
+import { myShellAreas, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -13,8 +12,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function NoWorkspacePage() {
-  const { actor, ctx } = await requireActor();
-  if (shellAreas(actor, await investigationService().myAreas(ctx)).length > 0) redirect("/");
+  const { ctx } = await requireActor();
+  if ((await myShellAreas()).length > 0) redirect("/");
   const t = await getTranslator();
   return (
     <>

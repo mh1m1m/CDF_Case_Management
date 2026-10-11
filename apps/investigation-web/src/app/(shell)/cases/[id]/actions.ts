@@ -84,7 +84,8 @@ export async function decideConflictAction(
     caseId,
     conflictId,
   });
-  if (result.ok) revalidatePath(`/cases/${caseId}`);
+  // The decided declaration leaves the panel, so the confirmation is shown on the page instead.
+  if (result.ok) redirect(`/cases/${caseId}?decided=conflict`);
   return toActionState(result, form);
 }
 

@@ -48,8 +48,9 @@ describe("sidebar areas: permission AND live relationship, never a role name (G7
       investigatorA: ["MY_WORK", "CASES"],
       lead: ["MY_WORK", "CASES"], // LEGAL_HOLD_REQUEST alone never gives Records
       committee: ["MY_WORK"], // CONFLICT_DECLARE alone never gives Cases
-      committeeSecretary: ["MY_WORK"], // a COMMITTEE grant is not a Cases relationship
-      committeeChair: ["MY_WORK"],
+      // A COMMITTEE grant shows Cases until the Committee area exists (S5): the case is reachable today.
+      committeeSecretary: ["MY_WORK", "CASES"],
+      committeeChair: ["MY_WORK", "CASES"],
       legal: ["MY_WORK", "RECORDS"], // no Cases from CONFLICT_DECLARE or CASE_DISCOVER
       grcDirector: ["MY_WORK", "CASES", "RECORDS"],
       records: ["MY_WORK", "RECORDS"],

@@ -162,13 +162,17 @@ export function CDFAppShell(props: {
   );
 }
 
-/** One line on every screen size; the detail is dropped on a phone but stays available to screen readers. */
+/**
+ * One line on every screen size; the detail is dropped on a phone but stays available to screen readers. The strip
+ * is positioned so that the visually hidden detail (absolutely positioned) is clipped with it rather than widening
+ * the page at 320 px (WCAG 1.4.10).
+ */
 export function CDFEnvironmentStrip({ label, detail }: { label: string; detail: string }) {
   return (
     <div
       role="note"
       data-testid="classification-banner"
-      className="truncate border-b border-cdf-border bg-cdf-warning-bg px-4 py-1 text-center text-sm text-cdf-warning"
+      className="relative truncate border-b border-cdf-border bg-cdf-warning-bg px-4 py-1 text-center text-sm text-cdf-warning"
     >
       <strong className="font-semibold">{label}</strong>
       <span className="ms-2 max-sm:sr-only">{detail}</span>

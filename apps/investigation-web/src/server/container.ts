@@ -18,7 +18,8 @@ import {
   type InvestigationService,
   type RecordsService,
 } from "@cdf/application";
-import type { Actor } from "@cdf/contracts";
+import { shellAreas } from "@cdf/authorization";
+import type { Actor, MyArea } from "@cdf/contracts";
 import {
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
@@ -147,4 +148,13 @@ export const requireActor = cache(async (): Promise<RequestScope> => {
   const actor = await investigationService().loadActor(ctx);
   if (!actor) redirect("/login?reason=inactive");
   return { actor, ctx };
+});
+
+/**
+ * The caller's sidebar areas for this request (api.my_areas() after the application floor), read once and shared by
+ * the shell and the pages that gate on an area. Explains access; each page's own reads still enforce it.
+ */
+export const myShellAreas = cache(async (): Promise<MyArea[]> => {
+  const { actor, ctx } = await requireActor();
+  return shellAreas(actor, await investigationService().myAreas(ctx));
 });

@@ -13,7 +13,7 @@ export function LanguageSwitch({ locale, label }: { locale: Locale; label: strin
       href={`/locale?to=${to}&next=${encodeURIComponent(next)}`}
       lang={to}
       hrefLang={to}
-      className="underline-offset-4 hover:underline"
+      className="inline-flex min-h-11 items-center rounded-cdf-md px-2 underline-offset-4 hover:underline"
       data-testid="language-switch"
     >
       {label}

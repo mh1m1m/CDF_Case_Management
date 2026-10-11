@@ -14,7 +14,8 @@
 --     break-glass). Nobody else's, and nothing from the identity vault.
 --
 -- Not yet included, by decision: break-glass and identity-reveal items wait for their screens and the security
--- review in DEC-16; Committee waits for S5; Reporting for S6; "Done recently" and pools for S4.
+-- review in DEC-16; the Committee area waits for S5 (until then a committee grant shows the Cases area);
+-- Reporting waits for S6; "Done recently" and pools for S4.
 -- Due dates from the workflow are labelled WORKFLOW_SLA_PROVISIONAL until an approved SLA source (DEC-43).
 -- Hand-over for the TRIAGE grant's Cases item is computed from the workflow state for display only (before
 -- JURISDICTION); the grant itself is unchanged until grant scope lands at S3 (ADR-016 D3). Not enforcement.
@@ -218,8 +219,11 @@ as $$
     select
       exists (select 1 from case_mgmt.case_assignment a, me
                where a.user_id = me.id and a.status = 'ACTIVE' and authz.can_view_case(a.case_id)) as assigned,
+      -- Any non-TRIAGE grant the caller can use today. COMMITTEE, REVIEW and AUDIT grants count until their own
+      -- areas arrive (Committee S5) and grant scope is enforced (S3, DEC-02); the sidebar must not hide a case
+      -- the caller can reach now.
       exists (select 1 from case_mgmt.case_access_grant g, me
-               where g.user_id = me.id and g.status = 'ACTIVE' and g.scope = 'CASE'
+               where g.user_id = me.id and g.status = 'ACTIVE' and g.scope <> 'TRIAGE'
                  and g.effective_from <= now() and (g.effective_to is null or g.effective_to > now())
                  and authz.can_view_case(g.case_id)) as case_grant,
       exists (select 1 from case_mgmt.case_access_grant g

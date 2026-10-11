@@ -4,7 +4,6 @@
 // re-checks access. Views are URLs, so a view survives reload, sign-in and the language switch.
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { shellAreas } from "@cdf/authorization";
 import { WORK_AREAS, type WorkItem, type WorkView } from "@cdf/contracts";
 import type { MessageKey, Translator } from "@cdf/i18n";
 import {
@@ -16,7 +15,7 @@ import {
   CDFWorkItem,
   CDFWorkList,
 } from "@cdf/ui";
-import { investigationService, requireActor } from "@/server/container";
+import { investigationService, myShellAreas, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { itemHref, overdueKeys } from "@/server/work-routes";
 
@@ -52,10 +51,9 @@ export default async function MyWorkPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { actor, ctx } = await requireActor();
-  const service = investigationService();
-  const [areas, items] = await Promise.all([service.myAreas(ctx), service.myWorkItems(ctx)]);
-  if (!shellAreas(actor, areas).some((a) => a.area === "MY_WORK")) notFound();
+  const { ctx } = await requireActor();
+  const [areas, items] = await Promise.all([myShellAreas(), investigationService().myWorkItems(ctx)]);
+  if (!areas.some((a) => a.area === "MY_WORK")) notFound();
   const t = await getTranslator();
 
   const raw = (await searchParams).view;
