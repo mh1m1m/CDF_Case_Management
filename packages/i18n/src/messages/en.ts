@@ -633,6 +633,23 @@ export const en = {
     declaration: "Declaration",
     declare: "Submit declaration",
     conflictWarning: "Declaring a conflict removes your access to this case immediately.",
+    conflictDecisionsTitle: "Conflict declarations to decide",
+    conflictDecisionsIntro:
+      "Each person below declared a possible conflict of interest on this case. You cannot decide your own declaration.",
+    conflictDeclaredBy: "Declared by {name}",
+    conflictDeclaredOn: "Declared",
+    conflictDeclarationText: "Their declaration",
+    conflictDecision: "Decision",
+    conflictConfirm: "Confirm the conflict",
+    conflictConfirmConsequence:
+      "{name} stays excluded from this case: they cannot see it or be assigned to it.",
+    conflictClear: "Clear the declaration",
+    conflictClearConsequence:
+      "{name} can reach the case again through any assignment or access they already hold.",
+    conflictReason: "Reason for the decision",
+    conflictReasonHint: "Recorded in the case history with your name. At least 10 characters.",
+    conflictDecide: "Record decision",
+    conflictDecided: "Decision recorded.",
     transitionsTitle: "Next steps",
     noTransitions: "No steps available.",
     transitionReason: "Reason",

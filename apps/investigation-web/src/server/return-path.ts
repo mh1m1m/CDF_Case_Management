@@ -6,12 +6,23 @@ const PATH = /^\/(?![/\\])[\w\-/]*$/;
 const QUERY = /^[\w\-=&.%]*$/;
 const MAX = 512;
 
-export function safeReturnPath(raw: unknown, fallback = "/"): string {
-  if (typeof raw !== "string" || raw.length === 0 || raw.length > MAX) return fallback;
+function check(raw: unknown, allowSignIn: boolean): string | null {
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > MAX) return null;
   const q = raw.indexOf("?");
   const path = q === -1 ? raw : raw.slice(0, q);
   const query = q === -1 ? "" : raw.slice(q + 1);
-  if (!PATH.test(path) || !QUERY.test(query)) return fallback;
-  if (path === "/login" || path.startsWith("/login/") || path === "/locale") return fallback;
+  if (!PATH.test(path) || !QUERY.test(query)) return null;
+  if (path === "/locale" || path.startsWith("/locale/")) return null;
+  if (!allowSignIn && (path === "/login" || path.startsWith("/login/"))) return null;
   return query ? `${path}?${query}` : path;
+}
+
+/** Where to go after signing in. */
+export function safeReturnPath(raw: unknown, fallback = "/"): string {
+  return check(raw, false) ?? fallback;
+}
+
+/** Where to go back to after a language switch: the same page and view, the sign-in page included. */
+export function safeLocaleReturnPath(raw: unknown): string {
+  return check(raw, true) ?? "/";
 }

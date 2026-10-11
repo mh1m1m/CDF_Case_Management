@@ -621,6 +621,23 @@ export const ar: Messages = {
     declaration: "الإقرار",
     declare: "تقديم الإقرار",
     conflictWarning: "الإفصاح عن تعارض يلغي وصولك إلى هذه القضية فوراً.",
+    conflictDecisionsTitle: "إقرارات تعارض بانتظار القرار",
+    conflictDecisionsIntro:
+      "أفصح كل شخص أدناه عن تعارض مصالح محتمل في هذه القضية. لا يمكنك البت في إقرارك أنت.",
+    conflictDeclaredBy: "أفصح عنه: {name}",
+    conflictDeclaredOn: "تاريخ الإفصاح",
+    conflictDeclarationText: "نص الإقرار",
+    conflictDecision: "القرار",
+    conflictConfirm: "تأكيد التعارض",
+    conflictConfirmConsequence:
+      "يبقى {name} مستبعداً من هذه القضية: لا يستطيع الاطلاع عليها ولا التكليف بها.",
+    conflictClear: "رفع الإقرار",
+    conflictClearConsequence:
+      "يستطيع {name} الوصول إلى القضية مجدداً عبر أي تكليف أو صلاحية وصول لديه أصلاً.",
+    conflictReason: "سبب القرار",
+    conflictReasonHint: "يُسجَّل في سجل القضية باسمك. ١٠ أحرف على الأقل.",
+    conflictDecide: "تسجيل القرار",
+    conflictDecided: "تم تسجيل القرار.",
     transitionsTitle: "الخطوات التالية",
     noTransitions: "لا توجد خطوات متاحة.",
     transitionReason: "المبررات",

@@ -90,9 +90,7 @@ export function CDFUserMenu({
         >
           {name.trim().charAt(0)}
         </span>
-        <span className="hidden max-w-48 truncate sm:inline">
-          {name}
-        </span>
+        <span className="hidden max-w-48 truncate sm:inline">{name}</span>
         <svg
           aria-hidden="true"
           viewBox="0 0 16 16"

@@ -127,7 +127,7 @@ describe("no storage URL ever reaches the browser", () => {
 
   it("the download route streams the object itself and never redirects", () => {
     const route = readFileSync(
-      join(root, "apps/investigation-web/src/app/cases/[id]/evidence/[versionId]/download/route.ts"),
+      join(root, "apps/investigation-web/src/app/(shell)/cases/[id]/evidence/[versionId]/download/route.ts"),
       "utf8",
     );
     expect(route).toMatch(/openDownload\(/);

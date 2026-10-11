@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { createTranslator, type Locale } from "@cdf/i18n";
 import { buttonClass } from "@cdf/ui";
-import { signOutAction } from "../login/actions";
-import { extendSessionAction } from "./actions";
+import { extendSessionAction, signOutAction } from "./actions";
 
 /** Seconds of warning before the idle limit (CDF-57: warn and extend, chosen 2026-10-10). */
 const WARNING_SECONDS = 120;

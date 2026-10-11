@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { CDFClassificationBanner, CDFLocaleProvider, CDFShell } from "@cdf/ui";
+import { CDFLocaleProvider } from "@cdf/ui";
 import { directionOf } from "@cdf/i18n";
 import { getTranslator } from "@/server/locale";
-import { LanguageSwitch } from "./language-switch";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -17,36 +16,14 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
+// The chrome lives in the route groups: (public) for sign-in, (shell) for everything signed in (UX redesign S1).
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const t = await getTranslator();
   return (
     <html lang={t.locale} dir={directionOf(t.locale)} data-theme="light">
       <body>
-        <CDFShell
-          skipLabel={t("common.skipToContent")}
-          banner={
-            <CDFClassificationBanner
-              label={t("common.classificationBanner")}
-              detail={t("common.classificationBannerDetail")}
-            />
-          }
-          brand={
-            <a href="/" className="flex items-center gap-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/cdf-logo.png" alt="" width={40} height={40} />
-              <span className="font-semibold">{t("common.appName")}</span>
-            </a>
-          }
-          utilities={
-            <LanguageSwitch
-              locale={t.locale}
-              label={t.locale === "ar" ? t("common.switchToEnglish") : t("common.switchToArabic")}
-            />
-          }
-        >
-          {/* Error boundaries are client components: they read the locale from here (UX-080). */}
-          <CDFLocaleProvider locale={t.locale}>{children}</CDFLocaleProvider>
-        </CDFShell>
+        {/* Error boundaries are client components: they read the locale from here (UX-080). */}
+        <CDFLocaleProvider locale={t.locale}>{children}</CDFLocaleProvider>
       </body>
     </html>
   );

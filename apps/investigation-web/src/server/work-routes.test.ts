@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MyArea, WorkItem } from "@cdf/contracts";
-import { safeReturnPath } from "./return-path";
+import { safeLocaleReturnPath, safeReturnPath } from "./return-path";
 import { areaHref, areaOfPath, itemHref, landingFor } from "./work-routes";
 
 const area = (a: MyArea["area"], defaultView = "x"): MyArea => ({ area: a, actionableCount: 0, defaultView });
@@ -89,5 +89,16 @@ describe("return path after sign-in (DEC-20)", () => {
       ["/cases"],
     ])
       expect(safeReturnPath(bad), String(bad)).toBe("/");
+  });
+});
+
+describe("return path after a language switch", () => {
+  it("keeps the page and its view, the sign-in page included", () => {
+    expect(safeLocaleReturnPath("/my-work?view=due-soon")).toBe("/my-work?view=due-soon");
+    expect(safeLocaleReturnPath("/login?next=%2Fcases%2Fabc")).toBe("/login?next=%2Fcases%2Fabc");
+  });
+  it("refuses other origins and the switch itself", () => {
+    for (const bad of ["//evil.example.test", "https://evil.example.test/", "/locale?to=ar", "/\\x", null])
+      expect(safeLocaleReturnPath(bad), String(bad)).toBe("/");
   });
 });

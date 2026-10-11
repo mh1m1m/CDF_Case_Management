@@ -124,7 +124,7 @@ requirements:
       [
         core.consume_rate_limit,
         packages/application/src/portal.ts,
-        apps/investigation-web/src/app/login/actions.ts,
+        apps/investigation-web/src/app/(public)/login/actions.ts,
       ]
     tests: [tests/integration/first-slice.spec.ts]
     production_substitution: "WAF / API gateway rate limiting and bot protection"
@@ -238,7 +238,7 @@ requirements:
         api.create_case_from_report,
         api.list_restricted_case_authorities,
         authz.is_restricted_case_authority,
-        "apps/investigation-web/src/app/intake/[id]/restricted-case-fields.tsx",
+        "apps/investigation-web/src/app/(shell)/intake/[id]/restricted-case-fields.tsx",
       ]
     tests: [tests/security/restricted-case-authority.spec.ts, tests/e2e/restricted-case.spec.ts]
     notes: "Ordinary (non-restricted) cases keep the creator's TRIAGE grant until grant scope lands (S3, DEC-02/DEC-03)."
@@ -331,7 +331,7 @@ requirements:
       [
         packages/ui/src/command-form.tsx,
         packages/ui/src/confirm-dialog.tsx,
-        apps/investigation-web/src/app/confirmations.ts,
+        apps/investigation-web/src/app/(shell)/confirmations.ts,
       ]
     tests: [tests/e2e/command-form.spec.ts, packages/ui/src/command-form-fields.test.ts]
 
@@ -365,7 +365,7 @@ requirements:
         packages/application/src/evidence.ts,
         packages/infrastructure/src/storage,
         packages/infrastructure/src/scanning,
-        "apps/investigation-web/src/app/cases/[id]/evidence/[versionId]/download/route.ts",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/evidence/[versionId]/download/route.ts",
       ]
     tests:
       [
@@ -411,7 +411,7 @@ requirements:
         packages/validation (startFormSchema … withdrawFormSchema),
         packages/application/src/forms.ts,
         packages/infrastructure/src/db/forms-gateway.ts,
-        "apps/investigation-web/src/app/cases/[id]/forms",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/forms",
       ]
     tests:
       [
@@ -1003,7 +1003,7 @@ requirements:
       - packages/application/src/portal.ts
       - apps/whistleblowing-web/src/app/report/attachments/route.ts
       - apps/whistleblowing-web/src/app/report/attachment-uploader.tsx
-      - apps/investigation-web/src/app/intake/[id]/attachments/[attachmentId]/route.ts
+      - apps/investigation-web/src/app/(shell)/intake/[id]/attachments/[attachmentId]/route.ts
     tests:
       - tests/security/reporter-attachments.spec.ts
       - packages/application/src/portal.test.ts
