@@ -607,3 +607,117 @@ export type CommandFormState =
 export * from "./forms";
 // ---- Interviews (EPIC 09, CDF-60) ----------------------------------------------------------------
 export * from "./interviews";
+
+// ---- Shell, My Work and My access (UX redesign S1; migration 1820; ADR-016 D0) --------------------------
+/** Sidebar areas in their fixed order (audit §20.5). Committee arrives at S5 and Reporting at S6. */
+export const WORK_AREAS = [
+  "MY_WORK",
+  "INTAKE",
+  "CASES",
+  "COMMITTEE",
+  "RECORDS",
+  "OVERSIGHT",
+  "ADMINISTRATION",
+  "REPORTING",
+] as const;
+export type WorkArea = (typeof WORK_AREAS)[number];
+
+/** An area the caller has now: a permission AND a live relationship (`api.my_areas()`). */
+export interface MyArea {
+  area: WorkArea;
+  /** The caller's own items that need their action in this area; always 0 for Oversight and Administration. */
+  actionableCount: number;
+  defaultView: string;
+}
+
+export const WORK_VIEWS = ["NEEDS_ACTION", "MY_CASES", "DUE_SOON", "WAITING"] as const;
+export type WorkView = (typeof WORK_VIEWS)[number];
+
+/** Item types `api.my_work_items()` returns; open tasks arrive as `TASK_<task type>`. */
+export const WORK_CATEGORIES = [
+  "NEW_REPORT",
+  "CASE_TO_OPEN",
+  "REPORTER_REPLIED",
+  "MY_CASE",
+  "DECLARE_CONFLICT",
+  "CONFLICT_TO_DECIDE",
+  "UNASSIGNED_CASE",
+  "CASE_STAGE_DUE",
+  "FORM_TO_REVIEW",
+  "FORM_TO_APPROVE",
+  "FORM_RETURNED",
+  "INTERVIEW_TO_REVIEW",
+  "INTERVIEW_TO_APPROVE",
+  "INTERVIEW_SOON",
+  "HOLD_REQUEST_TO_ROUTE",
+  "HOLD_RELEASE_TO_DECIDE",
+  "MY_HOLD_REQUEST",
+  "MY_HOLD_RELEASE_REQUEST",
+  ...CASE_TASK_TYPES.map((t) => `TASK_${t.code}` as const),
+] as const;
+export type WorkCategory = (typeof WORK_CATEGORIES)[number];
+
+export type WorkTargetType =
+  | "REPORT"
+  | "CASE"
+  | "CONFLICT"
+  | "FORM_INSTANCE"
+  | "INTERVIEW"
+  | "CASE_TASK"
+  | "HOLD_REQUEST"
+  | "HOLD_RELEASE";
+
+/**
+ * One item of the caller's work. Ids, codes and dates only: never a title, name or narrative (DEC-22 decides
+ * any further field). The case number is present only where the caller may see the case's metadata.
+ */
+export interface WorkItem {
+  area: WorkArea;
+  view: WorkView;
+  category: WorkCategory;
+  targetType: WorkTargetType;
+  targetId: string;
+  caseId: string | null;
+  caseNumber: string | null;
+  dueAt: string | null;
+  /** TASK, SCHEDULE, or WORKFLOW_SLA_PROVISIONAL until an approved SLA source exists (DEC-43). */
+  dueSource: "TASK" | "SCHEDULE" | "WORKFLOW_SLA_PROVISIONAL" | null;
+  sinceAt: string | null;
+}
+
+export const ACCESS_BASES = ["CLEARANCE", "ROLE", "ASSIGNMENT", "GRANT", "TASK", "BREAK_GLASS"] as const;
+export type AccessBasis = (typeof ACCESS_BASES)[number];
+
+/** One line of the caller's own access basis (`api.my_access()`); nobody else's. */
+export interface MyAccessEntry {
+  basis: AccessBasis;
+  code: string;
+  caseId: string | null;
+  caseNumber: string | null;
+  sinceAt: string | null;
+  untilAt: string | null;
+}
+
+/** One audit-ledger row for Oversight: metadata only. Reasons and details wait for DEC-11 (audit G13). */
+export interface LedgerEntry {
+  seq: number;
+  occurredAt: string;
+  action: string;
+  category: "BUSINESS" | "ADMIN" | "SECURITY";
+  actorType: string;
+  actorRoles: string[];
+  objectType: string | null;
+  outcome: string;
+}
+export type OversightView = "ledger" | "security-events";
+
+/** The read-only user register for Administration: directory columns and active roles. No case data. */
+export interface UserRegisterEntry {
+  id: string;
+  displayName: string;
+  displayNameAr: string;
+  email: string;
+  department: string | null;
+  status: "ACTIVE" | "SUSPENDED" | "REVOKED";
+  roles: Role[];
+}

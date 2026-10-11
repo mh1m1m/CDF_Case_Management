@@ -5,7 +5,7 @@
  *   3. runs the database command in the caller's security context (second enforcement point),
  *   4. maps failures to safe AppErrors and records denials as SECURITY events (§30).
  */
-import type { Actor, Permission } from "@cdf/contracts";
+import type { Actor, LedgerEntry, OversightView, Permission, UserRegisterEntry } from "@cdf/contracts";
 import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
 import {
@@ -22,6 +22,9 @@ import {
 import type { z } from "zod";
 import { AppError, toAppError } from "./errors";
 import type { InvestigationGateway, UserRequestContext } from "./ports";
+
+/** Oversight shows the latest events only; paging and filters arrive with the list reads (audit RC-09). */
+export const LEDGER_PAGE = 100;
 
 export interface InvestigationDeps {
   gateway: InvestigationGateway;
@@ -118,6 +121,37 @@ export function createInvestigationService(deps: InvestigationDeps) {
       ),
     myCaseTasks: (ctx: UserRequestContext) => query(ctx, () => gateway.myCaseTasks(ctx)),
     myWorkSummary: (ctx: UserRequestContext) => query(ctx, () => gateway.myWorkSummary(ctx)),
+
+    // Shell read models (UX redesign S1). They add no access: the database derives every row from what the caller
+    // can already act on, so there is no application pre-check beyond the authenticated session.
+    myAreas: (ctx: UserRequestContext) => query(ctx, () => gateway.myAreas(ctx)),
+    myWorkItems: (ctx: UserRequestContext) => query(ctx, () => gateway.myWorkItems(ctx)),
+    myAccess: (ctx: UserRequestContext) => query(ctx, () => gateway.myAccess(ctx)),
+
+    // Oversight (read only): the ledger for AUDIT_VIEW, security events for SECURITY_EVENT_VIEW. Metadata only;
+    // the database's audit_event_read policy decides every row, and no case content is joined (§21).
+    auditLedger: (ctx: UserRequestContext, actor: Actor, view: OversightView) => {
+      const categories: LedgerEntry["category"][] =
+        view === "ledger"
+          ? can(actor, "AUDIT_VIEW")
+            ? ["BUSINESS", "ADMIN"]
+            : []
+          : can(actor, "SECURITY_EVENT_VIEW")
+            ? ["SECURITY"]
+            : [];
+      return categories.length
+        ? query(ctx, () => gateway.auditLedger(ctx, categories, LEDGER_PAGE))
+        : Promise.resolve([] as LedgerEntry[]);
+    },
+    auditChainBreaks: (ctx: UserRequestContext, actor: Actor) =>
+      can(actor, "AUDIT_VIEW") || can(actor, "SECURITY_EVENT_VIEW")
+        ? query(ctx, () => gateway.auditChainBreaks(ctx))
+        : Promise.resolve(null),
+    // Administration (read only until dual control, DEC-12): directory columns and roles, never case data.
+    userRegister: (ctx: UserRequestContext, actor: Actor) =>
+      can(actor, "USER_ADMIN") || can(actor, "ROLE_ADMIN")
+        ? query(ctx, () => gateway.userRegister(ctx))
+        : Promise.resolve([] as UserRegisterEntry[]),
     requestCaseForLegalHold: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(
         ctx,

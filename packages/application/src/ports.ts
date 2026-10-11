@@ -17,6 +17,9 @@ import type {
   FormInstanceSummary,
   FormReviewOutcome,
   IntakeReportItem,
+  LedgerEntry,
+  MyAccessEntry,
+  MyArea,
   MyCaseTask,
   MyWorkSummary,
   PublicReportStatus,
@@ -27,6 +30,8 @@ import type {
   ReportMessage,
   ReporterMode,
   UserDirectoryEntry,
+  UserRegisterEntry,
+  WorkItem,
 } from "@cdf/contracts";
 
 export interface RequestContext {
@@ -269,6 +274,18 @@ export interface InvestigationGateway {
   ): Promise<{ total: number; items: RecordsCatalogueEntry[] }>;
   myCaseTasks(ctx: UserRequestContext): Promise<MyCaseTask[]>;
   myWorkSummary(ctx: UserRequestContext): Promise<MyWorkSummary>;
+  // Shell read models (UX redesign S1, migration 1820): the caller's own areas, work and access basis.
+  myAreas(ctx: UserRequestContext): Promise<MyArea[]>;
+  myWorkItems(ctx: UserRequestContext): Promise<WorkItem[]>;
+  myAccess(ctx: UserRequestContext): Promise<MyAccessEntry[]>;
+  // Read-only Oversight and Administration (S1). Row-level security decides every row.
+  auditLedger(
+    ctx: UserRequestContext,
+    categories: readonly LedgerEntry["category"][],
+    limit: number,
+  ): Promise<LedgerEntry[]>;
+  auditChainBreaks(ctx: UserRequestContext): Promise<number>;
+  userRegister(ctx: UserRequestContext): Promise<UserRegisterEntry[]>;
   requestCaseForLegalHold(
     ctx: UserRequestContext,
     input: { caseReference: string; justification: string; reasonCode: string },

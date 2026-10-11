@@ -306,6 +306,9 @@ importers:
       '@cdf/domain':
         specifier: workspace:*
         version: link:../packages/domain
+      '@cdf/i18n':
+        specifier: workspace:*
+        version: link:../packages/i18n
       '@cdf/infrastructure':
         specifier: workspace:*
         version: link:../packages/infrastructure

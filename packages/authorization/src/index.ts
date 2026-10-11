@@ -5,8 +5,8 @@
  * They are NOT the security boundary: every command is re-checked by the database (authz.* and RLS).
  * ROLE_PERMISSIONS mirrors iam.role_permission; tests/integration/mirrors.spec.ts asserts equality.
  */
-import type { Actor, Classification, Permission, Role } from "@cdf/contracts";
-import { CLASSIFICATION_LEVELS } from "@cdf/contracts";
+import type { Actor, Classification, MyArea, Permission, Role, WorkArea } from "@cdf/contracts";
+import { CLASSIFICATION_LEVELS, WORK_AREAS } from "@cdf/contracts";
 
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   INTAKE_OFFICER: ["INTAKE_VIEW", "REPORT_MESSAGE_REPLY", "FORM_VIEW", "FORM_PREPARE"],
@@ -150,6 +150,47 @@ export function navigationFor(actor: Pick<Actor, "permissions">) {
     recordsCatalogue: can(actor, "ARCHIVE_RECORD_VIEW"),
     administration: can(actor, "ROLE_ADMIN") || can(actor, "USER_ADMIN"),
   };
+}
+
+/**
+ * The permission floor of each shell area (audit §20.4). This is the application pre-check that the sidebar
+ * intersects with `api.my_areas()`, which adds the live relationship (assignment, grant, task or item). Cases and
+ * My Work have no floor because an assignment alone opens them; Committee (S5) and Reporting (S6) do not exist
+ * yet. Every route still re-checks in the database: hiding an area is not enforcement.
+ */
+const AREA_FLOOR: Readonly<Record<WorkArea, readonly Permission[] | "ANY" | "NONE">> = {
+  MY_WORK: "ANY",
+  INTAKE: ["INTAKE_VIEW"],
+  CASES: "ANY",
+  COMMITTEE: "NONE",
+  RECORDS: [
+    "RETENTION_TASK_VIEW",
+    "DISPOSITION_TASK_VIEW",
+    "LEGAL_HOLD_REVIEW",
+    "LEGAL_HOLD_RELEASE",
+    "DISPOSITION_APPROVE",
+    "ARCHIVE_RECORD_ADMINISTER",
+    "ARCHIVE_RECORD_VIEW",
+    "CASE_TASK_ASSIGN", // routing a hold request is a Records item
+  ],
+  OVERSIGHT: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
+  ADMINISTRATION: ["USER_ADMIN", "ROLE_ADMIN"],
+  REPORTING: "NONE",
+};
+
+export function areaPermitted(actor: Pick<Actor, "permissions">, area: WorkArea): boolean {
+  const floor = AREA_FLOOR[area];
+  if (floor === "ANY") return true;
+  if (floor === "NONE") return false;
+  return floor.some((p) => can(actor, p));
+}
+
+/** The sidebar: the database's areas that pass the floor, in the fixed order, at most one entry per area. */
+export function shellAreas(actor: Pick<Actor, "permissions">, areas: readonly MyArea[]): MyArea[] {
+  return WORK_AREAS.flatMap((code) => {
+    const a = areas.find((x) => x.area === code);
+    return a && areaPermitted(actor, code) ? [a] : [];
+  });
 }
 
 export * from "./purpose";
