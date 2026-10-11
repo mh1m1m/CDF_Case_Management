@@ -56,6 +56,16 @@ export const ar: Messages = {
     RATE_LIMITED: "محاولات كثيرة. يرجى الانتظار قليلاً ثم المحاولة مجدداً.",
     UNAVAILABLE: "الخدمة غير متاحة مؤقتاً.",
     withReference: "{message} المرجع: {ref}",
+    title: {
+      UNAUTHENTICATED: "انتهت الجلسة",
+      NOT_FOUND: "غير متاح",
+      FORBIDDEN: "غير مصرّح",
+      INVALID: "راجع ما أدخلته",
+      CONFLICT: "غير ممكن الآن",
+      RATE_LIMITED: "محاولات كثيرة",
+      UNAVAILABLE: "الخدمة غير متاحة",
+    },
+    entriesKept: "ما أدخلته ما زال في النموذج.",
   },
   session: {
     warningTitle: "هل ما زلت هنا؟",

@@ -8,6 +8,7 @@ import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFField,
   CDFPageHeader,
   CDFTable,
@@ -16,7 +17,6 @@ import {
 } from "@cdf/ui";
 import { formsService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../../action-form";
 import { AppNav } from "../../../app-nav";
 import { startFormAction } from "./actions";
 import { statusTone } from "./form-fields";
@@ -159,7 +159,7 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
               header: t("forms.start"),
               cell: (d) =>
                 d.canStart && d.isEnabled ? (
-                  <ActionForm
+                  <CDFCommandForm
                     action={startFormAction.bind(null, c.id, d.code)}
                     locale={t.locale}
                     submitLabel={t("forms.start")}
@@ -181,7 +181,7 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
                         ))}
                       </select>
                     </CDFField>
-                  </ActionForm>
+                  </CDFCommandForm>
                 ) : (
                   "—"
                 ),

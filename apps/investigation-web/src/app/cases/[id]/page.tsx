@@ -8,6 +8,7 @@ import {
   CDFAlert,
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFPageHeader,
@@ -21,7 +22,6 @@ import {
 import { STATES } from "@cdf/workflow";
 import { evidenceService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { assignAction, declareConflictAction, transitionAction, updateDetailsAction } from "./actions";
 import { EvidencePanel } from "./evidence-panel";
@@ -171,47 +171,63 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               <details className="mt-4">
                 <summary className="cursor-pointer font-semibold">{t("cases.editDetails")}</summary>
                 <div className="mt-3">
-                  <ActionForm
-                    action={updateDetailsAction.bind(null, c.id)}
+                  <CDFCommandForm
+                    // UX-030: the version and values this page rendered travel with the form; only changed
+                    // fields are sent, so an untouched field can never write an older value back.
+                    action={updateDetailsAction.bind(null, c.id, {
+                      rowVersion: c.rowVersion,
+                      title: c.title,
+                      summary: c.summary,
+                      priority: c.priority,
+                    })}
                     locale={t.locale}
                     submitLabel={t("common.save")}
                     variant="secondary"
                     testId="details-form"
                     successMessage={t("common.saved")}
+                    changedOnly={["title", "summary", "priority"]}
                   >
-                    <input type="hidden" name="expectedVersion" value={c.rowVersion} />
-                    <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
-                      <input id="title" name="title" defaultValue={c.title} className={inputClass} required />
-                    </CDFField>
-                    <CDFField
-                      id="summary"
-                      label={t("intake.caseSummary")}
-                      requiredLabel={t("common.required")}
-                    >
-                      <textarea
+                    {/* Keyed by version: after a save every field starts again from the stored values. */}
+                    <div key={c.rowVersion}>
+                      <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
+                        <input
+                          id="title"
+                          name="title"
+                          defaultValue={c.title}
+                          className={inputClass}
+                          required
+                        />
+                      </CDFField>
+                      <CDFField
                         id="summary"
-                        name="summary"
-                        defaultValue={c.summary}
-                        className={textareaClass}
-                        required
-                      />
-                    </CDFField>
-                    <CDFField id="priority" label={t("cases.priority")}>
-                      <select
-                        id="priority"
-                        name="priority"
-                        defaultValue={c.priority ?? ""}
-                        className={inputClass}
+                        label={t("intake.caseSummary")}
+                        requiredLabel={t("common.required")}
                       >
-                        <option value="">—</option>
-                        {PRIORITIES.map((p) => (
-                          <option key={p} value={p}>
-                            {t(`priority.${p}` as MessageKey)}
-                          </option>
-                        ))}
-                      </select>
-                    </CDFField>
-                  </ActionForm>
+                        <textarea
+                          id="summary"
+                          name="summary"
+                          defaultValue={c.summary}
+                          className={textareaClass}
+                          required
+                        />
+                      </CDFField>
+                      <CDFField id="priority" label={t("cases.priority")}>
+                        <select
+                          id="priority"
+                          name="priority"
+                          defaultValue={c.priority ?? ""}
+                          className={inputClass}
+                        >
+                          <option value="">—</option>
+                          {PRIORITIES.map((p) => (
+                            <option key={p} value={p}>
+                              {t(`priority.${p}` as MessageKey)}
+                            </option>
+                          ))}
+                        </select>
+                      </CDFField>
+                    </div>
+                  </CDFCommandForm>
                 </div>
               </details>
             ) : null}
@@ -250,7 +266,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                 >
                   <p className="mb-2 font-semibold">{t.locale === "ar" ? tr.nameAr : tr.nameEn}</p>
                   {tr.allowed ? (
-                    <ActionForm
+                    <CDFCommandForm
                       action={transitionAction.bind(null, c.id, tr.code)}
                       locale={t.locale}
                       submitLabel={t("cases.perform")}
@@ -274,7 +290,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                           />
                         </CDFField>
                       ) : null}
-                    </ActionForm>
+                    </CDFCommandForm>
                   ) : (
                     <div>
                       <CDFBadge tone="neutral">{t("cases.blocked")}</CDFBadge>
@@ -324,7 +340,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             {can(actor, "CASE_ASSIGN") && contentOpen ? (
               <div className="border-t border-cdf-border pt-4">
                 <h3 className="mb-2 font-semibold">{t("cases.assignTitle")}</h3>
-                <ActionForm
+                <CDFCommandForm
                   action={assignAction.bind(null, c.id)}
                   locale={t.locale}
                   submitLabel={t("cases.assign")}
@@ -369,7 +385,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   >
                     <input id="assignReason" name="reason" className={inputClass} required minLength={5} />
                   </CDFField>
-                </ActionForm>
+                </CDFCommandForm>
               </div>
             ) : null}
           </CDFCard>
@@ -385,7 +401,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   : t("cases.noDeclaration")}
               </p>
               {!c.myConflictStatus ? (
-                <ActionForm
+                <CDFCommandForm
                   action={declareConflictAction.bind(null, c.id)}
                   locale={t.locale}
                   submitLabel={t("cases.declare")}
@@ -424,7 +440,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                       minLength={5}
                     />
                   </CDFField>
-                </ActionForm>
+                </CDFCommandForm>
               ) : null}
             </CDFCard>
           ) : null}

@@ -576,6 +576,26 @@ export type Result<T> =
   | { ok: true; value: T }
   | { ok: false; error: { kind: AppErrorKind; detail?: string; correlationId: string } };
 
+/**
+ * Serializable result of a server-action command form (UX-001). Never contains database text (§82): `kind`
+ * is an AppErrorKind, `detail` a safe code mapped to an i18n key, `fieldErrors` maps a field name to a
+ * `validation.*` message key, and `ref` is the correlation id shown to the user.
+ *
+ * `values` echoes what the user submitted, so a refused submit made before the page hydrated can be shown
+ * again. It never holds a password, follow-up secret, token or identity field (see @cdf/ui `echoValues`).
+ */
+export type CommandFormState =
+  | { status: "idle" }
+  | { status: "ok"; message?: string }
+  | { status: "invalid"; fieldErrors: Record<string, string>; values?: Record<string, string | string[]> }
+  | {
+      status: "error";
+      kind: string;
+      detail?: string;
+      ref: string;
+      values?: Record<string, string | string[]>;
+    };
+
 export * from "./forms";
 // ---- Interviews (EPIC 09, CDF-60) ----------------------------------------------------------------
 export * from "./interviews";

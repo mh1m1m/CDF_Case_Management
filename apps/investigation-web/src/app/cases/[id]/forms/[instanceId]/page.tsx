@@ -8,6 +8,7 @@ import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFPageHeader,
@@ -18,7 +19,6 @@ import {
 } from "@cdf/ui";
 import { formsService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../../../action-form";
 import { AppNav } from "../../../../app-nav";
 import {
   approveFormAction,
@@ -50,7 +50,7 @@ export default async function FormInstancePage({
     A extends (caseId: string, instanceId: string, formCode: string, ...rest: never[]) => unknown,
   >(
     a: A,
-  ) => a.bind(null, f.caseId, f.id, f.formCode) as unknown as Parameters<typeof ActionForm>[0]["action"];
+  ) => a.bind(null, f.caseId, f.id, f.formCode) as unknown as Parameters<typeof CDFCommandForm>[0]["action"];
 
   return (
     <>
@@ -84,7 +84,7 @@ export default async function FormInstancePage({
         <div>
           <CDFCard title={t("forms.fields")} testId="form-fields">
             {f.capabilities.canSave ? (
-              <ActionForm
+              <CDFCommandForm
                 action={bind(saveDraftAction)}
                 locale={t.locale}
                 submitLabel={t("forms.saveDraft")}
@@ -93,7 +93,7 @@ export default async function FormInstancePage({
                 successMessage={t("forms.saved", { message: "{message}" })}
               >
                 <FormFields sections={f.definition.sections} data={f.data} editable t={t} />
-              </ActionForm>
+              </CDFCommandForm>
             ) : (
               <>
                 <p className="mb-3 text-sm text-cdf-text-secondary" data-testid="form-read-only">
@@ -180,7 +180,7 @@ export default async function FormInstancePage({
           {f.capabilities.canPrepare ? (
             <CDFCard title={t("forms.prepareTitle")} testId="prepare-card">
               <p className="mb-3 text-sm text-cdf-text-secondary">{t("forms.prepareHint")}</p>
-              <ActionForm
+              <CDFCommandForm
                 action={bind(prepareFormAction)}
                 locale={t.locale}
                 submitLabel={t("forms.prepare")}
@@ -200,7 +200,7 @@ export default async function FormInstancePage({
               <p className="mb-3 text-sm text-cdf-text-secondary">
                 {f.capabilities.canReview ? t("forms.reviewHint") : t("forms.approveHint")}
               </p>
-              <ActionForm
+              <CDFCommandForm
                 action={bind(f.capabilities.canReview ? reviewFormAction : approveFormAction)}
                 locale={t.locale}
                 submitLabel={t("forms.decide")}
@@ -242,14 +242,14 @@ export default async function FormInstancePage({
                     aria-describedby="decision-reason-hint"
                   />
                 </CDFField>
-              </ActionForm>
+              </CDFCommandForm>
             </CDFCard>
           ) : null}
 
           {f.capabilities.canWithdraw ? (
             <CDFCard title={t("forms.withdrawTitle")} testId="withdraw-card">
               <p className="mb-3 text-sm text-cdf-text-secondary">{t("forms.withdrawHint")}</p>
-              <ActionForm
+              <CDFCommandForm
                 action={bind(withdrawFormAction)}
                 locale={t.locale}
                 submitLabel={t("forms.withdraw")}
@@ -268,7 +268,7 @@ export default async function FormInstancePage({
                     maxLength={2000}
                   />
                 </CDFField>
-              </ActionForm>
+              </CDFCommandForm>
             </CDFCard>
           ) : null}
         </div>

@@ -1,4 +1,4 @@
-// Field groups shared by the records forms. Plain inputs inside ActionForm; the shared Zod schemas validate
+// Field groups shared by the records forms. Plain inputs inside CDFCommandForm; the shared Zod schemas validate
 // them on the server and the api.* commands validate them again (§45).
 import { LEGAL_HOLD_REASON_CODES } from "@cdf/contracts";
 import type { MessageKey, Translator } from "@cdf/i18n";

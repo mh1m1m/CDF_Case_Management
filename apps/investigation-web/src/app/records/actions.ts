@@ -5,7 +5,7 @@
 import { revalidatePath } from "next/cache";
 import type { CommandResult } from "@cdf/application";
 import { investigationService, recordsService, requireActor } from "@/server/container";
-import { formObject, toActionState, type ActionState } from "@/server/actions-helpers";
+import { formObject, toActionState, withEcho, type ActionState } from "@/server/actions-helpers";
 
 type RecordCommand =
   | "assignRetentionClass"
@@ -34,7 +34,7 @@ async function onRecord(
     if (caseId) revalidatePath(`/records/${caseId}`);
     revalidatePath("/records/legal-holds");
   }
-  return toActionState(result);
+  return toActionState(result, form);
 }
 
 export async function assignRetentionClassAction(caseId: string, _: ActionState, form: FormData) {
@@ -113,8 +113,8 @@ export async function caseLookupAction(_: ActionState, form: FormData): Promise<
   const { actor, ctx } = await requireActor();
   const result = await investigationService().requestCaseForLegalHold(ctx, actor, formObject(form));
   if (result.ok && result.value.outcome === "NO_MATCH") {
-    return { status: "error", kind: "NOT_FOUND", ref: ctx.requestId };
+    return withEcho({ status: "error", kind: "NOT_FOUND", ref: ctx.requestId }, form);
   }
   if (result.ok) revalidatePath("/records/legal-holds");
-  return toActionState(result);
+  return toActionState(result, form);
 }

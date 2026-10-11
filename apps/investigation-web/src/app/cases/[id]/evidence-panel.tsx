@@ -6,6 +6,7 @@ import { formatDateTime, type MessageKey, type Translator } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFField,
   CDFTable,
   classificationTone,
@@ -13,7 +14,6 @@ import {
   inputClass,
   textareaClass,
 } from "@cdf/ui";
-import { ActionForm } from "../../action-form";
 import { uploadEvidenceAction } from "./actions";
 
 const ACCEPT = ALLOWED_CONTENT_TYPES.flatMap((t) => t.extensions.map((e) => `.${e}`)).join(",");
@@ -205,7 +205,7 @@ export function EvidencePanel({
           {canUpload ? (
             <div className="mt-3">
               <h3 className="mb-2 font-semibold">{t("evidence.newVersionTitle")}</h3>
-              <ActionForm
+              <CDFCommandForm
                 action={uploadEvidenceAction.bind(null, c.id, e.id)}
                 locale={t.locale}
                 submitLabel={t("evidence.newVersion")}
@@ -229,7 +229,7 @@ export function EvidencePanel({
                     required
                   />
                 </CDFField>
-              </ActionForm>
+              </CDFCommandForm>
             </div>
           ) : null}
         </details>
@@ -239,7 +239,7 @@ export function EvidencePanel({
         <div className="mt-4 border-t border-cdf-border pt-4">
           <h3 className="mb-1 font-semibold">{t("evidence.uploadTitle")}</h3>
           <p className="mb-3 text-sm text-cdf-text-secondary">{t("evidence.uploadIntro")}</p>
-          <ActionForm
+          <CDFCommandForm
             action={uploadEvidenceAction.bind(null, c.id, null)}
             locale={t.locale}
             submitLabel={t("evidence.upload")}
@@ -341,7 +341,7 @@ export function EvidencePanel({
                 maxLength={2000}
               />
             </CDFField>
-          </ActionForm>
+          </CDFCommandForm>
         </div>
       ) : null}
     </CDFCard>

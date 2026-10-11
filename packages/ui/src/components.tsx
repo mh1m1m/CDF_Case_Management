@@ -88,7 +88,8 @@ const buttonVariants: Record<Variant, string> = {
 export function buttonClass(variant: Variant = "primary") {
   return cx(
     "inline-flex min-h-11 items-center justify-center gap-2 rounded-cdf-md px-4 py-2 text-sm font-semibold",
-    "disabled:cursor-not-allowed disabled:opacity-50 transition-opacity",
+    // aria-disabled: a command in progress keeps its button focusable, so focus never falls to the page (UX-077).
+    "disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-progress aria-disabled:opacity-70 transition-opacity",
     buttonVariants[variant],
   );
 }

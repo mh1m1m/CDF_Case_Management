@@ -24,9 +24,17 @@ for (const locale of ["ar", "en"] as const) {
     await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     await expect(page.getByTestId("interviews-table")).toBeVisible();
     await audit(page);
-    // Validation state on the planning form.
-    await page.getByTestId("plan-interview-form").locator('button[type="submit"]').click();
-    await expect(page.getByTestId("plan-interview-form").getByRole("alert")).toBeVisible();
+    // Validation state on the planning form: the shared command form (UX-099) focuses a linked summary and
+    // marks each field, as every other form does.
+    const plan = page.getByTestId("plan-interview-form");
+    await plan.locator("#interviewPurpose").fill("abc");
+    await plan.locator('button[type="submit"]').click();
+    await expect(plan.getByRole("alert")).toBeVisible();
+    const summary = plan.getByTestId("error-summary");
+    await expect.poll(() => summary.evaluate((el) => el === document.activeElement)).toBe(true);
+    await expect(summary.locator('a[href="#interviewTitle"]')).toHaveCount(1);
+    await expect(plan.locator("#interviewTitle")).toHaveAttribute("aria-invalid", "true");
+    await expect(plan.locator("#interviewPurpose")).toHaveValue("abc");
     await audit(page);
 
     // INT-001 (approved, read-only) and INT-002 (planned, forms open; the lead is on its panel).

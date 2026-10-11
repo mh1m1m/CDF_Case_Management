@@ -55,6 +55,17 @@ export const en = {
     RATE_LIMITED: "Too many attempts. Please wait a while and try again.",
     UNAVAILABLE: "The service is temporarily unavailable.",
     withReference: "{message} Reference: {ref}",
+    /** Heading of a refused command, by class (UX-078). Says what kind of refusal, never why access was refused. */
+    title: {
+      UNAUTHENTICATED: "Session ended",
+      NOT_FOUND: "Not available",
+      FORBIDDEN: "Not permitted",
+      INVALID: "Check your entries",
+      CONFLICT: "Not possible right now",
+      RATE_LIMITED: "Too many attempts",
+      UNAVAILABLE: "Service unavailable",
+    },
+    entriesKept: "What you entered is still in the form.",
   },
   /** Idle-session warning (CDF-57, WCAG 2.2.1). */
   session: {
