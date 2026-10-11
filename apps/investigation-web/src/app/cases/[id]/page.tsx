@@ -8,8 +8,10 @@ import {
   CDFAlert,
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
+  CDFFieldError,
   CDFPageHeader,
   CDFProgressTracker,
   CDFTimeline,
@@ -21,8 +23,8 @@ import {
 import { STATES } from "@cdf/workflow";
 import { evidenceService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
+import { actLabel, confirmation, transitionAct } from "../../confirmations";
 import { assignAction, declareConflictAction, transitionAction, updateDetailsAction } from "./actions";
 import { EvidencePanel } from "./evidence-panel";
 
@@ -171,47 +173,63 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               <details className="mt-4">
                 <summary className="cursor-pointer font-semibold">{t("cases.editDetails")}</summary>
                 <div className="mt-3">
-                  <ActionForm
-                    action={updateDetailsAction.bind(null, c.id)}
+                  <CDFCommandForm
+                    // UX-030: the version and values this page rendered travel with the form; only changed
+                    // fields are sent, so an untouched field can never write an older value back.
+                    action={updateDetailsAction.bind(null, c.id, {
+                      rowVersion: c.rowVersion,
+                      title: c.title,
+                      summary: c.summary,
+                      priority: c.priority,
+                    })}
                     locale={t.locale}
                     submitLabel={t("common.save")}
                     variant="secondary"
                     testId="details-form"
                     successMessage={t("common.saved")}
+                    changedOnly={["title", "summary", "priority"]}
                   >
-                    <input type="hidden" name="expectedVersion" value={c.rowVersion} />
-                    <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
-                      <input id="title" name="title" defaultValue={c.title} className={inputClass} required />
-                    </CDFField>
-                    <CDFField
-                      id="summary"
-                      label={t("intake.caseSummary")}
-                      requiredLabel={t("common.required")}
-                    >
-                      <textarea
+                    {/* Keyed by version: after a save every field starts again from the stored values. */}
+                    <div key={c.rowVersion}>
+                      <CDFField id="title" label={t("intake.caseTitle")} requiredLabel={t("common.required")}>
+                        <input
+                          id="title"
+                          name="title"
+                          defaultValue={c.title}
+                          className={inputClass}
+                          required
+                        />
+                      </CDFField>
+                      <CDFField
                         id="summary"
-                        name="summary"
-                        defaultValue={c.summary}
-                        className={textareaClass}
-                        required
-                      />
-                    </CDFField>
-                    <CDFField id="priority" label={t("cases.priority")}>
-                      <select
-                        id="priority"
-                        name="priority"
-                        defaultValue={c.priority ?? ""}
-                        className={inputClass}
+                        label={t("intake.caseSummary")}
+                        requiredLabel={t("common.required")}
                       >
-                        <option value="">—</option>
-                        {PRIORITIES.map((p) => (
-                          <option key={p} value={p}>
-                            {t(`priority.${p}` as MessageKey)}
-                          </option>
-                        ))}
-                      </select>
-                    </CDFField>
-                  </ActionForm>
+                        <textarea
+                          id="summary"
+                          name="summary"
+                          defaultValue={c.summary}
+                          className={textareaClass}
+                          required
+                        />
+                      </CDFField>
+                      <CDFField id="priority" label={t("cases.priority")}>
+                        <select
+                          id="priority"
+                          name="priority"
+                          defaultValue={c.priority ?? ""}
+                          className={inputClass}
+                        >
+                          <option value="">—</option>
+                          {PRIORITIES.map((p) => (
+                            <option key={p} value={p}>
+                              {t(`priority.${p}` as MessageKey)}
+                            </option>
+                          ))}
+                        </select>
+                      </CDFField>
+                    </div>
+                  </CDFCommandForm>
                 </div>
               </details>
             ) : null}
@@ -242,54 +260,61 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               <p className="text-cdf-text-secondary">{t("cases.noTransitions")}</p>
             ) : null}
             <ul>
-              {c.transitions.map((tr) => (
-                <li
-                  key={tr.code}
-                  className="mb-4 border-b border-cdf-border pb-4 last:border-0"
-                  data-testid={`transition-${tr.code}`}
-                >
-                  <p className="mb-2 font-semibold">{t.locale === "ar" ? tr.nameAr : tr.nameEn}</p>
-                  {tr.allowed ? (
-                    <ActionForm
-                      action={transitionAction.bind(null, c.id, tr.code)}
-                      locale={t.locale}
-                      submitLabel={t("cases.perform")}
-                      variant="secondary"
-                      fieldLabels={{ reason: t("cases.transitionReason") }}
-                    >
-                      {tr.reasonRequired ? (
-                        <CDFField
-                          id={`reason-${tr.code}`}
-                          label={t("cases.transitionReason")}
-                          hint={t("intake.reasonHint")}
-                          requiredLabel={t("common.required")}
-                        >
-                          <textarea
-                            id={`reason-${tr.code}`}
-                            name="reason"
-                            aria-describedby={`reason-${tr.code}-hint`}
-                            className={textareaClass}
-                            required
-                            minLength={10}
-                          />
-                        </CDFField>
-                      ) : null}
-                    </ActionForm>
-                  ) : (
-                    <div>
-                      <CDFBadge tone="neutral">{t("cases.blocked")}</CDFBadge>
-                      <ul
-                        className="mt-1 list-disc ps-5 text-sm text-cdf-text-secondary"
-                        data-testid={`blocked-${tr.code}`}
+              {c.transitions.map((tr) => {
+                const step = t.locale === "ar" ? tr.nameAr : tr.nameEn;
+                // UX-031: closing, archiving and returning a case are verb-labelled and confirmed first.
+                const act = transitionAct(tr.code, tr.toState);
+                return (
+                  <li
+                    key={tr.code}
+                    className="mb-4 border-b border-cdf-border pb-4 last:border-0"
+                    data-testid={`transition-${tr.code}`}
+                  >
+                    <p className="mb-2 font-semibold">{step}</p>
+                    {tr.allowed ? (
+                      <CDFCommandForm
+                        action={transitionAction.bind(null, c.id, tr.code)}
+                        locale={t.locale}
+                        submitLabel={act ? actLabel(t, act) : t("cases.perform")}
+                        submitName={act ? undefined : t("cases.performNamed", { step })}
+                        variant={act ? "danger" : "secondary"}
+                        fieldLabels={{ reason: t("cases.transitionReason") }}
+                        confirm={act ? confirmation(t, act) : undefined}
                       >
-                        {tr.blockingReasons.map((r) => (
-                          <li key={r}>{t.code("codes", r, "errors.CONFLICT")}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </li>
-              ))}
+                        {tr.reasonRequired ? (
+                          <CDFField
+                            id={`reason-${tr.code}`}
+                            label={t("cases.transitionReason")}
+                            hint={t("intake.reasonHint")}
+                            requiredLabel={t("common.required")}
+                          >
+                            <textarea
+                              id={`reason-${tr.code}`}
+                              name="reason"
+                              aria-describedby={`reason-${tr.code}-hint`}
+                              className={textareaClass}
+                              required
+                              minLength={10}
+                            />
+                          </CDFField>
+                        ) : null}
+                      </CDFCommandForm>
+                    ) : (
+                      <div>
+                        <CDFBadge tone="neutral">{t("cases.blocked")}</CDFBadge>
+                        <ul
+                          className="mt-1 list-disc ps-5 text-sm text-cdf-text-secondary"
+                          data-testid={`blocked-${tr.code}`}
+                        >
+                          {tr.blockingReasons.map((r) => (
+                            <li key={r}>{t.code("codes", r, "errors.CONFLICT")}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </CDFCard>
 
@@ -324,7 +349,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             {can(actor, "CASE_ASSIGN") && contentOpen ? (
               <div className="border-t border-cdf-border pt-4">
                 <h3 className="mb-2 font-semibold">{t("cases.assignTitle")}</h3>
-                <ActionForm
+                <CDFCommandForm
                   action={assignAction.bind(null, c.id)}
                   locale={t.locale}
                   submitLabel={t("cases.assign")}
@@ -369,7 +394,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   >
                     <input id="assignReason" name="reason" className={inputClass} required minLength={5} />
                   </CDFField>
-                </ActionForm>
+                </CDFCommandForm>
               </div>
             ) : null}
           </CDFCard>
@@ -385,30 +410,46 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   : t("cases.noDeclaration")}
               </p>
               {!c.myConflictStatus ? (
-                <ActionForm
+                <CDFCommandForm
                   action={declareConflictAction.bind(null, c.id)}
                   locale={t.locale}
                   submitLabel={t("cases.declare")}
                   variant="secondary"
-                  fieldLabels={{ declaration: t("cases.declaration") }}
+                  fieldLabels={{ hasConflict: t("cases.conflictTitle"), declaration: t("cases.declaration") }}
                   testId="conflict-form"
+                  // Declaring a conflict removes the declarant's own access at once: confirm that answer only.
+                  confirm={{
+                    ...confirmation(t, "declareConflict"),
+                    when: { field: "hasConflict", equals: "true" },
+                  }}
                 >
+                  {/* No default answer (UX-019): the declarant chooses; an unanswered submit is refused. */}
                   <fieldset className="mb-3">
                     <legend className="sr-only">{t("cases.conflictTitle")}</legend>
                     <label className="mb-2 flex items-center gap-2">
                       <input
+                        id="hasConflict-no"
                         type="radio"
                         name="hasConflict"
                         value="false"
-                        defaultChecked
+                        required
                         className="size-5"
+                        data-testid="conflict-no"
                       />{" "}
                       {t("cases.noConflict")}
                     </label>
                     <label className="flex items-center gap-2">
-                      <input type="radio" name="hasConflict" value="true" className="size-5" />{" "}
+                      <input
+                        type="radio"
+                        name="hasConflict"
+                        value="true"
+                        required
+                        className="size-5"
+                        data-testid="conflict-yes"
+                      />{" "}
                       {t("cases.hasConflict")}
                     </label>
+                    <CDFFieldError id="hasConflict-no" />
                   </fieldset>
                   <p className="mb-2 text-sm text-cdf-warning">{t("cases.conflictWarning")}</p>
                   <CDFField
@@ -424,7 +465,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                       minLength={5}
                     />
                   </CDFField>
-                </ActionForm>
+                </CDFCommandForm>
               ) : null}
             </CDFCard>
           ) : null}

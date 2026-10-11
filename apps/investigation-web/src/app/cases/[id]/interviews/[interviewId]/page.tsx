@@ -1,6 +1,7 @@
 // Interview detail (CDF-60). Opening it records INTERVIEW_VIEWED (or a SECURITY denial); missing and
 // invisible interviews are both 404. Forms appear only where the lifecycle and the viewer's case relationship
 // allow them; every command is re-checked by the database.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
@@ -24,6 +25,7 @@ import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFPageHeader,
@@ -34,6 +36,7 @@ import {
 import { evidenceService, interviewService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../../../../app-nav";
+import { confirmation } from "../../../../confirmations";
 import {
   acknowledgeStatementAction,
   addParticipantAction,
@@ -45,10 +48,17 @@ import {
   scheduleAction,
   transitionInterviewAction,
 } from "../actions";
-import { InterviewForm } from "../interview-form";
 import { interviewStatusTone } from "../status-tone";
 
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.interviewDetail") };
+}
+
 const UUID = /^[0-9a-f-]{36}$/i;
+// Interview refusals have their own codes; fall back to the shared ones.
+const INTERVIEW_CODES = ["interviews.codes", "codes"] as const;
 
 /** ISO instant → value for <input type="datetime-local"> in Riyadh time (UTC+3, no DST). */
 function riyadhLocal(iso: string | null): string | undefined {
@@ -173,7 +183,9 @@ export default async function InterviewDetailPage({
 
           {canConduct && open.schedule ? (
             <CDFCard title={t("interviews.scheduleTitle")} testId="schedule-card">
-              <InterviewForm
+              <CDFCommandForm
+                codeSections={INTERVIEW_CODES}
+                variant="secondary"
                 action={scheduleAction.bind(null, c.id, i.id)}
                 locale={t.locale}
                 submitLabel={t("interviews.saveSchedule")}
@@ -235,7 +247,7 @@ export default async function InterviewDetailPage({
                     aria-describedby="location-hint"
                   />
                 </CDFField>
-              </InterviewForm>
+              </CDFCommandForm>
             </CDFCard>
           ) : null}
 
@@ -258,7 +270,9 @@ export default async function InterviewDetailPage({
             )}
             {canConduct && open.notice ? (
               <div className="mt-3 border-t border-cdf-border pt-3">
-                <InterviewForm
+                <CDFCommandForm
+                  codeSections={INTERVIEW_CODES}
+                  variant="secondary"
                   action={issueNoticeAction.bind(null, c.id, i.id)}
                   locale={t.locale}
                   submitLabel={t("interviews.issueNotice")}
@@ -303,7 +317,7 @@ export default async function InterviewDetailPage({
                       )}
                     </select>
                   </CDFField>
-                </InterviewForm>
+                </CDFCommandForm>
               </div>
             ) : null}
           </CDFCard>
@@ -320,7 +334,9 @@ export default async function InterviewDetailPage({
                 : t("interviews.rightsNotRecorded")}
             </p>
             {canConduct && interviewer && open.rights && !i.rightsAckMethod ? (
-              <InterviewForm
+              <CDFCommandForm
+                codeSections={INTERVIEW_CODES}
+                variant="secondary"
                 action={recordRightsAction.bind(null, c.id, i.id)}
                 locale={t.locale}
                 submitLabel={t("interviews.recordRights")}
@@ -354,7 +370,7 @@ export default async function InterviewDetailPage({
                     required
                   />
                 </CDFField>
-              </InterviewForm>
+              </CDFCommandForm>
             ) : null}
           </CDFCard>
 
@@ -368,7 +384,9 @@ export default async function InterviewDetailPage({
                 : t("interviews.conductNotRecorded")}
             </p>
             {canConduct && interviewer && open.conduct ? (
-              <InterviewForm
+              <CDFCommandForm
+                codeSections={INTERVIEW_CODES}
+                variant="secondary"
                 action={recordConductedAction.bind(null, c.id, i.id)}
                 locale={t.locale}
                 submitLabel={t("interviews.recordConducted")}
@@ -398,7 +416,7 @@ export default async function InterviewDetailPage({
                     required
                   />
                 </CDFField>
-              </InterviewForm>
+              </CDFCommandForm>
             ) : null}
           </CDFCard>
 
@@ -458,7 +476,9 @@ export default async function InterviewDetailPage({
             )}
             {canConduct && onPanel && open.statement ? (
               <div className="border-t border-cdf-border pt-3">
-                <InterviewForm
+                <CDFCommandForm
+                  codeSections={INTERVIEW_CODES}
+                  variant="secondary"
                   action={recordStatementAction.bind(null, c.id, i.id)}
                   locale={t.locale}
                   submitLabel={t("interviews.saveStatement")}
@@ -493,13 +513,15 @@ export default async function InterviewDetailPage({
                       ))}
                     </select>
                   </CDFField>
-                </InterviewForm>
+                </CDFCommandForm>
               </div>
             ) : null}
             {canConduct && onPanel && open.acknowledge && current && !current.acknowledgement ? (
               <div className="mt-3 border-t border-cdf-border pt-3">
                 <h3 className="mb-2 font-semibold">{t("interviews.ackTitle")}</h3>
-                <InterviewForm
+                <CDFCommandForm
+                  codeSections={INTERVIEW_CODES}
+                  variant="secondary"
                   action={acknowledgeStatementAction.bind(null, c.id, i.id, current.id)}
                   locale={t.locale}
                   submitLabel={t("interviews.acknowledge")}
@@ -533,7 +555,7 @@ export default async function InterviewDetailPage({
                       required
                     />
                   </CDFField>
-                </InterviewForm>
+                </CDFCommandForm>
               </div>
             ) : null}
           </CDFCard>
@@ -557,7 +579,9 @@ export default async function InterviewDetailPage({
               linkable.length === 0 ? (
                 <p className="text-sm text-cdf-text-secondary">{t("interviews.noLinkable")}</p>
               ) : (
-                <InterviewForm
+                <CDFCommandForm
+                  codeSections={INTERVIEW_CODES}
+                  variant="secondary"
                   action={linkRecordingAction.bind(null, c.id, i.id)}
                   locale={t.locale}
                   submitLabel={t("interviews.link")}
@@ -577,7 +601,7 @@ export default async function InterviewDetailPage({
                       ))}
                     </select>
                   </CDFField>
-                </InterviewForm>
+                </CDFCommandForm>
               )
             ) : null}
           </CDFCard>
@@ -596,7 +620,9 @@ export default async function InterviewDetailPage({
             {canConduct && open.addParticipant ? (
               <div className="border-t border-cdf-border pt-3">
                 <h3 className="mb-2 font-semibold">{t("interviews.addParticipantTitle")}</h3>
-                <InterviewForm
+                <CDFCommandForm
+                  codeSections={INTERVIEW_CODES}
+                  variant="secondary"
                   action={addParticipantAction.bind(null, c.id, i.id)}
                   locale={t.locale}
                   submitLabel={t("interviews.add")}
@@ -638,7 +664,7 @@ export default async function InterviewDetailPage({
                       ))}
                     </select>
                   </CDFField>
-                </InterviewForm>
+                </CDFCommandForm>
               </div>
             ) : null}
           </CDFCard>
@@ -683,12 +709,15 @@ export default async function InterviewDetailPage({
                           ))}
                         </ul>
                       ) : (
-                        <InterviewForm
+                        <CDFCommandForm
+                          codeSections={INTERVIEW_CODES}
                           action={transitionInterviewAction.bind(null, c.id, i.id, a)}
                           locale={t.locale}
                           submitLabel={t(`interviews.action.${a}` as MessageKey)}
                           variant={a === "CANCEL" ? "danger" : a === "APPROVE" ? "primary" : "secondary"}
                           fieldLabels={{ reason: t("interviews.reasonLabel") }}
+                          // UX-031: cancelling is final, so it is confirmed first.
+                          confirm={a === "CANCEL" ? confirmation(t, "cancelInterview") : undefined}
                         >
                           {INTERVIEW_TRANSITIONS[a].reasonRequired ? (
                             <CDFField
@@ -706,7 +735,7 @@ export default async function InterviewDetailPage({
                               />
                             </CDFField>
                           ) : null}
-                        </InterviewForm>
+                        </CDFCommandForm>
                       )}
                     </li>
                   );

@@ -54,6 +54,14 @@ test("a form is started, saved, prepared, reviewed and kept from outsiders", asy
   await expect(lead.getByTestId("form-status")).toHaveText("Prepared");
   await expect(lead.getByTestId("draft-form")).toHaveCount(0);
   const decision = lead.getByTestId("decision-form");
+  // Nothing is pre-selected (UX-019): a submit without a choice is refused with a field error, and the form
+  // stays where it was.
+  await expect(decision.getByTestId("outcome-accept")).not.toBeChecked();
+  await expect(decision.getByTestId("outcome-return")).not.toBeChecked();
+  await decision.locator('button[type="submit"]').click();
+  await expect(decision.getByTestId("error-summary")).toContainText("Choose one option.");
+  await expect(decision.locator("#outcome-accept-error")).toHaveText("Choose one option.");
+  await expect(lead.getByTestId("form-status")).toHaveText("Prepared");
   await decision.getByTestId("outcome-accept").check();
   await decision.locator('button[type="submit"]').click();
   await expect(lead.getByTestId("form-status")).toHaveText("Reviewed");

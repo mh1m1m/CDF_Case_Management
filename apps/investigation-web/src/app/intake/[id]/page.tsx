@@ -192,7 +192,10 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             testId="triage-form"
           >
             <CDFField id="outcome" label={t("intake.outcome")} requiredLabel={t("common.required")}>
-              <select id="outcome" name="outcome" className={inputClass} required>
+              <select id="outcome" name="outcome" className={inputClass} defaultValue="" required>
+                <option value="" disabled>
+                  {t("intake.chooseOutcome")}
+                </option>
                 {TRIAGE_OUTCOMES.map((o) => (
                   <option key={o} value={o}>
                     {t(`triageOutcome.${o}` as MessageKey)}

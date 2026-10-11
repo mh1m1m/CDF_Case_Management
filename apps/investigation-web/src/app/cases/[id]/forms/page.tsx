@@ -1,5 +1,6 @@
 // Forms on a case (Phase 8; ADR-011): the started instances and the WB-FRM registry with a start control
 // for every form the database would let this user prepare (hidden ≠ forbidden: api.start_form re-checks).
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CLASSIFICATION_LEVELS, type FormDefinitionListItem, type FormInstanceSummary } from "@cdf/contracts";
@@ -8,6 +9,7 @@ import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFField,
   CDFPageHeader,
   CDFTable,
@@ -16,10 +18,15 @@ import {
 } from "@cdf/ui";
 import { formsService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../../action-form";
 import { AppNav } from "../../../app-nav";
 import { startFormAction } from "./actions";
 import { statusTone } from "./form-fields";
+
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.caseForms") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -159,7 +166,7 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
               header: t("forms.start"),
               cell: (d) =>
                 d.canStart && d.isEnabled ? (
-                  <ActionForm
+                  <CDFCommandForm
                     action={startFormAction.bind(null, c.id, d.code)}
                     locale={t.locale}
                     submitLabel={t("forms.start")}
@@ -181,7 +188,7 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
                         ))}
                       </select>
                     </CDFField>
-                  </ActionForm>
+                  </CDFCommandForm>
                 ) : (
                   "—"
                 ),

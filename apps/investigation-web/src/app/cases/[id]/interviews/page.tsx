@@ -1,6 +1,7 @@
 // Interview list and planning for one case (CDF-60). Lists what RLS returned; offers planning to users the
 // database would allow (hidden ≠ forbidden: api.plan_interview re-checks). Entry link from the case page is
 // added by the accessibility thread, which owns that page.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
@@ -10,6 +11,7 @@ import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFField,
   CDFPageHeader,
   CDFTable,
@@ -21,10 +23,17 @@ import { interviewService, investigationService, requireActor } from "@/server/c
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../../../app-nav";
 import { planInterviewAction } from "./actions";
-import { InterviewForm } from "./interview-form";
 import { interviewStatusTone } from "./status-tone";
 
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.caseInterviews") };
+}
+
 const UUID = /^[0-9a-f-]{36}$/i;
+// Interview refusals have their own codes; fall back to the shared ones.
+const INTERVIEW_CODES = ["interviews.codes", "codes"] as const;
 
 export default async function InterviewsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -135,7 +144,8 @@ export default async function InterviewsPage({ params }: { params: Promise<{ id:
       {canPlan ? (
         <CDFCard title={t("interviews.planTitle")} testId="plan-interview-card">
           <p className="mb-3 text-sm text-cdf-text-secondary">{t("interviews.planIntro")}</p>
-          <InterviewForm
+          <CDFCommandForm
+            codeSections={INTERVIEW_CODES}
             action={planInterviewAction.bind(null, c.id)}
             locale={t.locale}
             submitLabel={t("interviews.plan")}
@@ -217,7 +227,7 @@ export default async function InterviewsPage({ params }: { params: Promise<{ id:
             >
               <textarea id="interviewPurpose" name="purpose" className={textareaClass} maxLength={2000} />
             </CDFField>
-          </InterviewForm>
+          </CDFCommandForm>
         </CDFCard>
       ) : null}
     </>

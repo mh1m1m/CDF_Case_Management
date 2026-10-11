@@ -3,8 +3,7 @@
 // and reviewing an ASSIGNED request as its assigned reviewer (LEGAL_HOLD_REVIEW).
 import type { LegalHoldRequestInfo, UserDirectoryEntry } from "@cdf/contracts";
 import { formatDateTime, type MessageKey, type Translator } from "@cdf/i18n";
-import { CDFBadge, CDFDescriptionList, CDFField, inputClass } from "@cdf/ui";
-import { ActionForm } from "../action-form";
+import { CDFBadge, CDFCommandForm, CDFDescriptionList, CDFField, inputClass } from "@cdf/ui";
 import { assignHoldRequestAction, reviewHoldRequestAction } from "./actions";
 import { DecisionFields } from "./fields";
 
@@ -58,7 +57,7 @@ export function HoldRequestList({
           {canAssign && r.status === "SUBMITTED" && r.caseId ? (
             <div className="mt-3">
               <h3 className="mb-2 font-semibold">{t("records.assignTitle")}</h3>
-              <ActionForm
+              <CDFCommandForm
                 action={assignHoldRequestAction.bind(null, caseId, r.id)}
                 locale={t.locale}
                 submitLabel={t("records.assign")}
@@ -88,13 +87,13 @@ export function HoldRequestList({
                     ))}
                   </select>
                 </CDFField>
-              </ActionForm>
+              </CDFCommandForm>
             </div>
           ) : null}
           {canReview && r.assignedToMe && r.status === "ASSIGNED" ? (
             <div className="mt-3">
               <h3 className="mb-2 font-semibold">{t("records.reviewTitle")}</h3>
-              <ActionForm
+              <CDFCommandForm
                 action={reviewHoldRequestAction.bind(null, caseId, r.id)}
                 locale={t.locale}
                 submitLabel={t("records.review")}
@@ -109,7 +108,7 @@ export function HoldRequestList({
                   yes={{ value: "APPLY", label: t("records.applyHold") }}
                   no={{ value: "REJECT", label: t("records.rejectRequest") }}
                 />
-              </ActionForm>
+              </CDFCommandForm>
             </div>
           ) : null}
         </li>

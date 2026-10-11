@@ -88,7 +88,8 @@ const buttonVariants: Record<Variant, string> = {
 export function buttonClass(variant: Variant = "primary") {
   return cx(
     "inline-flex min-h-11 items-center justify-center gap-2 rounded-cdf-md px-4 py-2 text-sm font-semibold",
-    "disabled:cursor-not-allowed disabled:opacity-50 transition-opacity",
+    // aria-disabled: a command in progress keeps its button focusable, so focus never falls to the page (UX-077).
+    "disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-progress aria-disabled:opacity-70 transition-opacity",
     buttonVariants[variant],
   );
 }
@@ -100,8 +101,9 @@ export function CDFButton({
   return <button type="button" className={cx(buttonClass(variant), className)} {...rest} />;
 }
 
+// Control boundaries use --cdf-border-control (≥ 3:1 against every surface, WCAG 1.4.11; UX-014, tokens.css).
 export const inputClass =
-  "block w-full min-h-11 rounded-cdf-md border border-cdf-border bg-cdf-surface px-3 py-2 text-cdf-text aria-[invalid=true]:border-cdf-danger";
+  "block w-full min-h-11 rounded-cdf-md border border-cdf-border-control bg-cdf-surface px-3 py-2 text-cdf-text aria-[invalid=true]:border-cdf-danger";
 export const textareaClass = cx(inputClass, "min-h-28");
 
 export function fieldIds(id: string, opts: { hint?: string | undefined; error?: string | undefined }) {
@@ -146,6 +148,27 @@ export function CDFField(props: {
         // Errors a server action reports for this control (see CDFFieldErrorsProvider).
         <CDFFieldError id={props.id} />
       )}
+    </div>
+  );
+}
+
+/** Not-found, error and similar system pages (UX-080): one heading, one sentence, then the ways forward. */
+export function CDFSystemMessage({
+  title,
+  body,
+  children,
+  testId,
+}: {
+  title: string;
+  body: string;
+  children?: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <div className="mx-auto max-w-2xl py-8" data-testid={testId}>
+      <h1 className="text-cdf-h1 font-semibold">{title}</h1>
+      <p className="mt-3 text-cdf-text-secondary">{body}</p>
+      {children ? <div className="mt-6 flex flex-wrap items-center gap-3">{children}</div> : null}
     </div>
   );
 }

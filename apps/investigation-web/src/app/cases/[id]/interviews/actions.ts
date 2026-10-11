@@ -5,10 +5,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { CommandResult } from "@cdf/application";
 import { interviewService, requireActor } from "@/server/container";
-import { formObject, toActionState, type ActionState } from "@/server/actions-helpers";
+import { formObject, toActionState, withEcho, type ActionState } from "@/server/actions-helpers";
 
 /** Like toActionState, but keeps the interviews.* validation keys so the form can show specific messages. */
-function toInterviewState(result: CommandResult<unknown>): ActionState {
+function toInterviewState(result: CommandResult<unknown>, form?: FormData): ActionState {
   if (!result.ok && "fieldErrors" in result) {
     const fieldErrors: Record<string, string> = {};
     for (const issue of result.fieldErrors.issues) {
@@ -19,9 +19,9 @@ function toInterviewState(result: CommandResult<unknown>): ActionState {
           ? issue.message
           : "validation.invalid";
     }
-    return { status: "invalid", fieldErrors };
+    return withEcho({ status: "invalid", fieldErrors }, form);
   }
-  return toActionState(result);
+  return toActionState(result, form);
 }
 
 const detailPath = (caseId: string, interviewId: string) => `/cases/${caseId}/interviews/${interviewId}`;
@@ -34,7 +34,7 @@ export async function planInterviewAction(
   const { ctx } = await requireActor();
   const result = await interviewService().plan(ctx, { ...formObject(form), caseId });
   if (result.ok) redirect(detailPath(caseId, result.value));
-  return toInterviewState(result);
+  return toInterviewState(result, form);
 }
 
 /** Commands on one interview share this shape: form fields + the interview id from the route. */
@@ -53,7 +53,7 @@ async function onInterview(
     interviewId,
   });
   if (result.ok) revalidatePath(detailPath(caseId, interviewId));
-  return toInterviewState(result);
+  return toInterviewState(result, form);
 }
 
 export async function addParticipantAction(
@@ -113,7 +113,7 @@ export async function recordStatementAction(
     revalidatePath(detailPath(caseId, interviewId));
     return { status: "ok", message: result.value.sha256 };
   }
-  return toInterviewState(result);
+  return toInterviewState(result, form);
 }
 
 export async function acknowledgeStatementAction(
@@ -126,7 +126,7 @@ export async function acknowledgeStatementAction(
   const { ctx } = await requireActor();
   const result = await interviewService().acknowledgeStatement(ctx, { ...formObject(form), versionId });
   if (result.ok) revalidatePath(detailPath(caseId, interviewId));
-  return toInterviewState(result);
+  return toInterviewState(result, form);
 }
 
 export async function transitionInterviewAction(
@@ -143,5 +143,5 @@ export async function transitionInterviewAction(
     action,
   });
   if (result.ok) revalidatePath(detailPath(caseId, interviewId));
-  return toInterviewState(result);
+  return toInterviewState(result, form);
 }

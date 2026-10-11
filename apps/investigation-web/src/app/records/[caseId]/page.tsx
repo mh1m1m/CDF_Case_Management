@@ -11,6 +11,7 @@ import {
   CDFAlert,
   CDFBadge,
   CDFCard,
+  CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFPageHeader,
@@ -20,7 +21,6 @@ import {
 } from "@cdf/ui";
 import { investigationService, recordsService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import {
   assignRetentionClassAction,
@@ -33,6 +33,7 @@ import {
   requestLegalHoldAction,
 } from "../actions";
 import { LegalHoldBadge, RecordsStateBadge } from "../badges";
+import { confirmation } from "../../confirmations";
 import { DecisionFields, HoldReasonFields } from "../fields";
 import { HoldRequestList } from "../hold-requests";
 
@@ -137,7 +138,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
 
       {cap.manageRetention && retentionOpen ? (
         <CDFCard title={t("records.retentionTitle")} testId="retention-card">
-          <ActionForm
+          <CDFCommandForm
             action={assignRetentionClassAction.bind(null, r.caseId)}
             locale={t.locale}
             submitLabel={t("records.assignClass")}
@@ -169,7 +170,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                 ))}
               </select>
             </CDFField>
-          </ActionForm>
+          </CDFCommandForm>
         </CDFCard>
       ) : null}
 
@@ -207,7 +208,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                 />
                 {cap.releaseLegalHold && h.status === "ACTIVE" ? (
                   <div className="mt-3">
-                    <ActionForm
+                    <CDFCommandForm
                       action={requestHoldReleaseAction.bind(null, r.caseId, h.id)}
                       locale={t.locale}
                       submitLabel={t("records.requestRelease")}
@@ -231,7 +232,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                           maxLength={2000}
                         />
                       </CDFField>
-                    </ActionForm>
+                    </CDFCommandForm>
                   </div>
                 ) : null}
                 {cap.releaseLegalHold && h.pendingRelease ? (
@@ -247,12 +248,21 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                       <h3 className="mb-2 font-semibold">
                         {t("records.decideReleaseTitle", { number: h.holdNumber })}
                       </h3>
-                      <ActionForm
+                      <CDFCommandForm
                         action={decideHoldReleaseAction.bind(null, r.caseId, h.pendingRelease.id)}
                         locale={t.locale}
                         submitLabel={t("records.decide")}
                         testId={`decide-release-${h.holdNumber}`}
                         successMessage={t("records.decided")}
+                        fieldLabels={{
+                          approve: t("records.decisionLabel"),
+                          reason: t("records.decisionReasonLabel"),
+                        }}
+                        // UX-031: approving the release lifts the hold, so that answer is confirmed first.
+                        confirm={{
+                          ...confirmation(t, "releaseHold"),
+                          when: { field: "approve", equals: "APPROVE" },
+                        }}
                       >
                         <DecisionFields
                           id={`release-decision-${h.id}`}
@@ -261,7 +271,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                           yes={{ value: "APPROVE", label: t("records.approve") }}
                           no={{ value: "REJECT", label: t("records.reject") }}
                         />
-                      </ActionForm>
+                      </CDFCommandForm>
                     </div>
                   )
                 ) : null}
@@ -274,7 +284,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
           <div className="mt-4 border-t border-cdf-border pt-4">
             <h3 className="mb-1 font-semibold">{t("records.placeTitle")}</h3>
             <p className="mb-3 text-sm text-cdf-text-secondary">{t("records.placeIntro")}</p>
-            <ActionForm
+            <CDFCommandForm
               action={placeLegalHoldAction.bind(null, r.caseId)}
               locale={t.locale}
               submitLabel={t("records.place")}
@@ -282,13 +292,13 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
               successMessage={t("records.placed")}
             >
               <HoldReasonFields id="place" t={t} authority />
-            </ActionForm>
+            </CDFCommandForm>
           </div>
         ) : cap.requestLegalHold ? (
           <div className="mt-4 border-t border-cdf-border pt-4">
             <h3 className="mb-1 font-semibold">{t("records.requestTitle")}</h3>
             <p className="mb-3 text-sm text-cdf-text-secondary">{t("records.requestIntro")}</p>
-            <ActionForm
+            <CDFCommandForm
               action={requestLegalHoldAction.bind(null, r.caseId)}
               locale={t.locale}
               submitLabel={t("records.request")}
@@ -297,7 +307,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
               successMessage={t("records.requested")}
             >
               <HoldReasonFields id="request" t={t} />
-            </ActionForm>
+            </CDFCommandForm>
           </div>
         ) : null}
       </CDFCard>
@@ -336,7 +346,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
 
           {cap.manageDisposition && !openRequest && !disposed ? (
             r.recordsState === "DISPOSITION_ELIGIBLE" ? (
-              <ActionForm
+              <CDFCommandForm
                 action={requestDispositionAction.bind(null, r.caseId)}
                 locale={t.locale}
                 submitLabel={t("records.requestDisposition")}
@@ -359,12 +369,16 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
             ) : (
               <div className="mt-3">
                 <h3 className="mb-2 font-semibold">{t("records.decideDispositionTitle")}</h3>
-                <ActionForm
+                <CDFCommandForm
                   action={decideDispositionAction.bind(null, r.caseId, openRequest.id)}
                   locale={t.locale}
                   submitLabel={t("records.decide")}
                   testId="decide-disposition-form"
                   successMessage={t("records.decided")}
+                  fieldLabels={{
+                    approve: t("records.decisionLabel"),
+                    reason: t("records.decisionReasonLabel"),
+                  }}
                 >
                   <DecisionFields
                     id="disposition-decision"
@@ -373,7 +387,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                     yes={{ value: "APPROVE", label: t("records.approve") }}
                     no={{ value: "REJECT", label: t("records.reject") }}
                   />
-                </ActionForm>
+                </CDFCommandForm>
               </div>
             )
           ) : null}
@@ -381,7 +395,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
           {openRequest?.status === "APPROVED" && (cap.manageDisposition || cap.approveDisposition) ? (
             <div className="mt-3">
               <h3 className="mb-2 font-semibold">{t("records.executeTitle")}</h3>
-              <ActionForm
+              <CDFCommandForm
                 action={executeDispositionAction.bind(null, r.caseId, openRequest.id)}
                 locale={t.locale}
                 submitLabel={t("records.execute")}
@@ -400,7 +414,7 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                   />{" "}
                   {t("records.confirmLabel")}
                 </label>
-              </ActionForm>
+              </CDFCommandForm>
             </div>
           ) : null}
         </CDFCard>
