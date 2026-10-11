@@ -235,7 +235,7 @@ export async function CaseWorkspace({
   const primary = c.transitions.find((tr) => tr.enabled && tr.allowed && !transitionAct(tr.code, tr.toState));
 
   const overflow = [
-    ...(can(actor, "CASE_EDIT_ALL") && open
+    ...(c.can.edit && open
       ? [
           {
             key: "editDetails",
@@ -244,7 +244,7 @@ export async function CaseWorkspace({
           },
         ]
       : []),
-    ...(can(actor, "CASE_ASSIGN") && open
+    ...(c.can.assign && open
       ? [
           {
             key: "manageTeam",

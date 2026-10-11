@@ -3,7 +3,6 @@
 // allow them; every command is re-checked by the database.
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { can } from "@cdf/authorization";
 import {
   INTERVIEW_MODES,
   INTERVIEW_NOTICE_CHANNELS,
@@ -75,15 +74,8 @@ export default async function InterviewDetailPage({
   const i = await interviewService().getInterview(ctx, interviewId);
   if (!i || i.caseId !== c.id) notFound();
 
-  // UI mirrors of authz.can_conduct/review/approve_interviews; the database decides (§19).
-  const mine = (roles: string[]) =>
-    c.assignments.some((a) => a.userId === actor.userId && roles.includes(a.assignmentRole));
-  const active = c.recordsState === "ACTIVE";
-  const canConduct =
-    active && (can(actor, "CASE_EDIT_ALL") || mine(["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"]));
-  const canReview =
-    active && (can(actor, "CASE_EDIT_ALL") || mine(["CASE_OWNER", "LEAD_INVESTIGATOR", "REVIEWER"]));
-  const canApprove = active && (can(actor, "CASE_EDIT_ALL") || mine(["CASE_OWNER", "LEAD_INVESTIGATOR"]));
+  // authz.can_conduct/review/approve_interviews, read with the case (UX-116); every command checks again.
+  const { conductInterviews: canConduct, reviewInterviews: canReview, approveInterviews: canApprove } = c.can;
   const onPanel = i.participants.some((p) => p.userId === actor.userId);
   const interviewer = i.participants.some(
     (p) => p.userId === actor.userId && p.participantRole !== "NOTE_TAKER",

@@ -2,7 +2,6 @@
 // would allow (hidden ≠ forbidden: the server re-checks), and links downloads through the audited route.
 // DEC-09: each item says who on the team sees it, and the leads may limit it to themselves or open it again.
 import {
-  CLASSIFICATION_LEVELS,
   EVIDENCE_TYPES,
   type CaseDetail,
   type EvidenceItem,
@@ -35,7 +34,6 @@ export function EvidencePanel({
   canUpload,
   canDownload,
   canRestrict,
-  clearance,
   t,
 }: {
   c: CaseDetail;
@@ -44,16 +42,11 @@ export function EvidencePanel({
   canDownload: boolean;
   /** The case manager, owner or lead on a case whose content can still change (DEC-09). */
   canRestrict: boolean;
-  clearance: string;
   t: Translator;
 }) {
   const downloadHref = (versionId: string) => `/cases/${c.id}/evidence/${versionId}/download`;
-  const levels = CLASSIFICATION_LEVELS.filter(
-    (l) =>
-      CLASSIFICATION_LEVELS.indexOf(l) >= CLASSIFICATION_LEVELS.indexOf(c.classification) &&
-      CLASSIFICATION_LEVELS.indexOf(l) <=
-        CLASSIFICATION_LEVELS.indexOf(clearance as (typeof CLASSIFICATION_LEVELS)[number]),
-  );
+  // From the case's level up to the caller's clearance, read with the case (UX-116); the database checks again.
+  const levels = c.can.classifications;
 
   return (
     <CDFCard title={t("evidence.title")} testId="evidence-card">

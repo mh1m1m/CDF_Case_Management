@@ -2,7 +2,7 @@
 // for every form the database would let this user prepare (hidden ≠ forbidden: api.start_form re-checks).
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CLASSIFICATION_LEVELS, type FormDefinitionListItem, type FormInstanceSummary } from "@cdf/contracts";
+import type { FormDefinitionListItem, FormInstanceSummary } from "@cdf/contracts";
 import { formDisplayNumber } from "@cdf/domain";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
@@ -34,11 +34,8 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
     formsService().listInstances(ctx, id),
   ]);
   const name = (x: { nameAr: string; nameEn: string }) => (t.locale === "ar" ? x.nameAr : x.nameEn);
-  const levels = CLASSIFICATION_LEVELS.filter(
-    (l) =>
-      CLASSIFICATION_LEVELS.indexOf(l) >= CLASSIFICATION_LEVELS.indexOf(c.classification) &&
-      CLASSIFICATION_LEVELS.indexOf(l) <= CLASSIFICATION_LEVELS.indexOf(actor.clearance),
-  );
+  // From the case's level up to the caller's clearance, read with the case (UX-116).
+  const levels = c.can.classifications;
 
   return (
     <CaseWorkspace c={c} actor={actor} t={t} tab="forms">

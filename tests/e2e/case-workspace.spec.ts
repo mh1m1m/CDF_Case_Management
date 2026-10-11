@@ -1,8 +1,8 @@
 // The S2 case workspace (CDF-119; audit §22.2–§22.4): progress follows the case's own path, a branch ending is
 // named, a blocked step says who can take it (roles, never people), and the header states the viewer's own
 // relationship. History and the access roster keep their audiences (migration 1830; DEC-08, DEC-10). The
-// reporter conversation belongs to the case's correspondents (migration 1840; DEC-06).
-// Synthetic cases only.
+// reporter conversation belongs to the case's correspondents (migration 1840; DEC-06). What a viewer may do
+// comes from the database's own rules, read with the case (UX-116). Synthetic cases only.
 import { randomUUID } from "node:crypto";
 import { expect, test, type Browser } from "@playwright/test";
 import {
@@ -85,6 +85,41 @@ test("the access roster is full for the lead and limited for an investigator", a
   // Never a page view, although every visit above recorded one.
   await expect(investigator.getByTestId("history-CASE_VIEWED")).toHaveCount(0);
   await investigator.context().close();
+});
+
+test("what each viewer may do on the case comes from the database (UX-116)", async ({ browser }) => {
+  // The lead edits through the assignment alone: before S2e the page hid "Edit details" from them.
+  const lead = await signIn(browser, "lead@example.test");
+  await lead.goto("/cases");
+  await lead.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
+  await lead.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
+  const caseUrl = new URL(lead.url()).pathname;
+  await lead.getByTestId("case-overflow").locator("summary").click();
+  await expect(lead.getByTestId("case-overflow-editDetails")).toBeVisible();
+  await expect(lead.getByTestId("case-overflow-manageTeam")).toBeVisible();
+  await lead.getByTestId("case-overflow-editDetails").click();
+  await expect(lead.getByTestId("details-form")).toBeVisible();
+  await lead.context().close();
+
+  // An investigator works the evidence and interviews but neither edits nor manages the team.
+  const investigator = await signIn(browser, "investigator.a@example.test");
+  await investigator.goto(caseUrl);
+  await investigator.getByTestId("case-overflow").locator("summary").click();
+  await expect(investigator.getByTestId("case-overflow-myDeclaration")).toBeVisible();
+  await expect(investigator.getByTestId("case-overflow-editDetails")).toHaveCount(0);
+  await expect(investigator.getByTestId("case-overflow-manageTeam")).toHaveCount(0);
+  await expect(investigator.getByTestId("details-form")).toHaveCount(0);
+  await investigator.goto(`${caseUrl}/evidence`);
+  await expect(investigator.getByTestId("evidence-form")).toBeVisible();
+  await investigator.context().close();
+
+  // The GRC Director manages the team by role but does not edit or upload without an assignment.
+  const director = await signIn(browser, "grc.director@example.test");
+  await director.goto(caseUrl);
+  await director.getByTestId("case-overflow").locator("summary").click();
+  await expect(director.getByTestId("case-overflow-manageTeam")).toBeVisible();
+  await expect(director.getByTestId("case-overflow-editDetails")).toHaveCount(0);
+  await director.context().close();
 });
 
 test("a legal hold shows to the case team as status only, and in full to the hold audience", async ({

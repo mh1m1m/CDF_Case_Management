@@ -3,8 +3,7 @@
 // Interviews tab (UX redesign S2).
 import type { Metadata } from "next";
 import Link from "next/link";
-import { can } from "@cdf/authorization";
-import { CLASSIFICATION_LEVELS, INTERVIEWEE_KINDS, type InterviewListItem } from "@cdf/contracts";
+import { INTERVIEWEE_KINDS, type InterviewListItem } from "@cdf/contracts";
 import { interviewDisplayNumber } from "@cdf/domain";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
@@ -37,20 +36,9 @@ export default async function InterviewsPage({ params }: { params: Promise<{ id:
   const { actor, ctx, t, c } = await loadCase(id);
   const interviews = await interviewService().listInterviews(ctx, id);
 
-  // Mirrors authz.can_conduct_interviews for the UI only; the database decides (§19).
-  const canPlan =
-    c.recordsState === "ACTIVE" &&
-    (can(actor, "CASE_EDIT_ALL") ||
-      c.assignments.some(
-        (a) =>
-          a.userId === actor.userId &&
-          ["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"].includes(a.assignmentRole),
-      ));
-  const levels = CLASSIFICATION_LEVELS.filter(
-    (l) =>
-      CLASSIFICATION_LEVELS.indexOf(l) >= CLASSIFICATION_LEVELS.indexOf(c.classification) &&
-      CLASSIFICATION_LEVELS.indexOf(l) <= CLASSIFICATION_LEVELS.indexOf(actor.clearance),
-  );
+  // authz.can_conduct_interviews and the allowed levels, read with the case (UX-116); the database checks again.
+  const canPlan = c.can.conductInterviews;
+  const levels = c.can.classifications;
   const kinds = INTERVIEWEE_KINDS.filter((k) => k !== "REPORTER" || c.reporterWbId);
   const interviewee = (i: InterviewListItem) =>
     i.intervieweeKind === "REPORTER" ? t("interviews.reporterProtected") : (i.intervieweeLabel ?? "—");

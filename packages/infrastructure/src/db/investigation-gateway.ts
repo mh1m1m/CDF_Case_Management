@@ -5,6 +5,7 @@ import type {
   AuditTimelineEntry,
   CaseAccessRosterEntry,
   CaseAssignment,
+  CaseCapabilities,
   CaseDetail,
   CaseDiscoveryResult,
   CaseListItem,
@@ -224,6 +225,17 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
                     when exists (select 1 from intake.report r
                                   where r.case_id = ${caseId} and authz.can_view_report_files(r.id)) then 'REPORTER_FILES'
                     else 'NONE' end as access`;
+      // What the caller may do here, from the database's own rules (UX-116); every command checks again.
+      const [can] = await tx<CaseCapabilities[]>`
+        select authz.can_edit_case(${caseId}) as edit, authz.can_assign_case(${caseId}) as assign,
+               authz.can_upload_evidence(${caseId}) as "uploadEvidence",
+               authz.can_conduct_interviews(${caseId}) as "conductInterviews",
+               authz.can_review_interviews(${caseId}) as "reviewInterviews",
+               authz.can_approve_interviews(${caseId}) as "approveInterviews",
+               coalesce((select array_agg(l::text order by l)
+                           from unnest(enum_range(null::core.classification_level)) l
+                          where l >= ${c.classification as string}::core.classification_level
+                            and l <= authz.current_clearance()), '{}') as classifications`;
       return {
         ...toCaseItem(c),
         summary: c.summary as string,
@@ -244,6 +256,7 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         myConflictStatus: conflict?.status ?? null,
         reporterConversation: conversation?.access ?? "NONE",
         evidenceAccess: evidence?.access ?? "NONE",
+        can: can!,
       };
     });
   }

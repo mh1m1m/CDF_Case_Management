@@ -5,7 +5,6 @@
 // re-checked in the database. Nothing here touches the reporter's protected identity.
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { can } from "@cdf/authorization";
 import { formatDateTime } from "@cdf/i18n";
 import {
   CDFAlert,
@@ -184,7 +183,7 @@ export default async function CaseReporterPage({ params }: { params: Promise<{ i
                   })}
                 </ul>
               )}
-              {view.canDelegate && can(actor, "CASE_ASSIGN") && open ? (
+              {view.canDelegate && open ? (
                 <div className="mt-4 border-t border-cdf-border pt-4">
                   <h3 className="mb-2 font-semibold">{t("caseWorkspace.reporter.delegateTitle")}</h3>
                   {eligible.length === 0 ? (

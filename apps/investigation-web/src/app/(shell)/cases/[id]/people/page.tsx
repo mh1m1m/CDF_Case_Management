@@ -42,23 +42,15 @@ export default async function CasePeoplePage({
   const { actor, ctx, t, c } = await loadCase(id);
   const service = investigationService();
   const [directory, pendingConflicts, roster] = await Promise.all([
-    can(actor, "CASE_ASSIGN") ? service.directory(ctx) : Promise.resolve([]),
+    c.can.assign ? service.directory(ctx) : Promise.resolve([]),
     // Other people's open declarations, for CONFLICT_MANAGE holders only (the service filters out the caller's).
     service.pendingConflicts(ctx, actor, id),
     // DEC-08: the database returns the full roster only to those who manage the team (authz.can_assign_case).
     service.caseAccessRoster(ctx, id),
   ]);
   const open = contentOpen(c);
-  // The same rule as authz.can_assign_case, mirrored only to choose the explanation shown above the list.
-  const fullRoster =
-    can(actor, "CASE_ASSIGN") &&
-    (can(actor, "CASE_VIEW_ALL") ||
-      can(actor, "RESTRICTED_CASE_GRANT") ||
-      c.assignments.some(
-        (a) =>
-          a.userId === actor.userId &&
-          (a.assignmentRole === "CASE_OWNER" || a.assignmentRole === "LEAD_INVESTIGATOR"),
-      ));
+  // authz.can_assign_case, read with the case (UX-116): it chooses the explanation shown above the list.
+  const fullRoster = c.can.assign;
 
   return (
     <CaseWorkspace c={c} actor={actor} t={t} tab="people">
@@ -87,7 +79,7 @@ export default async function CasePeoplePage({
                   ))}
                 </ul>
               )}
-              {can(actor, "CASE_ASSIGN") && open ? (
+              {c.can.assign && open ? (
                 <div className="border-t border-cdf-border pt-4">
                   <h3 className="mb-2 font-semibold">{t("cases.assignTitle")}</h3>
                   <CDFCommandForm

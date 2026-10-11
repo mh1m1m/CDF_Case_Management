@@ -27,17 +27,8 @@ export default async function CaseEvidencePage({ params }: { params: Promise<{ i
     register ? evidenceService().listEvidence(ctx, id) : Promise.resolve([]),
     evidenceService().listCaseReportAttachments(ctx, id),
   ]);
-  // Mirrors authz.can_upload_evidence for the UI only; the database decides (§19).
-  const canUpload =
-    register &&
-    can(actor, "EVIDENCE_UPLOAD") &&
-    c.recordsState === "ACTIVE" &&
-    (can(actor, "CASE_EDIT_ALL") ||
-      c.assignments.some(
-        (a) =>
-          a.userId === actor.userId &&
-          ["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"].includes(a.assignmentRole),
-      ));
+  // authz.can_upload_evidence, read with the case (UX-116); the upload command checks it again.
+  const canUpload = register && c.can.uploadEvidence;
   const canDownload = can(actor, "EVIDENCE_DOWNLOAD");
   return (
     <CaseWorkspace c={c} actor={actor} t={t} tab="evidence">
@@ -48,7 +39,6 @@ export default async function CaseEvidencePage({ params }: { params: Promise<{ i
           canUpload={canUpload}
           canDownload={canDownload}
           canRestrict={c.evidenceAccess === "LEADS" && contentOpen(c)}
-          clearance={actor.clearance}
           t={t}
         />
       ) : (

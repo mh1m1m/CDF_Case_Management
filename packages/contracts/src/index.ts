@@ -555,6 +555,24 @@ export interface CaseDetail extends CaseListItem {
   reporterConversation: ConversationAccess;
   /** The caller's evidence need-to-know, from the database (DEC-09): it decides the Evidence tab. */
   evidenceAccess: EvidenceAccess;
+  /** What the caller may do on this case, from the database's own rules (UX-116). Commands check again. */
+  can: CaseCapabilities;
+}
+
+/**
+ * Case capabilities read from `authz.*` (UX-116), so no page re-implements a rule. `edit`: details and allegations
+ * (`can_edit_case`); `assign`: the team, grants and delegations (`can_assign_case`); `uploadEvidence`
+ * (`can_upload_evidence`); the three interview rules (`can_conduct/review/approve_interviews`); `classifications`:
+ * the levels a new item on this case may carry, from the case's level up to the caller's clearance.
+ */
+export interface CaseCapabilities {
+  edit: boolean;
+  assign: boolean;
+  uploadEvidence: boolean;
+  conductInterviews: boolean;
+  reviewInterviews: boolean;
+  approveInterviews: boolean;
+  classifications: Classification[];
 }
 
 /**

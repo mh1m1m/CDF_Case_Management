@@ -3,7 +3,6 @@
 // and the latest business events. Everything shown is what the database returned for this viewer; every step
 // is re-checked by api.transition_case.
 import type { Metadata } from "next";
-import { can } from "@cdf/authorization";
 import { PRIORITIES, type TransitionOption } from "@cdf/contracts";
 import type { MessageKey } from "@cdf/i18n";
 import {
@@ -261,7 +260,7 @@ export default async function CaseOverviewPage({
                     : []),
                 ]}
               />
-              {can(actor, "CASE_EDIT_ALL") && open ? (
+              {c.can.edit && open ? (
                 <details className="mt-4" open={editing}>
                   <summary className="cursor-pointer font-semibold">{t("cases.editDetails")}</summary>
                   <div className="mt-3">
