@@ -14,11 +14,12 @@ const appNames = {
 /** Returns the page-specific part of the title and checks the app name follows it. */
 async function pagePart(page: Page, appName: string) {
   await page.waitForLoadState("load");
-  const title = await page.title();
   const suffix = ` · ${appName}`;
-  expect(title, `title "${title}" should end with the app name`).toMatch(
+  // A client navigation sets the title just after the URL changes, so wait for it instead of reading it once.
+  await expect(page, "the title should end with the app name").toHaveTitle(
     new RegExp(`.+${suffix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
   );
+  const title = await page.title();
   return title.slice(0, -suffix.length);
 }
 
