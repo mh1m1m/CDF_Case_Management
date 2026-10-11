@@ -36,10 +36,12 @@ export function CDFCaseHeader({
     <header className="mb-4" data-testid="case-header">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h1 className="min-w-0 text-cdf-h1 font-semibold break-words">
-          <CDFIdentifier testId="case-number">{number}</CDFIdentifier>
-          <span aria-hidden="true" className="mx-2 text-cdf-text-secondary">
+          {/* Real spaces around the dot are where a long title may wrap. Without them the number, the dot
+              and the first word are one unbreakable run that a phone splits mid-word. */}
+          <CDFIdentifier testId="case-number">{number}</CDFIdentifier>{" "}
+          <span aria-hidden="true" className="mx-1 text-cdf-text-secondary">
             ·
-          </span>
+          </span>{" "}
           <bdi dir="auto" data-testid="case-title">
             {title}
           </bdi>
