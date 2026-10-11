@@ -12,6 +12,7 @@ import type {
   MyWorkSummary,
   RecordsCatalogueEntry,
   ReportDetail,
+  RestrictedCaseAuthority,
   TransitionOption,
   UserDirectoryEntry,
 } from "@cdf/contracts";
@@ -107,14 +108,36 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
 
   createCaseFromReport(
     ctx: UserRequestContext,
-    i: { reportId: string; title: string; summary: string; classification: string; isRestricted: boolean },
+    i: {
+      reportId: string;
+      title: string;
+      summary: string;
+      classification: string;
+      isRestricted: boolean;
+      restrictedAuthorityId?: string | undefined;
+    },
   ) {
     return this.run(ctx, async (tx) => {
       const [row] = await tx<{ id: string }[]>`
         select api.create_case_from_report(${i.reportId}, ${i.title}, ${i.summary},
-          ${i.classification}::core.classification_level, ${i.isRestricted}) as id`;
+          ${i.classification}::core.classification_level, ${i.isRestricted},
+          ${i.restrictedAuthorityId ?? null}::uuid) as id`;
       return row!.id;
     });
+  }
+
+  /** People who may be named as a restricted case's accountable authority at this classification (DEC-01). */
+  listRestrictedCaseAuthorities(
+    ctx: UserRequestContext,
+    reportId: string,
+    classification: string,
+  ): Promise<RestrictedCaseAuthority[]> {
+    return this.run(
+      ctx,
+      (tx) => tx<RestrictedCaseAuthority[]>`
+      select user_id as "userId", display_name as "displayName", display_name_ar as "displayNameAr"
+      from api.list_restricted_case_authorities(${reportId}, ${classification}::core.classification_level)`,
+    );
   }
 
   listCases(ctx: UserRequestContext): Promise<CaseListItem[]> {

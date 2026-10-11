@@ -24,10 +24,10 @@ export async function createCaseAction(
   form: FormData,
 ): Promise<ActionState> {
   const { actor, ctx } = await requireActor();
-  const result = await investigationService().createCase(ctx, actor, {
-    ...formObject(form, ["isRestricted"]),
-    reportId,
-  });
-  if (result.ok) redirect(`/cases/${result.value}`);
+  const input: Record<string, unknown> = { ...formObject(form, ["isRestricted"]), reportId };
+  const result = await investigationService().createCase(ctx, actor, input);
+  // A restricted case is handed to its authority at creation (DEC-01): the initiator can no longer open the case
+  // or its report, so they return to the queue with a notice instead of being sent to a page they cannot see.
+  if (result.ok) redirect(input.isRestricted === true ? "/intake?handedOver=1" : `/cases/${result.value}`);
   return toActionState(result);
 }

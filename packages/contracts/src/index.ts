@@ -68,6 +68,7 @@ export const PERMISSIONS = [
   "CONFLICT_MANAGE",
   "CLASSIFICATION_CHANGE",
   "RESTRICTED_CASE_GRANT",
+  "RESTRICTED_CASE_AUTHORITY",
   "REPORTER_IDENTITY_REVEAL",
   "AUDIT_VIEW",
   "SECURITY_EVENT_VIEW",
@@ -488,6 +489,13 @@ export interface ReportDetail extends IntakeReportItem {
   willingToCooperate: boolean | null;
   language: "ar" | "en";
   messages: ReportMessage[];
+}
+
+/** A person who may be named as a restricted case's accountable authority (DEC-01). Names only. */
+export interface RestrictedCaseAuthority {
+  userId: string;
+  displayName: string;
+  displayNameAr: string;
 }
 
 export interface ReportMessage {

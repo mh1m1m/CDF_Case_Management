@@ -219,13 +219,22 @@ export const triageReportSchema = z
     path: ["duplicateOf"],
   });
 
-export const createCaseSchema = z.object({
-  reportId: uuid,
-  title: text(3, 200),
-  summary: text(10, 4000),
-  classification: z.enum(CLASSIFICATION_LEVELS).default("RESTRICTED"),
-  isRestricted: z.boolean().default(false),
-});
+// DEC-01 (ADR-016 D1): a restricted case names its accountable authority at creation; the database re-checks
+// that the named person is eligible and refuses an authority on a case that is not restricted.
+export const createCaseSchema = z
+  .object({
+    reportId: uuid,
+    title: text(3, 200),
+    summary: text(10, 4000),
+    classification: z.enum(CLASSIFICATION_LEVELS).default("RESTRICTED"),
+    isRestricted: z.boolean().default(false),
+    restrictedAuthorityId: uuid.optional(),
+  })
+  .refine((v) => !v.isRestricted || v.restrictedAuthorityId, {
+    message: "validation.restrictedAuthorityRequired",
+    path: ["restrictedAuthorityId"],
+  })
+  .transform((v) => (v.isRestricted ? v : { ...v, restrictedAuthorityId: undefined }));
 
 export const updateCaseDetailsSchema = z.object({
   caseId: uuid,

@@ -23,6 +23,7 @@ import type {
   RecordsCatalogueEntry,
   ReportAttachmentItem,
   ReportDetail,
+  RestrictedCaseAuthority,
   ReportMessage,
   ReporterMode,
   UserDirectoryEntry,
@@ -227,8 +228,14 @@ export interface InvestigationGateway {
       summary: string;
       classification: string;
       isRestricted: boolean;
+      restrictedAuthorityId?: string | undefined;
     },
   ): Promise<string>;
+  listRestrictedCaseAuthorities(
+    ctx: UserRequestContext,
+    reportId: string,
+    classification: string,
+  ): Promise<RestrictedCaseAuthority[]>;
   listCases(ctx: UserRequestContext): Promise<CaseListItem[]>;
   getCase(ctx: UserRequestContext, caseId: string): Promise<CaseDetail | null>;
   updateCaseDetails(

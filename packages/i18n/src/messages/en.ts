@@ -69,6 +69,7 @@ export const en = {
   },
   codes: {
     NO_ALLEGATION_RECORDED: "No allegation is recorded.",
+    restricted_authority_id: "Choose an eligible accountable authority for this restricted case.",
     PRIORITY_NOT_SET: "Set a priority first.",
     ACTOR_CONFLICT_DECLARATION_MISSING: "Declare your conflict-of-interest status first.",
     UNRESOLVED_CONFLICT_DECLARATION: "A declared conflict has not been decided.",
@@ -130,6 +131,7 @@ export const en = {
     acknowledgementRequired: "Please confirm the statement.",
     idNumber: "Enter a valid number for the selected ID type.",
     birthDate: "Enter the date as YYYY-MM-DD in the selected calendar.",
+    restrictedAuthorityRequired: "Choose the accountable authority for this restricted case.",
   },
   category: {
     FINANCIAL_MISCONDUCT: "Financial misconduct",
@@ -198,6 +200,7 @@ export const en = {
     CASE_VIEWED: "Case viewed",
     CASE_UPDATED: "Case details updated",
     CASE_ASSIGNED: "Person assigned",
+    CASE_HANDED_OVER: "Case handed over",
     CASE_UNASSIGNED: "Assignment ended",
     CASE_REASSIGNED: "Case reassigned",
     CASE_ACCESS_GRANTED: "Access granted",
@@ -449,7 +452,21 @@ export const en = {
     caseTitle: "Case title",
     caseSummary: "Case summary",
     caseClassification: "Classification",
-    restricted: "Restricted case (visible only to explicitly granted people)",
+    restricted: "This case needs restricted handling",
+    restrictedHint:
+      "A restricted case is visible only to its accountable authority and the people they add. Classification options stop at your clearance.",
+    restrictedAuthority: "Accountable authority",
+    restrictedAuthorityHint:
+      "Only people allowed to hold restricted cases at the chosen classification are listed.",
+    restrictedAuthorityChoose: "Choose a person",
+    restrictedAuthorityNone:
+      "Nobody allowed to hold restricted cases is cleared for this classification. Choose a lower classification, or ask GRC to name an authority before you open the case.",
+    restrictedConsequence:
+      "When you create this case, {name} becomes its accountable owner and the only person who can see it until they add others. You will no longer be able to open the case or this report.",
+    restrictedConsequencePending: "Choose the accountable authority to see who will hold the case.",
+    restrictedCreated:
+      "Restricted case created and handed to the authority you chose. You no longer have access to it or to this report.",
+    backToIntake: "Back to the intake queue",
     createCase: "Create case",
     viewCase: "View case",
     incidentTime: "Incident time",

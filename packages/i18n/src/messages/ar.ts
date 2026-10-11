@@ -69,6 +69,7 @@ export const ar: Messages = {
   },
   codes: {
     NO_ALLEGATION_RECORDED: "لا توجد مخالفة مسجلة.",
+    restricted_authority_id: "اختر صاحب صلاحية مخوّلًا لهذه القضية المقيدة.",
     PRIORITY_NOT_SET: "حدّد الأولوية أولاً.",
     ACTOR_CONFLICT_DECLARATION_MISSING: "قدّم إقرار تعارض المصالح الخاص بك أولاً.",
     UNRESOLVED_CONFLICT_DECLARATION: "يوجد إفصاح عن تعارض مصالح لم يُبتّ فيه.",
@@ -130,6 +131,7 @@ export const ar: Messages = {
     acknowledgementRequired: "يرجى تأكيد الإقرار.",
     idNumber: "أدخل رقماً صحيحاً لنوع الهوية المختار.",
     birthDate: "أدخل التاريخ بالصيغة YYYY-MM-DD حسب التقويم المختار.",
+    restrictedAuthorityRequired: "اختر صاحب الصلاحية المسؤول عن هذه القضية المقيدة.",
   },
   category: {
     FINANCIAL_MISCONDUCT: "مخالفة مالية",
@@ -202,6 +204,7 @@ export const ar: Messages = {
     CASE_VIEWED: "عرض القضية",
     CASE_UPDATED: "تحديث بيانات القضية",
     CASE_ASSIGNED: "تكليف شخص",
+    CASE_HANDED_OVER: "تسليم القضية",
     CASE_UNASSIGNED: "إنهاء تكليف",
     CASE_REASSIGNED: "إعادة تكليف",
     CASE_ACCESS_GRANTED: "منح صلاحية وصول",
@@ -445,7 +448,20 @@ export const ar: Messages = {
     caseTitle: "عنوان القضية",
     caseSummary: "ملخص القضية",
     caseClassification: "تصنيف السرية",
-    restricted: "قضية مقيدة الوصول (تظهر فقط لمن مُنح صلاحية صريحة)",
+    restricted: "تحتاج هذه القضية إلى معالجة مقيدة",
+    restrictedHint:
+      "لا يرى القضية المقيدة إلا صاحب الصلاحية المسؤول عنها ومن يضيفهم. لا تتجاوز خيارات التصنيف مستوى تصريحك.",
+    restrictedAuthority: "صاحب الصلاحية المسؤول",
+    restrictedAuthorityHint: "تظهر هنا فقط أسماء المخوّلين بتولي القضايا المقيدة عند التصنيف المختار.",
+    restrictedAuthorityChoose: "اختر شخصًا",
+    restrictedAuthorityNone:
+      "لا يوجد مخوّل بتولي القضايا المقيدة يحمل تصريحًا لهذا التصنيف. اختر تصنيفًا أدنى، أو اطلب من إدارة الحوكمة تسمية صاحب صلاحية قبل فتح القضية.",
+    restrictedConsequence:
+      "عند إنشاء هذه القضية يصبح {name} المسؤول عنها، ويكون الوحيد الذي يراها إلى أن يضيف غيره. ولن تتمكن بعدها من فتح القضية أو هذا البلاغ.",
+    restrictedConsequencePending: "اختر صاحب الصلاحية المسؤول لترى من سيتولى القضية.",
+    restrictedCreated:
+      "أُنشئت القضية المقيدة وسُلّمت إلى صاحب الصلاحية الذي اخترته. لم يعد بإمكانك الوصول إليها أو إلى هذا البلاغ.",
+    backToIntake: "العودة إلى قائمة البلاغات الواردة",
     createCase: "إنشاء القضية",
     viewCase: "عرض القضية",
     incidentTime: "وقت الواقعة",

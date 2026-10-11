@@ -93,6 +93,17 @@ export function createInvestigationService(deps: InvestigationDeps) {
     getCase: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.getCase(ctx, id)),
     caseTimeline: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.caseTimeline(ctx, id)),
     directory: (ctx: UserRequestContext) => query(ctx, () => gateway.directory(ctx)),
+    // DEC-01: who a restricted case may be handed to at this classification. The database re-checks the
+    // report, CASE_CREATE and the caller's clearance; this pre-check only avoids a pointless round trip.
+    restrictedCaseAuthorities: (
+      ctx: UserRequestContext,
+      actor: Actor,
+      reportId: string,
+      classification: string,
+    ) =>
+      can(actor, "CASE_CREATE")
+        ? query(ctx, () => gateway.listRestrictedCaseAuthorities(ctx, reportId, classification))
+        : Promise.resolve([]),
 
     // Records and legal views (ADR-014). The catalogue is not a case browser; dashboards show own work.
     searchRecordsCatalogue: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>

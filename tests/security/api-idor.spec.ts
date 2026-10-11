@@ -95,6 +95,13 @@ const PROBES: Probe[] = [
       tx`select api.create_case_from_report(${t.report}, 'Probe case (synthetic)', 'Synthetic probe summary text.', 'RESTRICTED'::core.classification_level, false)`,
   },
   {
+    // DEC-01 (ADR-016): the authority list is report-scoped, so an outsider learns nothing about the report.
+    fn: "list_restricted_case_authorities",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select * from api.list_restricted_case_authorities(${t.report}, 'RESTRICTED'::core.classification_level)`,
+  },
+  {
     fn: "decide_conflict",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.decide_conflict(${t.conflict}, 'CONFLICT_CLEARED', ${REASON})`,

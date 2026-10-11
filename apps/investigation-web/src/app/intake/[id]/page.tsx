@@ -22,6 +22,7 @@ import { getTranslator } from "@/server/locale";
 import { ActionForm } from "../../action-form";
 import { AppNav } from "../../app-nav";
 import { createCaseAction, replyAction, triageAction } from "./actions";
+import { RestrictedCaseFields } from "./restricted-case-fields";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -45,6 +46,29 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
     can(actor, "REPORT_TRIAGE") && ["RECEIVED", "INFO_REQUESTED"].includes(report.status) && !report.caseId;
   const canCreate = can(actor, "CASE_CREATE") && report.status === "ACCEPTED" && !report.caseId;
   const canReply = can(actor, "REPORT_MESSAGE_REPLY");
+  // Classification never drops below the report's and never exceeds the initiator's clearance (DEC-01).
+  const level = (c: string) => CLASSIFICATION_LEVELS.indexOf(c as (typeof CLASSIFICATION_LEVELS)[number]);
+  const classifications = CLASSIFICATION_LEVELS.filter(
+    (c) => level(c) >= level(report.classification) && level(c) <= level(actor.clearance),
+  );
+  const authorities = canCreate
+    ? Object.fromEntries(
+        await Promise.all(
+          classifications.map(
+            async (c) =>
+              [
+                c,
+                (await investigationService().restrictedCaseAuthorities(ctx, actor, report.id, c)).map(
+                  (a) => ({
+                    userId: a.userId,
+                    name: t.locale === "ar" ? a.displayNameAr : a.displayName,
+                  }),
+                ),
+              ] as const,
+          ),
+        ),
+      )
+    : {};
 
   return (
     <>
@@ -214,6 +238,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
               title: t("intake.caseTitle"),
               summary: t("intake.caseSummary"),
               classification: t("intake.caseClassification"),
+              restrictedAuthorityId: t("intake.restrictedAuthority"),
             }}
             testId="create-case-form"
           >
@@ -230,27 +255,26 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                 maxLength={4000}
               />
             </CDFField>
-            <CDFField id="classification" label={t("intake.caseClassification")}>
-              <select
-                id="classification"
-                name="classification"
-                className={inputClass}
-                defaultValue={report.classification}
-              >
-                {CLASSIFICATION_LEVELS.filter(
-                  (c) =>
-                    CLASSIFICATION_LEVELS.indexOf(c) >= CLASSIFICATION_LEVELS.indexOf(report.classification),
-                ).map((c) => (
-                  <option key={c} value={c}>
-                    {t(`classification.${c}` as MessageKey)}
-                  </option>
-                ))}
-              </select>
-            </CDFField>
-            <label className="mb-4 flex items-start gap-3">
-              <input type="checkbox" name="isRestricted" className="mt-1 size-5" />
-              <span>{t("intake.restricted")}</span>
-            </label>
+            <RestrictedCaseFields
+              classifications={classifications.map((c) => ({
+                value: c,
+                label: t(`classification.${c}` as MessageKey),
+              }))}
+              defaultClassification={report.classification}
+              authorities={authorities}
+              labels={{
+                classification: t("intake.caseClassification"),
+                restricted: t("intake.restricted"),
+                restrictedHint: t("intake.restrictedHint"),
+                authority: t("intake.restrictedAuthority"),
+                authorityHint: t("intake.restrictedAuthorityHint"),
+                choose: t("intake.restrictedAuthorityChoose"),
+                none: t("intake.restrictedAuthorityNone"),
+                consequence: t("intake.restrictedConsequence"),
+                consequencePending: t("intake.restrictedConsequencePending"),
+                required: t("common.required"),
+              }}
+            />
           </ActionForm>
         </CDFCard>
       ) : null}
