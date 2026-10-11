@@ -29,6 +29,11 @@
   --cdf-text: #101820;
   --cdf-text-secondary: #5e646b;
   --cdf-text-muted: #5e646b; /* textMuted #8B9095 fails AA on white for body text; secondary used instead */
+  /* Deviation from CDF_Design_Tokens.json (which stays unchanged), like text-muted above: the JSON has one border
+     colour, #D7D2CB, at 1.50:1 on white. Form-control boundaries must reach 3:1 (WCAG 2.2 1.4.11; UX-014, RC-04),
+     so controls use the CDF neutral-70 primitive. Measured (tokens.test.ts): 5.98 on surface #FFFFFF, 5.63 on
+     surface-subtle #F8F8F7, 5.43 on bg #F3F4F4. Decorative dividers keep --cdf-border. */
+  --cdf-border-control: var(--cdf-neutral-70);
   --cdf-border: #d7d2cb;
   --cdf-primary: #101820;
   --cdf-primary-text: #ffffff;
@@ -62,6 +67,8 @@
   --cdf-text-secondary: #d8dadd;
   --cdf-text-muted: #babdc0;
   --cdf-border: #46505a;
+  /* neutral-50: 5.56 on bg #101820, 5.04 on surface #19212B, 3.69 on surface-subtle #303841 (tokens.test.ts). */
+  --cdf-border-control: var(--cdf-neutral-50);
   --cdf-primary: #ffffff;
   --cdf-primary-text: #101820;
   --cdf-focus: #bbdde6;
@@ -86,6 +93,7 @@
   --color-cdf-text-secondary: var(--cdf-text-secondary);
   --color-cdf-text-muted: var(--cdf-text-muted);
   --color-cdf-border: var(--cdf-border);
+  --color-cdf-border-control: var(--cdf-border-control);
   --color-cdf-primary: var(--cdf-primary);
   --color-cdf-primary-text: var(--cdf-primary-text);
   --color-cdf-focus: var(--cdf-focus);
@@ -124,6 +132,62 @@ html {
 :focus-visible {
   outline: 3px solid var(--cdf-focus);
   outline-offset: 2px;
+}
+
+/*
+ * Checkboxes and radios in both apps (UX-014): the browser's own boundary colour varies (Firefox draws about
+ * 2.9:1 on the page background), so every one is drawn with --cdf-border-control. Size and spacing stay with the
+ * page (size-5, mt-1). Forced-colours mode gets the native control back.
+ */
+@layer base {
+  input[type="checkbox"],
+  input[type="radio"] {
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    flex-shrink: 0;
+    vertical-align: middle;
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+    border: 2px solid var(--cdf-border-control);
+    border-radius: var(--cdf-radius-sm);
+    background-color: var(--cdf-surface);
+    cursor: pointer;
+  }
+  input[type="radio"] {
+    border-radius: 9999px;
+  }
+  input[type="checkbox"]:checked,
+  input[type="radio"]:checked {
+    border-color: var(--cdf-primary);
+    background-color: var(--cdf-primary);
+  }
+  input[type="radio"]:checked {
+    box-shadow: inset 0 0 0 3px var(--cdf-surface);
+  }
+  input[type="checkbox"]:checked::before {
+    content: "";
+    inline-size: 0.75rem;
+    block-size: 0.75rem;
+    background-color: var(--cdf-primary-text);
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  }
+  input[type="checkbox"][aria-invalid="true"],
+  input[type="radio"][aria-invalid="true"] {
+    border-color: var(--cdf-danger);
+  }
+  input[type="checkbox"]:disabled,
+  input[type="radio"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  @media (forced-colors: active) {
+    input[type="checkbox"],
+    input[type="radio"] {
+      appearance: auto;
+      box-shadow: none;
+    }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

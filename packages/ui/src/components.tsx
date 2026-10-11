@@ -101,8 +101,9 @@ export function CDFButton({
   return <button type="button" className={cx(buttonClass(variant), className)} {...rest} />;
 }
 
+// Control boundaries use --cdf-border-control (≥ 3:1 against every surface, WCAG 1.4.11; UX-014, tokens.css).
 export const inputClass =
-  "block w-full min-h-11 rounded-cdf-md border border-cdf-border bg-cdf-surface px-3 py-2 text-cdf-text aria-[invalid=true]:border-cdf-danger";
+  "block w-full min-h-11 rounded-cdf-md border border-cdf-border-control bg-cdf-surface px-3 py-2 text-cdf-text aria-[invalid=true]:border-cdf-danger";
 export const textareaClass = cx(inputClass, "min-h-28");
 
 export function fieldIds(id: string, opts: { hint?: string | undefined; error?: string | undefined }) {
