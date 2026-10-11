@@ -4,6 +4,8 @@
 // detail and no legal-hold rationale outside the hold audience, and an object's events follow that object's own
 // rule. The full roster is only for those who manage the team; nobody sees oversight grants or break-glass.
 import { createHash, randomUUID } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
@@ -527,5 +529,38 @@ describe("function properties", () => {
       expect(r).toMatchObject({ secdef: true, volatile: "s", anon: false, auth: true });
       expect(r.config).toContain('search_path=""');
     }
+  });
+});
+
+// The audit_event_read table policy still admits a viewable case's BUSINESS rows to its team (SECURITY_RULES L-4).
+// The product never relies on that: case history is read only through api.case_history, and the one direct
+// ledger query is Oversight's, which its own permissions gate. A new direct read anywhere fails here.
+describe("the product reads the ledger directly in one place only", () => {
+  const root = join(import.meta.dirname, "..", "..");
+  const sources = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const full = join(dir, name);
+      if (name === "node_modules" || name === ".next" || name.startsWith(".")) return [];
+      if (statSync(full).isDirectory()) return sources(full);
+      return /\.(ts|tsx|mjs|js)$/.test(name) && !/\.test\.tsx?$/.test(name) ? [full] : [];
+    });
+
+  it("selects from audit.audit_event only in the Oversight ledger query; case history uses api.case_history", () => {
+    const files = [...sources(join(root, "apps")), ...sources(join(root, "packages"))];
+    expect(files.length).toBeGreaterThan(50);
+    const reads = files.flatMap((f) => {
+      const text = readFileSync(f, "utf8");
+      return [...text.matchAll(/\baudit\s*\.\s*audit_event\b/g)].map((m) => {
+        // The enclosing class method: the last two-space-indented "name(" before the match.
+        const method = [...text.slice(0, m.index).matchAll(/^ {2}(\w+)\(/gm)].at(-1)?.[1] ?? "(top level)";
+        return `${relative(root, f)}#${method}`;
+      });
+    });
+    expect(reads).toEqual(["packages/infrastructure/src/db/investigation-gateway.ts#auditLedger"]);
+    const gateway = readFileSync(
+      join(root, "packages/infrastructure/src/db/investigation-gateway.ts"),
+      "utf8",
+    );
+    expect(gateway).toMatch(/from api\.case_history\(/);
   });
 });
