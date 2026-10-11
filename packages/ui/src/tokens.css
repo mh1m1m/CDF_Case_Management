@@ -43,12 +43,38 @@
   --cdf-info-bg: #e5f2f6;
   --cdf-elevation: 0 8px 24px rgba(16, 24, 32, 0.08);
 
+  /* semantic: interaction and state (audit §15.11; contrast ratios computed there) */
+  --cdf-critical: #8a2f1b; /* white on it 8.39; irreversible actions inside a confirmation only */
+  --cdf-critical-text: #ffffff;
+  --cdf-selected-bg: #e5f2f6; /* Cinder on it 15.65; always with the 2 px inline-start bar */
+  --cdf-hover-bg: #f8f8f7;
+  --cdf-pressed-bg: #e8e9ea;
+  --cdf-disabled-bg: #e8e9ea;
+  --cdf-disabled-text: #5e646b; /* 4.92: readable although WCAG exempts disabled controls */
+  --cdf-surface-elevated: #ffffff; /* dialogs, drawers and menus only */
+  --cdf-overlay: rgba(16, 24, 32, 0.48);
+  --cdf-table-header-bg: #101820;
+  --cdf-table-header-text: #ffffff;
+
+  /* semantic: indicators. Classification, named access and legal hold are rectangles with a Cinder outline and a
+     glyph, never red; the tints alone are below 3:1 on white, so the outline is part of the token. Text on every
+     fill is Cinder (8.07 on salmon, the lowest). Level names are SOURCE_REQUIRED (DEC-44). */
+  --cdf-indicator-text: #101820;
+  --cdf-indicator-outline: #101820;
+  --cdf-class-internal: #e8e9ea;
+  --cdf-class-restricted: #bbdde6;
+  --cdf-class-confidential: #fdd086;
+  --cdf-class-secret: #fa9370;
+  --cdf-named-access: #ffffff;
+  --cdf-legal-hold: #a5b0e3;
+
   --cdf-radius-sm: 4px;
   --cdf-radius-md: 6px;
   --cdf-radius-lg: 8px;
   --cdf-radius-xl: 12px;
   --cdf-motion-fast: 120ms;
   --cdf-motion-standard: 180ms;
+  --cdf-motion-slow: 240ms;
   --cdf-font: "Segoe UI", Tahoma, "Noto Sans Arabic", "Geeza Pro", Arial, sans-serif;
   color-scheme: light;
 }
@@ -73,6 +99,17 @@
   --cdf-danger-bg: #3d241d;
   --cdf-info-bg: #1b3038;
   --cdf-elevation: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --cdf-critical: #ffb19a;
+  --cdf-critical-text: #101820;
+  --cdf-selected-bg: #1b3038;
+  --cdf-hover-bg: #303841;
+  --cdf-pressed-bg: #46505a;
+  --cdf-disabled-bg: #303841;
+  --cdf-disabled-text: #babdc0;
+  --cdf-surface-elevated: #252e38;
+  --cdf-overlay: rgba(0, 0, 0, 0.6);
+  --cdf-table-header-bg: #303841;
+  --cdf-table-header-text: #ffffff;
   color-scheme: dark;
 }
 
@@ -97,6 +134,25 @@
   --color-cdf-info-bg: var(--cdf-info-bg);
   --color-cdf-powder: var(--cdf-powder-blue);
   --color-cdf-warm: var(--cdf-warm-gray);
+  --color-cdf-critical: var(--cdf-critical);
+  --color-cdf-critical-text: var(--cdf-critical-text);
+  --color-cdf-selected: var(--cdf-selected-bg);
+  --color-cdf-hover: var(--cdf-hover-bg);
+  --color-cdf-pressed: var(--cdf-pressed-bg);
+  --color-cdf-disabled: var(--cdf-disabled-bg);
+  --color-cdf-disabled-text: var(--cdf-disabled-text);
+  --color-cdf-surface-elevated: var(--cdf-surface-elevated);
+  --color-cdf-overlay: var(--cdf-overlay);
+  --color-cdf-table-header: var(--cdf-table-header-bg);
+  --color-cdf-table-header-text: var(--cdf-table-header-text);
+  --color-cdf-indicator-text: var(--cdf-indicator-text);
+  --color-cdf-indicator-outline: var(--cdf-indicator-outline);
+  --color-cdf-class-internal: var(--cdf-class-internal);
+  --color-cdf-class-restricted: var(--cdf-class-restricted);
+  --color-cdf-class-confidential: var(--cdf-class-confidential);
+  --color-cdf-class-secret: var(--cdf-class-secret);
+  --color-cdf-named-access: var(--cdf-named-access);
+  --color-cdf-legal-hold: var(--cdf-legal-hold);
   --radius-cdf-sm: var(--cdf-radius-sm);
   --radius-cdf-md: var(--cdf-radius-md);
   --radius-cdf-lg: var(--cdf-radius-lg);
@@ -117,6 +173,12 @@ html {
   background: var(--cdf-bg);
   color: var(--cdf-text);
   font-family: var(--cdf-font);
+}
+
+/* Native radios and checkboxes take the brand colour (DESIGN_REVIEW #8). */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--cdf-primary);
 }
 
 :focus-visible {
