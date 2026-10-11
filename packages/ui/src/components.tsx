@@ -152,6 +152,27 @@ export function CDFField(props: {
   );
 }
 
+/** Not-found, error and similar system pages (UX-080): one heading, one sentence, then the ways forward. */
+export function CDFSystemMessage({
+  title,
+  body,
+  children,
+  testId,
+}: {
+  title: string;
+  body: string;
+  children?: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <div className="mx-auto max-w-2xl py-8" data-testid={testId}>
+      <h1 className="text-cdf-h1 font-semibold">{title}</h1>
+      <p className="mt-3 text-cdf-text-secondary">{body}</p>
+      {children ? <div className="mt-6 flex flex-wrap items-center gap-3">{children}</div> : null}
+    </div>
+  );
+}
+
 // ---- Feedback ----------------------------------------------------------------------------------------
 type Tone = "info" | "success" | "warning" | "danger" | "neutral";
 const toneClasses: Record<Tone, string> = {

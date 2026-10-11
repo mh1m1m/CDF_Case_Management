@@ -4,3 +4,4 @@ export * from "./scroll-region";
 export * from "./command-form";
 export * from "./command-form-fields";
 export * from "./confirm-dialog";
+export * from "./system-page";

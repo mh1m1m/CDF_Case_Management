@@ -1,6 +1,7 @@
 // One form instance (Phase 8; ADR-011): fields, draft saving, prepare / review / approve / withdraw as the
 // database allows this user, the immutable version list with hashes and the lifecycle trail.
 // api.open_form_instance audits FORM_VIEWED or a SECURITY denial; invisible and missing instances are alike.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formDisplayNumber } from "@cdf/domain";
@@ -30,6 +31,12 @@ import {
   withdrawFormAction,
 } from "../actions";
 import { FormFields, fieldLabels, statusTone } from "../form-fields";
+
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.formInstance") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 

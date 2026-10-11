@@ -1,5 +1,6 @@
 // Forms on a case (Phase 8; ADR-011): the started instances and the WB-FRM registry with a start control
 // for every form the database would let this user prepare (hidden ≠ forbidden: api.start_form re-checks).
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CLASSIFICATION_LEVELS, type FormDefinitionListItem, type FormInstanceSummary } from "@cdf/contracts";
@@ -20,6 +21,12 @@ import { getTranslator } from "@/server/locale";
 import { AppNav } from "../../../app-nav";
 import { startFormAction } from "./actions";
 import { statusTone } from "./form-fields";
+
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.caseForms") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 

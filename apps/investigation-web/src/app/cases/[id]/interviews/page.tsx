@@ -1,6 +1,7 @@
 // Interview list and planning for one case (CDF-60). Lists what RLS returned; offers planning to users the
 // database would allow (hidden ≠ forbidden: api.plan_interview re-checks). Entry link from the case page is
 // added by the accessibility thread, which owns that page.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
@@ -23,6 +24,12 @@ import { getTranslator } from "@/server/locale";
 import { AppNav } from "../../../app-nav";
 import { planInterviewAction } from "./actions";
 import { interviewStatusTone } from "./status-tone";
+
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.caseInterviews") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 // Interview refusals have their own codes; fall back to the shared ones.

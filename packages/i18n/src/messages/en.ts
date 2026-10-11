@@ -45,6 +45,10 @@ export const en = {
     recordDetail: "Record",
     legalHolds: "Legal hold requests",
     certificate: "Disposition certificate",
+    caseForms: "Case forms",
+    formInstance: "Form details",
+    caseInterviews: "Case interviews",
+    interviewDetail: "Interview details",
   },
   errors: {
     UNAUTHENTICATED: "Your session has ended. Please sign in again.",
@@ -66,6 +70,21 @@ export const en = {
       UNAVAILABLE: "Service unavailable",
     },
     entriesKept: "What you entered is still in the form.",
+  },
+  /** Not-found, error and loading pages of both apps (UX-080). Generic: never a stack trace or internal detail (§82). */
+  system: {
+    notFoundTitle: "Page not found",
+    notFoundBody:
+      "This page does not exist, or it is not available to you. Check the address, or go back to the start page.",
+    caseNotFoundTitle: "Not available",
+    caseNotFoundBody: "This case, or the item in it, does not exist or is not available to you.",
+    backHome: "Go to the start page",
+    backToCases: "Go to cases",
+    errorTitle: "Something went wrong",
+    errorBody: "This page could not be shown. Try again. If it keeps happening, note the reference below.",
+    errorReference: "Reference: {ref}",
+    retry: "Try again",
+    loading: "Loading…",
   },
   /** Confirmation of controlled and irreversible acts (UX-031, O08 §08.6.4). Each act states what happens,
    *  whether it can be undone and who is affected; the confirm button repeats the trigger's verb. */

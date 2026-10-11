@@ -1,6 +1,7 @@
 // Interview detail (CDF-60). Opening it records INTERVIEW_VIEWED (or a SECURITY denial); missing and
 // invisible interviews are both 404. Forms appear only where the lifecycle and the viewer's case relationship
 // allow them; every command is re-checked by the database.
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
@@ -48,6 +49,12 @@ import {
   transitionInterviewAction,
 } from "../actions";
 import { interviewStatusTone } from "../status-tone";
+
+/** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslator();
+  return { title: t("pageTitles.interviewDetail") };
+}
 
 const UUID = /^[0-9a-f-]{36}$/i;
 // Interview refusals have their own codes; fall back to the shared ones.
