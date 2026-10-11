@@ -152,6 +152,25 @@ export async function transitionAction(
  * Evidence upload (§24–§27). The file travels only server-side: bytes → checks → quarantine → scan → vault.
  * `evidenceId` is set when adding a version to an existing item.
  */
+/** DEC-09: limit an item to the case leads, or open it to the team again. The database decides who may. */
+export async function setEvidenceRestrictionAction(
+  caseId: string,
+  evidenceId: string,
+  restriction: "TEAM" | "LEADS",
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await evidenceService().setRestriction(ctx, actor, {
+    ...formObject(form),
+    caseId,
+    evidenceId,
+    restriction,
+  });
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
+  return toActionState(result, form);
+}
+
 export async function uploadEvidenceAction(
   caseId: string,
   evidenceId: string | null,

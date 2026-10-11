@@ -295,11 +295,12 @@ Evidence files are listed in [SYNTHETIC_DATA.md §5](SYNTHETIC_DATA.md#5-evidenc
 
 ### UAT-EVID-04 Evidence download denied without permission or access
 
-**Actor** triage, investigator.b · **Trace** CDF-EVID-001, `tests/security/evidence-access.spec.ts`, `tests/security/storage-policy.spec.ts`
+**Actor** triage, grc.director, investigator.b · **Trace** CDF-EVID-001, ADR-016 D6 (DEC-09), `tests/security/evidence-access.spec.ts`, `tests/security/evidence-need-to-know.spec.ts`, `tests/security/storage-policy.spec.ts`
 
-1. As **triage** (has a grant on 0001, no `EVIDENCE_DOWNLOAD`) → 0001 → Evidence. → Items listed; no upload form; no download links.
+1. As **triage** (has a grant on 0001, no `EVIDENCE_DOWNLOAD`) → 0001 → Evidence. → A note that the evidence register is for the investigation team; no evidence items and no upload form; the reporter's files, if any, without download links.
 2. Paste the download URL copied in UAT-AUTHZ-01. → "Not found"; **API** as soc → `EVIDENCE_ACCESS_DENIED`.
-3. As **investigator.b** → the same URL. → "Not found".
+3. As **grc.director** → 0001. → No Evidence tab; the same download URL → "Not found".
+4. As **investigator.b** → the same URL. → "Not found".
 
 ## Administration and audit separation (UAT-ADMIN)
 

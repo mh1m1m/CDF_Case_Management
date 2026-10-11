@@ -137,7 +137,10 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
 
       <CDFCard title={t("intake.attachmentsTitle")} testId="report-attachments">
         <p className="mb-2 text-sm text-cdf-text-secondary">{t("intake.attachmentsIntro")}</p>
-        {attachments.length === 0 ? (
+        {!report.filesVisible ? (
+          // DEC-09: the files are the case team's; say so instead of a false "none", and give no count.
+          <p data-testid="attachments-with-team">{t("intake.attachmentsWithTeam")}</p>
+        ) : attachments.length === 0 ? (
           <p>{t("intake.attachmentsNone")}</p>
         ) : (
           <ul className="space-y-2">

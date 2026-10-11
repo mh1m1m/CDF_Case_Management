@@ -12,6 +12,7 @@ import type {
   CaseReporterView,
   EvidenceItem,
   EvidenceRejectionCode,
+  EvidenceRestriction,
   FormApprovalOutcome,
   FormData,
   FormDefinitionListItem,
@@ -159,8 +160,15 @@ export interface EvidenceGateway {
   ): Promise<void>;
   /** Records the download (custody + audit) and returns the storage facts, or null when denied/missing. */
   openVersion(ctx: UserRequestContext, versionId: string): Promise<EvidenceDownloadRecord | null>;
+  /** DEC-09: limit an item to the case leads, or open it to the team again (audited in the database). */
+  setRestriction(
+    ctx: UserRequestContext,
+    input: { caseId: string; evidenceId: string; restriction: EvidenceRestriction; reason: string },
+  ): Promise<void>;
   /** Reporter attachments on a report the caller can view (CDF-72), quarantined and rejected ones included. */
   listReportAttachments(ctx: UserRequestContext, reportId: string): Promise<ReportAttachmentItem[]>;
+  /** The reporter's files of every report behind a case, as far as the caller may see them (DEC-09). */
+  listCaseReportAttachments(ctx: UserRequestContext, caseId: string): Promise<ReportAttachmentItem[]>;
   /** Download gate for an available reporter attachment; null when denied, missing or not yet scanned. */
   openReportAttachment(
     ctx: UserRequestContext,

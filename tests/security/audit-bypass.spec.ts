@@ -236,9 +236,10 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "register_evidence_version",
         actor: "investigatorB",
         run: async (s) => {
-          const [r] = await s.tx<{ v: string }[]>`
-            select o_version_id as v from api.register_evidence_version(${caseB}, null, 'Audit walk item (synthetic)', null,
+          const [r] = await s.tx<{ v: string; e: string }[]>`
+            select o_version_id as v, o_evidence_id as e from api.register_evidence_version(${caseB}, null, 'Audit walk item (synthetic)', null,
               'DOCUMENT', 'Synthetic source', null, 'CONFIDENTIAL'::core.classification_level, 'walk.pdf', 'application/pdf', 512, ${"1".repeat(64)})`;
+          ids.evidence = r!.e;
           return (ids.version = r!.v);
         },
       },
@@ -246,6 +247,12 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "complete_evidence_version",
         actor: "investigatorB",
         run: (s) => s.tx`select api.complete_evidence_version(${ids.version!}, 'CLEAN', 'walk-scanner')`,
+      },
+      // DEC-09 (migration 1850): the case manager limits the item to the case leads.
+      {
+        fn: "set_evidence_restriction",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.set_evidence_restriction(${ids.evidence!}, 'LEADS', ${REASON})`,
       },
       {
         fn: "reject_evidence_version",
@@ -758,6 +765,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_records",
       "authz.can_view_records_catalogue",
       "authz.can_view_report",
+      "authz.can_view_report_files",
       "authz.current_clearance",
       "authz.current_roles",
       "authz.current_subject",
@@ -765,6 +773,8 @@ describe("audit internals are not reachable", () => {
       "authz.form_entitled",
       "authz.has_permission",
       "authz.in_records_catalogue_scope",
+      "authz.is_evidence_lead",
+      "authz.is_evidence_team",
       "authz.is_reporter_correspondent",
       "authz.task_grants",
       "forms.canonical_json",

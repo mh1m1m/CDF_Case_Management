@@ -192,6 +192,12 @@ const PROBES: Probe[] = [
       tx`select api.reject_evidence_version(${t.version}, 'MALWARE_DETECTED', 'INFECTED', 'probe')`,
   },
   {
+    // DEC-09 (migration 1850): an item outside the caller's need-to-know is not found.
+    fn: "set_evidence_restriction",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.set_evidence_restriction(${t.evidence}, 'LEADS', ${REASON})`,
+  },
+  {
     fn: "reply_to_reporter",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.reply_to_reporter(${t.report}, 'Synthetic probe reply to the reporter.')`,

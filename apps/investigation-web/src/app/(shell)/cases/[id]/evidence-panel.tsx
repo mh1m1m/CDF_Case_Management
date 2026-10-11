@@ -1,6 +1,13 @@
 // Evidence panel on the case page (§24–§27). Lists what RLS returned, offers upload to users the database
 // would allow (hidden ≠ forbidden: the server re-checks), and links downloads through the audited route.
-import { CLASSIFICATION_LEVELS, EVIDENCE_TYPES, type CaseDetail, type EvidenceItem } from "@cdf/contracts";
+// DEC-09: each item says who on the team sees it, and the leads may limit it to themselves or open it again.
+import {
+  CLASSIFICATION_LEVELS,
+  EVIDENCE_TYPES,
+  type CaseDetail,
+  type EvidenceItem,
+  type ReportAttachmentItem,
+} from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES, evidenceDisplayNumber, formatBytes } from "@cdf/domain";
 import { formatDateTime, type MessageKey, type Translator } from "@cdf/i18n";
 import {
@@ -14,7 +21,7 @@ import {
   inputClass,
   textareaClass,
 } from "@cdf/ui";
-import { uploadEvidenceAction } from "./actions";
+import { setEvidenceRestrictionAction, uploadEvidenceAction } from "./actions";
 
 const ACCEPT = ALLOWED_CONTENT_TYPES.flatMap((t) => t.extensions.map((e) => `.${e}`)).join(",");
 
@@ -27,6 +34,7 @@ export function EvidencePanel({
   items,
   canUpload,
   canDownload,
+  canRestrict,
   clearance,
   t,
 }: {
@@ -34,6 +42,8 @@ export function EvidencePanel({
   items: EvidenceItem[];
   canUpload: boolean;
   canDownload: boolean;
+  /** The case manager, owner or lead on a case whose content can still change (DEC-09). */
+  canRestrict: boolean;
   clearance: string;
   t: Translator;
 }) {
@@ -93,9 +103,19 @@ export function EvidencePanel({
           {
             header: t("evidence.classification"),
             cell: (e) => (
-              <CDFBadge tone={classificationTone(e.classification)}>
-                {t(`classification.${e.classification}` as MessageKey)}
-              </CDFBadge>
+              <>
+                <CDFBadge tone={classificationTone(e.classification)}>
+                  {t(`classification.${e.classification}` as MessageKey)}
+                </CDFBadge>
+                {e.restriction === "LEADS" ? (
+                  <>
+                    {" "}
+                    <span data-testid={`evidence-leads-${e.sequenceNo}`}>
+                      <CDFBadge tone="warning">{t("evidence.restriction.leadsBadge")}</CDFBadge>
+                    </span>
+                  </>
+                ) : null}
+              </>
             ),
           },
           {
@@ -193,6 +213,52 @@ export function EvidencePanel({
               </li>
             ))}
           </ul>
+          <h3 className="mt-2 font-semibold">{t("evidence.restriction.title")}</h3>
+          <p className="text-sm" data-testid={`evidence-restriction-${e.sequenceNo}`}>
+            {e.restriction === "LEADS" ? t("evidence.restriction.leads") : t("evidence.restriction.team")}
+          </p>
+          {canRestrict ? (
+            <div className="mt-2">
+              <CDFCommandForm
+                action={setEvidenceRestrictionAction.bind(
+                  null,
+                  c.id,
+                  e.id,
+                  e.restriction === "LEADS" ? "TEAM" : "LEADS",
+                )}
+                locale={t.locale}
+                submitLabel={
+                  e.restriction === "LEADS" ? t("evidence.restriction.open") : t("evidence.restriction.limit")
+                }
+                submitName={t(
+                  e.restriction === "LEADS"
+                    ? "evidence.restriction.openItem"
+                    : "evidence.restriction.limitItem",
+                  { item: evidenceDisplayNumber(e.sequenceNo) },
+                )}
+                variant="secondary"
+                fieldLabels={{ reason: t("evidence.restriction.reason") }}
+                testId={`restriction-form-${e.sequenceNo}`}
+              >
+                <CDFField
+                  id={`restrictionReason-${e.sequenceNo}`}
+                  label={t("evidence.restriction.reasonFor", { item: evidenceDisplayNumber(e.sequenceNo) })}
+                  hint={t("evidence.restriction.reasonHint")}
+                  requiredLabel={t("common.required")}
+                >
+                  <input
+                    id={`restrictionReason-${e.sequenceNo}`}
+                    name="reason"
+                    aria-describedby={`restrictionReason-${e.sequenceNo}-hint`}
+                    className={inputClass}
+                    required
+                    minLength={10}
+                    maxLength={500}
+                  />
+                </CDFField>
+              </CDFCommandForm>
+            </div>
+          ) : null}
           <h3 className="mt-2 font-semibold">{t("evidence.custody")}</h3>
           <ol className="list-decimal ps-5 text-sm" data-testid={`custody-${e.sequenceNo}`}>
             {e.custody.map((ev) => (
@@ -344,6 +410,63 @@ export function EvidencePanel({
           </CDFCommandForm>
         </div>
       ) : null}
+    </CDFCard>
+  );
+}
+
+/**
+ * The reporter's files «ملفات المبلّغ» (ADR-015; DEC-09). What RLS returned: the investigation team's, and triage's
+ * while its grant lasts. Opening one needs evidence download rights once a case exists; the route re-checks.
+ */
+export function ReporterFilesCard({
+  files,
+  canDownload,
+  t,
+}: {
+  files: ReportAttachmentItem[];
+  canDownload: boolean;
+  t: Translator;
+}) {
+  return (
+    <CDFCard title={t("evidence.reporterFiles.title")} testId="reporter-files">
+      <p className="mb-2 text-sm text-cdf-text-secondary">{t("evidence.reporterFiles.intro")}</p>
+      {files.length === 0 ? (
+        <p data-testid="reporter-files-none">{t("intake.attachmentsNone")}</p>
+      ) : (
+        <ul className="space-y-2">
+          {files.map((a) => (
+            <li
+              key={a.id}
+              className="flex flex-wrap items-center gap-3"
+              data-testid={`reporter-file-${a.displayName}`}
+            >
+              {canDownload && a.status === "AVAILABLE" ? (
+                <a
+                  href={`/intake/${a.reportId}/attachments/${a.id}`}
+                  className="font-semibold underline"
+                  aria-label={t("intake.attachmentDownload", { name: a.displayName })}
+                  dir="ltr"
+                >
+                  {a.displayName}
+                </a>
+              ) : (
+                <span className="font-semibold" dir="ltr">
+                  {a.displayName}
+                </span>
+              )}
+              <CDFBadge
+                tone={a.status === "AVAILABLE" ? "success" : a.status === "REJECTED" ? "danger" : "warning"}
+              >
+                {t(`intake.attachmentStatus.${a.status}` as MessageKey)}
+              </CDFBadge>
+              <span className="text-sm text-cdf-text-secondary">
+                {t(`intake.attachmentSource.${a.source}` as MessageKey)} · {formatBytes(a.sizeBytes)} ·{" "}
+                {formatDateTime(t.locale, a.receivedAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </CDFCard>
   );
 }

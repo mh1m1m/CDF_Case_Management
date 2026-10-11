@@ -10,6 +10,7 @@ import type {
   CaseListItem,
   CaseReporterView,
   ConversationAccess,
+  EvidenceAccess,
   CasePathStep,
   IntakeReportItem,
   LedgerEntry,
@@ -92,15 +93,17 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         { direction: "FROM_REPORTER" | "TO_REPORTER"; body: string; createdAt: Date }[]
       >`
         select direction, body, created_at as "createdAt" from intake.report_message where report_id = ${reportId} order by created_at`;
-      const [access] = await tx<{ access: ConversationAccess }[]>`
+      const [access] = await tx<{ access: ConversationAccess; files: boolean }[]>`
         select case when authz.can_message_reporter(${reportId}) then 'SEND'
                     when authz.can_read_reporter_conversation(${reportId}) then 'READ'
-                    else 'NONE' end as access`;
+                    else 'NONE' end as access,
+               authz.can_view_report_files(${reportId}) as files`;
       return {
         ...(r as unknown as ReportDetail),
         receivedAt: iso(r.receivedAt as Date)!,
         messages: messages.map((m) => ({ ...m, createdAt: iso(m.createdAt)! })),
         conversation: access?.access ?? "NONE",
+        filesVisible: access?.files ?? false,
       };
     });
   }
@@ -214,6 +217,13 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
                     when bool_or(authz.can_read_reporter_conversation(r.id)) then 'READ'
                     else 'NONE' end as access
         from intake.report r where r.case_id = ${caseId}`;
+      // The caller's evidence need-to-know (DEC-09): the register for the team, the reporter's files for triage.
+      const [evidence] = await tx<{ access: EvidenceAccess }[]>`
+        select case when authz.is_evidence_lead(${caseId}) then 'LEADS'
+                    when authz.is_evidence_team(${caseId}) then 'TEAM'
+                    when exists (select 1 from intake.report r
+                                  where r.case_id = ${caseId} and authz.can_view_report_files(r.id)) then 'REPORTER_FILES'
+                    else 'NONE' end as access`;
       return {
         ...toCaseItem(c),
         summary: c.summary as string,
@@ -233,6 +243,7 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         transitions: [...transitions],
         myConflictStatus: conflict?.status ?? null,
         reporterConversation: conversation?.access ?? "NONE",
+        evidenceAccess: evidence?.access ?? "NONE",
       };
     });
   }

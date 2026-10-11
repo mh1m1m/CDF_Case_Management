@@ -419,6 +419,29 @@ requirements:
       ]
     notes: "Interview invitations to the reporter through the channel are not built yet (S3 interviews). The triage officer stops writing at case creation; DEC-03 ends the TRIAGE grant itself later."
 
+  - id: CDF-UX-010
+    title: "Evidence is need-to-know: the investigation team sees a case's evidence within clearance, the case leads may limit an item to themselves, and seeing the case is never enough"
+    source: [UX audit 2026-10-10 UX-072; ADR-016 D6; DEC-09]
+    external_ids: []
+    linear_issues: [CDF-119]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001850_evidence_need_to_know.sql,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/evidence/page.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/evidence-panel.tsx",
+      ]
+    tests:
+      [
+        tests/security/evidence-need-to-know.spec.ts,
+        tests/security/evidence-access.spec.ts,
+        tests/security/reporter-attachments.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+        tests/e2e/evidence.spec.ts,
+      ]
+    notes: "Packet-linked evidence for review, committee and decision users is S5; until then they get none. Triage keeps the reporter's files (listing only) through its TRIAGE grant until DEC-03 ends that grant at hand-over (S3)."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

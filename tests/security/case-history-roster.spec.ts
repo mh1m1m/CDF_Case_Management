@@ -50,7 +50,7 @@ const CATALOGUE = new Set([
   ],
   ...["CASE_ASSIGNED", "CASE_UNASSIGNED", "CASE_REASSIGNED", "CASE_HANDED_OVER"],
   ...["CASE_ACCESS_GRANTED", "CASE_ACCESS_REVOKED", "CONFLICT_DECLARED", "CONFLICT_DECIDED"],
-  ...["EVIDENCE_RECEIVED", "EVIDENCE_STORED", "EVIDENCE_REJECTED"],
+  ...["EVIDENCE_RECEIVED", "EVIDENCE_STORED", "EVIDENCE_REJECTED", "EVIDENCE_RESTRICTION_CHANGED"],
   ...[
     "FORM_STARTED",
     "FORM_SAVED",
@@ -195,7 +195,17 @@ describe("history shows business events from the catalogue only", () => {
 
   it("returns only a fixed set of detail keys, never raw metadata", async () => {
     await scenario(async (s) => {
-      const allowed = new Set(["transition", "from", "to", "role", "scope", "fields", "restricted"]);
+      const allowed = new Set([
+        "transition",
+        "from",
+        "to",
+        "role",
+        "scope",
+        "fields",
+        "restricted",
+        "item",
+        "restriction",
+      ]);
       for (const user of ["lead", "caseManager", "grcDirector", "triage"] as UserKey[]) {
         for (const r of await historyOf(s, user, caseA))
           for (const key of Object.keys(r.detail ?? {}))
@@ -267,6 +277,10 @@ describe("each event keeps its own audience", () => {
 
   it("legal hold: status for the case team, who and why only for the hold audience (DEC-10)", async () => {
     await scenario(async (s) => {
+      // Requests already on the seed case (an earlier browser run may have left one) are not this test's.
+      const requested = (rows: { action: string }[]) =>
+        rows.filter((r) => r.action === "LEGAL_HOLD_REQUESTED").length;
+      const before = requested(await historyOf(s, "grcDirector", caseA));
       await s.as("caseManager");
       await s.tx`select api.request_legal_hold(${caseA}, 'LITIGATION', ${REASON + " Request."})`;
       await s.as("grcDirector");
@@ -300,7 +314,7 @@ describe("each event keeps its own audience", () => {
         actor_name: "GRC Director Zeta",
         reason: "LITIGATION",
       });
-      expect(director.filter((r) => r.action === "LEGAL_HOLD_REQUESTED").length).toBe(1);
+      expect(requested(director)).toBe(before + 1);
     });
   });
 
@@ -319,7 +333,7 @@ describe("each event keeps its own audience", () => {
     });
   });
 
-  it("evidence events follow the evidence's own rule: a reviewer never sees an item above their entitlement", async () => {
+  it("evidence events follow the evidence's own rule: nobody sees an item outside their entitlement", async () => {
     await scenario(async (s) => {
       // The GRC Director joins case A and records a SECRET item; an investigator records a CONFIDENTIAL one.
       await s.as("caseManager");
@@ -344,12 +358,16 @@ describe("each event keeps its own audience", () => {
         )[0]!;
       const [secretSeq, confSeq] = [await seqOf(secret), await seqOf(confidential)];
       const seqs = async (user: UserKey) => (await historyOf(s, user, caseA)).map((r) => String(r.seq));
-      // The reviewer (REVIEW grant, CONFIDENTIAL clearance) and the investigator: the confidential item only.
-      for (const user of ["committee", "investigatorA", "lead"] as UserKey[]) {
+      // The investigators (CONFIDENTIAL clearance): the confidential item only.
+      for (const user of ["investigatorA", "lead"] as UserKey[]) {
         const mine = await seqs(user);
         expect(mine, user).toContain(confSeq!.seq);
         expect(mine, user).not.toContain(secretSeq!.seq);
       }
+      // The reviewer (REVIEW grant) is not the investigation team: neither item (DEC-09; packets at S5).
+      const reviewer = await seqs("committee");
+      expect(reviewer).not.toContain(confSeq!.seq);
+      expect(reviewer).not.toContain(secretSeq!.seq);
       expect(await seqs("grcDirector")).toEqual(expect.arrayContaining([secretSeq!.seq, confSeq!.seq]));
     });
   });

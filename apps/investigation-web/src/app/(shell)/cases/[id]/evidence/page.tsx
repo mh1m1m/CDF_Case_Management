@@ -1,11 +1,16 @@
-// Evidence «الأدلة» (UX redesign S2; audit §22.6.1 tab 3). The case's evidence register and upload. The list is
-// what authz.can_view_evidence returns for this viewer; uploads and downloads are re-checked by the server.
+// Evidence «الأدلة» (UX redesign S2; audit §22.6.1 tab 3, §22.6.3; ADR-016 D6, DEC-09). The case's evidence
+// register and upload for the investigation team, and the reporter's files. Who sees what is the database's
+// answer (migration 1850): the tab exists only for those with a need to know, the register only for the team,
+// LEADS items and the restriction control only for the case manager, owner and lead. Uploads, downloads and
+// restriction changes are re-checked by the server.
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { can } from "@cdf/authorization";
+import { CDFAlert } from "@cdf/ui";
 import { evidenceService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { EvidencePanel } from "../evidence-panel";
-import { CaseWorkspace, loadCase } from "../workspace";
+import { EvidencePanel, ReporterFilesCard } from "../evidence-panel";
+import { CaseWorkspace, contentOpen, loadCase } from "../workspace";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -15,9 +20,16 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function CaseEvidencePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { actor, ctx, t, c } = await loadCase(id);
-  const evidence = await evidenceService().listEvidence(ctx, id);
+  // No need to know: the same answer as a case that does not exist (G2).
+  if (c.evidenceAccess === "NONE") notFound();
+  const register = c.evidenceAccess === "TEAM" || c.evidenceAccess === "LEADS";
+  const [evidence, files] = await Promise.all([
+    register ? evidenceService().listEvidence(ctx, id) : Promise.resolve([]),
+    evidenceService().listCaseReportAttachments(ctx, id),
+  ]);
   // Mirrors authz.can_upload_evidence for the UI only; the database decides (§19).
   const canUpload =
+    register &&
     can(actor, "EVIDENCE_UPLOAD") &&
     c.recordsState === "ACTIVE" &&
     (can(actor, "CASE_EDIT_ALL") ||
@@ -26,16 +38,29 @@ export default async function CaseEvidencePage({ params }: { params: Promise<{ i
           a.userId === actor.userId &&
           ["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"].includes(a.assignmentRole),
       ));
+  const canDownload = can(actor, "EVIDENCE_DOWNLOAD");
   return (
     <CaseWorkspace c={c} actor={actor} t={t} tab="evidence">
-      <EvidencePanel
-        c={c}
-        items={evidence}
-        canUpload={canUpload}
-        canDownload={can(actor, "EVIDENCE_DOWNLOAD")}
-        clearance={actor.clearance}
-        t={t}
-      />
+      {register ? (
+        <EvidencePanel
+          c={c}
+          items={evidence}
+          canUpload={canUpload}
+          canDownload={canDownload}
+          canRestrict={c.evidenceAccess === "LEADS" && contentOpen(c)}
+          clearance={actor.clearance}
+          t={t}
+        />
+      ) : (
+        <div className="mb-4">
+          <CDFAlert tone="info" testId="evidence-team-only">
+            {t("evidence.teamOnly")}
+          </CDFAlert>
+        </div>
+      )}
+      <div className="mt-6">
+        <ReporterFilesCard files={files} canDownload={canDownload} t={t} />
+      </div>
     </CaseWorkspace>
   );
 }

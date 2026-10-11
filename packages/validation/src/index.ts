@@ -10,6 +10,7 @@ import {
   BIRTH_DATE_CALENDARS,
   CITIES,
   CLASSIFICATION_LEVELS,
+  EVIDENCE_RESTRICTIONS,
   EVIDENCE_TYPES,
   FORM_APPROVAL_OUTCOMES,
   FORM_REVIEW_OUTCOMES,
@@ -313,6 +314,14 @@ export const uploadEvidenceSchema = z
     path: ["classification"],
   });
 export type UploadEvidenceInput = z.output<typeof uploadEvidenceSchema>;
+
+// DEC-09: limit an item to the case leads, or open it to the team again, with a reason.
+export const setEvidenceRestrictionSchema = z.object({
+  caseId: uuid,
+  evidenceId: uuid,
+  restriction: z.enum(EVIDENCE_RESTRICTIONS),
+  reason: text(10, 500),
+});
 
 // ---- Forms engine (Phase 8; ADR-011). Field values are checked against the definition by @cdf/domain
 // validateFormData and by forms.validate_data; these schemas cover the command envelope.

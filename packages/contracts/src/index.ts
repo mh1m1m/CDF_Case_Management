@@ -372,6 +372,10 @@ export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 export const EVIDENCE_STATUSES = ["PENDING", "AVAILABLE", "REJECTED"] as const;
 export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
 
+/** Who on the case team sees an item (DEC-09): the team, or only the case manager, owner and lead investigator. */
+export const EVIDENCE_RESTRICTIONS = ["TEAM", "LEADS"] as const;
+export type EvidenceRestriction = (typeof EVIDENCE_RESTRICTIONS)[number];
+
 export const EVIDENCE_VERSION_STATUSES = ["QUARANTINED", "AVAILABLE", "REJECTED"] as const;
 export type EvidenceVersionStatus = (typeof EVIDENCE_VERSION_STATUSES)[number];
 
@@ -424,6 +428,7 @@ export interface EvidenceItem {
   collectedAt: string | null;
   classification: Classification;
   status: EvidenceStatus;
+  restriction: EvidenceRestriction;
   createdBy: string;
   createdByName: string | null;
   createdAt: string;
@@ -494,6 +499,8 @@ export interface ReportDetail extends IntakeReportItem {
   /** Empty unless the caller may read the conversation (DEC-06: once a case exists it belongs to the case). */
   messages: ReportMessage[];
   conversation: ConversationAccess;
+  /** Whether the caller may see the reporter's files (DEC-09: once a case exists, its investigation team). */
+  filesVisible: boolean;
 }
 
 /** A person who may be named as a restricted case's accountable authority (DEC-01). Names only. */
@@ -546,7 +553,15 @@ export interface CaseDetail extends CaseListItem {
   myConflictStatus: string | null;
   /** The caller's part in the reporter conversation, from the database (DEC-06): it decides the Reporter tab. */
   reporterConversation: ConversationAccess;
+  /** The caller's evidence need-to-know, from the database (DEC-09): it decides the Evidence tab. */
+  evidenceAccess: EvidenceAccess;
 }
+
+/**
+ * LEADS: the register, LEADS items and the restriction control (case manager, owner, lead investigator);
+ * TEAM: the register; REPORTER_FILES: the reporter's files only (triage while its grant lasts); NONE: no tab.
+ */
+export type EvidenceAccess = "LEADS" | "TEAM" | "REPORTER_FILES" | "NONE";
 
 /** NONE: no thread; READ: read only (oversight); SEND: may also write to the reporter. */
 export type ConversationAccess = "NONE" | "READ" | "SEND";
@@ -626,6 +641,9 @@ export interface CaseHistoryDetail {
   scope?: string;
   fields?: string[];
   restricted?: boolean;
+  /** EVIDENCE_RESTRICTION_CHANGED (DEC-09): the item's number within the case and its new restriction. */
+  item?: number;
+  restriction?: EvidenceRestriction;
 }
 
 export const ROSTER_STATUSES = ["ACTIVE", "SCHEDULED", "EXPIRED", "ENDED", "REVOKED"] as const;

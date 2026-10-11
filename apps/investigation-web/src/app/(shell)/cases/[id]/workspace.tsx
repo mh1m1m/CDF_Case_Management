@@ -22,6 +22,7 @@ import {
   CDFOverflowMenu,
   CDFViewTabs,
 } from "@cdf/ui";
+import { evidenceDisplayNumber } from "@cdf/domain";
 import { stateByCode } from "@cdf/workflow";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
@@ -122,6 +123,15 @@ function historyTitle(t: Translator, e: AuditTimelineEntry): string {
       break;
     case "REPORTER_COMMUNICATION_ENDED":
       if (name) return t("caseWorkspace.history.reporterDelegationEnded", { name });
+      break;
+    case "EVIDENCE_RESTRICTION_CHANGED":
+      if (typeof d.item === "number" && d.restriction)
+        return t(
+          d.restriction === "LEADS"
+            ? "caseWorkspace.history.evidenceLimited"
+            : "caseWorkspace.history.evidenceOpened",
+          { item: evidenceDisplayNumber(d.item) },
+        );
       break;
     case "CLASSIFICATION_CHANGED":
       // The database names a level only when it is within the viewer's clearance.
@@ -375,7 +385,12 @@ export async function CaseWorkspace({
         itemTestIdPrefix="case-tab-"
         wrap
         current={tab}
-        items={CASE_TABS.filter((k) => k !== "reporter" || c.reporterConversation !== "NONE").map((k) => ({
+        items={CASE_TABS.filter(
+          // The database decides both: the conversation's readers (DEC-06) and evidence need-to-know (DEC-09).
+          (k) =>
+            (k !== "reporter" || c.reporterConversation !== "NONE") &&
+            (k !== "evidence" || c.evidenceAccess !== "NONE"),
+        ).map((k) => ({
           key: k,
           href: tabHref(c.id, k),
           label: tabLabel(k),
