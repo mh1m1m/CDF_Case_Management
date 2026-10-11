@@ -1,5 +1,6 @@
 // CDF-57: before the 30-minute idle limit signs a user out, a dialog warns them and lets them stay signed in
-// (WCAG 2.2.1 Timing Adjustable). The browser clock is fast-forwarded; the server session stays real.
+// (WCAG 2.2.1 Timing Adjustable). The browser clock is fast-forwarded; the server session stays real. Escape keeps
+// the session during the warning and cannot dismiss the signed-out prompt (UX-130).
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { signIn } from "../e2e/support";
@@ -35,11 +36,22 @@ for (const locale of ["ar", "en"] as const) {
     await page.clock.fastForward("01:05");
     await expect(page.getByRole("dialog", { name: text[locale].warning })).toBeVisible();
 
-    // Without a response the session ends: the page stays in place and the dialog links to sign-in.
+    // Escape is the safe default (UX-130): during the warning it also keeps the session.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await page.clock.fastForward("27:00");
+    await expect(dialog).toBeHidden();
+    await page.clock.fastForward("01:05");
+    await expect(page.getByRole("dialog", { name: text[locale].warning })).toBeVisible();
+
+    // Without a response the session ends: the page stays in place and the dialog links to sign-in, back here.
     await page.clock.fastForward("02:00");
     await expect(page.getByRole("dialog", { name: text[locale].ended })).toBeVisible();
-    await expect(page.getByTestId("session-sign-in")).toHaveAttribute("href", "/login");
+    await expect(page.getByTestId("session-sign-in")).toHaveAttribute("href", "/login?next=%2Fcases");
     await expect(page.getByTestId("signed-in-as")).toBeAttached();
+    // Once signed out, Escape cannot dismiss the sign-in prompt.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: text[locale].ended })).toBeVisible();
     await page.context().close();
   });
 }

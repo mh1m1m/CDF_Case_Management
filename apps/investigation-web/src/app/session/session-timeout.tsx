@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState, type SyntheticEvent } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { createTranslator, type Locale } from "@cdf/i18n";
 import { buttonClass } from "@cdf/ui";
 import { extendSessionAction, signOutAction } from "./actions";
@@ -14,12 +14,15 @@ type Phase = "active" | "warning" | "ended";
  * Warns before the server's idle limit signs the user out and lets them extend it (WCAG 2.2.1 Timing Adjustable).
  * The browser only knows about its own requests, so the timer restarts on navigation and on form submits;
  * any other request the server sees only makes the warning appear early, never late. When time runs out the
- * page stays as it is, so unsaved text can still be copied, and a dialog offers sign-in again.
+ * page stays as it is, so unsaved text can still be copied, and a dialog offers sign-in again, back to this page.
+ * Escape is the safe default (UX-130): during the warning it means "Stay signed in" (the server re-checks the
+ * session); once signed out it does nothing, so the sign-in prompt cannot be dismissed.
  */
 export function SessionTimeout({ idleSeconds, locale }: { idleSeconds: number; locale: Locale }) {
   const t = createTranslator(locale);
   const dialog = useRef<HTMLDialogElement>(null);
   const pathname = usePathname();
+  const query = useSearchParams()?.toString() ?? "";
   const [phase, setPhase] = useState<Phase>("active");
   const [deadline, setDeadline] = useState(() => Date.now() + idleSeconds * 1000);
   const minutes = Math.round(idleSeconds / 60);
@@ -68,9 +71,19 @@ export function SessionTimeout({ idleSeconds, locale }: { idleSeconds: number; l
     }
   };
 
+  const onCancel = (event: SyntheticEvent<HTMLDialogElement>) => {
+    event.preventDefault();
+    if (phase === "warning") void stay();
+  };
+
+  // The login page re-validates `next` (safeReturnPath), so only a path on this app is ever followed.
+  const here = query ? `${pathname}?${query}` : pathname;
+  const signInHref = `/login?next=${encodeURIComponent(here)}`;
+
   return (
     <dialog
       ref={dialog}
+      onCancel={onCancel}
       aria-labelledby="session-dialog-title"
       aria-describedby="session-dialog-body"
       data-testid="session-dialog"
@@ -86,7 +99,7 @@ export function SessionTimeout({ idleSeconds, locale }: { idleSeconds: number; l
             {t("session.endedBody", { minutes })}
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
-            <a href="/login" className={buttonClass("primary")} data-testid="session-sign-in">
+            <a href={signInHref} className={buttonClass("primary")} data-testid="session-sign-in">
               {t("session.signInAgain")}
             </a>
           </div>

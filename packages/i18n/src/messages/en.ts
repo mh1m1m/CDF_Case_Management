@@ -165,7 +165,7 @@ export const en = {
   session: {
     warningTitle: "Are you still there?",
     warningBody:
-      "You will be signed out in {minutes} minutes because there has been no activity. Unsaved changes on this page will be lost.",
+      "You will be signed out in {minutes} minutes because there has been no activity. Choose Stay signed in to continue where you are.",
     stay: "Stay signed in",
     endedTitle: "You have been signed out",
     endedBody:
