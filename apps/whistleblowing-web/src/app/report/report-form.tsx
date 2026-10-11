@@ -1,6 +1,6 @@
 "use client";
-import { useMemo, useState, useTransition, type ReactNode } from "react";
-import { useForm, useWatch, type Resolver } from "react-hook-form";
+import { useActionState, useMemo, useState, useTransition, type ReactNode } from "react";
+import { useForm, useWatch, type FieldErrors, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   BIRTH_DATE_CALENDARS,
@@ -15,8 +15,10 @@ import {
 import { createTranslator, type Locale, type MessageKey } from "@cdf/i18n";
 import { CDFAlert, CDFCard, CDFField, buttonClass, fieldIds, inputClass, textareaClass } from "@cdf/ui";
 import { submitReportSchema, type SubmitReport, type SubmitReportInput } from "@cdf/validation";
-import { submitReportAction, type SubmitResult } from "./actions";
+import { submitReportAction, submitReportFormAction, type SubmitResult } from "./actions";
 import { AttachmentsUnavailable } from "./attachment-uploader";
+import { nestedFieldErrors } from "./form-data";
+import { NoScriptIdentityFields } from "./no-script-fields";
 import { ReportReceipt } from "./report-receipt";
 
 const MODE_LABELS = {
@@ -25,11 +27,31 @@ const MODE_LABELS = {
   IDENTIFIED: ["portal.modeIdentified", "portal.modeIdentifiedHint"],
 } as const satisfies Record<(typeof REPORTER_MODES)[number], readonly [MessageKey, MessageKey]>;
 
-/** Field set from the Drive whistleblowing requirements report (CDF-63); numbers refer to its table. */
+/**
+ * Field set from the Drive whistleblowing requirements report (CDF-63); numbers refer to its table.
+ *
+ * Two submission paths reach the same server action and schema (UX-002). With JavaScript, React Hook Form
+ * validates and calls submitReportAction; its handleSubmit prevents the native submission, so the form action
+ * never also runs. Without JavaScript (or before hydration), the browser POSTs the form natively, React's
+ * progressive enhancement runs submitReportFormAction, and the POST response renders the receipt, or the form
+ * again with the reporter's non-identity values and the errors. Fields that JavaScript reveals on demand are
+ * also rendered inside <noscript>, so they are reachable without it.
+ */
 export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; attachmentsEnabled: boolean }) {
   const t = createTranslator(locale);
+  const [formState, formAction] = useActionState(submitReportFormAction, null);
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [pending, startTransition] = useTransition();
+  // Once script has submitted, its own result wins over a native POST answered on the server.
+  const shown = result ?? formState;
+  const echo = formState && formState.status !== "ok" ? formState.values : undefined;
+  const serverErrors = useMemo(
+    () =>
+      formState?.status === "invalid"
+        ? (nestedFieldErrors(formState.fieldErrors) as FieldErrors<SubmitReportInput>)
+        : undefined,
+    [formState],
+  );
   const {
     register,
     handleSubmit,
@@ -47,7 +69,10 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
       reporterMode: "ANONYMOUS",
       language: locale,
       identity: { preferredContact: "PORTAL_ONLY", birthDateCalendar: "GREGORIAN" },
+      ...(echo as Partial<SubmitReportInput> | undefined),
     },
+    // Server-side errors from a native POST; undefined on the JavaScript path.
+    errors: serverErrors,
   });
   const mode = useWatch({ control, name: "reporterMode" });
   const relationship = useWatch({ control, name: "relationship" });
@@ -61,12 +86,12 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
     );
   }, [locale]);
 
-  if (result?.status === "ok")
+  if (shown?.status === "ok")
     return (
       <ReportReceipt
         locale={locale}
-        reportRef={result.reportRef}
-        secret={result.secret}
+        reportRef={shown.reportRef}
+        secret={shown.secret}
         attachmentsEnabled={attachmentsEnabled}
       />
     );
@@ -114,6 +139,13 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
     </option>
   );
 
+  // Initial choices, also written into the markup so a form without JavaScript starts from the same values.
+  const radioDefaults: Record<string, string | undefined> = {
+    reporterMode: echo?.reporterMode ?? "ANONYMOUS",
+    willingToCooperate: echo?.willingToCooperate,
+    "identity.birthDateCalendar": "GREGORIAN",
+  };
+
   /** Radio group with a visible legend; errors are announced through the fieldset description. */
   const radioGroup = (
     name: "reporterMode" | "willingToCooperate" | "identity.birthDateCalendar",
@@ -140,6 +172,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
               type="radio"
               value={o.value}
               {...register(name)}
+              defaultChecked={radioDefaults[name] === o.value}
               className="mt-1 size-5"
               data-testid={o.testId}
             />
@@ -159,13 +192,23 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
   };
 
   return (
-    <form method="post" onSubmit={onSubmit} noValidate data-testid="report-form">
-      {result?.status === "error" ? (
+    // React renders method="POST" and the action fields for the native submission, so no method prop here.
+    <form action={formAction} onSubmit={onSubmit} noValidate data-testid="report-form">
+      {shown?.status === "error" ? (
         <CDFAlert tone="danger" testId="form-error">
-          {t("errors.withReference", { message: t(`errors.${result.kind}` as MessageKey), ref: result.ref })}
+          {t("errors.withReference", { message: t(`errors.${shown.kind}` as MessageKey), ref: shown.ref })}
         </CDFAlert>
       ) : null}
       {Object.values(errors).length > 0 ? <CDFAlert tone="danger">{t("errors.INVALID")}</CDFAlert> : null}
+      {result === null && formState && formState.status !== "ok" && formState.reenter ? (
+        <CDFAlert tone="warning" testId="reenter-identity">
+          {t(
+            formState.reenter === "IDENTIFIED"
+              ? "portal.noScript.reenterIdentity"
+              : "portal.noScript.reenterEmail",
+          )}
+        </CDFAlert>
+      ) : null}
 
       <CDFCard>
         {/* Fields 1–2 */}
@@ -174,7 +217,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             {...register("relationship")}
             {...fieldIds("relationship", { error: e.relationship })}
             className={inputClass}
-            defaultValue=""
+            defaultValue={echo?.relationship ?? ""}
           >
             {choose}
             {RELATIONSHIPS_TO_FUND.map((r) => (
@@ -197,9 +240,27 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
               {...fieldIds("relationshipOther", { hint: "y", error: e.relationshipOther })}
               className={textareaClass}
               rows={3}
+              defaultValue={echo?.relationshipOther}
             />
           </CDFField>
-        ) : null}
+        ) : (
+          <noscript>
+            <CDFField
+              id="relationshipOther"
+              label={t("portal.relationshipOther")}
+              hint={`${t("portal.noScript.otherOnly")} ${t("portal.otherTextHint")}`}
+              optionalLabel={t("common.optional")}
+            >
+              <textarea
+                name="relationshipOther"
+                {...fieldIds("relationshipOther", { hint: "y" })}
+                className={textareaClass}
+                rows={3}
+                defaultValue={echo?.relationshipOther}
+              />
+            </CDFField>
+          </noscript>
+        )}
       </CDFCard>
 
       <CDFCard>
@@ -210,7 +271,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             aria-required="true"
             {...fieldIds("category", { error: e.category })}
             className={inputClass}
-            defaultValue=""
+            defaultValue={echo?.category ?? ""}
           >
             {choose}
             {REPORT_CATEGORIES.map((c) => (
@@ -233,9 +294,27 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
               {...fieldIds("categoryOther", { hint: "y", error: e.categoryOther })}
               className={textareaClass}
               rows={3}
+              defaultValue={echo?.categoryOther}
             />
           </CDFField>
-        ) : null}
+        ) : (
+          <noscript>
+            <CDFField
+              id="categoryOther"
+              label={t("portal.categoryOther")}
+              hint={`${t("portal.noScript.otherOnly")} ${t("portal.otherTextHint")}`}
+              optionalLabel={t("common.optional")}
+            >
+              <textarea
+                name="categoryOther"
+                {...fieldIds("categoryOther", { hint: "y" })}
+                className={textareaClass}
+                rows={3}
+                defaultValue={echo?.categoryOther}
+              />
+            </CDFField>
+          </noscript>
+        )}
         {/* Field 15 */}
         <CDFField
           id="description"
@@ -249,6 +328,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             {...fieldIds("description", { hint: "y", error: e.description })}
             className={textareaClass}
             rows={8}
+            defaultValue={echo?.description}
           />
         </CDFField>
         {/* Field 16 */}
@@ -275,6 +355,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
                 .filter(Boolean)
                 .join(" ")}
               className={inputClass}
+              defaultValue={echo?.incidentDate}
             />
           </CDFField>
           <CDFField id="incidentTime" label={t("portal.incidentTime")} error={e.incidentTime}>
@@ -284,6 +365,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
               aria-required="true"
               {...fieldIds("incidentTime", { error: e.incidentTime })}
               className={inputClass}
+              defaultValue={echo?.incidentTime}
             />
           </CDFField>
         </div>
@@ -299,6 +381,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             {...fieldIds("location", { hint: "y", error: e.location })}
             className={inputClass}
             autoComplete="off"
+            defaultValue={echo?.location}
           />
         </CDFField>
         {/* Field 18 */}
@@ -313,6 +396,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             {...fieldIds("subjectDescription", { hint: "y", error: e.subjectDescription })}
             className={inputClass}
             autoComplete="off"
+            defaultValue={echo?.subjectDescription}
           />
         </CDFField>
         {/* Field 19 (CDF-72, ADR-015): files are added after submission, with the Report ID and secret. */}
@@ -515,6 +599,17 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             </CDFField>
           </div>
         ) : null}
+
+        {/* Without JavaScript the chosen mode cannot reveal its fields, so they are offered and plainly labelled. */}
+        {mode !== "IDENTIFIED" ? (
+          <noscript>
+            <NoScriptIdentityFields
+              t={t}
+              includeEmail={mode !== "EMAIL_ONLY"}
+              nationalities={nationalities}
+            />
+          </noscript>
+        ) : null}
       </CDFCard>
 
       <CDFCard>
@@ -539,6 +634,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
             aria-required="true"
             {...fieldIds("acknowledgement", { error: e.acknowledgement })}
             className="mt-1 size-5"
+            defaultChecked={echo?.acknowledgement === true}
           />
           <span>{t("portal.policyAcknowledgement")}</span>
         </label>
@@ -548,7 +644,7 @@ export function ReportForm({ locale, attachmentsEnabled }: { locale: Locale; att
           </p>
         ) : null}
       </div>
-      <input type="hidden" {...register("language")} />
+      <input type="hidden" {...register("language")} defaultValue={locale} />
       <button type="submit" className={buttonClass("primary")} disabled={pending} data-testid="submit-report">
         {pending ? t("portal.submitting") : t("common.submit")}
       </button>

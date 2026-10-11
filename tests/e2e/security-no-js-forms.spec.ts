@@ -24,7 +24,8 @@ function urlsCarrying(requests: Request[], needles: string[]) {
 
 async function submitWithoutScript(page: Page, testId: string) {
   const form = page.getByTestId(testId);
-  await expect(form).toHaveAttribute("method", "post");
+  // React writes method="POST" for a form whose action is a Server Action (UX-002); HTML methods are case-insensitive.
+  await expect(form).toHaveAttribute("method", /^post$/i);
   await Promise.all([page.waitForLoadState("load"), form.locator('button[type="submit"]').first().click()]);
 }
 

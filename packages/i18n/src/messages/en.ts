@@ -327,6 +327,8 @@ export const en = {
       received: "{file}: received as {name}",
       failed: "{file}: {reason}",
       resultsTitle: "Upload results",
+      needsJavaScript:
+        "Adding files needs JavaScript. With JavaScript turned on, you can add them on this confirmation screen or later from the follow-up page with your Report ID and secret code.",
       unavailable:
         "Attachments cannot be uploaded in this deployment yet. Describe any documents; the case team can ask for them through follow-up.",
       code: {
@@ -346,6 +348,18 @@ export const en = {
         CONTENT_MISMATCH: "the file content does not match its type",
         NAME_INVALID: "the file name is not valid",
       },
+    },
+    /** Shown only when JavaScript is off, or for a form submitted before the page finished loading (UX-002). */
+    noScript: {
+      otherOnly: "Only if you chose “Other” above.",
+      emailHint: "Only if you report with your email only, or with your details.",
+      identityIntro:
+        "Only if you report with your details. Leave these fields empty for an anonymous or email-only report.",
+      reenterEmail:
+        "For your protection, the email address you entered was not kept. Enter it again before you submit.",
+      reenterIdentity:
+        "For your protection, the personal details you entered were not kept. Enter them again before you submit: full name, gender, nationality, calendar and date of birth, ID type and number, city, mobile number, email and preferred contact.",
+      replyCredentials: "Enter your secret code again to send a message. It is not kept on this page.",
     },
     modeEmailOnly: "With my email only",
     modeEmailOnlyHint:
