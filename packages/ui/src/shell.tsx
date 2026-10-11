@@ -20,10 +20,14 @@ export function countText(count: number): string {
   return count > 9 ? "9+" : String(count);
 }
 
+/**
+ * The badge is positioned so that its visually hidden label (absolutely positioned) stays inside the scrolling
+ * list instead of widening the page on a phone (WCAG 1.4.10).
+ */
 export function CDFCountBadge({ count, label }: { count: number; label: string }) {
   if (count <= 0) return null;
   return (
-    <span className="ms-auto inline-flex min-w-6 items-center justify-center rounded-full bg-cdf-primary px-1.5 text-xs font-semibold text-cdf-primary-text tabular-nums">
+    <span className="relative ms-auto inline-flex min-w-6 items-center justify-center rounded-full bg-cdf-primary px-1.5 text-xs font-semibold text-cdf-primary-text tabular-nums">
       <span aria-hidden="true">{countText(count)}</span>
       <span className="sr-only">{label}</span>
     </span>
@@ -43,7 +47,7 @@ export function CDFSideNav({
   if (items.length === 0) return null;
   return (
     <nav aria-label={label} data-testid="app-sidebar" className="md:w-60 md:shrink-0">
-      <ul className="flex gap-1 overflow-x-auto px-4 py-2 md:sticky md:top-0 md:flex-col md:overflow-visible md:px-3 md:py-4">
+      <ul className="relative flex gap-1 overflow-x-auto px-4 py-2 md:sticky md:top-0 md:flex-col md:overflow-visible md:px-3 md:py-4">
         {items.map((i) => (
           <li key={i.key} className="shrink-0">
             <a
@@ -244,7 +248,7 @@ export function CDFViewTabs({
 }) {
   return (
     <nav aria-label={label} className="mb-4 border-b border-cdf-border" data-testid="view-tabs">
-      <ul className="-mb-px flex gap-1 overflow-x-auto">
+      <ul className="relative -mb-px flex gap-1 overflow-x-auto">
         {items.map((v) => (
           <li key={v.key} className="shrink-0">
             <a
