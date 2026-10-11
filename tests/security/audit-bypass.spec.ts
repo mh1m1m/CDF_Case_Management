@@ -60,6 +60,10 @@ const NOT_STATE_CHANGING = new Set([
   // CDF-73: reads of the caller's own work and the authorised catalogue; open_case_metadata records a view.
   "my_case_tasks",
   "my_work_summary",
+  // S1 read models: the caller's own areas, work items and access basis (no object is opened).
+  "my_areas",
+  "my_work_items",
+  "my_access",
   "open_case_metadata",
   "search_records_catalogue",
   "open_report_attachment",
