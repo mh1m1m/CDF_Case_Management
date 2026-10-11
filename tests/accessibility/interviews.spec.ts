@@ -1,16 +1,8 @@
-// WCAG 2.1 AA checks (§43) on the interview screens (CDF-60), in Arabic (RTL) and English (LTR):
+// WCAG 2.2 AA checks (§43) on the interview screens (CDF-60), in Arabic (RTL) and English (LTR):
 // the list with its planning form, an approved interview, and a planned one with every recording form open.
-import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { audit } from "./axe";
 import { signIn } from "../e2e/support";
-
-async function audit(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-  const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
-  expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
-}
 
 for (const locale of ["ar", "en"] as const) {
   test(`interview pages (${locale})`, async ({ browser }) => {

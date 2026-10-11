@@ -41,6 +41,7 @@ The owner reviewed the audit, approved its target and baseline, and decided the 
   - The portal track and the design-system foundation run in parallel.
   - Decisions for S3–S6 that this ADR does not record must not stall S0–S2. Each is raised when its gate is reached.
 - **Design system.** EVOLVE the system, with a major refactor of page composition. Do not rebuild it. Proof screens PS-1 to PS-7 come first; PS-8 waits for S5.
+- **Accessibility target (DEC-52).** WCAG 2.2 AA, checked in CI as part of the shared foundation.
 - **Forms.** No prettier replicas of paper forms.
   - Rule: ask once → reuse → derive → auto-populate → confirm only where necessary.
   - Each field takes the audit's disposition: KEEP, AUTO-POPULATE, DERIVE, MERGE, REMOVE, CONVERT-TO-WORKFLOW or CONVERT-TO-COMPONENT.
@@ -288,6 +289,11 @@ The POST fix is verified on a running build, covering:
 - request and log behaviour.
 
 UX-002 is re-rated only after that.
+
+**Status 2026-10-11.** A local production build of `7d10259` passes all five points for confidentiality: every portal form sends POST with JavaScript off and before hydration, and no report text, Report ID or secret reaches a URL, Referer, redirect, history entry or log (`tests/e2e/portal-no-js.spec.ts`). Two things keep UX-002 open:
+
+- the hosted check is not done (the deployment URL was unreachable from the build environment);
+- without JavaScript a report or follow-up sign-in is dropped silently, with no message to the reporter.
 
 ## Delivery governance
 
