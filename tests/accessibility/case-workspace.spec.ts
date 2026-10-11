@@ -1,4 +1,4 @@
-// WCAG 2.2 AA on the S2 case workspace (CDF-119; audit §22) in Arabic and English, at a desktop and a phone width
+// WCAG 2.2 AA on the S2 case workspace (CDF-125; audit §22) in Arabic and English, at a desktop and a phone width
 // and at 320 px: the header on every tab and on an evidence item's page, the overflow menu open, the stage panel
 // and each tab's content. Also checks what the overview must answer on first paint: where the case is, since
 // when, by when, and what next.

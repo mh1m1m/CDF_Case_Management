@@ -1,4 +1,4 @@
-// The case workspace (UX redesign S2; audit §22, RC-15; CDF-119). Every tab of a case renders inside the same
+// The case workspace (UX redesign S2; audit §22, RC-15; CDF-91). Every tab of a case renders inside the same
 // header, breadcrumbs and tabs, so the case number, its stage, its owner and the viewer's own relationship stay
 // on screen. Each tab page calls loadCase itself, rather than a shared layout doing it once: api.open_case
 // audits CASE_VIEWED, and a layout would also run when a link to the case is prefetched. Every tab page still

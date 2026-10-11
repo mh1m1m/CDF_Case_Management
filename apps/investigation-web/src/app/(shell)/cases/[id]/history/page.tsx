@@ -1,4 +1,4 @@
-// History «مجريات القضية» (UX redesign S2; audit §22.7; CDF-119). The case's business events, newest first, in
+// History «مجريات القضية» (UX redesign S2; audit §22.7; CDF-127). The case's business events, newest first, in
 // business words in both languages, read through api.case_history (migration 1830, ADR-016 D5): the database
 // applies each event's audience, so page views, other people's access and legal-hold details never reach this
 // page unless the viewer may know them (DEC-08, DEC-10). Oversight reads the full ledger under its own permission.

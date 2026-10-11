@@ -1,4 +1,4 @@
-// UX redesign S2 (CDF-119; migration 1830; ADR-016 D5; DEC-08, DEC-10) · §19, §21, §22, §29, §40: case history and
+// UX redesign S2 (CDF-127; migration 1830; ADR-016 D5; DEC-08, DEC-10) · §19, §21, §22, §29, §40: case history and
 // the access roster are read models with an audience. Both answer nothing without the caller's own case access,
 // the same as for a case that does not exist. History has no page views, no security events, no identity-reveal
 // detail and no legal-hold rationale outside the hold audience, and an object's events follow that object's own

@@ -1,4 +1,4 @@
-// Case overview «نظرة عامة» (UX redesign S2; audit §22.3; CDF-119). Answers where the case is, what comes next,
+// Case overview «نظرة عامة» (UX redesign S2; audit §22.3; CDF-125). Answers where the case is, what comes next,
 // who can do it and by when, on first paint: the stage panel, the viewer's own items here, key facts, the team
 // and the latest business events. Everything shown is what the database returned for this viewer; every step
 // is re-checked by api.transition_case.

@@ -1,4 +1,4 @@
-// Reporter «المبلّغ» (UX redesign S2; audit §22.6.1 tab 6; ADR-016 D4, DEC-06; CDF-119). The conversation with the
+// Reporter «المبلّغ» (UX redesign S2; audit §22.6.1 tab 6; ADR-016 D4, DEC-06; CDF-128). The conversation with the
 // reporter through the portal, who may write to the reporter, and REPORTER_COMMUNICATE delegations. The database
 // decides everything shown here (migration 1840): the tab exists only for the conversation's readers, a reply form
 // only for its correspondents, and the delegation controls only for those who manage the team. Every command is

@@ -1,4 +1,4 @@
-// The S2 case workspace (CDF-119; audit §22.2–§22.4): progress follows the case's own path, a branch ending is
+// The S2 case workspace (CDF-125, CDF-126; audit §22.2–§22.4): progress follows the case's own path, a branch ending is
 // named, a blocked step says who can take it (roles, never people), and the header states the viewer's own
 // relationship. History and the access roster keep their audiences (migration 1830; DEC-08, DEC-10). The
 // reporter conversation belongs to the case's correspondents (migration 1840; DEC-06). What a viewer may do

@@ -1,4 +1,4 @@
-// UX redesign S2 (CDF-119; migration 1840; ADR-016 D4; DEC-06) · §19, §22, §29, §39: who holds the conversation
+// UX redesign S2 (CDF-128; migration 1840; ADR-016 D4; DEC-06) · §19, §22, §29, §39: who holds the conversation
 // with the reporter. Before a case exists, intake and triage read and answer it, as before. From case creation it
 // belongs to the case: the case manager, the case's owner and lead investigator write; an assigned investigator
 // writes only with a REPORTER_COMMUNICATE delegation, which lapses with the assignment; the GRC Director reads for

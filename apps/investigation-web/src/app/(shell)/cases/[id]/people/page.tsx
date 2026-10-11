@@ -1,4 +1,4 @@
-// People & access «الفريق والصلاحيات» (UX redesign S2; audit §22.6.1 tab 7; CDF-119). The team and its case
+// People & access «الفريق والصلاحيات» (UX redesign S2; audit §22.6.1 tab 7; CDF-127). The team and its case
 // roles, who has access and on what basis (api.case_access_roster, DEC-08), assigning a person, conflict declarations to decide (UX-016, RC-10: their S2 home) and the viewer's own
 // declaration. Every command is re-checked in the database; the assign and decide controls are offered only to
 // holders of the permission, as a pre-check (G16).

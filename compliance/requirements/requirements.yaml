@@ -365,7 +365,7 @@ requirements:
     title: "Case workspace: one header on every tab, sections as tabs, a stage panel that follows the case's own path"
     source: [UX audit 2026-10-10 §22.2-§22.4, RC-15, UX-006, UX-011; ADR-016]
     external_ids: []
-    linear_issues: [CDF-119]
+    linear_issues: [CDF-125, CDF-126]
     status: IN_PROGRESS
     enforcement:
       [
@@ -387,7 +387,7 @@ requirements:
     title: "Case history and access roster keep their audience: no page views, hold status without its details, full roster only for those who manage the team"
     source: [UX audit 2026-10-10 UX-011, UX-092; ADR-016 D5; DEC-08, DEC-10]
     external_ids: []
-    linear_issues: [CDF-119]
+    linear_issues: [CDF-127]
     status: IN_PROGRESS
     enforcement:
       [
@@ -402,7 +402,7 @@ requirements:
     title: "The reporter conversation belongs to the case: the case manager, owner and lead write, an investigator only when delegated, the GRC Director reads; seeing the case is never enough"
     source: [UX audit 2026-10-10 UX-026, RC-20; ADR-016 D4; DEC-06]
     external_ids: []
-    linear_issues: [CDF-119]
+    linear_issues: [CDF-128]
     status: IN_PROGRESS
     enforcement:
       [
@@ -423,7 +423,7 @@ requirements:
     title: "Evidence is need-to-know: the investigation team sees a case's evidence within clearance, the case leads may limit an item to themselves, and seeing the case is never enough"
     source: [UX audit 2026-10-10 UX-072; ADR-016 D6; DEC-09]
     external_ids: []
-    linear_issues: [CDF-119]
+    linear_issues: [CDF-181]
     status: IN_PROGRESS
     enforcement:
       [
