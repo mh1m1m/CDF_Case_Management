@@ -93,7 +93,8 @@ export default async function MyWorkPage({
         since={
           i.sinceAt ? (
             <>
-              {t("myWork.since")} <CDFDateTime value={i.sinceAt} locale={t.locale} dateOnly />
+              {/* With the time, so items of the same kind received the same day can be told apart. */}
+              {t("myWork.since")} <CDFDateTime value={i.sinceAt} locale={t.locale} />
             </>
           ) : undefined
         }
