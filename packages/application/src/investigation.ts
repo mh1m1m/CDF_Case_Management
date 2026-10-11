@@ -95,7 +95,10 @@ export function createInvestigationService(deps: InvestigationDeps) {
     getReport: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.getReport(ctx, id)),
     listCases: (ctx: UserRequestContext) => query(ctx, () => gateway.listCases(ctx)),
     getCase: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.getCase(ctx, id)),
-    caseTimeline: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.caseTimeline(ctx, id)),
+    caseTimeline: (ctx: UserRequestContext, id: string, limit?: number) =>
+      query(ctx, () => gateway.caseTimeline(ctx, id, limit)),
+    caseAccessRoster: (ctx: UserRequestContext, id: string) =>
+      query(ctx, () => gateway.caseAccessRoster(ctx, id)),
     directory: (ctx: UserRequestContext) => query(ctx, () => gateway.directory(ctx)),
     // DEC-01: who a restricted case may be handed to at this classification. The database re-checks the
     // report, CASE_CREATE and the caller's clearance; this pre-check only avoids a pointless round trip.

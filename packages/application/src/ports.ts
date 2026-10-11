@@ -5,6 +5,7 @@ import type {
   Actor,
   AttachmentSource,
   AuditTimelineEntry,
+  CaseAccessRosterEntry,
   CaseDetail,
   CaseDiscoveryResult,
   CaseListItem,
@@ -260,7 +261,9 @@ export interface InvestigationGateway {
     ctx: UserRequestContext,
     input: { caseId: string; transitionCode: string; reason?: string },
   ): Promise<string>;
-  caseTimeline(ctx: UserRequestContext, caseId: string): Promise<AuditTimelineEntry[]>;
+  // Case history and access roster (UX redesign S2, migration 1830): the database applies each event's audience.
+  caseTimeline(ctx: UserRequestContext, caseId: string, limit?: number): Promise<AuditTimelineEntry[]>;
+  caseAccessRoster(ctx: UserRequestContext, caseId: string): Promise<CaseAccessRosterEntry[]>;
   directory(ctx: UserRequestContext): Promise<UserDirectoryEntry[]>;
   // Purpose-bound records and legal access (ADR-014): authorised rows, counts and own work only.
   searchRecordsCatalogue(

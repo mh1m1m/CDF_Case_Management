@@ -5,7 +5,7 @@
 import type { Metadata } from "next";
 import { can } from "@cdf/authorization";
 import { PRIORITIES, type TransitionOption } from "@cdf/contracts";
-import { formatDateTime, type MessageKey } from "@cdf/i18n";
+import type { MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
@@ -28,7 +28,17 @@ import { overdueKeys } from "@/server/work-routes";
 import { confirmation, transitionAct } from "../../confirmations";
 import { WorkItemRow } from "../../work-item-row";
 import { transitionAction, updateDetailsAction } from "./actions";
-import { CaseWorkspace, contentOpen, loadCase, personName, stateName, stepVerb, tabHref } from "./workspace";
+import {
+  CaseWorkspace,
+  contentOpen,
+  historyItems,
+  loadCase,
+  personName,
+  stateLabel as stateLabelOf,
+  stateName,
+  stepVerb,
+  tabHref,
+} from "./workspace";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -46,14 +56,11 @@ export default async function CaseOverviewPage({
   const editing = (await searchParams).edit === "details";
   const { actor, ctx, t, c } = await loadCase(id);
   const service = investigationService();
-  const [timeline, work] = await Promise.all([service.caseTimeline(ctx, id), service.myWorkItems(ctx)]);
+  const [timeline, work] = await Promise.all([service.caseTimeline(ctx, id, 5), service.myWorkItems(ctx)]);
   const open = contentOpen(c);
   const mine = work.filter((i) => i.caseId === c.id);
   const overdue = overdueKeys(mine);
-  const stateLabel = (code: string) => {
-    const s = stateByCode(code);
-    return s ? (t.locale === "ar" ? s.nameAr : s.nameEn) : code;
-  };
+  const stateLabel = (code: string) => stateLabelOf(t, code);
   const list = (xs: string[]) => xs.join(t.locale === "ar" ? "، " : ", ");
 
   const steps = progressSteps(c.currentState, c.path).map((s) => ({
@@ -337,15 +344,7 @@ export default async function CaseOverviewPage({
               </a>
             }
           >
-            <CDFTimeline
-              empty={t("cases.noTimeline")}
-              items={timeline.slice(0, 5).map((e) => ({
-                id: String(e.seq),
-                title: t.code("auditAction", e.action, "common.none"),
-                meta: `${formatDateTime(t.locale, e.occurredAt)} · ${e.actorName ?? "—"}`,
-                body: e.reason,
-              }))}
-            />
+            <CDFTimeline empty={t("cases.noTimeline")} items={historyItems(t, timeline)} />
           </CDFCard>
         </div>
 

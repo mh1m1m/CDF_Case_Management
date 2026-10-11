@@ -571,13 +571,52 @@ export interface TransitionOption {
   eligibleRoles: string[];
 }
 
+/**
+ * One event of a case's history, read through api.case_history (ADR-016 D5, DEC-08/DEC-10). The database decides
+ * which events reach the caller and blanks the actor, subject or reason where the audience may not know them.
+ */
 export interface AuditTimelineEntry {
   seq: number;
   occurredAt: string;
   action: string;
   actorId: string | null;
   actorName: string | null;
+  actorNameAr: string | null;
+  /** The person a team, access or conflict event is about. */
+  subjectName: string | null;
+  subjectNameAr: string | null;
   reason: string | null;
+  detail: CaseHistoryDetail | null;
+}
+
+/** The fixed keys api.case_history returns per action; never the event's raw metadata. */
+export interface CaseHistoryDetail {
+  transition?: string;
+  /** A workflow state, or a classification level within the caller's clearance (otherwise null). */
+  from?: string | null;
+  to?: string | null;
+  role?: string;
+  scope?: string;
+  fields?: string[];
+  restricted?: boolean;
+}
+
+export const ROSTER_STATUSES = ["ACTIVE", "SCHEDULED", "EXPIRED", "ENDED", "REVOKED"] as const;
+export type RosterStatus = (typeof ROSTER_STATUSES)[number];
+
+/** One row of a case's access roster (api.case_access_roster; DEC-08). Never oversight grants or break-glass. */
+export interface CaseAccessRosterEntry {
+  userId: string;
+  displayName: string;
+  displayNameAr: string | null;
+  relationship: "ASSIGNMENT" | "GRANT";
+  /** The assignment role, or the grant's purpose (TRIAGE, CASE, COMMITTEE, REVIEW). */
+  code: string;
+  sinceAt: string;
+  untilAt: string | null;
+  endedAt: string | null;
+  status: RosterStatus;
+  isSelf: boolean;
 }
 
 export interface UserDirectoryEntry {

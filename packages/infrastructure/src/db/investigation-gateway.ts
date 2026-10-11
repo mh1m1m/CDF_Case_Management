@@ -3,6 +3,7 @@
 import type {
   Actor,
   AuditTimelineEntry,
+  CaseAccessRosterEntry,
   CaseAssignment,
   CaseDetail,
   CaseDiscoveryResult,
@@ -282,16 +283,39 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
     });
   }
 
-  // Page views leave the case story (ADR-016 D5, DEC-08): they stay in the ledger for Oversight.
-  caseTimeline(ctx: UserRequestContext, caseId: string): Promise<AuditTimelineEntry[]> {
+  // The case's history for its team (ADR-016 D5, DEC-08/DEC-10). The database applies actor access, each
+  // action's audience, object entitlement and classification; page views stay in the ledger for Oversight.
+  caseTimeline(ctx: UserRequestContext, caseId: string, limit = 200): Promise<AuditTimelineEntry[]> {
     return this.run(ctx, async (tx) => {
       const rows = await tx<(Omit<AuditTimelineEntry, "occurredAt"> & { occurredAt: Date })[]>`
-        select e.seq::int as seq, e.occurred_at as "occurredAt", e.action, e.actor_id as "actorId",
-               u.display_name as "actorName", e.reason
-        from audit.audit_event e left join iam.user_profile u on u.id = e.actor_id
-        where e.case_id = ${caseId} and e.category = 'BUSINESS' and right(e.action, 7) <> '_VIEWED'
-        order by e.seq desc limit 200`;
+        select seq::int as seq, occurred_at as "occurredAt", action, actor_id as "actorId",
+               actor_name as "actorName", actor_name_ar as "actorNameAr", subject_name as "subjectName",
+               subject_name_ar as "subjectNameAr", reason, detail
+        from api.case_history(${caseId}, ${limit})`;
       return rows.map((r) => ({ ...r, occurredAt: iso(r.occurredAt)! }));
+    });
+  }
+
+  // Who has access and on what basis (DEC-08): the full roster only for those who manage the team.
+  caseAccessRoster(ctx: UserRequestContext, caseId: string): Promise<CaseAccessRosterEntry[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<
+        (Omit<CaseAccessRosterEntry, "sinceAt" | "untilAt" | "endedAt"> & {
+          sinceAt: Date;
+          untilAt: Date | null;
+          endedAt: Date | null;
+        })[]
+      >`
+        select user_id as "userId", display_name as "displayName", display_name_ar as "displayNameAr",
+               relationship, code, since_at as "sinceAt", until_at as "untilAt", ended_at as "endedAt", status,
+               is_self as "isSelf"
+        from api.case_access_roster(${caseId})`;
+      return rows.map((r) => ({
+        ...r,
+        sinceAt: iso(r.sinceAt)!,
+        untilAt: iso(r.untilAt),
+        endedAt: iso(r.endedAt),
+      }));
     });
   }
 

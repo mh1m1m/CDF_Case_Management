@@ -77,6 +77,17 @@ const PROBES: Probe[] = [
     outcome: "EMPTY",
     call: (tx, t) => tx`select * from api.available_transitions(${t.case})`,
   },
+  // S2 read models (migration 1830): no rows without the caller's own case access, as for a missing case.
+  {
+    fn: "case_access_roster",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.case_access_roster(${t.case})`,
+  },
+  {
+    fn: "case_history",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.case_history(${t.case}, 500)`,
+  },
   {
     fn: "change_case_classification",
     outcome: "NOT_FOUND",

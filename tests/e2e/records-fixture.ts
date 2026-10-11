@@ -20,6 +20,7 @@ const url = (user: string, pwVar: string) => {
 const USERS = {
   triage: "a0000000-0000-4000-8000-000000000002",
   caseManager: "a0000000-0000-4000-8000-000000000003",
+  grcDirector: "a0000000-0000-4000-8000-000000000008",
   records: "a0000000-0000-4000-8000-000000000019",
 } as const;
 
@@ -98,6 +99,16 @@ export async function screeningCase(label: string): Promise<{ caseId: string; ca
     select case_number from case_mgmt.case_record where id = ${caseId}`,
   );
   return { caseId, caseNumber: row!.case_number };
+}
+
+/** A new case in SCREENING under a legal hold placed by the GRC Director (DEC-10 history audience). */
+export async function heldCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
+  const c = await screeningCase(label);
+  await as("grcDirector", async (tx) => {
+    await tx`select api.place_legal_hold(${c.caseId}, 'CASE', null, 'LITIGATION',
+      'Synthetic: preservation for the case-history e2e.', null)`;
+  });
+  return c;
 }
 
 /** A new case closed at screening (CLOSURE), so the case manager can archive it. */

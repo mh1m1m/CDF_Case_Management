@@ -94,7 +94,11 @@ test("anonymous report becomes an open investigation", async ({ browser }) => {
   await expect(grc.getByTestId("case-state")).toHaveText("Investigation");
   await grc.getByTestId("case-tab-history").click();
   await expect(grc.getByTestId("audit-timeline")).toContainText("Case created");
-  await expect(grc.getByTestId("audit-timeline")).toContainText("Person assigned");
+  // History in business words (ADR-016 D5): who was assigned as what, and where the case moved.
+  await expect(grc.getByTestId("audit-timeline")).toContainText("assigned as Investigator");
+  await expect(grc.getByTestId("audit-timeline")).toContainText(
+    "Moved from Investigation approval to Investigation",
+  );
   await grc.context().close();
 
   expect(await publicStatus(browser, reportRef, secret)).toBe("In progress");

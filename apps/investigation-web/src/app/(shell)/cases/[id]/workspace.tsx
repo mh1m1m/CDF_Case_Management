@@ -6,8 +6,8 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { can, navigationFor } from "@cdf/authorization";
-import type { Actor, CaseDetail, MyAccessEntry, TransitionOption } from "@cdf/contracts";
-import type { MessageKey, Translator } from "@cdf/i18n";
+import type { Actor, AuditTimelineEntry, CaseDetail, MyAccessEntry, TransitionOption } from "@cdf/contracts";
+import { formatDateTime, type MessageKey, type Translator } from "@cdf/i18n";
 import {
   buttonClass,
   CDFAlert,
@@ -22,6 +22,7 @@ import {
   CDFOverflowMenu,
   CDFViewTabs,
 } from "@cdf/ui";
+import { stateByCode } from "@cdf/workflow";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { isPast } from "@/server/work-routes";
@@ -61,6 +62,90 @@ export const personName = (t: Translator, n: { displayName: string; displayNameA
 
 export const stateName = (t: Translator, c: Pick<CaseDetail, "stateNameEn" | "stateNameAr">) =>
   (t.locale === "ar" ? c.stateNameAr : c.stateNameEn) ?? "—";
+
+/** A workflow state's name in the viewer's language; the code itself if the state is unknown. */
+export function stateLabel(t: Translator, code: string): string {
+  const s = stateByCode(code);
+  return s ? (t.locale === "ar" ? s.nameAr : s.nameEn) : code;
+}
+
+/** An action's label: the case-level catalogue first, then the interview catalogue (ADR-012). */
+function actionLabel(t: Translator, action: string): string {
+  const other = t("caseWorkspace.history.other");
+  const top = t.code("auditAction", action, "caseWorkspace.history.other");
+  return top !== other ? top : t.code("interviews.auditAction", action, "caseWorkspace.history.other");
+}
+
+/** One history event in business words. Names appear only where api.case_history returned them (DEC-08). */
+function historyTitle(t: Translator, e: AuditTimelineEntry): string {
+  const d = e.detail ?? {};
+  const name = e.subjectName
+    ? personName(t, { displayName: e.subjectName, displayNameAr: e.subjectNameAr })
+    : null;
+  const role = d.role ? t.code("assignmentRole", d.role, "caseWorkspace.history.other") : null;
+  const purpose = d.scope ? t.code("myAccess.grantScope", d.scope, "caseWorkspace.history.other") : null;
+  switch (e.action) {
+    case "WORKFLOW_TRANSITION":
+      if (d.from && d.to)
+        return t("caseWorkspace.history.moved", { from: stateLabel(t, d.from), to: stateLabel(t, d.to) });
+      break;
+    case "CASE_ASSIGNED":
+    case "CASE_REASSIGNED":
+    case "CASE_UNASSIGNED":
+      if (name && role) {
+        const key = {
+          CASE_ASSIGNED: "assigned",
+          CASE_REASSIGNED: "reassigned",
+          CASE_UNASSIGNED: "unassigned",
+        }[e.action];
+        return t(`caseWorkspace.history.${key}` as MessageKey, { name, role });
+      }
+      break;
+    case "CASE_HANDED_OVER":
+      if (name) return t("caseWorkspace.history.handedOver", { name });
+      break;
+    case "CASE_ACCESS_GRANTED":
+      if (name && purpose) return t("caseWorkspace.history.accessGranted", { name, purpose });
+      break;
+    case "CASE_ACCESS_REVOKED":
+      if (name && purpose) return t("caseWorkspace.history.accessRevoked", { name, purpose });
+      break;
+    case "CONFLICT_DECLARED":
+      if (name) return t("caseWorkspace.history.conflictDeclared", { name });
+      break;
+    case "CONFLICT_DECIDED":
+      if (name) return t("caseWorkspace.history.conflictDecided", { name });
+      break;
+    case "CLASSIFICATION_CHANGED":
+      // The database names a level only when it is within the viewer's clearance.
+      if (d.to) return t("caseWorkspace.history.classifiedAs", { level: t.code("classification", d.to) });
+      break;
+  }
+  return actionLabel(t, e.action);
+}
+
+/** History rows for CDFTimeline, newest first, as the database filtered them (api.case_history). */
+export function historyItems(t: Translator, entries: AuditTimelineEntry[]) {
+  return entries.map((e) => {
+    const actor = e.actorName
+      ? personName(t, { displayName: e.actorName, displayNameAr: e.actorNameAr })
+      : null;
+    // Hold status without who or why (DEC-10): say where those details are kept.
+    const holdNote =
+      !actor && (e.action === "LEGAL_HOLD_PLACED" || e.action === "LEGAL_HOLD_RELEASED")
+        ? t("caseWorkspace.history.holdNote")
+        : null;
+    return {
+      id: String(e.seq),
+      title: historyTitle(t, e),
+      meta: actor
+        ? `${formatDateTime(t.locale, e.occurredAt)} · ${actor}`
+        : formatDateTime(t.locale, e.occurredAt),
+      body: holdNote ?? e.reason,
+      testId: `history-${e.action}`,
+    };
+  });
+}
 
 /** The verb on a step's button: closing, archiving and returning use the confirmation's own verb (UX-031). */
 export function stepVerb(t: Translator, tr: TransitionOption): string {

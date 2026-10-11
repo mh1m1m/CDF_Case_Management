@@ -252,6 +252,8 @@ Also: the IDOR probe and audit-coverage lists, and the policy snapshot.
 - The hold indicator shows without the hold's details.
 - Oversight still reads the full ledger under its own permission.
 
+**Implementation (S2, migration 1830).** `api.case_history(case, limit)` and `api.case_access_roster(case)`; the action-audience catalogue is an allowlist inside `api.case_history`, so an action not in it never reaches history. The full-roster audience is `authz.can_assign_case` (Case Manager and GRC Director with access to the case, or its assigned lead or owner). Purpose tasks are left out of the roster: a legal task would reveal a hold request to people outside the hold audience. Tests: `tests/security/case-history-roster.spec.ts`. Known gap: the `audit_event_read` table policy is unchanged, so direct SQL by the case team still reads every `BUSINESS` row of a case it can view; the application reads history only through `api.case_history`, and narrowing the policy is a follow-up decision.
+
 ### D6. Evidence need-to-know (DEC-09). Effective at S2.
 
 **Decision.**

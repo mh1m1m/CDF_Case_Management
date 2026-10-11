@@ -407,7 +407,7 @@ export function CDFTimeline({
   empty,
   testId,
 }: {
-  items: { id: string; title: string; meta: string; body?: string | null }[];
+  items: { id: string; title: string; meta: string; body?: string | null; testId?: string }[];
   empty: string;
   testId?: string;
 }) {
@@ -415,7 +415,7 @@ export function CDFTimeline({
   return (
     <ol className="border-s-2 border-cdf-border ps-4" data-testid={testId}>
       {items.map((i) => (
-        <li key={i.id} className="mb-3">
+        <li key={i.id} className="mb-3" data-testid={i.testId}>
           <p className="font-semibold">{i.title}</p>
           <p className="text-xs text-cdf-text-secondary">{i.meta}</p>
           {i.body ? <p className="mt-1 text-sm whitespace-pre-wrap break-words">{i.body}</p> : null}

@@ -1,11 +1,12 @@
-// History «مجريات القضية» (UX redesign S2; audit §22.7; CDF-119). The case's business events, newest first, each
-// labelled in both languages. Page views stay in the ledger for Oversight and never appear here (DEC-08).
+// History «مجريات القضية» (UX redesign S2; audit §22.7; CDF-119). The case's business events, newest first, in
+// business words in both languages, read through api.case_history (migration 1830, ADR-016 D5): the database
+// applies each event's audience, so page views, other people's access and legal-hold details never reach this
+// page unless the viewer may know them (DEC-08, DEC-10). Oversight reads the full ledger under its own permission.
 import type { Metadata } from "next";
-import { formatDateTime } from "@cdf/i18n";
 import { CDFCard, CDFTimeline } from "@cdf/ui";
 import { investigationService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { CaseWorkspace, loadCase } from "../workspace";
+import { CaseWorkspace, historyItems, loadCase } from "../workspace";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -23,12 +24,7 @@ export default async function CaseHistoryPage({ params }: { params: Promise<{ id
         <CDFTimeline
           testId="audit-timeline"
           empty={t("cases.noTimeline")}
-          items={timeline.map((e) => ({
-            id: String(e.seq),
-            title: t.code("auditAction", e.action, "common.none"),
-            meta: `${formatDateTime(t.locale, e.occurredAt)} · ${e.actorName ?? "—"}`,
-            body: e.reason,
-          }))}
+          items={historyItems(t, timeline)}
         />
       </CDFCard>
     </CaseWorkspace>

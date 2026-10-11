@@ -358,8 +358,45 @@ requirements:
     external_ids: []
     linear_issues: [CDF-177]
     status: COMPLETE
-    enforcement: [api.decide_conflict, "apps/investigation-web/src/app/(shell)/cases/[id]/page.tsx"]
+    enforcement: [api.decide_conflict, "apps/investigation-web/src/app/(shell)/cases/[id]/people/page.tsx"]
     tests: [tests/e2e/conflict-decision.spec.ts, tests/security/my-work-read-models.spec.ts]
+
+  - id: CDF-UX-007
+    title: "Case workspace: one header on every tab, sections as tabs, a stage panel that follows the case's own path"
+    source: [UX audit 2026-10-10 §22.2-§22.4, RC-15, UX-006, UX-011; ADR-016]
+    external_ids: []
+    linear_issues: [CDF-119]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        "apps/investigation-web/src/app/(shell)/cases/[id]/workspace.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/page.tsx",
+        packages/ui/src/case-workspace.tsx,
+        packages/workflow/src/index.ts,
+        api.available_transitions,
+      ]
+    tests:
+      [
+        tests/e2e/case-workspace.spec.ts,
+        tests/accessibility/case-workspace.spec.ts,
+        packages/workflow/src/index.test.ts,
+      ]
+    notes: "Deferred within S2: sticky compact header, select-style tabs on phones, tab counts, open items and who holds them, search in case. Reporter conversation (DEC-06) and evidence need-to-know (DEC-09) follow with their own migrations."
+
+  - id: CDF-UX-008
+    title: "Case history and access roster keep their audience: no page views, hold status without its details, full roster only for those who manage the team"
+    source: [UX audit 2026-10-10 UX-011, UX-092; ADR-016 D5; DEC-08, DEC-10]
+    external_ids: []
+    linear_issues: [CDF-119]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001830_case_history_and_roster.sql,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/history/page.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/people/page.tsx",
+      ]
+    tests: [tests/security/case-history-roster.spec.ts, tests/e2e/case-workspace.spec.ts]
+    notes: "The audit_event_read table policy still admits every BUSINESS row of a viewable case to direct SQL; the app reads only through api.case_history. Narrowing the policy is a follow-up decision. Packet-bound reviewer evidence (DEC-09, S5) will narrow authz.can_view_evidence, which history already follows."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"

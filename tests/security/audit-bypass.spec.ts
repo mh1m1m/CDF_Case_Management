@@ -69,6 +69,9 @@ const NOT_STATE_CHANGING = new Set([
   "open_report_attachment",
   // DEC-01 (ADR-016): names of the people a restricted case may be handed to; opening the report is audited.
   "list_restricted_case_authorities",
+  // S2 read models (migration 1830): a case's history and access roster, read inside an audited case view.
+  "case_history",
+  "case_access_roster",
 ]);
 
 interface Step {
