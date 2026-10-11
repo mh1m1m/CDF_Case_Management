@@ -21,6 +21,7 @@ import {
 import { formsService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../../../../app-nav";
+import { actLabel, confirmation } from "../../../../confirmations";
 import {
   approveFormAction,
   prepareFormAction,
@@ -257,11 +258,12 @@ export default async function FormInstancePage({
               <CDFCommandForm
                 action={bind(withdrawFormAction)}
                 locale={t.locale}
-                submitLabel={t("forms.withdraw")}
+                submitLabel={actLabel(t, "withdrawForm")}
                 variant="danger"
                 testId="withdraw-form"
                 fieldLabels={{ reason: t("forms.reason") }}
                 successMessage={t("forms.withdrawn")}
+                confirm={confirmation(t, "withdrawForm")}
               >
                 <CDFField id="withdraw-reason" label={t("forms.reason")}>
                   <input

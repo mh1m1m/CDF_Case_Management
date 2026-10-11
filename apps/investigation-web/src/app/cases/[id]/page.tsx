@@ -24,6 +24,7 @@ import { STATES } from "@cdf/workflow";
 import { evidenceService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../../app-nav";
+import { actLabel, confirmation, transitionAct } from "../../confirmations";
 import { assignAction, declareConflictAction, transitionAction, updateDetailsAction } from "./actions";
 import { EvidencePanel } from "./evidence-panel";
 
@@ -259,54 +260,61 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               <p className="text-cdf-text-secondary">{t("cases.noTransitions")}</p>
             ) : null}
             <ul>
-              {c.transitions.map((tr) => (
-                <li
-                  key={tr.code}
-                  className="mb-4 border-b border-cdf-border pb-4 last:border-0"
-                  data-testid={`transition-${tr.code}`}
-                >
-                  <p className="mb-2 font-semibold">{t.locale === "ar" ? tr.nameAr : tr.nameEn}</p>
-                  {tr.allowed ? (
-                    <CDFCommandForm
-                      action={transitionAction.bind(null, c.id, tr.code)}
-                      locale={t.locale}
-                      submitLabel={t("cases.perform")}
-                      variant="secondary"
-                      fieldLabels={{ reason: t("cases.transitionReason") }}
-                    >
-                      {tr.reasonRequired ? (
-                        <CDFField
-                          id={`reason-${tr.code}`}
-                          label={t("cases.transitionReason")}
-                          hint={t("intake.reasonHint")}
-                          requiredLabel={t("common.required")}
-                        >
-                          <textarea
-                            id={`reason-${tr.code}`}
-                            name="reason"
-                            aria-describedby={`reason-${tr.code}-hint`}
-                            className={textareaClass}
-                            required
-                            minLength={10}
-                          />
-                        </CDFField>
-                      ) : null}
-                    </CDFCommandForm>
-                  ) : (
-                    <div>
-                      <CDFBadge tone="neutral">{t("cases.blocked")}</CDFBadge>
-                      <ul
-                        className="mt-1 list-disc ps-5 text-sm text-cdf-text-secondary"
-                        data-testid={`blocked-${tr.code}`}
+              {c.transitions.map((tr) => {
+                const step = t.locale === "ar" ? tr.nameAr : tr.nameEn;
+                // UX-031: closing, archiving and returning a case are verb-labelled and confirmed first.
+                const act = transitionAct(tr.code, tr.toState);
+                return (
+                  <li
+                    key={tr.code}
+                    className="mb-4 border-b border-cdf-border pb-4 last:border-0"
+                    data-testid={`transition-${tr.code}`}
+                  >
+                    <p className="mb-2 font-semibold">{step}</p>
+                    {tr.allowed ? (
+                      <CDFCommandForm
+                        action={transitionAction.bind(null, c.id, tr.code)}
+                        locale={t.locale}
+                        submitLabel={act ? actLabel(t, act) : t("cases.perform")}
+                        submitName={act ? undefined : t("cases.performNamed", { step })}
+                        variant={act ? "danger" : "secondary"}
+                        fieldLabels={{ reason: t("cases.transitionReason") }}
+                        confirm={act ? confirmation(t, act) : undefined}
                       >
-                        {tr.blockingReasons.map((r) => (
-                          <li key={r}>{t.code("codes", r, "errors.CONFLICT")}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </li>
-              ))}
+                        {tr.reasonRequired ? (
+                          <CDFField
+                            id={`reason-${tr.code}`}
+                            label={t("cases.transitionReason")}
+                            hint={t("intake.reasonHint")}
+                            requiredLabel={t("common.required")}
+                          >
+                            <textarea
+                              id={`reason-${tr.code}`}
+                              name="reason"
+                              aria-describedby={`reason-${tr.code}-hint`}
+                              className={textareaClass}
+                              required
+                              minLength={10}
+                            />
+                          </CDFField>
+                        ) : null}
+                      </CDFCommandForm>
+                    ) : (
+                      <div>
+                        <CDFBadge tone="neutral">{t("cases.blocked")}</CDFBadge>
+                        <ul
+                          className="mt-1 list-disc ps-5 text-sm text-cdf-text-secondary"
+                          data-testid={`blocked-${tr.code}`}
+                        >
+                          {tr.blockingReasons.map((r) => (
+                            <li key={r}>{t.code("codes", r, "errors.CONFLICT")}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </CDFCard>
 
@@ -409,6 +417,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                   variant="secondary"
                   fieldLabels={{ hasConflict: t("cases.conflictTitle"), declaration: t("cases.declaration") }}
                   testId="conflict-form"
+                  // Declaring a conflict removes the declarant's own access at once: confirm that answer only.
+                  confirm={{
+                    ...confirmation(t, "declareConflict"),
+                    when: { field: "hasConflict", equals: "true" },
+                  }}
                 >
                   {/* No default answer (UX-019): the declarant chooses; an unanswered submit is refused. */}
                   <fieldset className="mb-3">

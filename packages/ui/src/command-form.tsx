@@ -18,6 +18,7 @@ import {
   type CommandFormControl,
 } from "./command-form-fields";
 import { CDFAlert, buttonClass } from "./components";
+import { CDFConfirmDialog, type CDFConfirmation } from "./confirm-dialog";
 import { CDFFieldErrorsProvider } from "./field-errors";
 
 type FieldProblem = { name: string; id: string; label: string; message: string };
@@ -69,6 +70,8 @@ export interface CDFCommandFormProps {
   codeSections?: readonly string[];
   /** Fields sent only when the user changed them (UX-030): the command keeps the stored value for the rest. */
   changedOnly?: readonly string[];
+  /** Asks before the command runs (UX-031). With `when`, only when that field holds that value. */
+  confirm?: CDFConfirmation & { when?: { field: string; equals: string } };
   children?: ReactNode;
 }
 
@@ -83,20 +86,22 @@ export interface CDFCommandFormProps {
  * - The same Zod schema validates on the server (§45). After an invalid submit the summary takes focus and links
  *   to each field, and each reported control gets `aria-invalid` plus an inline error (WCAG 3.3.1, 2.4.3).
  * - While the command runs the button stays focusable (`aria-disabled`), so focus does not fall to the page (UX-077).
- * - Forms that send only changed fields wait for hydration (fail closed): without the client handler the
- *   browser would send stale values.
+ * - Forms that confirm or send only changed fields wait for hydration (fail closed): without the client handler
+ *   the browser would skip the confirmation or send stale values.
  */
 export function CDFCommandForm(props: CDFCommandFormProps) {
   const t = createTranslator(props.locale);
   const [state, formAction, pending] = useActionState(props.action, IDLE);
   const form = useRef<HTMLFormElement>(null);
   const summary = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const initialState = useRef(state);
   const resetting = useRef(false);
   const [problems, setProblems] = useState<FieldProblem[]>([]);
+  const [asking, setAsking] = useState<FormData | null>(null);
   const hydrated = useHydrated();
-  const { fieldLabels, changedOnly } = props;
-  const needsClient = Boolean(changedOnly?.length);
+  const { fieldLabels, confirm, changedOnly } = props;
+  const needsClient = Boolean(confirm || changedOnly?.length);
 
   // Block every reset this component did not ask for (React resets a form after an action it dispatched itself).
   useEffect(() => {
@@ -180,6 +185,10 @@ export function CDFCommandForm(props: CDFCommandFormProps) {
     const el = event.currentTarget;
     const data = new FormData(el, (event.nativeEvent as SubmitEvent).submitter);
     if (changedOnly?.length) pruneUnchanged(data, changedOnly, (name) => controlsNamed(el, name));
+    if (confirm && (!confirm.when || data.get(confirm.when.field) === confirm.when.equals)) {
+      setAsking(data);
+      return;
+    }
     run(data);
   }
 
@@ -195,54 +204,70 @@ export function CDFCommandForm(props: CDFCommandFormProps) {
   };
 
   return (
-    <form ref={form} action={formAction} onSubmit={onSubmit} data-testid={props.testId} noValidate>
-      {state.status === "invalid" ? (
-        <div ref={summary} tabIndex={-1} data-testid="error-summary">
-          <CDFAlert tone="danger" title={t("errors.INVALID")}>
-            <ul className="list-disc ps-5">
-              {problems.map((p) => (
-                <li key={p.name}>
-                  {p.id ? (
-                    <a href={`#${p.id}`} className="underline">
-                      {p.label}: {p.message}
-                    </a>
-                  ) : (
-                    `${p.label}: ${p.message}`
-                  )}
-                </li>
-              ))}
-            </ul>
+    <>
+      <form ref={form} action={formAction} onSubmit={onSubmit} data-testid={props.testId} noValidate>
+        {state.status === "invalid" ? (
+          <div ref={summary} tabIndex={-1} data-testid="error-summary">
+            <CDFAlert tone="danger" title={t("errors.INVALID")}>
+              <ul className="list-disc ps-5">
+                {problems.map((p) => (
+                  <li key={p.name}>
+                    {p.id ? (
+                      <a href={`#${p.id}`} className="underline">
+                        {p.label}: {p.message}
+                      </a>
+                    ) : (
+                      `${p.label}: ${p.message}`
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </CDFAlert>
+          </div>
+        ) : null}
+        {state.status === "error" ? (
+          // UX-078: the class of refusal as a title, what happened with its reference, and that nothing was lost.
+          <CDFAlert tone="danger" testId="action-error" title={t(errorTitle(state.kind))}>
+            <p>
+              {t("errors.withReference", { message: errorMessage(state.kind, state.detail), ref: state.ref })}
+            </p>
+            {state.kind === "UNAUTHENTICATED" ? null : <p className="mt-1">{t("errors.entriesKept")}</p>}
           </CDFAlert>
-        </div>
+        ) : null}
+        {state.status === "ok" && props.successMessage ? (
+          // "{message}" in the success text is replaced by the action's result (e.g. a file hash).
+          <CDFAlert tone="success">{props.successMessage.replace("{message}", state.message ?? "")}</CDFAlert>
+        ) : null}
+        <CDFFieldErrorsProvider
+          errors={Object.fromEntries(problems.filter((p) => p.id).map((p) => [p.id, p.message]))}
+        >
+          {props.children}
+        </CDFFieldErrorsProvider>
+        <button
+          ref={trigger}
+          type="submit"
+          className={buttonClass(props.variant ?? "primary")}
+          disabled={needsClient && !hydrated}
+          aria-disabled={pending ? true : undefined}
+          aria-label={pending ? undefined : props.submitName}
+        >
+          {pending ? t("common.working") : props.submitLabel}
+        </button>
+      </form>
+      {confirm ? (
+        <CDFConfirmDialog
+          open={asking !== null}
+          confirmation={confirm}
+          onConfirm={() => {
+            const data = asking;
+            setAsking(null);
+            if (data) run(data);
+          }}
+          onDismiss={() => setAsking(null)}
+          onClosed={() => trigger.current?.focus()}
+        />
       ) : null}
-      {state.status === "error" ? (
-        // UX-078: the class of refusal as a title, what happened with its reference, and that nothing was lost.
-        <CDFAlert tone="danger" testId="action-error" title={t(errorTitle(state.kind))}>
-          <p>
-            {t("errors.withReference", { message: errorMessage(state.kind, state.detail), ref: state.ref })}
-          </p>
-          {state.kind === "UNAUTHENTICATED" ? null : <p className="mt-1">{t("errors.entriesKept")}</p>}
-        </CDFAlert>
-      ) : null}
-      {state.status === "ok" && props.successMessage ? (
-        // "{message}" in the success text is replaced by the action's result (e.g. a file hash).
-        <CDFAlert tone="success">{props.successMessage.replace("{message}", state.message ?? "")}</CDFAlert>
-      ) : null}
-      <CDFFieldErrorsProvider
-        errors={Object.fromEntries(problems.filter((p) => p.id).map((p) => [p.id, p.message]))}
-      >
-        {props.children}
-      </CDFFieldErrorsProvider>
-      <button
-        type="submit"
-        className={buttonClass(props.variant ?? "primary")}
-        disabled={needsClient && !hydrated}
-        aria-disabled={pending ? true : undefined}
-        aria-label={pending ? undefined : props.submitName}
-      >
-        {pending ? t("common.working") : props.submitLabel}
-      </button>
-    </form>
+    </>
   );
 }
 

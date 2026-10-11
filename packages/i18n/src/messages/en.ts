@@ -67,6 +67,81 @@ export const en = {
     },
     entriesKept: "What you entered is still in the form.",
   },
+  /** Confirmation of controlled and irreversible acts (UX-031, O08 §08.6.4). Each act states what happens,
+   *  whether it can be undone and who is affected; the confirm button repeats the trigger's verb. */
+  confirm: {
+    whatHappens: "What happens",
+    canUndo: "Can it be undone?",
+    whoAffected: "Who is affected",
+    cancel: "Cancel",
+    acts: {
+      closeAtScreening: {
+        action: "Close case at screening",
+        title: "Close this case at screening?",
+        body: "The case moves to Closure. Its forms, interviews and evidence can no longer be changed, and the reporter's follow-up page shows the report as closed, so they can no longer reply.",
+        undo: "No. Reopening a closed case is not available in this version.",
+        affected: "The case team, and the reporter, who sees the report as closed.",
+      },
+      closeOutOfJurisdiction: {
+        action: "Close case: outside jurisdiction",
+        title: "Close this case as outside CDF's jurisdiction?",
+        body: "The case moves to Closure. Its forms, interviews and evidence can no longer be changed, and the reporter's follow-up page shows the report as closed, so they can no longer reply.",
+        undo: "No. Reopening a closed case is not available in this version.",
+        affected: "The case team, and the reporter, who sees the report as closed.",
+      },
+      closeCase: {
+        action: "Close case",
+        title: "Close this case?",
+        body: "The case moves to Closure. Its forms, interviews and evidence can no longer be changed, and the reporter's follow-up page shows the report as closed, so they can no longer reply.",
+        undo: "No. Reopening a closed case is not available in this version.",
+        affected: "The case team, and the reporter, who sees the report as closed.",
+      },
+      archiveCase: {
+        action: "Archive case",
+        title: "Archive this case?",
+        body: "The case moves to the archive and to records management. Its details, team, forms, interviews and evidence become read-only.",
+        undo: "No. An archived case cannot be reopened in this version.",
+        affected:
+          "The case team, who can then only read the case, and records officers, who manage it from now on.",
+      },
+      returnToJurisdiction: {
+        action: "Return to jurisdiction",
+        title: "Return this case to jurisdiction?",
+        body: "The investigation is not approved. The case goes back to the jurisdiction step with your reason, and must be approved again before it can be investigated.",
+        undo: "Not directly. The case can come back for approval once jurisdiction is confirmed again.",
+        affected: "The case team, who must confirm jurisdiction again.",
+      },
+      withdrawForm: {
+        action: "Withdraw form",
+        title: "Withdraw this form?",
+        body: "The form is closed as withdrawn and can no longer be edited, reviewed or approved. It stays in the case history.",
+        undo: "No. Withdrawing is final; a new copy of the form can be started instead.",
+        affected: "Everyone preparing, reviewing or approving this form.",
+      },
+      cancelInterview: {
+        action: "Cancel interview",
+        title: "Cancel this interview?",
+        body: "The interview is recorded as cancelled with your reason, and its record can no longer be changed.",
+        undo: "No. Cancelling is final; plan a new interview if one is still needed.",
+        affected: "The interview team and everyone due to take part.",
+        dismiss: "Keep interview",
+      },
+      releaseHold: {
+        action: "Release legal hold",
+        title: "Release this legal hold?",
+        body: "The hold is released. If no other hold is active on the case, retention and disposition of its records resume.",
+        undo: "Not by undoing it. A new legal hold can be placed if one is needed.",
+        affected: "Records officers and legal reviewers responsible for this case's records.",
+      },
+      declareConflict: {
+        action: "Declare conflict",
+        title: "Declare a conflict of interest?",
+        body: "Your access to this case ends immediately, and you return to the case list.",
+        undo: "Not by you. Someone else who manages conflicts of interest reviews your declaration.",
+        affected: "You, and the case team, who must review the conflict.",
+      },
+    },
+  },
   /** Idle-session warning (CDF-57, WCAG 2.2.1). */
   session: {
     warningTitle: "Are you still there?",
@@ -512,6 +587,8 @@ export const en = {
     noTransitions: "No steps available.",
     transitionReason: "Reason",
     perform: "Confirm",
+    /** Accessible name of a step's button: starts with the visible "Confirm" (WCAG 2.5.3) and names the step. */
+    performNamed: "Confirm: {step}",
     blocked: "Not available",
     workNav: "Case work",
     formsLink: "Forms",

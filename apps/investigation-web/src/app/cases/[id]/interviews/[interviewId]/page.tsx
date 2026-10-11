@@ -35,6 +35,7 @@ import {
 import { evidenceService, interviewService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AppNav } from "../../../../app-nav";
+import { confirmation } from "../../../../confirmations";
 import {
   acknowledgeStatementAction,
   addParticipantAction,
@@ -708,6 +709,8 @@ export default async function InterviewDetailPage({
                           submitLabel={t(`interviews.action.${a}` as MessageKey)}
                           variant={a === "CANCEL" ? "danger" : a === "APPROVE" ? "primary" : "secondary"}
                           fieldLabels={{ reason: t("interviews.reasonLabel") }}
+                          // UX-031: cancelling is final, so it is confirmed first.
+                          confirm={a === "CANCEL" ? confirmation(t, "cancelInterview") : undefined}
                         >
                           {INTERVIEW_TRANSITIONS[a].reasonRequired ? (
                             <CDFField

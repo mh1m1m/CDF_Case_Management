@@ -33,6 +33,7 @@ import {
   requestLegalHoldAction,
 } from "../actions";
 import { LegalHoldBadge, RecordsStateBadge } from "../badges";
+import { confirmation } from "../../confirmations";
 import { DecisionFields, HoldReasonFields } from "../fields";
 import { HoldRequestList } from "../hold-requests";
 
@@ -256,6 +257,11 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
                         fieldLabels={{
                           approve: t("records.decisionLabel"),
                           reason: t("records.decisionReasonLabel"),
+                        }}
+                        // UX-031: approving the release lifts the hold, so that answer is confirmed first.
+                        confirm={{
+                          ...confirmation(t, "releaseHold"),
+                          when: { field: "approve", equals: "APPROVE" },
                         }}
                       >
                         <DecisionFields

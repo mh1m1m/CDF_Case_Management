@@ -88,6 +88,7 @@ for (const locale of ["ar", "en"] as const) {
     const close = manager.getByTestId("transition-SCREEN_OUT");
     await close.locator("textarea").fill("short");
     await close.getByRole("button").click();
+    await manager.getByRole("dialog").getByTestId("confirm-submit").click();
     await expect(close.getByRole("alert")).toBeVisible();
     await expect(close.locator("textarea")).toHaveValue("short");
     await expect(manager.getByTestId("case-state")).toHaveText(
