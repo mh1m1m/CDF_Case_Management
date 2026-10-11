@@ -5,7 +5,16 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
-import { USERS, caseId, ownerScenario, reportId, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  admin,
+  caseId,
+  ownerScenario,
+  reportId,
+  scenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
 
 const REASON = "Synthetic: my-work read-model test.";
 let caseA: string, caseSecret: string;
@@ -195,6 +204,31 @@ describe("work items exist only where the caller passes the command's own check"
       ]);
       await s.as("legalB");
       expect((await items(s.tx)).filter((i) => i.target_id === task)).toEqual([]);
+    });
+  });
+
+  it("never tells a controlled-lookup requester which case the request reached (CDF-84)", async () => {
+    await scenario(async (s) => {
+      const one = async <T>(rows: Promise<T[]>) => (await rows)[0]!;
+      const { n } = await one(admin<{ n: string }[]>`
+        select case_number as n from case_mgmt.case_record where id = ${caseA}`);
+      await s.as("legal");
+      const lookup = await one(s.tx<{ outcome: string; request_id: string }[]>`
+        select * from api.request_case_for_legal_hold(${n}, ${REASON + " Controlled lookup."})`);
+      expect(lookup.outcome).toBe("MATCHED");
+      const metadata = async (id: string) =>
+        (await one(s.tx<{ ok: boolean }[]>`select authz.can_view_case_metadata(${id}) as ok`)).ok;
+      expect(await metadata(caseA)).toBe(false);
+      const mine = (await items(s.tx)).filter((i) => i.target_id === lookup.request_id);
+      expect(mine.map((i) => [i.category, i.case_id, i.case_number])).toEqual([
+        ["MY_HOLD_REQUEST", null, null],
+      ]);
+      // No row of anyone's list carries a case id the caller cannot see.
+      for (const u of ["legal", "lead", "records", "triage", "committeeChair"] as UserKey[]) {
+        await s.as(u);
+        for (const i of (await items(s.tx)).filter((r) => r.case_id !== null))
+          expect(await metadata(i.case_id!), `${u} ${i.category}`).toBe(true);
+      }
     });
   });
 

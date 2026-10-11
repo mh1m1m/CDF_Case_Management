@@ -29,8 +29,9 @@ returns table (
   category text,         -- the item type; the page renders a fixed template for it
   target_type text,      -- REPORT, CASE, CONFLICT, FORM_INSTANCE, INTERVIEW, CASE_TASK, HOLD_REQUEST, HOLD_RELEASE
   target_id uuid,
-  case_id uuid,
-  case_number text,      -- only when the caller may see the case's metadata
+  case_id uuid,          -- only when the caller may see the case's metadata (CDF-84: a controlled lookup's
+                         -- requester never learns which case the request reached)
+  case_number text,      -- the same rule
   due_at timestamptz,
   due_source text,       -- TASK, SCHEDULE or WORKFLOW_SLA_PROVISIONAL; null when there is no due date
   since_at timestamptz
@@ -196,7 +197,8 @@ as $$
       join records.legal_hold h on h.id = x.hold_id, me
      where x.requested_by = me.id and x.status = 'PENDING'
   )
-  select i.area, i.view, i.category, i.target_type, i.target_id, i.case_id,
+  select i.area, i.view, i.category, i.target_type, i.target_id,
+         case when i.case_id is not null and authz.can_view_case_metadata(i.case_id) then i.case_id end,
          case when i.case_id is not null and authz.can_view_case_metadata(i.case_id) then c.case_number end,
          i.due_at, i.due_source, i.since_at
     from items i
