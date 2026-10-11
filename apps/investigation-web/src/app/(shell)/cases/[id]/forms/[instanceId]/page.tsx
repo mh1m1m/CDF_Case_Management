@@ -105,8 +105,8 @@ export default async function FormInstancePage({
         >
           {returned.reason ? (
             <p>
-              <q dir="auto" className="break-words">
-                {returned.reason}
+              <q className="break-words">
+                <bdi>{returned.reason}</bdi>
               </q>
             </p>
           ) : null}

@@ -40,7 +40,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 const disclosure = "mb-6 rounded-cdf-lg border border-cdf-border bg-cdf-surface p-4 shadow-cdf";
-const summary = "flex min-h-11 cursor-pointer items-center font-semibold";
+// The browser's own disclosure marker stays (as elsewhere in the case pages), so a closed group reads as openable.
+const summary = "min-h-11 cursor-pointer py-2 font-semibold";
 
 export default async function CaseFormsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -134,8 +135,8 @@ export default async function CaseFormsPage({ params }: { params: Promise<{ id: 
               {i.returned.reason ? (
                 <>
                   {": "}
-                  <q dir="auto" className="break-words">
-                    {i.returned.reason}
+                  <q className="break-words">
+                    <bdi>{i.returned.reason}</bdi>
                   </q>
                 </>
               ) : null}
