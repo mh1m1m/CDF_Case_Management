@@ -55,6 +55,13 @@ test("My Work lists the caller's own items, keeps the view in the URL and across
   browser,
 }) => {
   const investigator = await signIn(browser, "investigator.a@example.test");
+  // The landing view is never a dead end while the caller has work in another view.
+  await investigator.goto("/my-work");
+  if ((await investigator.getByTestId("my-work-empty").count()) > 0)
+    await expect(investigator.getByTestId("my-work-elsewhere")).toHaveAttribute(
+      "href",
+      /^\/my-work\?view=(my-cases|due-soon|waiting)$/,
+    );
   await investigator.goto("/my-work?view=my-cases");
   const list = investigator.getByTestId("my-work-my-cases");
   await expect(list.getByTestId("work-item-MY_CASE")).toHaveCount(1);

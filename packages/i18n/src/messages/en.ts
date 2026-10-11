@@ -1312,6 +1312,7 @@ export const en = {
       waiting: "Nothing you asked for is waiting on someone else.",
     },
     emptyBody: "New items appear here as soon as they are assigned to you or need your decision.",
+    openView: "Open {view}",
     provisionalNote:
       "Stage targets are provisional until CDF approves the service levels (PRODUCTION_SUBSTITUTION_REQUIRED).",
     backToMyWork: "Back to My work",

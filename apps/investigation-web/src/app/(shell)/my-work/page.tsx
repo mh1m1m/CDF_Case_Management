@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import { WORK_AREAS, type WorkItem, type WorkView } from "@cdf/contracts";
 import type { MessageKey, Translator } from "@cdf/i18n";
 import {
+  buttonClass,
   CDFDateTime,
   CDFEmptyState,
   CDFIdentifier,
@@ -108,6 +109,9 @@ export default async function MyWorkPage({
         )
       : [{ area: null, rows }];
   const count = (c: WorkView) => items.filter((i) => i.view === c).length;
+  // An empty view points to the first other view that has the caller's items, so the landing is never a dead end
+  // while work exists elsewhere (UX-004). It names the view, never a number.
+  const elsewhere = rows.length === 0 ? VIEWS.find(([k, c]) => k !== view && count(c) > 0) : undefined;
 
   return (
     <>
@@ -129,6 +133,17 @@ export default async function MyWorkPage({
           title={t(`myWork.empty.${view}` as MessageKey)}
           body={t("myWork.emptyBody")}
           testId="my-work-empty"
+          action={
+            elsewhere ? (
+              <a
+                href={`/my-work?view=${elsewhere[0]}`}
+                className={buttonClass("secondary")}
+                data-testid="my-work-elsewhere"
+              >
+                {t("myWork.openView", { view: t(`myWork.view.${elsewhere[0]}` as MessageKey) })}
+              </a>
+            ) : undefined
+          }
         />
       ) : (
         <div className="grid gap-6" data-testid={`my-work-${view}`}>

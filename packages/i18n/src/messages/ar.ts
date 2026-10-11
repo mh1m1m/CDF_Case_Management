@@ -1290,6 +1290,7 @@ export const ar: Messages = {
       waiting: "لا يوجد طلب مقدم منك بانتظار شخص آخر.",
     },
     emptyBody: "تظهر العناصر الجديدة هنا فور إسنادها إليك أو حاجتها إلى قرارك.",
+    openView: "فتح «{view}»",
     provisionalNote:
       "مواعيد المراحل مؤقتة إلى أن يعتمد الصندوق مستويات الخدمة (PRODUCTION_SUBSTITUTION_REQUIRED).",
     backToMyWork: "العودة إلى أعمالي",
