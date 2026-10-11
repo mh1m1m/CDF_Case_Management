@@ -4,7 +4,7 @@
 - **Decision owner:** Fady, 2026-10-11 12:11 UTC, in the UI/UX audit thread: "IMPLEMENT THE UX REDESIGN", with the decision package recorded here.
 - **Source:** CDF-UX-AUDIT v1.0, run 2026-10-10/11 on synthetic data (report `UIUX_AUDIT_2026-10-10.md` and its summary, held in the project files, not in this repository). Decision IDs `DEC-nn`, debt IDs `UX-nnn` and step IDs `S0`–`S6` are the audit's. Its decision register is O17 §17.7; its gates are O28 §28.10.
 - **Extends:** ADR-014 (purpose-bound authorization). **Amends:** ADR-013 and ADR-014 on case-history audience (D5). **Unchanged:** ADR-003 (PostgreSQL/RLS, command-only writes), ADR-004 (identity vault), ADR-005 (append-only audit), ADR-006 and ADR-015 (evidence and reporter attachments).
-- **Linear:** the UX Re-Architecture epics UXR-01 to UXR-12; D1 is UXR-12's first issue.
+- **Linear:** project "UX Re-Architecture" (epics CDF-88 to CDF-99 = UXR-01 to UXR-12); decision groups CDF-100 (S0) to CDF-108. D1 is CDF-176; the UX-002 verification is CDF-140.
 - **Protocol:** §4 (authority), §10–§11 (two apps, BFF), §19–§23 (authorization, roles, identity, portal), §24–§29 (evidence, audit), §39–§42 (notifications, search, bilingual), §65 (definition of done), §82–§83 (errors, logging), §87–§88 (prohibitions, human decisions).
 
 ## Context
