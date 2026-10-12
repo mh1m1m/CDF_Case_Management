@@ -265,3 +265,15 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `decision.restricted_legal_review_approval` | Restricted Case Authority approval of one legal review | Names the reviewer; used once (AGENT-09 W2)                                          |
 
 `committee.vote_item` gains `package_id`, `recommendation_item_id` and `package_round` (1900).
+
+## Employee defence and grievances (migration 1910, ADR-024)
+
+| Table                                | Purpose                                             | Notes                                                        |
+| ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------ |
+| `grievance.subject_portal_link`      | A case subject linked to an employee portal account | One active per subject; revoke only                          |
+| `grievance.defence_notice`           | Notice to one subject with a due date               | ISSUED → ACKNOWLEDGED → RESPONDED, or WITHDRAWN              |
+| `grievance.defence_notice_item`      | The subject's allegations, snapshotted              | Append-only                                                  |
+| `grievance.defence_response`         | Portal or recorded response                         | Original date; document reference unless portal; append-only |
+| `grievance.grievance`                | LINKED or STANDALONE grievance                      | Rule set, window and late flag stored (Q94)                  |
+| `grievance.admissibility_assessment` | Secretary assessment and the decider's decision     | Not visible to the grievant                                  |
+| `grievance.grievance_outcome`        | Combinable outcomes bound to an approved vote       | Reinvestigation path opens a REINVESTIGATION proceeding      |

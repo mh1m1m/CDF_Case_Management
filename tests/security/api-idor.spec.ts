@@ -739,6 +739,75 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
   },
 ];
 
+// Employee defence and grievance commands (migration 1910) take a subject, a portal link, a defence notice or a
+// grievance; never a case.
+interface GrievanceTargets {
+  subject: string;
+  link: string;
+  notice: string;
+  grievance: string;
+}
+
+const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
+  {
+    fn: "link_subject_portal_account",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.link_subject_portal_account(${t.subject}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "revoke_subject_portal_link",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revoke_subject_portal_link(${t.link}, ${REASON})`,
+  },
+  {
+    fn: "issue_defence_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.issue_defence_notice(${t.subject}, 'Probe notice text.', ${[randomUUID()]}::uuid[],
+        now() + interval '10 days')`,
+  },
+  {
+    fn: "acknowledge_defence_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.acknowledge_defence_notice(${t.notice})`,
+  },
+  {
+    fn: "submit_defence_response",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_defence_response(${t.notice}, 'Probe response text.')`,
+  },
+  {
+    fn: "record_defence_response",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_defence_response(${t.notice}, 'EMAIL', now(), 'Probe response text.', 'EMAIL-PROBE-0001')`,
+  },
+  {
+    fn: "file_grievance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.file_grievance(${t.link}, now() - interval '1 day', 'Probe grievance grounds.')`,
+  },
+  {
+    fn: "assess_grievance_admissibility",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.assess_grievance_admissibility(${t.grievance}, 'ADMISSIBLE', null, ${REASON})`,
+  },
+  {
+    fn: "decide_grievance_admissibility",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.decide_grievance_admissibility(${t.grievance}, 'ADMISSIBLE', null, ${REASON})`,
+  },
+  {
+    fn: "record_grievance_outcome",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_grievance_outcome(${t.grievance}, ${["UPHOLD"]}::text[], null, ${randomUUID()}, 'Probe summary.')`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -775,6 +844,11 @@ const GLOBAL_COMMANDS = [
   "search_records_catalogue",
   // Migration 1880: the caller's purpose-bound approval queue.
   "preliminary_approval_queue",
+  // Migration 1910: the caller's own defence notices; a grievance recorded by case number (never a UUID), refused
+  // unless the caller is the Grievance Committee Secretary and answering an unknown and an uncleared number alike
+  // (grievance-defence.spec.ts).
+  "my_defence_notices",
+  "record_grievance",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -973,6 +1047,7 @@ describe("catalog guard", () => {
       ...REFERRAL_PROBES.map((p) => p.fn),
       ...MEETING_PROBES.map((p) => p.fn),
       ...DECISION_PROBES.map((p) => p.fn),
+      ...GRIEVANCE_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1398,6 +1473,74 @@ describe("IDOR: recommendation, legal review and authority objects (migration 19
         "authority_decision",
       ]) {
         expect(await s.tx`select id from ${s.tx("decision." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: employee defence and grievance objects (migration 1910)", () => {
+  // None of these works case 0002, sits on the Grievance Committee, is the linked subject or filed the grievance.
+  // The case team, the subject and the secretary are covered by grievance-defence.spec.ts.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "grcSectorHead",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [link] = await s.tx<{ id: string }[]>`
+        select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON}) as id`;
+      const [allegation] = await s.tx<{ id: string }[]>`
+        select api.add_allegation(${caseB}, 'FRAUD', 'Synthetic: allegation against Employee Sigma.', ${subj!.id},
+          null, null) as id`;
+      const [notice] = await s.tx<{ id: string }[]>`
+        select api.issue_defence_notice(${subj!.id}, 'Synthetic: you are invited to respond.',
+          ${[allegation!.id]}::uuid[], now() + interval '10 days') as id`;
+      await s.as("employee");
+      const [grievance] = await s.tx<{ id: string }[]>`
+        select api.file_grievance(${link!.id}, now() - interval '1 day', 'Synthetic: grievance grounds.') as id`;
+      await s.as(actor);
+      const real: GrievanceTargets = {
+        subject: subj!.id,
+        link: link!.id,
+        notice: notice!.id,
+        grievance: grievance!.id,
+      };
+      const random: GrievanceTargets = {
+        subject: randomUUID(),
+        link: randomUUID(),
+        notice: randomUUID(),
+        grievance: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of GRIEVANCE_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select * from api.my_defence_notices()`).toEqual([{ my_defence_notices: [] }]);
+      for (const table of [
+        "subject_portal_link",
+        "defence_notice",
+        "defence_notice_item",
+        "defence_response",
+        "grievance",
+        "admissibility_assessment",
+        "grievance_outcome",
+      ]) {
+        expect(await s.tx`select id from ${s.tx("grievance." + table)}`, table).toEqual([]);
       }
     });
   });

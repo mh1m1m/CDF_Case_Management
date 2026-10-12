@@ -282,3 +282,11 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - A member who declared a conflict in any meeting of the proceeding sees no package, item, packet or opinion (AGENT-09 W1). On a restricted case each legal review needs the Restricted Case Authority's single-use approval naming the reviewer (AGENT-09 W2).
 - An authority decision needs a source document reference (N15) and the authority type the effective-dated rule names; decided packages are frozen; decisions and item outcomes are append-only.
 - Tests: `tests/security/recommendations-authority.spec.ts`, decision IDOR probes and the audit walk.
+
+## 18. Employee defence and grievances (migration 1910; ADR-024)
+
+- A subject reaches only their own defence notices, the allegations snapshotted for them and their own responses, through an active portal link the case team created. A link is never given to a case-team member. The subject never gains case access.
+- Grievances are received by the Grievance Committee's seated, cleared secretary. A grievant sees their own grievance and outcome, never the internal admissibility assessment. Unknown and uncleared case numbers answer alike.
+- Admission opens the GRIEVANCE committee proceeding through the shared referral path: the case gate and the N9 firewall apply, so no Investigation Committee voter of the case votes on its grievance.
+- Outcomes are bound to a closed, approved vote of the grievance proceeding and used once.
+- Tests: `tests/security/grievance-defence.spec.ts`, grievance IDOR probes and the audit walk.

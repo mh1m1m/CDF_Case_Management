@@ -1061,3 +1061,51 @@ export const AUTHORITY_OUTCOMES = [
 export type AuthorityOutcome = (typeof AUTHORITY_OUTCOMES)[number];
 export const PACKET_PURPOSES = ["LEGAL_REVIEW", "AUTHORITY_DECISION"] as const;
 export type PacketPurpose = (typeof PACKET_PURPOSES)[number];
+
+// ---- Employee defence and grievances (ADR-024, migration 1910) -------------------------------------------
+export const SUBMISSION_CHANNELS = [
+  "EMPLOYEE_PORTAL",
+  "EMAIL",
+  "PHYSICAL_SUBMISSION",
+  "SECRETARY_ENTRY",
+  "BCP_IMPORT",
+  "OTHER_AUTHORIZED_CHANNEL",
+] as const;
+export type SubmissionChannel = (typeof SUBMISSION_CHANNELS)[number];
+export const DEFENCE_NOTICE_STATUSES = ["ISSUED", "ACKNOWLEDGED", "RESPONDED", "WITHDRAWN"] as const;
+export type DefenceNoticeStatus = (typeof DEFENCE_NOTICE_STATUSES)[number];
+export const GRIEVANCE_KINDS = ["LINKED", "STANDALONE"] as const;
+export type GrievanceKind = (typeof GRIEVANCE_KINDS)[number];
+export const GRIEVANCE_STATUSES = [
+  "RECEIVED",
+  "AWAITING_ADMISSIBILITY_DECISION",
+  "ADMITTED",
+  "INADMISSIBLE",
+  "DECIDED",
+  "WITHDRAWN",
+] as const;
+export type GrievanceStatus = (typeof GRIEVANCE_STATUSES)[number];
+export const GRIEVANCE_OUTCOMES = [
+  "UPHOLD",
+  "MODIFY",
+  "CANCEL",
+  "RETURN_FOR_REINVESTIGATION",
+  "REQUEST_COMPLETION",
+  "INADMISSIBLE",
+  "REJECT_ON_MERITS",
+  "PARTIALLY_ACCEPT",
+  "CORRECTIVE_ACTION",
+  "DISCIPLINARY_ACTION",
+  "OTHER_AUTHORIZED_OUTCOME",
+] as const;
+export type GrievanceOutcome = (typeof GRIEVANCE_OUTCOMES)[number];
+export const REINVESTIGATION_PATHS = [
+  "SAME_INVESTIGATION_COMMITTEE",
+  "NEW_INTERNAL_TEAM",
+  "NEW_INVESTIGATOR",
+  "EXTERNAL_INVESTIGATOR",
+  "TECHNICAL_INVESTIGATION",
+  "GRIEVANCE_COMMITTEE_FACT_FINDING",
+  "OTHER",
+] as const;
+export type ReinvestigationPath = (typeof REINVESTIGATION_PATHS)[number];

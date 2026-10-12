@@ -75,6 +75,8 @@ const NOT_STATE_CHANGING = new Set([
   "preliminary_approval_queue",
   // Committee meetings (migration 1890): who has voted, and choices only after close.
   "vote_item_status",
+  // Employee defence (migration 1910): the subject's own notices.
+  "my_defence_notices",
 ]);
 
 interface Step {
@@ -1158,6 +1160,150 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "records",
         run: (s) => s.tx`select api.execute_disposition(${ids.disposition!})`,
       },
+      // Employee defence and grievance (migration 1910): the walk subject is linked to employee's portal account,
+      // answers one notice through the portal and one on paper, and files a grievance the Grievance Committee
+      // admits and decides; a standalone grievance under a CHAIR rule is decided by the chair.
+      {
+        fn: "link_subject_portal_account",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.portalLink = await one(
+            s,
+            s.tx`select api.link_subject_portal_account(${ids.subject!}, ${USERS.employee}, ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "issue_defence_notice",
+        actor: "caseManager",
+        run: async (s) => {
+          ids.notice2 = await one(
+            s,
+            s.tx`select api.issue_defence_notice(${ids.subject!}, 'Synthetic: walk notice (paper reply).',
+              ${[ids.allegation!]}::uuid[], now() + interval '10 days') as id`,
+          );
+          return (ids.notice = await one(
+            s,
+            s.tx`select api.issue_defence_notice(${ids.subject!}, 'Synthetic: walk notice.',
+              ${[ids.allegation!]}::uuid[], now() + interval '10 days') as id`,
+          ));
+        },
+      },
+      {
+        fn: "acknowledge_defence_notice",
+        actor: "employee",
+        run: (s) => s.tx`select api.acknowledge_defence_notice(${ids.notice!})`,
+      },
+      {
+        fn: "submit_defence_response",
+        actor: "employee",
+        run: (s) => s.tx`select api.submit_defence_response(${ids.notice!}, 'Synthetic: my walk response.')`,
+      },
+      {
+        fn: "record_defence_response",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.record_defence_response(${ids.notice2!}, 'EMAIL', now(),
+            'Synthetic: walk response received by email.', 'EMAIL-DEMO-WALK')`,
+      },
+      {
+        fn: "file_grievance",
+        actor: "employee",
+        run: async (s) =>
+          (ids.grievance = await one(
+            s,
+            s.tx`select api.file_grievance(${ids.portalLink!}, now() - interval '1 day',
+              'Synthetic: walk grievance grounds.') as id`,
+          )),
+      },
+      {
+        fn: "revoke_subject_portal_link",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.revoke_subject_portal_link(${ids.portalLink!}, ${REASON})`,
+      },
+      {
+        // Fixture: the Grievance Committee is seated with members who took no part in the case's investigation (N9).
+        fn: "assess_grievance_admissibility",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const [gc] = await admin<
+            { id: string }[]
+          >`select id from committee.committee where kind = 'GRIEVANCE'`;
+          ids.gc = gc!.id;
+          await s.as("platformAdmin");
+          for (const [user, seat] of [
+            ["legal", "CHAIR"],
+            ["committeeSecretary", "SECRETARY"],
+            ["legalB", "MEMBER"],
+          ] as const) {
+            await s.tx`select api.appoint_committee_member(${ids.gc}, ${USERS[user]}, ${seat}, now(), null, 'DEMO-APPT-GC')`;
+          }
+          await s.as("committeeSecretary");
+          return s.tx`select api.assess_grievance_admissibility(${ids.grievance!}, 'ADMISSIBLE', null, ${REASON})`;
+        },
+      },
+      {
+        fn: "record_grievance_outcome",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const cp = await one(
+            s,
+            s.tx`select committee_proceeding_id from grievance.grievance where id = ${ids.grievance!}`,
+          );
+          const m = await one(
+            s,
+            s.tx`select api.schedule_meeting(${cp}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+              now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`,
+          );
+          const seats = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${m} and is_voting`;
+          for (const key of ["legal", "legalB"] as const) {
+            await s.as(key);
+            await s.tx`select api.declare_meeting_conflict(${seats.find((r) => r.user_id === USERS[key])!.id}, 'NO_CONFLICT', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_meeting(${m}, ${REASON})`;
+          for (const r of seats) await s.tx`select api.record_attendance(${r.id}, 'PRESENT')`;
+          const vi = await one(
+            s,
+            s.tx`select api.open_vote_item(${m}, 'OTHER', null, 'Grievance outcome (synthetic)') as id`,
+          );
+          for (const key of ["legal", "legalB"] as const) {
+            await s.as(key);
+            await s.tx`select api.cast_vote(${vi}, 'APPROVE', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.close_vote_item(${vi}, null)`;
+          return s.tx`select api.record_grievance_outcome(${ids.grievance!}, ${["UPHOLD"]}::text[], null, ${vi},
+            'Synthetic: the walk grievance outcome.')`;
+        },
+      },
+      {
+        // Fixture: a CHAIR rule in force from now (Q93), so the standalone grievance waits for the chair.
+        fn: "record_grievance",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          await s.as("platformAdmin");
+          await s.tx`select api.set_committee_rule_set(${ids.gc!}, now(), 'MAJORITY_ELIGIBLE', null, true, 3, true, 30,
+            'CHAIR', 'NO_DECISION', 'SOURCE_REQUIRED', ${REASON})`;
+          await s.as("committeeSecretary");
+          return (ids.grievance2 = await one(
+            s,
+            s.tx`select api.record_grievance('STANDALONE', null, 'Employee Phi (synthetic)', 'Walk grievance (synthetic)',
+              'CONFIDENTIAL'::core.classification_level, ${USERS.caseManager}, 'EMAIL', now(), now() - interval '5 days',
+              'Synthetic: walk standalone grievance.', 'EMAIL-DEMO-WALK2') as id`,
+          ));
+        },
+      },
+      {
+        fn: "decide_grievance_admissibility",
+        actor: "legal",
+        run: async (s) => {
+          await s.as("committeeSecretary");
+          await s.tx`select api.assess_grievance_admissibility(${ids.grievance2!}, 'INADMISSIBLE', null, ${REASON})`;
+          await s.as("legal");
+          return s.tx`select api.decide_grievance_admissibility(${ids.grievance2!}, 'INADMISSIBLE', null, ${REASON})`;
+        },
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
@@ -1304,6 +1450,8 @@ describe("audit internals are not reachable", () => {
       "authz.can_discover_case",
       "authz.can_download_evidence",
       "authz.can_edit_case",
+      "authz.can_handle_grievance",
+      "authz.can_manage_defence",
       "authz.can_manage_disposition",
       "authz.can_manage_meeting",
       "authz.can_manage_recommendation_package",
@@ -1325,6 +1473,8 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_committee_registry",
       "authz.can_view_evidence",
       "authz.can_view_form_instance",
+      "authz.can_view_grievance",
+      "authz.can_view_grievance_assessment",
       "authz.can_view_interview",
       "authz.can_view_meeting",
       "authz.can_view_meeting_deliberation",
@@ -1346,6 +1496,7 @@ describe("audit internals are not reachable", () => {
       "authz.has_permission",
       "authz.in_records_catalogue_scope",
       "authz.is_committee_secretary",
+      "authz.is_portal_subject",
       "authz.task_grants",
       "forms.canonical_json",
       "forms.content_hash",

@@ -3,9 +3,11 @@ import { COMMITTEE_SEATS } from "@cdf/contracts";
 import {
   SINGLE_HOLDER_SEATS,
   addBusinessDays,
+  grievanceOutcomesValid,
   isBusinessDay,
   isCaseWide,
   isEffectiveAt,
+  isLateGrievance,
   isQuorate,
   isVotingSeat,
   legalReviewRequired,
@@ -125,5 +127,22 @@ describe("recommendations (ADR-021, ADR-022)", () => {
     expect(isCaseWide(0, 0)).toBe(true);
     expect(isCaseWide(1, 0)).toBe(false);
     expect(isCaseWide(0, 2)).toBe(false);
+  });
+});
+
+describe("grievances (ADR-024)", () => {
+  it("flags a grievance filed after the window as late", () => {
+    expect(isLateGrievance("2026-09-01T09:00:00Z", "2026-10-01T09:00:00Z", 30)).toBe(false);
+    expect(isLateGrievance("2026-09-01T09:00:00Z", "2026-10-01T09:00:01Z", 30)).toBe(true);
+  });
+
+  it("combines outcomes unless they contradict", () => {
+    expect(grievanceOutcomesValid(["MODIFY", "RETURN_FOR_REINVESTIGATION"])).toBe(true);
+    expect(grievanceOutcomesValid(["UPHOLD", "CORRECTIVE_ACTION"])).toBe(true);
+    expect(grievanceOutcomesValid(["UPHOLD", "CANCEL"])).toBe(false);
+    expect(grievanceOutcomesValid(["MODIFY", "CANCEL"])).toBe(false);
+    expect(grievanceOutcomesValid(["INADMISSIBLE"])).toBe(false);
+    expect(grievanceOutcomesValid(["UPHOLD", "UPHOLD"])).toBe(false);
+    expect(grievanceOutcomesValid([])).toBe(false);
   });
 });

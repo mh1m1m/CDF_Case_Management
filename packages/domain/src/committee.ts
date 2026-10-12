@@ -5,6 +5,7 @@
  */
 import type {
   CommitteeSeat,
+  GrievanceOutcome,
   ProceedingStatus,
   ProceedingType,
   QuorumType,
@@ -177,4 +178,36 @@ export function legalReviewRequired(approvedItemTypes: readonly RecommendationIt
 /** Q89: an item that names no subject and no allegation applies to the whole case. */
 export function isCaseWide(subjectCount: number, allegationCount: number): boolean {
   return subjectCount === 0 && allegationCount === 0;
+}
+
+// ---- Grievances (ADR-024, migration 1910) ------------------------------------------------------------------
+
+/** Q94: late when submitted more than the window after the contested decision. A flag, never a rejection. */
+export function isLateGrievance(
+  contestedDecisionDate: string,
+  submittedAt: string,
+  windowDays: number,
+): boolean {
+  return Date.parse(submittedAt) > Date.parse(contestedDecisionDate) + windowDays * 24 * 60 * 60 * 1000;
+}
+
+const CONFIRMING: readonly GrievanceOutcome[] = ["UPHOLD", "REJECT_ON_MERITS"];
+const CHANGING: readonly GrievanceOutcome[] = [
+  "MODIFY",
+  "CANCEL",
+  "PARTIALLY_ACCEPT",
+  "RETURN_FOR_REINVESTIGATION",
+];
+
+/**
+ * Q95: outcomes combine unless they contradict (confirming and changing the decision together, or MODIFY with
+ * CANCEL). INADMISSIBLE is the admissibility decision, never a committee outcome. Mirrors
+ * api.record_grievance_outcome.
+ */
+export function grievanceOutcomesValid(outcomes: readonly GrievanceOutcome[]): boolean {
+  if (outcomes.length === 0 || new Set(outcomes).size !== outcomes.length) return false;
+  if (outcomes.includes("INADMISSIBLE")) return false;
+  if (outcomes.some((o) => CONFIRMING.includes(o)) && outcomes.some((o) => CHANGING.includes(o)))
+    return false;
+  return !(outcomes.includes("MODIFY") && outcomes.includes("CANCEL"));
 }
