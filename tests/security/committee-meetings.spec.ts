@@ -128,6 +128,15 @@ describe("meetings: scheduling and visibility", () => {
       expect(await s.tx`select id from committee.meeting where id = ${f.meeting}`).toHaveLength(1);
       expect(await s.tx`select id from committee.vote_item`).toEqual([]);
       expect(await s.tx`select id from committee.minutes`).toEqual([]);
+      // AGENT-09 V4: an invitee outside the case team sees their own participant row, not the seats, conflicts or
+      // other invitees.
+      await s.as("committeeSecretary");
+      const [expert] = await s.tx<{ id: string }[]>`
+        select api.invite_to_meeting(${f.meeting}, 'EXPERT', ${USERS.employeeB}, null, false, ${REASON}) as id`;
+      await s.as("employeeB");
+      expect(await s.tx`select id from committee.meeting where id = ${f.meeting}`).toHaveLength(1);
+      expect(await s.tx`select id from committee.meeting_participant`).toEqual([{ id: expert!.id }]);
+      expect(await s.tx`select id from committee.vote_item`).toEqual([]);
     });
   });
 
@@ -204,11 +213,11 @@ describe("conflict of interest and attendance (N4, N5)", () => {
       await s.tx`select api.record_attendance(${f.participant.committeeChair!}, 'PRESENT')`;
       await s.tx`select api.record_attendance(${f.participant.legal!}, 'PRESENT')`;
       const item = await openItem(s, f.meeting);
+      // A member who has not declared sees no deliberation until they do (AGENT-09 V3), so cannot vote either.
       await s.as("lead");
-      await s.expectError(
-        "CDF_CONFLICT:COI_NOT_CLEARED",
-        (tx) => tx`select api.cast_vote(${item}, 'APPROVE', null)`,
-      );
+      expect(await s.tx`select id from committee.vote_item`).toEqual([]);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.vote_item_status(${item})`);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.cast_vote(${item}, 'APPROVE', null)`);
       await s.as("legalB");
       expect(await s.tx`select id from committee.vote_item`).toEqual([]); // no deliberation for the conflicted
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.cast_vote(${item}, 'APPROVE', null)`);
@@ -220,6 +229,27 @@ describe("conflict of interest and attendance (N4, N5)", () => {
       const r = await itemRow(s, item);
       expect(r.eligible_count).toBe(2);
       expect(r.present_count).toBe(2);
+    });
+  });
+
+  it("a conflict declared in one meeting carries into the proceeding's later meetings", async () => {
+    await scenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await s.as("legal");
+      await s.tx`select api.declare_meeting_conflict(${f.participant.legal!}, 'CONFLICT_DECLARED', 'Synthetic: related party.')`;
+      await s.as("committeeSecretary");
+      const [m2] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${f.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '3 days', now() + interval '3 days 1 hour', ${REASON}) as id`;
+      const [p2] = await s.tx<{ id: string }[]>`
+        select id from committee.meeting_participant where meeting_id = ${m2!.id} and user_id = ${USERS.legal}`;
+      await s.as("legal");
+      await s.expectError(
+        "CDF_CONFLICT:PRIOR_CONFLICT_DECLARED",
+        (tx) => tx`select api.declare_meeting_conflict(${p2!.id}, 'NO_CONFLICT', null)`,
+      );
+      await s.tx`select api.declare_meeting_conflict(${p2!.id}, 'CONFLICT_DECLARED', 'Synthetic: still related.')`;
     });
   });
 
@@ -250,12 +280,25 @@ describe("voting (N6, N7, N8)", () => {
             tx`select api.record_vote_for_member(${item}, ${f.participant.legal!}, ${choice}, 'Synthetic: on behalf.', null)`,
         );
       }
+      // A present member votes for themself, recusal included: the secretary cannot pre-empt them (AGENT-09 V1b).
+      for (const choice of ["ABSENT", "UNABLE_TO_VOTE", "RECUSED"]) {
+        await s.expectError(
+          "CDF_CONFLICT:MEMBER_PRESENT",
+          (tx) =>
+            tx`select api.record_vote_for_member(${item}, ${f.participant.legal!}, ${choice}, 'Synthetic: on behalf.', null)`,
+        );
+      }
       await s.expectError(
         "CDF_INVALID:reason",
         (tx) =>
-          tx`select api.record_vote_for_member(${item}, ${f.participant.legal!}, 'UNABLE_TO_VOTE', null, null)`,
+          tx`select api.record_vote_for_member(${item}, ${f.participant.lead!}, 'UNABLE_TO_VOTE', null, null)`,
       );
-      await s.tx`select api.record_vote_for_member(${item}, ${f.participant.legal!}, 'UNABLE_TO_VOTE', 'Synthetic: left the room.', null)`;
+      await s.tx`select api.record_vote_for_member(${item}, ${f.participant.lead!}, 'UNABLE_TO_VOTE', 'Synthetic: not reachable.', null)`;
+      await s.expectError(
+        "CDF_CONFLICT:ALREADY_VOTED",
+        (tx) =>
+          tx`select api.record_vote_for_member(${item}, ${f.participant.lead!}, 'ABSENT', 'Synthetic: on behalf.', null)`,
+      );
       // A member cannot record for another member either.
       await s.as("legalB");
       await s.expectError(
@@ -263,12 +306,39 @@ describe("voting (N6, N7, N8)", () => {
         (tx) =>
           tx`select api.record_vote_for_member(${item}, ${f.participant.committeeChair!}, 'ABSENT', 'Synthetic: on behalf.', null)`,
       );
-      // The member cannot then vote over the recorded status.
-      await s.as("legal");
+      await vote(s, "legal", item, "APPROVE");
+    });
+  });
+
+  it("attendance is frozen while a vote is undecided, so the secretary cannot drop a counted vote (AGENT-09 V1a)", async () => {
+    await scenario(async (s) => {
+      const f = await ready(s, ["committeeChair", "legal", "legalB"]);
+      const item = await openItem(s, f.meeting);
+      await vote(s, "legal", item, "APPROVE");
+      await s.as("committeeSecretary");
       await s.expectError(
-        "CDF_CONFLICT:ALREADY_VOTED",
-        (tx) => tx`select api.cast_vote(${item}, 'APPROVE', null)`,
+        "CDF_CONFLICT:VOTE_IN_PROGRESS",
+        (tx) => tx`select api.record_attendance(${f.participant.legal!}, 'ABSENT')`,
       );
+      // A late arrival cannot be added mid-vote either.
+      await s.as("lead");
+      await s.tx`select api.declare_meeting_conflict(${f.participant.lead!}, 'NO_CONFLICT', null)`;
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:VOTE_IN_PROGRESS",
+        (tx) => tx`select api.record_attendance(${f.participant.lead!}, 'PRESENT')`,
+      );
+      await vote(s, "legalB", item, "REJECT");
+      await vote(s, "committeeChair", item, "REJECT");
+      await s.as("committeeSecretary");
+      expect((await s.tx<{ r: string }[]>`select api.close_vote_item(${item}, null) as r`)[0]!.r).toBe(
+        "REJECTED",
+      );
+      const [t] = await s.tx<{ approve_count: number; excluded_count: number }[]>`
+        select approve_count, excluded_count from committee.vote_item where id = ${item}`;
+      expect(t).toEqual({ approve_count: 1, excluded_count: 0 });
+      // Once every item is decided, attendance can change again.
+      await s.tx`select api.record_attendance(${f.participant.lead!}, 'PRESENT')`;
     });
   });
 
@@ -392,10 +462,47 @@ describe("voting (N6, N7, N8)", () => {
     });
   });
 
+  it("a chair who recused on the item cannot break its tie (AGENT-09 V2)", async () => {
+    await scenario(async (s) => {
+      const f = await ready(s);
+      const item = await openItem(s, f.meeting);
+      await vote(s, "committeeChair", item, "RECUSED");
+      await vote(s, "legal", item, "APPROVE");
+      await vote(s, "lead", item, "REJECT");
+      await vote(s, "legalB", item, "ABSTAIN");
+      await s.as("committeeSecretary");
+      expect((await s.tx<{ r: string }[]>`select api.close_vote_item(${item}, null) as r`)[0]!.r).toBe(
+        "TIED",
+      );
+      await s.as("committeeChair");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.cast_casting_vote(${item}, 'APPROVE', null)`,
+      );
+    });
+  });
+
+  it("when nobody approves or rejects, the item is not decided and the chair never decides alone (AGENT-09 V5)", async () => {
+    await scenario(async (s) => {
+      const f = await ready(s);
+      const item = await openItem(s, f.meeting);
+      for (const u of VOTERS) await vote(s, u, item, "ABSTAIN");
+      await s.as("committeeSecretary");
+      expect((await s.tx<{ r: string }[]>`select api.close_vote_item(${item}, null) as r`)[0]!.r).toBe(
+        "NO_DECISION",
+      );
+      await s.as("committeeChair");
+      await s.expectError(
+        "CDF_CONFLICT:NOT_A_TIE",
+        (tx) => tx`select api.cast_casting_vote(${item}, 'REJECT', null)`,
+      );
+    });
+  });
+
   it("with the casting vote disabled by the rule in force at referral, a tie stays TIED", async () => {
     await scenario(async (s) => {
       await s.as("platformAdmin");
-      await s.tx`select api.set_committee_rule_set(${ic}, now(), 'MAJORITY_ELIGIBLE', null, false, 3, true, null, null, 'SOURCE_REQUIRED', ${REASON})`;
+      await s.tx`select api.set_committee_rule_set(${ic}, now(), 'MAJORITY_ELIGIBLE', null, false, 3, true, null, null, 'NO_DECISION', 'SOURCE_REQUIRED', ${REASON})`;
       const f = await ready(s);
       const tie = await openItem(s, f.meeting);
       await vote(s, "legal", tie, "APPROVE");
@@ -519,11 +626,11 @@ describe("minutes (Q97–Q98)", () => {
 describe("meeting records are append-only", () => {
   it("votes, conflicts and reviews cannot be changed or deleted even by the owner; a closed meeting is frozen", async () => {
     await ownerScenario(async (s) => {
-      const f = await ready(s);
+      const f = await ready(s, ["committeeChair", "legal", "legalB"]);
       const item = await openItem(s, f.meeting);
       await vote(s, "legal", item, "APPROVE");
       await s.as("committeeSecretary");
-      await s.tx`select api.record_vote_for_member(${item}, ${f.participant.legalB!}, 'ABSENT', 'Synthetic: absent.', null)`;
+      await s.tx`select api.record_vote_for_member(${item}, ${f.participant.lead!}, 'ABSENT', 'Synthetic: absent.', null)`;
       await s.asOwner();
       await s.expectError(
         "committee.vote is append-only",

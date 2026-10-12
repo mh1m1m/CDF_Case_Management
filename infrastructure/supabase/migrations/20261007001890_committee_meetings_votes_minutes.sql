@@ -149,7 +149,7 @@ create table committee.vote_item (
   finding_id              uuid references case_mgmt.finding (id),
   title                   text not null check (length(title) between 3 and 300),
   status                  text not null default 'OPEN' check (status in ('OPEN', 'AWAITING_CASTING_VOTE', 'CLOSED')),
-  result                  text check (result in ('APPROVED', 'REJECTED', 'TIED', 'NO_QUORUM')),
+  result                  text check (result in ('APPROVED', 'REJECTED', 'TIED', 'NO_DECISION', 'NO_QUORUM')),
   eligible_count          int,
   present_count           int,
   quorum_required         int,
@@ -372,8 +372,9 @@ as $$
   );
 $$;
 
--- Deliberation (vote items, minutes in review): the managing secretary, or a member of the meeting who has not
--- declared a conflict, cleared for the case. A conflicted member sees nothing of the deliberation (Q42, Q44).
+-- Deliberation (vote items, minutes in review): the managing secretary, or a member of the meeting who has declared
+-- no conflict, cleared for the case. A member who is conflicted, or has not declared yet, sees nothing of the
+-- deliberation (Q41–Q44; AGENT-09 V3: fail safe until the declaration).
 create function authz.can_view_meeting_deliberation(p_meeting_id uuid)
 returns boolean
 language sql stable security definer
@@ -383,13 +384,27 @@ as $$
     select 1 from committee.meeting m
     join committee.meeting_participant mp on mp.meeting_id = m.id
     where m.id = p_meeting_id and mp.participant_kind = 'MEMBER' and mp.user_id = authz.current_user_id()
-      and mp.coi_status <> 'CONFLICT_DECLARED'
+      and mp.coi_status = 'NO_CONFLICT'
       and authz.user_case_gate(authz.current_user_id(), m.case_id)
   );
 $$;
 
+-- The participant list (seats, conflict statuses, invitees): whoever can see the committee proceeding. An invitee who
+-- is not on the proceeding sees only their own row and the meeting logistics (AGENT-09 V4).
+create function authz.can_view_meeting_roster(p_meeting_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and exists (
+    select 1 from committee.meeting m
+    where m.id = p_meeting_id and authz.can_view_committee_proceeding(m.committee_proceeding_id)
+  );
+$$;
+
 grant execute on function
-  authz.can_view_meeting(uuid), authz.can_manage_meeting(uuid), authz.can_view_meeting_deliberation(uuid)
+  authz.can_view_meeting(uuid), authz.can_manage_meeting(uuid), authz.can_view_meeting_deliberation(uuid),
+  authz.can_view_meeting_roster(uuid)
 to authenticated;
 
 -- -----------------------------------------------------------------------------
@@ -408,7 +423,8 @@ create policy meeting_read on committee.meeting for select to authenticated usin
 grant select on committee.meeting to authenticated;
 
 create policy meeting_participant_read on committee.meeting_participant for select to authenticated
-  using (authz.can_view_meeting(meeting_id));
+  using (authz.can_view_meeting_roster(meeting_id)
+         or (user_id = authz.current_user_id() and authz.can_view_meeting(meeting_id)));
 grant select on committee.meeting_participant to authenticated;
 
 create policy meeting_conflict_read on committee.meeting_conflict for select to authenticated
@@ -613,7 +629,8 @@ end;
 $$;
 
 -- A participant declares for themself; the secretary records the declaration of an invitee without an account.
--- NO_CONFLICT may later become CONFLICT_DECLARED; a declared conflict is final for the meeting.
+-- NO_CONFLICT may later become CONFLICT_DECLARED; a declared conflict is final for the meeting, and a member who declared
+-- a conflict in an earlier meeting of the same proceeding cannot declare NO_CONFLICT in a later one (fail safe).
 create function api.declare_meeting_conflict(p_participant_id uuid, p_status text, p_reason text)
 returns void
 language plpgsql security definer
@@ -642,6 +659,13 @@ begin
   if p_status is null or p_status not in ('NO_CONFLICT', 'CONFLICT_DECLARED') then perform api._fail('INVALID', 'status'); end if;
   if v_p.coi_status = 'CONFLICT_DECLARED' or (v_p.coi_status = 'NO_CONFLICT' and p_status = 'NO_CONFLICT') then
     perform api._fail('CONFLICT', 'COI_ALREADY_DECLARED');
+  end if;
+  if p_status = 'NO_CONFLICT' and v_p.participant_kind = 'MEMBER' and exists (
+       select 1 from committee.meeting_participant prior
+       join committee.meeting pm on pm.id = prior.meeting_id
+       where pm.committee_proceeding_id = v_m.committee_proceeding_id and pm.id <> v_m.id
+         and prior.proceeding_member_id = v_p.proceeding_member_id and prior.coi_status = 'CONFLICT_DECLARED') then
+    perform api._fail('CONFLICT', 'PRIOR_CONFLICT_DECLARED');
   end if;
   v_reason := case when p_status = 'CONFLICT_DECLARED' or p_reason is not null
                    then api._require_text(p_reason, 'reason', 5, 2000) end;
@@ -688,7 +712,8 @@ begin
 end;
 $$;
 
--- N4 / Q44: PRESENT only for a cleared participant; EXCUSED_CONFLICT only for a declared conflict.
+-- N4 / Q44: PRESENT only for a cleared participant; EXCUSED_CONFLICT only for a declared conflict. Attendance is frozen
+-- while any vote item of the meeting is undecided, so the secretary cannot change whose votes count (AGENT-09 V1a).
 create function api.record_attendance(p_participant_id uuid, p_attendance text)
 returns void
 language plpgsql security definer
@@ -704,6 +729,9 @@ begin
   v_m := committee.lock_managed_meeting(v_p.meeting_id);
   select * into v_p from committee.meeting_participant mp where mp.id = p_participant_id for update;
   if v_m.status <> 'OPEN' then perform api._fail('CONFLICT', 'MEETING_NOT_OPEN'); end if;
+  if exists (select 1 from committee.vote_item vi where vi.meeting_id = v_m.id and vi.status <> 'CLOSED') then
+    perform api._fail('CONFLICT', 'VOTE_IN_PROGRESS');
+  end if;
   if p_attendance is null or p_attendance not in ('PRESENT', 'ABSENT', 'EXCUSED_CONFLICT') then
     perform api._fail('INVALID', 'attendance');
   end if;
@@ -850,7 +878,8 @@ begin
 end;
 $$;
 
--- N6 (Q60): the secretary records ABSENT, UNABLE_TO_VOTE or RECUSED for a voting member, with a reason.
+-- N6 (Q60): the secretary records ABSENT, UNABLE_TO_VOTE or RECUSED for a voting member who is not present, with a
+-- reason. A present member votes for themself, recusal included (AGENT-09 V1b).
 create function api.record_vote_for_member(
   p_vote_item_id uuid, p_participant_id uuid, p_choice text, p_reason text, p_original_event_at timestamptz
 )
@@ -870,6 +899,7 @@ begin
   where mp.id = p_participant_id and mp.meeting_id = v_item.meeting_id and mp.participant_kind = 'MEMBER' and mp.is_voting;
   if v_p.id is null then perform api._fail('INVALID', 'participant_id'); end if;
   if v_p.user_id = v_actor then perform api._fail('FORBIDDEN'); end if;
+  if v_p.attendance = 'PRESENT' then perform api._fail('CONFLICT', 'MEMBER_PRESENT'); end if;
   if v_item.status <> 'OPEN' then perform api._fail('CONFLICT', 'VOTE_NOT_OPEN'); end if;
   if p_original_event_at is not null and p_original_event_at > now() then perform api._fail('INVALID', 'original_event_at'); end if;
   if exists (select 1 from committee.vote v where v.vote_item_id = v_item.id and v.participant_id = v_p.id) then
@@ -950,9 +980,12 @@ begin
         from committee.vote v join committee.meeting_participant mp on mp.id = v.participant_id
         where v.vote_item_id = v_item.id) v;
 
+  -- The chair breaks a tie only with a counted vote of their own on this item that is not a recusal (AGENT-09 V2).
   v_chair_ready := exists (select 1 from committee.meeting_participant mp
+                           join committee.vote v on v.participant_id = mp.id and v.vote_item_id = v_item.id
                            where mp.meeting_id = v_item.meeting_id and mp.participant_kind = 'MEMBER' and mp.seat = 'CHAIR'
                              and mp.is_voting and mp.coi_status = 'NO_CONFLICT' and mp.attendance = 'PRESENT'
+                             and v.choice in ('APPROVE', 'REJECT', 'ABSTAIN')
                              and authz.user_case_gate(mp.user_id, v_item.case_id));
   v_status := 'CLOSED';
   if v_eligible = 0 or (v_required is not null and v_present < v_required) or (v_required is null and v_present = 0) then
@@ -961,6 +994,9 @@ begin
     v_result := 'APPROVED';
   elsif v_counts.reject > v_counts.approve then
     v_result := 'REJECTED';
+  elsif v_counts.approve = 0 then
+    -- Nobody approved or rejected: never decided by the chair alone (AGENT-09 V5; label configurable, SOURCE_REQUIRED).
+    v_result := coalesce(v_rule ->> 'no_substantive_vote_outcome', 'NO_DECISION');
   elsif coalesce((v_rule ->> 'casting_vote_enabled')::boolean, false) and v_chair_ready then
     v_status := 'AWAITING_CASTING_VOTE';
     v_result := null;
@@ -987,7 +1023,8 @@ begin
 end;
 $$;
 
--- N8 (Q57): only on a tie the rule lets the chair break, by the present, cleared chair.
+-- N8 (Q57): only on a tie the rule lets the chair break, by the present, cleared chair whose own counted vote on the
+-- item is not a recusal (AGENT-09 V2).
 create function api.cast_casting_vote(p_vote_item_id uuid, p_choice text, p_reason text)
 returns text
 language plpgsql security definer
@@ -1001,7 +1038,10 @@ begin
   v_item := committee.lock_vote_item(p_vote_item_id);
   if not exists (select 1 from committee.meeting_participant mp
                  where mp.meeting_id = v_item.meeting_id and mp.user_id = v_actor and mp.participant_kind = 'MEMBER'
-                   and mp.seat = 'CHAIR' and mp.is_voting and mp.coi_status = 'NO_CONFLICT' and mp.attendance = 'PRESENT') then
+                   and mp.seat = 'CHAIR' and mp.is_voting and mp.coi_status = 'NO_CONFLICT' and mp.attendance = 'PRESENT'
+                   and exists (select 1 from committee.vote v
+                               where v.vote_item_id = v_item.id and v.participant_id = mp.id
+                                 and v.choice in ('APPROVE', 'REJECT', 'ABSTAIN'))) then
     perform api._fail('FORBIDDEN');
   end if;
   if v_item.status <> 'AWAITING_CASTING_VOTE' then perform api._fail('CONFLICT', 'NOT_A_TIE'); end if;

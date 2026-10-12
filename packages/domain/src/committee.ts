@@ -143,16 +143,19 @@ export function tallyVotes(votes: readonly CountedVote[]): Tally {
 
 /**
  * The outcome api.close_vote_item records: NO_QUORUM without quorum; otherwise a simple majority of APPROVE over
- * REJECT (SOURCE_REQUIRED); a tie awaits the chair's casting vote when the rule enables it and the chair can vote,
- * else TIED.
+ * REJECT (SOURCE_REQUIRED); with no APPROVE or REJECT at all the rule's no-substantive-vote outcome (never the
+ * chair alone); a tie awaits the chair's casting vote when the rule enables it and the chair cast a counted,
+ * non-recused vote, else TIED.
  */
 export function voteOutcome(
   tally: Pick<Tally, "approve" | "reject">,
   quorate: boolean,
   castingVoteAvailable: boolean,
+  noSubstantiveVoteOutcome: "NO_DECISION" | "TIED" = "NO_DECISION",
 ): VoteResult | "AWAITING_CASTING_VOTE" {
   if (!quorate) return "NO_QUORUM";
   if (tally.approve > tally.reject) return "APPROVED";
   if (tally.reject > tally.approve) return "REJECTED";
+  if (tally.approve === 0) return noSubstantiveVoteOutcome;
   return castingVoteAvailable ? "AWAITING_CASTING_VOTE" : "TIED";
 }

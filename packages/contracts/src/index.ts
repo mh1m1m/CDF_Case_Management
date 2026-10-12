@@ -1006,7 +1006,7 @@ export const SELF_VOTE_CHOICES: readonly VoteChoice[] = ["APPROVE", "REJECT", "A
 export const SECRETARY_RECORDABLE_CHOICES: readonly VoteChoice[] = ["ABSENT", "UNABLE_TO_VOTE", "RECUSED"];
 export const VOTE_ITEM_STATUSES = ["OPEN", "AWAITING_CASTING_VOTE", "CLOSED"] as const;
 export type VoteItemStatus = (typeof VOTE_ITEM_STATUSES)[number];
-export const VOTE_RESULTS = ["APPROVED", "REJECTED", "TIED", "NO_QUORUM"] as const;
+export const VOTE_RESULTS = ["APPROVED", "REJECTED", "TIED", "NO_DECISION", "NO_QUORUM"] as const;
 export type VoteResult = (typeof VOTE_RESULTS)[number];
 export const MINUTES_STATUSES = [
   "IN_REVIEW",

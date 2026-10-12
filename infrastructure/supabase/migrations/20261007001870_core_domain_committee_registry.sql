@@ -293,6 +293,9 @@ create table committee.rule_set (
   deemed_approval_enabled      boolean not null,
   grievance_window_days        int check (grievance_window_days between 1 and 365),
   admissibility_decider        text check (admissibility_decider in ('SECRETARY', 'CHAIR', 'COMMITTEE')),
+  -- An item where nobody votes APPROVE or REJECT (all abstain or recuse) is never decided by the chair alone
+  -- (AGENT-09 V5). Its label is configurable; SOURCE_REQUIRED.
+  no_substantive_vote_outcome  text not null default 'NO_DECISION' check (no_substantive_vote_outcome in ('NO_DECISION', 'TIED')),
   source_status                text not null check (source_status in ('OWNER_DEFAULT', 'SOURCE_REQUIRED', 'APPROVED')),
   reason                       text check (length(reason) between 5 and 2000),
   created_by                   uuid references iam.user_profile (id),
@@ -1129,7 +1132,8 @@ $$;
 create function api.set_committee_rule_set(
   p_committee_id uuid, p_effective_from timestamptz, p_quorum_type text, p_quorum_value numeric,
   p_casting_vote_enabled boolean, p_minutes_review_business_days int, p_deemed_approval_enabled boolean,
-  p_grievance_window_days int, p_admissibility_decider text, p_source_status text, p_reason text
+  p_grievance_window_days int, p_admissibility_decider text, p_no_substantive_vote_outcome text, p_source_status text,
+  p_reason text
 )
 returns uuid
 language plpgsql security definer
@@ -1168,6 +1172,9 @@ begin
   elsif p_grievance_window_days is not null or p_admissibility_decider is not null then
     perform api._fail('INVALID', 'grievance_rules');
   end if;
+  if p_no_substantive_vote_outcome is null or p_no_substantive_vote_outcome not in ('NO_DECISION', 'TIED') then
+    perform api._fail('INVALID', 'no_substantive_vote_outcome');
+  end if;
   if p_source_status is null or p_source_status not in ('OWNER_DEFAULT', 'SOURCE_REQUIRED', 'APPROVED') then
     perform api._fail('INVALID', 'source_status');
   end if;
@@ -1184,14 +1191,15 @@ begin
 
   insert into committee.rule_set (committee_id, effective_from, quorum_type, quorum_value, casting_vote_enabled,
                                   minutes_review_business_days, deemed_approval_enabled, grievance_window_days,
-                                  admissibility_decider, source_status, reason, created_by)
+                                  admissibility_decider, no_substantive_vote_outcome, source_status, reason, created_by)
   values (p_committee_id, p_effective_from, p_quorum_type, p_quorum_value, p_casting_vote_enabled,
           p_minutes_review_business_days, p_deemed_approval_enabled, p_grievance_window_days,
-          p_admissibility_decider, p_source_status, v_reason, v_actor)
+          p_admissibility_decider, p_no_substantive_vote_outcome, p_source_status, v_reason, v_actor)
   returning id into v_id;
   perform audit.record_event('COMMITTEE_RULE_SET_CHANGED', 'ADMIN', 'SUCCESS', null, 'committee_rule_set', v_id::text, v_reason,
     jsonb_build_object('committee_id', p_committee_id, 'previous_rule_set_id', v_current.id, 'effective_from', p_effective_from,
-                       'quorum_type', p_quorum_type, 'quorum_value', p_quorum_value, 'source_status', p_source_status));
+                       'quorum_type', p_quorum_type, 'quorum_value', p_quorum_value,
+                       'no_substantive_vote_outcome', p_no_substantive_vote_outcome, 'source_status', p_source_status));
   return v_id;
 end;
 $$;
@@ -1356,6 +1364,6 @@ grant execute on function
   api.link_supporting_material(uuid, uuid, uuid),
   api.appoint_committee_member(uuid, uuid, text, timestamptz, timestamptz, text),
   api.end_committee_membership(uuid, timestamptz, text),
-  api.set_committee_rule_set(uuid, timestamptz, text, numeric, boolean, int, boolean, int, text, text, text),
+  api.set_committee_rule_set(uuid, timestamptz, text, numeric, boolean, int, boolean, int, text, text, text, text),
   api.refer_case_to_committee(uuid, uuid, uuid, text)
 to authenticated;

@@ -130,7 +130,7 @@ describe("registry administration (N13, Q28)", () => {
         await s.expectError(
           "CDF_FORBIDDEN",
           (tx) =>
-            tx`select api.set_committee_rule_set(${ic}, now(), 'MAJORITY_ELIGIBLE', null, true, 3, true, null, null, 'APPROVED', ${REASON})`,
+            tx`select api.set_committee_rule_set(${ic}, now(), 'MAJORITY_ELIGIBLE', null, true, 3, true, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`,
         );
       });
     },
@@ -166,23 +166,23 @@ describe("registry administration (N13, Q28)", () => {
       await s.expectError(
         "CDF_INVALID:effective_from",
         (tx) =>
-          tx`select api.set_committee_rule_set(${ic}, now() - interval '1 day', 'MAJORITY_ELIGIBLE', null, true, 3, true, null, null, 'APPROVED', ${REASON})`,
+          tx`select api.set_committee_rule_set(${ic}, now() - interval '1 day', 'MAJORITY_ELIGIBLE', null, true, 3, true, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`,
       );
       await s.expectError(
         "CDF_INVALID:grievance_rules",
         (tx) =>
-          tx`select api.set_committee_rule_set(${ic}, now(), 'MAJORITY_ELIGIBLE', null, true, 3, true, 30, 'SECRETARY', 'APPROVED', ${REASON})`,
+          tx`select api.set_committee_rule_set(${ic}, now(), 'MAJORITY_ELIGIBLE', null, true, 3, true, 30, 'SECRETARY', 'NO_DECISION', 'APPROVED', ${REASON})`,
       );
       await s.expectError(
         "CDF_INVALID:quorum_value",
         (tx) =>
-          tx`select api.set_committee_rule_set(${ic}, now(), 'PERCENTAGE', 120, true, 3, true, null, null, 'APPROVED', ${REASON})`,
+          tx`select api.set_committee_rule_set(${ic}, now(), 'PERCENTAGE', 120, true, 3, true, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`,
       );
-      await s.tx`select api.set_committee_rule_set(${ic}, now() + interval '7 days', 'FIXED_NUMBER', 3, false, 5, false, null, null, 'APPROVED', ${REASON})`;
+      await s.tx`select api.set_committee_rule_set(${ic}, now() + interval '7 days', 'FIXED_NUMBER', 3, false, 5, false, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`;
       await s.expectError(
         "CDF_CONFLICT:RULE_SET_SCHEDULED",
         (tx) =>
-          tx`select api.set_committee_rule_set(${ic}, now() + interval '1 day', 'MAJORITY_ELIGIBLE', null, true, 3, true, null, null, 'APPROVED', ${REASON})`,
+          tx`select api.set_committee_rule_set(${ic}, now() + interval '1 day', 'MAJORITY_ELIGIBLE', null, true, 3, true, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`,
       );
       const rows = await s.tx<{ quorum_type: string; open_ended: boolean }[]>`
         select quorum_type, effective_to is null as open_ended from committee.rule_set where committee_id = ${ic} order by effective_from`;
@@ -211,7 +211,7 @@ describe("committee proceedings and snapshots (Q30, Q45–Q46)", () => {
       const cp = await refer(s, ic);
       await s.as("platformAdmin");
       await s.tx`select api.end_committee_membership(${seats.member}, now(), ${REASON})`;
-      await s.tx`select api.set_committee_rule_set(${ic}, now(), 'FIXED_NUMBER', 2, false, 5, false, null, null, 'APPROVED', ${REASON})`;
+      await s.tx`select api.set_committee_rule_set(${ic}, now(), 'FIXED_NUMBER', 2, false, 5, false, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`;
       await s.as("committeeSecretary");
       const members = await s.tx<{ user_id: string; seat: string; is_voting: boolean }[]>`
         select user_id, seat, is_voting from committee.proceeding_member where committee_proceeding_id = ${cp} order by seat`;

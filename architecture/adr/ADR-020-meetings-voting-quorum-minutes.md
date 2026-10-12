@@ -27,7 +27,7 @@
 - The secretary may record only ABSENT, UNABLE_TO_VOTE or RECUSED for another member (check constraint + command). Members cast their own substantive votes.
 - The chair votes normally; on a tie, if the rule enables it, the chair's **casting vote** is a separate row (`committee.casting_vote`).
 - Secrecy: no SELECT grant or policy on `vote`. `api.vote_item_status` returns who voted and when while OPEN; choices and totals only after CLOSED.
-- Close requires quorum; result APPROVED / REJECTED / TIED / NO_QUORUM.
+- Close requires quorum; result APPROVED / REJECTED / TIED / NO_DECISION / NO_QUORUM.
 
 ### Minutes
 
@@ -39,6 +39,9 @@
 - Members are copied in at scheduling from the proceeding snapshot, leaving out grievance-firewalled and case-gate-excluded seats (ADR-018 points 6–7). Every participation check also passes `authz.user_case_gate`.
 - Predicates: `authz.can_view_meeting` (logistics), `authz.can_view_meeting_deliberation` (vote items, minutes in review), `authz.can_manage_meeting` (the secretary). Approved minutes are visible to the case team.
 - Close needs every present eligible member's vote row; votes of anyone not present-and-eligible at close are excluded and counted. Decision rule: simple majority of APPROVE over REJECT among counted votes (SOURCE_REQUIRED). A tie awaits the casting vote only when the rule enables it and the chair is present and eligible.
+- AGENT-09 review of 1890 (V1–V5): attendance is frozen while any vote item of the meeting is undecided (`VOTE_IN_PROGRESS`); the secretary records ABSENT / UNABLE_TO_VOTE / RECUSED only for a member who is not present (`MEMBER_PRESENT`); the chair breaks a tie only with a counted, non-recused vote of their own on the item; a member sees the deliberation only after declaring NO_CONFLICT (PENDING is fail safe); an invitee outside the proceeding sees only their own participant row (`authz.can_view_meeting_roster`).
+- When nobody votes APPROVE or REJECT the item closes as `NO_DECISION` (or `TIED`, per the rule set's `no_substantive_vote_outcome`, SOURCE_REQUIRED); the chair never decides it alone.
+- Conflict declarations are per meeting (Q41). A member who declared a conflict in an earlier meeting of the same proceeding cannot declare NO_CONFLICT in a later one (`PRIOR_CONFLICT_DECLARED`). A meeting declaration is not written to the case's `conflict_check`: removing all case access stays the case team's decision.
 - Minutes snapshots hold attendance, conflict statuses and results, never individual choices. With no eligible reviewer the minutes are final at once. Deemed approval needs the window to have passed and a recorded reminder (`api.record_minutes_reminder`).
 
 ## Consequences

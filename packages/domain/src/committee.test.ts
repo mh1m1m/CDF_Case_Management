@@ -105,5 +105,8 @@ describe("vote tally and outcome (Q55–Q63)", () => {
     expect(voteOutcome({ approve: 1, reject: 2 }, true, true)).toBe("REJECTED");
     expect(voteOutcome({ approve: 2, reject: 2 }, true, true)).toBe("AWAITING_CASTING_VOTE");
     expect(voteOutcome({ approve: 2, reject: 2 }, true, false)).toBe("TIED");
+    // Everyone abstained or recused: the chair never decides alone (AGENT-09 V5).
+    expect(voteOutcome({ approve: 0, reject: 0 }, true, true)).toBe("NO_DECISION");
+    expect(voteOutcome({ approve: 0, reject: 0 }, true, true, "TIED")).toBe("TIED");
   });
 });

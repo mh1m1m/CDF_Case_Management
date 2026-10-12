@@ -500,7 +500,7 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "platformAdmin",
         run: (s) =>
           s.tx`select api.set_committee_rule_set(${ids.committee!}, now(), 'FIXED_NUMBER', 2, true, 3, true, null, null,
-            'SOURCE_REQUIRED', ${REASON})`,
+            'NO_DECISION', 'SOURCE_REQUIRED', ${REASON})`,
       },
       {
         fn: "refer_case_to_committee",
@@ -598,6 +598,8 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "record_vote_for_member",
         actor: "committeeSecretary",
         run: async (s) => {
+          // Only for a member who is not present (AGENT-09 V1b); attendance changes only between vote items.
+          await s.tx`select api.record_attendance(${ids.memberSeat!}, 'ABSENT')`;
           const item = await one(
             s,
             s.tx`select api.open_vote_item(${ids.meeting!}, 'OTHER', null, 'Walk second item (synthetic)') as id`,
@@ -616,8 +618,13 @@ describe("every state-changing command writes its audit event in the same transa
       {
         fn: "close_vote_item",
         actor: "committeeSecretary",
-        run: (s) => s.tx`
-          select api.close_vote_item((select id from committee.vote_item where meeting_id = ${ids.meeting!} and sequence_no = 2), null)`,
+        run: async (s) => {
+          const r = await s.tx`
+            select api.close_vote_item((select id from committee.vote_item where meeting_id = ${ids.meeting!} and sequence_no = 2), null)`;
+          // The member is back for the end of the meeting, so they review the minutes.
+          await s.tx`select api.record_attendance(${ids.memberSeat!}, 'PRESENT')`;
+          return r;
+        },
       },
       {
         fn: "close_meeting",
@@ -1165,6 +1172,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_interview",
       "authz.can_view_meeting",
       "authz.can_view_meeting_deliberation",
+      "authz.can_view_meeting_roster",
       "authz.can_view_preliminary_recommendation",
       "authz.can_view_proceeding",
       "authz.can_view_records",
