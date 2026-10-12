@@ -3,7 +3,14 @@
  * happen and the application layer to refuse early. Migration 1870 and later committee migrations are the
  * authority and re-check every rule.
  */
-import type { CommitteeSeat, ProceedingStatus, ProceedingType, QuorumType } from "@cdf/contracts";
+import type {
+  CommitteeSeat,
+  ProceedingStatus,
+  ProceedingType,
+  QuorumType,
+  VoteChoice,
+  VoteResult,
+} from "@cdf/contracts";
 
 /** Chair, deputy chair and members vote; secretaries and alternates do not (api.refer_case_to_committee). */
 export const VOTING_SEATS: readonly CommitteeSeat[] = ["CHAIR", "DEPUTY_CHAIR", "MEMBER"];
@@ -81,4 +88,71 @@ export function quorumThreshold(rule: QuorumRule, eligible: number): number | nu
 export function isQuorate(rule: QuorumRule, eligible: number, present: number): boolean | null {
   const needed = quorumThreshold(rule, eligible);
   return needed === null ? null : eligible > 0 && present >= needed;
+}
+
+// ---- Meetings, voting and minutes (ADR-020, migration 1890) --------------------------------------------
+
+/** Business days are Sunday to Thursday in Asia/Riyadh. Public holidays are SOURCE_REQUIRED and not modelled. */
+const RIYADH_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+3 all year (no daylight saving)
+
+export function isBusinessDay(at: Date): boolean {
+  const day = new Date(at.getTime() + RIYADH_OFFSET_MS).getUTCDay();
+  return day !== 5 && day !== 6;
+}
+
+/** `days` business days after `from`, same local time of day (committee.add_business_days). */
+export function addBusinessDays(from: Date, days: number): Date {
+  let t = from.getTime();
+  let left = days;
+  while (left > 0) {
+    t += 24 * 60 * 60 * 1000;
+    if (isBusinessDay(new Date(t))) left -= 1;
+  }
+  return new Date(t);
+}
+
+export interface CountedVote {
+  choice: VoteChoice;
+  /** The voter is present, has declared no conflict and is cleared for the case when the item closes. */
+  counted: boolean;
+}
+
+export interface Tally {
+  approve: number;
+  reject: number;
+  abstain: number;
+  recused: number;
+  absent: number;
+  unable: number;
+  excluded: number;
+}
+
+export function tallyVotes(votes: readonly CountedVote[]): Tally {
+  const t: Tally = { approve: 0, reject: 0, abstain: 0, recused: 0, absent: 0, unable: 0, excluded: 0 };
+  for (const v of votes) {
+    if (v.choice === "ABSENT") t.absent += 1;
+    else if (v.choice === "UNABLE_TO_VOTE") t.unable += 1;
+    else if (!v.counted) t.excluded += 1;
+    else if (v.choice === "APPROVE") t.approve += 1;
+    else if (v.choice === "REJECT") t.reject += 1;
+    else if (v.choice === "ABSTAIN") t.abstain += 1;
+    else t.recused += 1;
+  }
+  return t;
+}
+
+/**
+ * The outcome api.close_vote_item records: NO_QUORUM without quorum; otherwise a simple majority of APPROVE over
+ * REJECT (SOURCE_REQUIRED); a tie awaits the chair's casting vote when the rule enables it and the chair can vote,
+ * else TIED.
+ */
+export function voteOutcome(
+  tally: Pick<Tally, "approve" | "reject">,
+  quorate: boolean,
+  castingVoteAvailable: boolean,
+): VoteResult | "AWAITING_CASTING_VOTE" {
+  if (!quorate) return "NO_QUORUM";
+  if (tally.approve > tally.reject) return "APPROVED";
+  if (tally.reject > tally.approve) return "REJECTED";
+  return castingVoteAvailable ? "AWAITING_CASTING_VOTE" : "TIED";
 }

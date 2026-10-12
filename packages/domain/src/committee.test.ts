@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import { COMMITTEE_SEATS } from "@cdf/contracts";
 import {
   SINGLE_HOLDER_SEATS,
+  addBusinessDays,
+  isBusinessDay,
   isEffectiveAt,
   isQuorate,
   isVotingSeat,
   periodsOverlap,
   proceedingDisplayNumber,
   quorumThreshold,
+  tallyVotes,
+  voteOutcome,
 } from "./committee";
 
 describe("committee seats", () => {
@@ -63,5 +67,43 @@ describe("quorum (Q51–Q54)", () => {
 describe("display numbers", () => {
   it("pads proceeding numbers", () => {
     expect(proceedingDisplayNumber(7)).toBe("PRC-007");
+  });
+});
+
+describe("business days (Q98)", () => {
+  it("are Sunday to Thursday in Riyadh", () => {
+    expect(isBusinessDay(new Date("2026-10-11T09:00:00+03:00"))).toBe(true); // Sunday
+    expect(isBusinessDay(new Date("2026-10-15T23:30:00+03:00"))).toBe(true); // Thursday night
+    expect(isBusinessDay(new Date("2026-10-16T00:30:00+03:00"))).toBe(false); // Friday, though Thursday in UTC
+    expect(isBusinessDay(new Date("2026-10-17T12:00:00+03:00"))).toBe(false); // Saturday
+  });
+
+  it("three business days from Wednesday skip the weekend", () => {
+    expect(addBusinessDays(new Date("2026-10-14T10:00:00+03:00"), 3).toISOString()).toBe(
+      new Date("2026-10-19T10:00:00+03:00").toISOString(), // Thu, Sun, Mon
+    );
+  });
+});
+
+describe("vote tally and outcome (Q55–Q63)", () => {
+  it("counts only present, cleared voters; absence and inability are counted apart", () => {
+    expect(
+      tallyVotes([
+        { choice: "APPROVE", counted: true },
+        { choice: "APPROVE", counted: false },
+        { choice: "REJECT", counted: true },
+        { choice: "ABSTAIN", counted: true },
+        { choice: "ABSENT", counted: false },
+        { choice: "UNABLE_TO_VOTE", counted: true },
+      ]),
+    ).toEqual({ approve: 1, reject: 1, abstain: 1, recused: 0, absent: 1, unable: 1, excluded: 1 });
+  });
+
+  it("decides by majority, sends a tie to the casting vote only when available", () => {
+    expect(voteOutcome({ approve: 3, reject: 1 }, false, true)).toBe("NO_QUORUM");
+    expect(voteOutcome({ approve: 3, reject: 1 }, true, true)).toBe("APPROVED");
+    expect(voteOutcome({ approve: 1, reject: 2 }, true, true)).toBe("REJECTED");
+    expect(voteOutcome({ approve: 2, reject: 2 }, true, true)).toBe("AWAITING_CASTING_VOTE");
+    expect(voteOutcome({ approve: 2, reject: 2 }, true, false)).toBe("TIED");
   });
 });

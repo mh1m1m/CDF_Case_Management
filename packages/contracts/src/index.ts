@@ -962,3 +962,57 @@ export const PRELIMINARY_PREPARER_ROLES = [
   "COMPLIANCE_SECTION_MANAGER",
   "GRC_DIRECTOR",
 ] as const;
+
+// ---- Committee meetings, voting and minutes (migration 1890, ADR-020) -----------------------------------
+export const MEETING_PURPOSES = ["DELIBERATION", "HEARING"] as const;
+export type MeetingPurpose = (typeof MEETING_PURPOSES)[number];
+/** TEAMS links come from the manual provider for now (PRODUCTION_SUBSTITUTION_REQUIRED: M365 Teams provider). */
+export const MEETING_MODES = ["IN_PERSON", "TEAMS", "HYBRID"] as const;
+export type MeetingMode = (typeof MEETING_MODES)[number];
+export const MEETING_STATUSES = ["SCHEDULED", "OPEN", "CLOSED", "CANCELLED"] as const;
+export type MeetingStatus = (typeof MEETING_STATUSES)[number];
+export const MEETING_INVITEE_ROLES = [
+  "WITNESS",
+  "EXPERT",
+  "LEGAL",
+  "INFORMATION_PROVIDER",
+  "SUBJECT",
+] as const;
+export type MeetingInviteeRole = (typeof MEETING_INVITEE_ROLES)[number];
+/** What a grievance-firewalled member may be invited as (Q46). */
+export const FIREWALL_INVITEE_ROLES: readonly MeetingInviteeRole[] = [
+  "WITNESS",
+  "EXPERT",
+  "INFORMATION_PROVIDER",
+];
+export const COI_STATUSES = ["PENDING", "NO_CONFLICT", "CONFLICT_DECLARED", "NOT_REQUIRED"] as const;
+export type CoiStatus = (typeof COI_STATUSES)[number];
+export const ATTENDANCE_STATUSES = ["NOT_RECORDED", "PRESENT", "ABSENT", "EXCUSED_CONFLICT"] as const;
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+export const VOTE_TARGET_TYPES = [
+  "FINDING",
+  "RECOMMENDATION_ITEM",
+  "SANCTION",
+  "CORRECTIVE_ACTION",
+  "PACKAGE",
+  "FINAL_PACKAGE",
+  "OTHER",
+] as const;
+export type VoteTargetType = (typeof VOTE_TARGET_TYPES)[number];
+export const VOTE_CHOICES = ["APPROVE", "REJECT", "ABSTAIN", "RECUSED", "ABSENT", "UNABLE_TO_VOTE"] as const;
+export type VoteChoice = (typeof VOTE_CHOICES)[number];
+/** A member's own choices; the secretary records only the non-substantive ones (Q60, N6). */
+export const SELF_VOTE_CHOICES: readonly VoteChoice[] = ["APPROVE", "REJECT", "ABSTAIN", "RECUSED"];
+export const SECRETARY_RECORDABLE_CHOICES: readonly VoteChoice[] = ["ABSENT", "UNABLE_TO_VOTE", "RECUSED"];
+export const VOTE_ITEM_STATUSES = ["OPEN", "AWAITING_CASTING_VOTE", "CLOSED"] as const;
+export type VoteItemStatus = (typeof VOTE_ITEM_STATUSES)[number];
+export const VOTE_RESULTS = ["APPROVED", "REJECTED", "TIED", "NO_QUORUM"] as const;
+export type VoteResult = (typeof VOTE_RESULTS)[number];
+export const MINUTES_STATUSES = [
+  "IN_REVIEW",
+  "CHANGES_REQUESTED",
+  "APPROVED",
+  "DEEMED_APPROVED",
+  "SUPERSEDED",
+] as const;
+export type MinutesStatus = (typeof MINUTES_STATUSES)[number];

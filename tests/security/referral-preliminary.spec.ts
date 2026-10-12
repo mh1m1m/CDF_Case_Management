@@ -624,3 +624,63 @@ describe("preliminary review (N14)", () => {
     });
   });
 });
+
+describe("referral objection and delegation edges (AGENT-09 P2, required tests 4 and 5)", () => {
+  it("the head who prepared a referral cannot object to its rejection, and an edit after rejection blocks the objection", async () => {
+    await scenario(async (s) => {
+      await constitute(s);
+      // The head prepares; a delegate approves; the secretary rejects.
+      const id = await draft(s, "sectorHead");
+      await s.tx`select api.submit_referral(${id}, null)`;
+      await s.tx`select api.delegate_referral_approval(${OPS}, ${USERS.employeeB}, now(), now() + interval '3 days', 'DEMO-DEL-P2', ${REASON})`;
+      await s.as("employeeB");
+      await s.tx`select api.sector_decide_referral(${id}, 'APPROVE', null, null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.secretary_decide_referral(${id}, 'REJECT', array['OUT_OF_SCOPE'], null, null)`;
+      // The preparing head holds an approval basis but cannot object alone.
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.object_to_referral_rejection(${id}, 'Synthetic: objection by the preparer.')`,
+      );
+      expect(await actions(s, "sectorHead", id)).not.toContain("OBJECT");
+      // The preparer edits the rejected text: no approver has seen it, so the delegate cannot object to it either.
+      await s.as("sectorHead");
+      await s.tx`select api.update_referral(${id}, 'Referral (synthetic, edited)', 'Synthetic: an edited summary text.', 'FRAUD', 'RESTRICTED'::core.classification_level)`;
+      await s.as("employeeB");
+      await s.expectError(
+        "CDF_CONFLICT:REFERRAL_CHANGED_AFTER_REJECTION",
+        (tx) => tx`select api.object_to_referral_rejection(${id}, 'Synthetic: objection to edited text.')`,
+      );
+      expect(await actions(s, "employeeB", id)).not.toContain("OBJECT");
+      // The path left is resubmission, which goes back through sector approval.
+      await s.as("sectorHead");
+      await s.tx`select api.resubmit_referral(${id}, null)`;
+      const [r] = await s.tx<{ status: string }[]>`select status from intake.referral where id = ${id}`;
+      expect(r!.status).toBe("SUBMITTED_TO_HEAD");
+    });
+  });
+
+  it("a delegate whose delegation has passed its effective end cannot approve", async () => {
+    await ownerScenario(async (s) => {
+      const id = await draft(s);
+      await s.tx`select api.submit_referral(${id}, null)`;
+      await s.as("sectorHead");
+      const [d] = await s.tx<{ id: string }[]>`
+        select api.delegate_referral_approval(${OPS}, ${USERS.employeeB}, now(), now() + interval '1 day', 'DEMO-DEL-EXP', ${REASON}) as id`;
+      // The period ends: shift it into the past as the owner (the commands only ever create future periods).
+      await s.asOwner();
+      await s.tx`alter table iam.sector_delegation disable trigger user`;
+      await s.tx`update iam.sector_delegation set effective_from = now() - interval '3 days',
+                   effective_to = now() - interval '1 day' where id = ${d!.id}`;
+      await s.tx`alter table iam.sector_delegation enable trigger user`;
+      // The lapsed delegate no longer sees the referral at all, so cannot approve it.
+      await s.as("employeeB");
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.sector_decide_referral(${id}, 'APPROVE', null, null)`,
+      );
+      expect(await actions(s, "employeeB", id)).not.toContain("SECTOR_APPROVE");
+    });
+  });
+});

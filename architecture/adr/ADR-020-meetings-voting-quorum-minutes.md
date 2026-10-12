@@ -1,6 +1,6 @@
 # ADR-020: Meetings, conflict of interest, quorum, voting and minutes
 
-- **Status:** Proposed (2026-10-12). Linear CDF-190. Security-sensitive: AGENT-09 review before the implementing PR leaves draft.
+- **Status:** Proposed (2026-10-12). Linear CDF-190. Implemented in migration 1890 (draft, not merged). Security-sensitive: AGENT-09 review before the implementing PR leaves draft.
 - **Protocol:** §18–§21, §29, §39, §68, §87; owner Q&A Q35–Q36, Q41–Q70, Q97–Q98.
 
 ## Decision
@@ -32,6 +32,14 @@
 ### Minutes
 
 - Generated snapshot (attendance, conflicts, votes, decisions) + secretary narrative. Reviewed by attending non-conflicted members. Default window 3 business days; after expiry and notification, `api.apply_minutes_deemed_approval` marks DEEMED_APPROVED (idempotent; invoked by scheduler port, PRODUCTION_SUBSTITUTION_REQUIRED).
+
+## Implementation notes (migration 1890)
+
+- Conflict status lives on `committee.meeting_participant` (current) with append-only history in `committee.meeting_conflict`; reasons are visible only to the declarer and the secretary. A declared conflict cannot be withdrawn.
+- Members are copied in at scheduling from the proceeding snapshot, leaving out grievance-firewalled and case-gate-excluded seats (ADR-018 points 6–7). Every participation check also passes `authz.user_case_gate`.
+- Predicates: `authz.can_view_meeting` (logistics), `authz.can_view_meeting_deliberation` (vote items, minutes in review), `authz.can_manage_meeting` (the secretary). Approved minutes are visible to the case team.
+- Close needs every present eligible member's vote row; votes of anyone not present-and-eligible at close are excluded and counted. Decision rule: simple majority of APPROVE over REJECT among counted votes (SOURCE_REQUIRED). A tie awaits the casting vote only when the rule enables it and the chair is present and eligible.
+- Minutes snapshots hold attendance, conflict statuses and results, never individual choices. With no eligible reviewer the minutes are final at once. Deemed approval needs the window to have passed and a recorded reminder (`api.record_minutes_reminder`).
 
 ## Consequences
 

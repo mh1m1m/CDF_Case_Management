@@ -260,3 +260,15 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - The GRC Sector Head has no case access. `authz.can_view_preliminary_recommendation` shows them, purpose-bound (ADR-031), a recommendation awaiting their approval or one they decided, on a non-restricted, undisposed case within clearance and without conflict; `api.preliminary_approval_queue` lists case numbers only. A restricted case needs an explicit grant first.
 - Audit metadata for referral and preliminary-review events carries ids, statuses and codes, never comments or rationale. History rows, closed referrals and decided recommendations are protected by triggers.
 - Tests: `tests/security/referral-preliminary.spec.ts`, referral IDOR probes, preliminary IDOR probes and the audit walk.
+
+## 16. Committee meetings, conflict of interest and voting (migration 1890; ADR-020; DEC-61)
+
+- Committee participation always passes `authz.user_case_gate` (clearance, no declared case conflict). Uncleared or conflicted seat holders are snapshotted as excluded and see nothing; a conflict declared later removes access at once. A restricted case reaches a committee only with its Restricted Case Authority's recorded, single-use approval (DEC-61).
+- A meeting member who is PENDING or CONFLICT_DECLARED cannot be recorded present, cannot vote, sees no deliberation and is not eligible for quorum (N4, N5). Check constraints repeat the rule.
+- The secretary records only ABSENT, UNABLE_TO_VOTE or RECUSED for another member, with a reason (N6); a check constraint repeats it.
+- `committee.vote` and `committee.casting_vote` have no SELECT grant. `api.vote_item_status` shows who voted and when while open; choices and totals only after close. Vote audit events carry no choice (N7).
+- The casting vote exists only on a tie, when the rule snapshot enables it, cast by the present and cleared chair (N8).
+- Minutes are reviewed by attending, cleared, non-secretary members; a change request supersedes the version; deemed approval needs the window to pass and a recorded reminder, and is idempotent. Minutes in review are visible to the meeting's deliberation only; approved minutes join the case.
+- Meetings, participants, vote items and minutes cannot be deleted; votes, conflict declarations, casting votes and minute reviews are append-only; closed meetings and items are frozen by triggers.
+- PRODUCTION_SUBSTITUTION_REQUIRED: the manual meeting provider (pasted link) stands in for Microsoft Teams; the reminder and the deemed-approval run stand in for the notification engine and scheduler.
+- Tests: `tests/security/committee-meetings.spec.ts`, `tests/security/committee-access.spec.ts`, meeting IDOR probes and the audit walk.

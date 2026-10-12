@@ -347,13 +347,39 @@ create table committee.proceeding_member (
   is_voting               boolean not null,
   -- Grievance independence (Q45–Q46): set when an IC voting member is snapshotted into the same case's GC.
   firewall_restricted     boolean not null default false,
+  -- Not cleared for the case at referral (clearance, a declared case conflict): recorded, non-voting, and given no
+  -- view of the proceeding (DEC-01, Q42). Visibility is re-checked against the case gate at every read as well.
+  case_gate_excluded      boolean not null default false,
   snapshotted_at          timestamptz not null default now(),
   unique (committee_proceeding_id, user_id),
-  check (not (firewall_restricted and is_voting))
+  check (not (firewall_restricted and is_voting)),
+  check (not (case_gate_excluded and is_voting))
 );
 create index proceeding_member_user on committee.proceeding_member (user_id);
 create index proceeding_member_membership on committee.proceeding_member (membership_id);
 comment on table committee.proceeding_member is 'Who sat on a committee proceeding and in which seat (Q30). Append-only.';
+
+-- DEC-61 (owner decision 2026-10-12, option C): a restricted case goes to a committee only after the case's
+-- Restricted Case Authority (DEC-01: its owner, eligible for the classification) approves that referral. One approval
+-- opens one proceeding.
+create table committee.restricted_referral_approval (
+  id                      uuid primary key default gen_random_uuid(),
+  case_id                 uuid not null references case_mgmt.case_record (id),
+  committee_id            uuid not null references committee.committee (id),
+  approved_by             uuid not null references iam.user_profile (id),
+  reason                  text not null check (length(reason) between 5 and 2000),
+  approved_at             timestamptz not null default now(),
+  committee_proceeding_id uuid unique references committee.committee_proceeding (id),
+  used_at                 timestamptz,
+  check ((committee_proceeding_id is null) = (used_at is null))
+);
+-- At most one unused approval per case and committee.
+create unique index restricted_referral_approval_open on committee.restricted_referral_approval (case_id, committee_id)
+  where committee_proceeding_id is null;
+create index restricted_referral_approval_committee on committee.restricted_referral_approval (committee_id);
+create index restricted_referral_approval_approved_by on committee.restricted_referral_approval (approved_by);
+comment on table committee.restricted_referral_approval is
+  'DEC-61: the Restricted Case Authority''s approval to refer a restricted case to a committee. Used once.';
 
 -- -----------------------------------------------------------------------------
 -- Integrity: append-only rows, frozen identity columns, monotonic effective dates
@@ -379,7 +405,7 @@ begin
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
   end loop;
   foreach t in array array['case_mgmt.proceeding', 'committee.committee', 'committee.membership', 'committee.rule_set',
-                           'committee.committee_proceeding'] loop
+                           'committee.committee_proceeding', 'committee.restricted_referral_approval'] loop
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
   end loop;
@@ -429,6 +455,11 @@ begin
     if (to_jsonb(new) - 'effective_to') <> (to_jsonb(old) - 'effective_to') or old.effective_to is not null then
       raise exception 'rule set % can only be given an end, once', old.id using errcode = 'insufficient_privilege';
     end if;
+  elsif tg_table_name = 'restricted_referral_approval' then
+    if (to_jsonb(new) - array['committee_proceeding_id', 'used_at']) <> (to_jsonb(old) - array['committee_proceeding_id', 'used_at'])
+       or old.committee_proceeding_id is not null then
+      raise exception 'restricted referral approval % is used once and never rewritten', old.id using errcode = 'insufficient_privilege';
+    end if;
   elsif tg_table_name = 'committee_proceeding' then
     if (to_jsonb(new) - array['status', 'closed_at']) <> (to_jsonb(old) - array['status', 'closed_at'])
        or old.status <> 'OPEN' then
@@ -445,6 +476,8 @@ create trigger membership_protect before update on committee.membership
 create trigger rule_set_protect before update on committee.rule_set
   for each row execute function committee.protect_registry();
 create trigger committee_proceeding_protect before update on committee.committee_proceeding
+  for each row execute function committee.protect_registry();
+create trigger restricted_referral_approval_protect before update on committee.restricted_referral_approval
   for each row execute function committee.protect_registry();
 
 -- -----------------------------------------------------------------------------
@@ -487,8 +520,9 @@ as $$
           or authz.user_committee_seat(authz.current_user_id(), p_committee_id, now()) is not null);
 $$;
 
--- A committee proceeding: its snapshotted members, the committee's current secretaries, and the case team that can
--- already see the case. COMMITTEE_ADMIN alone gives nothing here (§21).
+-- A committee proceeding: its snapshotted members and the committee's current secretaries, each only while cleared
+-- for the case (clearance, no declared case conflict); and the case team that can already see the case. A conflict declared after the snapshot therefore removes access at once. COMMITTEE_ADMIN
+-- alone gives nothing here (§21).
 create function authz.can_view_committee_proceeding(p_committee_proceeding_id uuid)
 returns boolean
 language sql stable security definer
@@ -497,9 +531,11 @@ as $$
   select authz.current_user_id() is not null and exists (
     select 1 from committee.committee_proceeding cp
     where cp.id = p_committee_proceeding_id
-      and (exists (select 1 from committee.proceeding_member pm
-                   where pm.committee_proceeding_id = cp.id and pm.user_id = authz.current_user_id())
-           or authz.is_committee_secretary(cp.committee_id)
+      and ((authz.user_case_gate(authz.current_user_id(), cp.case_id)
+            and (exists (select 1 from committee.proceeding_member pm
+                         where pm.committee_proceeding_id = cp.id and pm.user_id = authz.current_user_id()
+                           and not pm.case_gate_excluded)
+                 or authz.is_committee_secretary(cp.committee_id)))
            or authz.can_view_case(cp.case_id))
   );
 $$;
@@ -563,6 +599,7 @@ alter table committee.membership enable row level security;
 alter table committee.rule_set enable row level security;
 alter table committee.committee_proceeding enable row level security;
 alter table committee.proceeding_member enable row level security;
+alter table committee.restricted_referral_approval enable row level security;
 
 create policy status_code_read on config.status_code for select to authenticated using (authz.current_user_id() is not null);
 grant select on config.status_code to authenticated;
@@ -600,6 +637,10 @@ grant select on committee.committee_proceeding to authenticated;
 create policy proceeding_member_read on committee.proceeding_member for select to authenticated
   using (authz.can_view_committee_proceeding(committee_proceeding_id));
 grant select on committee.proceeding_member to authenticated;
+
+create policy restricted_referral_approval_read on committee.restricted_referral_approval for select to authenticated
+  using (authz.can_view_case(case_id));
+grant select on committee.restricted_referral_approval to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Internal helpers (owner context; not granted to application roles)
@@ -1177,9 +1218,18 @@ declare
   v_reason text;
   v_voting int;
   v_restricted int;
+  v_excluded int;
+  v_approval uuid;
 begin
   select * into v_c from committee.committee c where c.id = p_committee_id and c.is_active;
   if v_c.id is null then perform api._fail('INVALID', 'committee_id'); end if;
+  -- DEC-61: a restricted case needs an unused approval by its Restricted Case Authority for this committee.
+  if exists (select 1 from case_mgmt.case_record c where c.id = p_case_id and c.is_restricted) then
+    select a.id into v_approval from committee.restricted_referral_approval a
+    where a.case_id = p_case_id and a.committee_id = v_c.id and a.committee_proceeding_id is null
+    for update;
+    if v_approval is null then perform api._fail('CONFLICT', 'AUTHORITY_APPROVAL_REQUIRED'); end if;
+  end if;
   v_reason := api._require_text(p_reason, 'reason', 5, 2000);
   perform case_mgmt.require_parent_proceeding(p_case_id, p_parent_proceeding_id);
   v_type := case v_c.kind when 'INVESTIGATION' then 'COMMITTEE_INVESTIGATION' else 'GRIEVANCE' end;
@@ -1207,21 +1257,28 @@ begin
   values (v_p.id, v_c.id, p_case_id, v_rule.id,
           to_jsonb(v_rule) - array['id', 'committee_id', 'created_by', 'created_at', 'reason'], v_actor)
   returning id into v_cp;
+  if v_approval is not null then
+    update committee.restricted_referral_approval set committee_proceeding_id = v_cp, used_at = now() where id = v_approval;
+  end if;
 
   -- Chair, deputy chair and members vote; secretaries and alternates do not. On a grievance, anyone who voted in an
-  -- Investigation Committee proceeding of this case sits as non-voting (Q45–Q46).
-  insert into committee.proceeding_member (committee_proceeding_id, user_id, membership_id, seat, is_voting, firewall_restricted)
+  -- Investigation Committee proceeding of this case sits as non-voting (Q45–Q46). Anyone not cleared for the case
+  -- (clearance or a declared case conflict) is recorded as excluded, non-voting and without access (AGENT-09 P1).
+  insert into committee.proceeding_member (committee_proceeding_id, user_id, membership_id, seat, is_voting,
+                                           firewall_restricted, case_gate_excluded)
   select v_cp, m.user_id, m.id, m.seat,
-         m.seat in ('CHAIR', 'DEPUTY_CHAIR', 'MEMBER')
+         m.seat in ('CHAIR', 'DEPUTY_CHAIR', 'MEMBER') and authz.user_case_gate(m.user_id, p_case_id)
            and not (v_c.kind = 'GRIEVANCE' and authz.participated_in_investigation_committee(m.user_id, p_case_id)),
-         m.seat in ('CHAIR', 'DEPUTY_CHAIR', 'MEMBER')
-           and v_c.kind = 'GRIEVANCE' and authz.participated_in_investigation_committee(m.user_id, p_case_id)
+         m.seat in ('CHAIR', 'DEPUTY_CHAIR', 'MEMBER') and authz.user_case_gate(m.user_id, p_case_id)
+           and v_c.kind = 'GRIEVANCE' and authz.participated_in_investigation_committee(m.user_id, p_case_id),
+         not authz.user_case_gate(m.user_id, p_case_id)
   from committee.membership m
   join iam.user_profile u on u.id = m.user_id and u.status = 'ACTIVE'
   where m.committee_id = v_c.id and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now());
 
-  select count(*) filter (where pm.is_voting), count(*) filter (where pm.firewall_restricted)
-    into v_voting, v_restricted
+  select count(*) filter (where pm.is_voting), count(*) filter (where pm.firewall_restricted),
+         count(*) filter (where pm.case_gate_excluded)
+    into v_voting, v_restricted, v_excluded
   from committee.proceeding_member pm where pm.committee_proceeding_id = v_cp;
   if v_voting = 0 then perform api._fail('CONFLICT', 'COMMITTEE_NOT_CONSTITUTED'); end if;
 
@@ -1229,7 +1286,8 @@ begin
     jsonb_build_object('proceeding_type', v_type, 'sequence_no', v_p.sequence_no, 'parent_proceeding_id', p_parent_proceeding_id));
   perform audit.record_event('COMMITTEE_PROCEEDING_OPENED', 'BUSINESS', 'SUCCESS', p_case_id, 'committee_proceeding', v_cp::text, null,
     jsonb_build_object('committee_id', v_c.id, 'committee_kind', v_c.kind, 'rule_set_id', v_rule.id,
-                       'voting_members', v_voting, 'firewall_restricted_members', v_restricted));
+                       'voting_members', v_voting, 'firewall_restricted_members', v_restricted,
+                       'case_gate_excluded_members', v_excluded, 'restricted_referral_approval_id', v_approval));
   return v_cp;
 end;
 $$;
@@ -1247,7 +1305,47 @@ begin
 end;
 $$;
 
+-- DEC-61: the case owner, eligible as a Restricted Case Authority for the case classification, approves referring the
+-- restricted case to one committee.
+create function api.approve_restricted_committee_referral(p_case_id uuid, p_committee_id uuid, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_case case_mgmt.case_record;
+  v_id uuid;
+  v_reason text;
+begin
+  if p_case_id is null or not authz.can_view_case(p_case_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v_case from case_mgmt.case_record c where c.id = p_case_id for update;
+  if not v_case.is_restricted then perform api._fail('CONFLICT', 'CASE_NOT_RESTRICTED'); end if;
+  if v_case.owner_id is distinct from v_actor
+     or not authz.is_restricted_case_authority(v_actor, v_case.classification) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  if v_case.records_state <> 'ACTIVE' then perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE'); end if;
+  if not exists (select 1 from committee.committee c where c.id = p_committee_id and c.is_active) then
+    perform api._fail('INVALID', 'committee_id');
+  end if;
+  if exists (select 1 from committee.restricted_referral_approval a
+             where a.case_id = p_case_id and a.committee_id = p_committee_id and a.committee_proceeding_id is null) then
+    perform api._fail('CONFLICT', 'APPROVAL_ALREADY_PENDING');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  insert into committee.restricted_referral_approval (case_id, committee_id, approved_by, reason)
+  values (p_case_id, p_committee_id, v_actor, v_reason)
+  returning id into v_id;
+  perform audit.record_event('RESTRICTED_COMMITTEE_REFERRAL_APPROVED', 'BUSINESS', 'SUCCESS', p_case_id,
+    'restricted_referral_approval', v_id::text, v_reason,
+    jsonb_build_object('committee_id', p_committee_id, 'classification', v_case.classification));
+  return v_id;
+end;
+$$;
+
 grant execute on function
+  api.approve_restricted_committee_referral(uuid, uuid, text),
   api.open_proceeding(uuid, text, uuid, text),
   api.update_proceeding_state(uuid, text, text, text, text),
   api.close_proceeding(uuid, text, text, text),

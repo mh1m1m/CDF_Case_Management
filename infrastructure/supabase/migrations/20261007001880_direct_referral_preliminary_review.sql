@@ -1007,17 +1007,27 @@ as $$
 declare
   v_actor uuid := api._actor();
   v_r intake.referral;
+  v_basis text;
 begin
   v_r := intake.lock_visible_referral(p_referral_id);
-  if authz.user_referral_approval_basis(v_actor, v_r.sector_id, now()) is null then perform api._fail('FORBIDDEN'); end if;
+  v_basis := authz.user_referral_approval_basis(v_actor, v_r.sector_id, now());
+  -- Separation of duties (AGENT-09 P2): the objection is a sector approval of what was rejected, so the preparer
+  -- cannot make it, and it stands only for the text the secretary rejected.
+  if v_basis is null or v_actor = v_r.prepared_by then perform api._fail('FORBIDDEN'); end if;
   if v_r.status <> 'REJECTED' then perform api._fail('CONFLICT', 'REFERRAL_NOT_REJECTED'); end if;
+  if exists (select 1 from intake.referral_event u
+             where u.referral_id = v_r.id and u.event_type = 'UPDATED'
+               and u.occurred_at > (select max(e.occurred_at) from intake.referral_event e
+                                    where e.referral_id = v_r.id and e.event_type = 'REJECTED')) then
+    perform api._fail('CONFLICT', 'REFERRAL_CHANGED_AFTER_REJECTION');
+  end if;
   -- A rejection that answered an objection cannot be objected to again (escalation beyond: SOURCE_REQUIRED).
   if (select e.from_status from intake.referral_event e
       where e.referral_id = v_r.id and e.event_type = 'REJECTED' order by e.occurred_at desc, e.id desc limit 1) = 'OBJECTED' then
     perform api._fail('CONFLICT', 'OBJECTION_ALREADY_DECIDED');
   end if;
   perform intake.record_referral_event(v_r, 'OBJECTED', 'OBJECTED', v_actor, null,
-    api._require_text(p_comment, 'comment', 10, 4000));
+    api._require_text(p_comment, 'comment', 10, 4000), jsonb_build_object('approval_basis', v_basis));
 end;
 $$;
 
@@ -1088,7 +1098,13 @@ begin
                 and v_r.status = 'REJECTED' then 'RESUBMIT' end,
       case when authz.user_referral_approval_basis(v_actor, v_r.sector_id, now()) is not null and v_r.status = 'REJECTED'
                 and (select e.from_status from intake.referral_event e where e.referral_id = v_r.id and e.event_type = 'REJECTED'
-                     order by e.occurred_at desc, e.id desc limit 1) is distinct from 'OBJECTED' then 'OBJECT' end,
+                     order by e.occurred_at desc, e.id desc limit 1) is distinct from 'OBJECTED'
+                and not v_preparer
+                and not exists (select 1 from intake.referral_event u
+                                where u.referral_id = v_r.id and u.event_type = 'UPDATED'
+                                  and u.occurred_at > (select max(e.occurred_at) from intake.referral_event e
+                                                       where e.referral_id = v_r.id and e.event_type = 'REJECTED'))
+           then 'OBJECT' end,
       case when v_preparer and v_r.status in ('DRAFT', 'SUBMITTED_TO_HEAD', 'RETURNED_FOR_COMPLETION', 'REJECTED')
            then 'WITHDRAW' end,
       'COMMENT'

@@ -11,6 +11,7 @@ import {
   ownerScenario,
   reportId,
   scenario,
+  type OwnerScenario,
   type Scenario,
   type UserKey,
 } from "../support/db";
@@ -72,6 +73,8 @@ const NOT_STATE_CHANGING = new Set([
   // Direct referral and preliminary review (migration 1880): the caller's next actions and approval queue.
   "referral_available_actions",
   "preliminary_approval_queue",
+  // Committee meetings (migration 1890): who has voted, and choices only after close.
+  "vote_item_status",
 ]);
 
 interface Step {
@@ -502,14 +505,175 @@ describe("every state-changing command writes its audit event in the same transa
       {
         fn: "refer_case_to_committee",
         actor: "caseManager",
-        run: (s) =>
-          s.tx`select api.refer_case_to_committee(${caseA}, ${ids.committee!}, ${ids.proceeding!}, ${REASON})`,
+        run: async (s) =>
+          (ids.committeeProceeding = await one(
+            s,
+            s.tx`select api.refer_case_to_committee(${caseA}, ${ids.committee!}, ${ids.proceeding!}, ${REASON}) as id`,
+          )),
       },
       {
         fn: "end_committee_membership",
         actor: "platformAdmin",
         run: (s) =>
           s.tx`select api.end_committee_membership(${ids.membership!}, now() + interval '1 day', ${REASON})`,
+      },
+      // Committee meeting (migration 1890): chair and member declare, attend and vote; a tie goes to the chair's
+      // casting vote; the secretary records a non-substantive vote; minutes are reviewed and deemed approved.
+      {
+        fn: "schedule_meeting",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          ids.meeting = await one(
+            s,
+            s.tx`select api.schedule_meeting(${ids.committeeProceeding!}, 'DELIBERATION', 'HYBRID', 'Room (synthetic)',
+              'https://meet.example.test/walk', now() + interval '1 day', now() + interval '1 day 2 hours', ${REASON}) as id`,
+          );
+          const rows = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${ids.meeting}`;
+          ids.chairSeat = rows.find((r) => r.user_id === USERS.committeeChair)!.id;
+          ids.memberSeat = rows.find((r) => r.user_id === USERS.committee)!.id;
+          return ids.meeting;
+        },
+      },
+      {
+        fn: "invite_to_meeting",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.invite_to_meeting(${ids.meeting!}, 'EXPERT', ${USERS.lead}, null, false, ${REASON})`,
+      },
+      {
+        fn: "declare_meeting_conflict",
+        actor: "committee",
+        run: (s) => s.tx`select api.declare_meeting_conflict(${ids.memberSeat!}, 'NO_CONFLICT', null)`,
+      },
+      {
+        fn: "declare_meeting_conflict",
+        actor: "committeeChair",
+        run: (s) => s.tx`select api.declare_meeting_conflict(${ids.chairSeat!}, 'NO_CONFLICT', null)`,
+      },
+      {
+        fn: "open_meeting",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.open_meeting(${ids.meeting!}, ${REASON})`,
+      },
+      {
+        fn: "record_attendance",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          await s.tx`select api.record_attendance(${ids.chairSeat!}, 'PRESENT')`;
+          return s.tx`select api.record_attendance(${ids.memberSeat!}, 'PRESENT')`;
+        },
+      },
+      {
+        fn: "open_vote_item",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.voteItem = await one(
+            s,
+            s.tx`select api.open_vote_item(${ids.meeting!}, 'OTHER', null, 'Walk recommendation (synthetic)') as id`,
+          )),
+      },
+      {
+        fn: "cast_vote",
+        actor: "committee",
+        run: (s) => s.tx`select api.cast_vote(${ids.voteItem!}, 'APPROVE', null)`,
+      },
+      {
+        fn: "cast_vote",
+        actor: "committeeChair",
+        run: (s) => s.tx`select api.cast_vote(${ids.voteItem!}, 'REJECT', null)`,
+      },
+      {
+        fn: "close_vote_item",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.close_vote_item(${ids.voteItem!}, null)`,
+      },
+      {
+        fn: "cast_casting_vote",
+        actor: "committeeChair",
+        run: (s) =>
+          s.tx`select api.cast_casting_vote(${ids.voteItem!}, 'APPROVE', 'Synthetic: casting vote.')`,
+      },
+      {
+        fn: "record_vote_for_member",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const item = await one(
+            s,
+            s.tx`select api.open_vote_item(${ids.meeting!}, 'OTHER', null, 'Walk second item (synthetic)') as id`,
+          );
+          return s.tx`select api.record_vote_for_member(${item}, ${ids.memberSeat!}, 'UNABLE_TO_VOTE',
+            'Synthetic: connection lost.', null)`;
+        },
+      },
+      {
+        fn: "cast_vote",
+        actor: "committeeChair",
+        run: (s) => s.tx`
+          select api.cast_vote((select id from committee.vote_item where meeting_id = ${ids.meeting!} and sequence_no = 2),
+            'APPROVE', null)`,
+      },
+      {
+        fn: "close_vote_item",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`
+          select api.close_vote_item((select id from committee.vote_item where meeting_id = ${ids.meeting!} and sequence_no = 2), null)`,
+      },
+      {
+        fn: "close_meeting",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.close_meeting(${ids.meeting!}, ${REASON})`,
+      },
+      {
+        fn: "generate_minutes",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.minutes = await one(
+            s,
+            s.tx`select api.generate_minutes(${ids.meeting!}, 'Synthetic minutes narrative for the walk.') as id`,
+          )),
+      },
+      {
+        fn: "review_minutes",
+        actor: "committee",
+        run: (s) => s.tx`select api.review_minutes(${ids.minutes!}, 'APPROVE', null)`,
+      },
+      {
+        fn: "record_minutes_reminder",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.record_minutes_reminder(${ids.minutes!})`,
+      },
+      {
+        fn: "apply_minutes_deemed_approval",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          // Fixture: the review window has passed (the owner may only shorten it).
+          await (s as OwnerScenario).asOwner();
+          await s.tx`update committee.minutes set review_due_at = now() - interval '1 minute' where id = ${ids.minutes!}`;
+          await s.as("committeeSecretary");
+          return s.tx`select api.apply_minutes_deemed_approval(${ids.minutes!})`;
+        },
+      },
+      {
+        fn: "cancel_meeting",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const m = await one(
+            s,
+            s.tx`select api.schedule_meeting(${ids.committeeProceeding!}, 'HEARING', 'IN_PERSON', 'Room (synthetic)', null,
+              now() + interval '3 days', now() + interval '3 days 1 hour', ${REASON}) as id`,
+          );
+          return s.tx`select api.cancel_meeting(${m}, ${REASON})`;
+        },
+      },
+      {
+        // DEC-61: the restricted SECRET case's owner approves its referral to the Investigation Committee.
+        fn: "approve_restricted_committee_referral",
+        actor: "grcDirector",
+        run: async (s) => {
+          const exec = await caseId("0003");
+          return s.tx`select api.approve_restricted_committee_referral(${exec}, ${ids.committee!}, ${REASON})`;
+        },
       },
       {
         fn: "close_proceeding",
@@ -979,6 +1143,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_download_evidence",
       "authz.can_edit_case",
       "authz.can_manage_disposition",
+      "authz.can_manage_meeting",
       "authz.can_manage_retention",
       "authz.can_prepare_form",
       "authz.can_record_findings",
@@ -998,6 +1163,8 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_evidence",
       "authz.can_view_form_instance",
       "authz.can_view_interview",
+      "authz.can_view_meeting",
+      "authz.can_view_meeting_deliberation",
       "authz.can_view_preliminary_recommendation",
       "authz.can_view_proceeding",
       "authz.can_view_records",

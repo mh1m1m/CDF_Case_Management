@@ -409,6 +409,13 @@ const PROBES: Probe[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.withdraw_form(${t.formInstance}, ${REASON})`,
   },
+  // DEC-61: the Restricted Case Authority's approval to refer a restricted case.
+  {
+    fn: "approve_restricted_committee_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.approve_restricted_committee_referral(${t.case}, (select id from committee.committee where code = 'IC'), ${REASON})`,
+  },
   // Preliminary review (migration 1880).
   {
     fn: "prepare_preliminary_recommendation",
@@ -489,6 +496,108 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
     fn: "revoke_referral_delegation",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.revoke_referral_delegation(${t.delegation}, ${REASON})`,
+  },
+];
+
+// Committee meeting commands (migration 1890) take a committee proceeding, a meeting, a participant, a vote item or
+// minutes; never a case.
+interface MeetingTargets {
+  committeeProceeding: string;
+  meeting: string;
+  participant: string;
+  voteItem: string;
+  minutes: string;
+}
+
+const MEETING_PROBES: Probe<MeetingTargets>[] = [
+  {
+    fn: "schedule_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.schedule_meeting(${t.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+        now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON})`,
+  },
+  {
+    fn: "invite_to_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.invite_to_meeting(${t.meeting}, 'EXPERT', ${self}, null, true, ${REASON})`,
+  },
+  {
+    fn: "declare_meeting_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.declare_meeting_conflict(${t.participant}, 'NO_CONFLICT', null)`,
+  },
+  {
+    fn: "open_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_meeting(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "record_attendance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_attendance(${t.participant}, 'PRESENT')`,
+  },
+  {
+    fn: "close_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_meeting(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "cancel_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_meeting(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "open_vote_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_vote_item(${t.meeting}, 'OTHER', null, 'Probe item')`,
+  },
+  {
+    fn: "cast_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cast_vote(${t.voteItem}, 'APPROVE', null)`,
+  },
+  {
+    fn: "record_vote_for_member",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_vote_for_member(${t.voteItem}, ${t.participant}, 'ABSENT', 'Synthetic: probe.', null)`,
+  },
+  {
+    fn: "close_vote_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_vote_item(${t.voteItem}, null)`,
+  },
+  {
+    fn: "cast_casting_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cast_casting_vote(${t.voteItem}, 'APPROVE', null)`,
+  },
+  {
+    fn: "vote_item_status",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.vote_item_status(${t.voteItem})`,
+  },
+  {
+    fn: "generate_minutes",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.generate_minutes(${t.meeting}, 'Synthetic probe narrative.')`,
+  },
+  {
+    fn: "review_minutes",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.review_minutes(${t.minutes}, 'APPROVE', null)`,
+  },
+  {
+    fn: "record_minutes_reminder",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_minutes_reminder(${t.minutes})`,
+  },
+  {
+    fn: "apply_minutes_deemed_approval",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.apply_minutes_deemed_approval(${t.minutes})`,
   },
 ];
 
@@ -781,6 +890,7 @@ describe("catalog guard", () => {
       ...PROBES.map((p) => p.fn),
       ...RECORDS_PROBES.map((p) => p.fn),
       ...REFERRAL_PROBES.map((p) => p.fn),
+      ...MEETING_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1059,6 +1169,95 @@ describe("IDOR: referral commands give outsiders the same answer for real object
       expect(mismatches).toEqual([]);
       expect(await s.tx`select id from intake.referral`).toEqual([]);
       expect(await s.tx`select id from intake.referral_event`).toEqual([]);
+    });
+  });
+});
+
+describe("IDOR: committee meeting objects (migration 1890)", () => {
+  // Nobody here holds a seat on the proceeding or a place in the meeting. The case team (case manager) sees the
+  // meeting's logistics but not its deliberation, so it is covered by the meeting spec, not listed here.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee", // a global COMMITTEE_MEMBER role, no seat
+    "intake",
+    "platformAdmin", // COMMITTEE_ADMIN maintains the registry, sees no proceeding
+    "internalAudit",
+    "soc",
+    "dpo",
+    "grcSectorHead",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("platformAdmin");
+      const [ic] = await s.tx<{ id: string }[]>`select id from committee.committee where code = 'IC'`;
+      for (const [user, seatCode] of [
+        ["committeeChair", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"],
+        ["legal", "MEMBER"],
+      ] as const) {
+        await s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS[user]}, ${seatCode}, now() - interval '1 day', null, 'DEMO-APPT')`;
+      }
+      await s.as("caseManager");
+      const [cp] = await s.tx<{ id: string }[]>`
+        select api.refer_case_to_committee(${caseB}, ${ic!.id}, null, ${REASON}) as id`;
+      await s.as("committeeSecretary");
+      const [m] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${cp!.id}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`;
+      const [p] = await s.tx<{ id: string }[]>`
+        select id from committee.meeting_participant where meeting_id = ${m!.id} and user_id = ${USERS.legal}`;
+      await s.as("legal");
+      await s.tx`select api.declare_meeting_conflict(${p!.id}, 'NO_CONFLICT', null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+      await s.tx`select api.record_attendance(${p!.id}, 'PRESENT')`;
+      const [v] = await s.tx<
+        { id: string }[]
+      >`select api.open_vote_item(${m!.id}, 'OTHER', null, 'Probe item') as id`;
+      // A second meeting, closed with nobody present, so its minutes are final at once.
+      const [m2] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${cp!.id}, 'HEARING', 'TEAMS', null, 'https://meet.example.test/probe',
+          now() + interval '2 days', now() + interval '2 days 1 hour', ${REASON}) as id`;
+      await s.tx`select api.open_meeting(${m2!.id}, ${REASON})`;
+      await s.tx`select api.close_meeting(${m2!.id}, ${REASON})`;
+      const [mi] = await s.tx<
+        { id: string }[]
+      >`select api.generate_minutes(${m2!.id}, 'Synthetic probe minutes.') as id`;
+
+      await s.as(actor);
+      const real: MeetingTargets = {
+        committeeProceeding: cp!.id,
+        meeting: m!.id,
+        participant: p!.id,
+        voteItem: v!.id,
+        minutes: mi!.id,
+      };
+      const random: MeetingTargets = {
+        committeeProceeding: randomUUID(),
+        meeting: randomUUID(),
+        participant: randomUUID(),
+        voteItem: randomUUID(),
+        minutes: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of MEETING_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "meeting",
+        "meeting_participant",
+        "meeting_conflict",
+        "vote_item",
+        "minutes",
+        "minutes_review",
+      ]) {
+        expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
+      }
     });
   });
 });
