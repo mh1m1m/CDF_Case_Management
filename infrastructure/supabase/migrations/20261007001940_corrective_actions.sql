@@ -647,7 +647,10 @@ begin
    where id = v.id
   returning * into v;
   perform decision.record_action_event(v, 'DUE_DATE_CHANGED', v_reason, null, null, null, p_due_date, null);
-  perform notify.enqueue('CORRECTIVE_ACTION_CHANGED', v.owner_id, v.id, null, 'action-changed:' || v.id || ':' || v.row_version);
+  -- Notices reach the owner only while they can still open the action (AGENT-09 L1).
+  if decision.owner_eligible(v.owner_id, v.case_id) then
+    perform notify.enqueue('CORRECTIVE_ACTION_CHANGED', v.owner_id, v.id, null, 'action-changed:' || v.id || ':' || v.row_version);
+  end if;
   perform audit.record_event('CORRECTIVE_ACTION_DUE_DATE_CHANGED', 'BUSINESS', 'SUCCESS', v.case_id, 'corrective_action',
     v.id::text, v_reason, jsonb_build_object('previous_due_date', v_old, 'due_date', p_due_date));
 end;
@@ -760,7 +763,9 @@ begin
        set status = 'IN_PROGRESS', completion_submitted_at = null, updated_at = now(), row_version = row_version + 1
      where id = v.id
     returning * into v;
-    perform notify.enqueue('CORRECTIVE_ACTION_RETURNED', v.owner_id, v.id, null, 'action-returned:' || v.id || ':' || v.row_version);
+    if decision.owner_eligible(v.owner_id, v.case_id) then
+      perform notify.enqueue('CORRECTIVE_ACTION_RETURNED', v.owner_id, v.id, null, 'action-returned:' || v.id || ':' || v.row_version);
+    end if;
   end if;
   perform decision.record_action_event(v, p_decision, v_note, null, null, null, null, null);
   perform audit.record_event(case p_decision when 'VERIFIED' then 'CORRECTIVE_ACTION_VERIFIED'
@@ -795,7 +800,9 @@ begin
    where id = v.id
   returning * into v;
   perform decision.record_action_event(v, 'REOPENED', v_reason, null, null, null, null, null);
-  perform notify.enqueue('CORRECTIVE_ACTION_RETURNED', v.owner_id, v.id, null, 'action-returned:' || v.id || ':' || v.row_version);
+  if decision.owner_eligible(v.owner_id, v.case_id) then
+    perform notify.enqueue('CORRECTIVE_ACTION_RETURNED', v.owner_id, v.id, null, 'action-returned:' || v.id || ':' || v.row_version);
+  end if;
   perform audit.record_event('CORRECTIVE_ACTION_REOPENED', 'BUSINESS', 'SUCCESS', v.case_id, 'corrective_action',
     v.id::text, v_reason, '{}'::jsonb);
 end;
@@ -829,7 +836,9 @@ begin
    where id = v.id
   returning * into v;
   perform decision.record_action_event(v, 'WAIVED', v_reason, null, null, null, null, v_reference);
-  perform notify.enqueue('CORRECTIVE_ACTION_CHANGED', v.owner_id, v.id, null, 'action-changed:' || v.id || ':' || v.row_version);
+  if decision.owner_eligible(v.owner_id, v.case_id) then
+    perform notify.enqueue('CORRECTIVE_ACTION_CHANGED', v.owner_id, v.id, null, 'action-changed:' || v.id || ':' || v.row_version);
+  end if;
   perform audit.record_event('CORRECTIVE_ACTION_WAIVED', 'BUSINESS', 'SUCCESS', v.case_id, 'corrective_action',
     v.id::text, v_reason, jsonb_build_object('source_document_reference', v_reference));
 end;

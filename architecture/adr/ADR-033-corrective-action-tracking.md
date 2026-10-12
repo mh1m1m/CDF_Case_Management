@@ -18,7 +18,7 @@ The committee may recommend non-disciplinary corrective actions and governance r
 7. **A waiver is the authority's, with its source document (N15 pattern).** `CORRECTIVE_ACTION_WAIVE` is held by no role until the Delegation of Authority names one (SOURCE_REQUIRED); a waiver records the source document reference and is final.
 8. **Policy is effective-dated and seeded empty.** `corrective_action_policy` per action type holds the default due period, a reminder before the due date, the escalation delay after it and the completion evidence asked for (`REFERENCE_REQUIRED` or `NOTE_ONLY`). `api.set_corrective_action_policy` (`CORRECTIVE_ACTION_POLICY_ADMIN`, GRC Director) adds versions; none is edited. The seeded rows are SOURCE_REQUIRED placeholders: no default period (a due date is always given), no reminder, no escalation, and an evidence reference required (the strictest setting). Evidence files wait for UX S2; the reference names a document or system record.
 9. **A case does not close with work outstanding (EPIC 12).** Closing a case is refused while an approved actionable item has no action or an action that is not completed or waived (`CORRECTIVE_ACTIONS_OUTSTANDING`). Actions on a closed case are not reopened or waived.
-10. **Notifications carry ids only (ADR-025, N18).** Mandatory: CORRECTIVE_ACTION_ASSIGNED and CORRECTIVE_ACTION_RETURNED (also on reopening) to the owner. Event rules (in-app on, email off, SOURCE_REQUIRED): CORRECTIVE_ACTION_CHANGED (due date moved or waived) to the owner, CORRECTIVE_ACTION_SUBMITTED to the managers who can see the case, CORRECTIVE_ACTION_DUE to the owner and CORRECTIVE_ACTION_OVERDUE to the owner and those managers. The last two are queued by the scheduler's reminder run only when a policy sets them, once per due date.
+10. **Notifications carry ids only (ADR-025, N18).** Mandatory: CORRECTIVE_ACTION_ASSIGNED and CORRECTIVE_ACTION_RETURNED (also on reopening) to the owner. Event rules (in-app on, email off, SOURCE_REQUIRED): CORRECTIVE_ACTION_CHANGED (due date moved or waived) to the owner, CORRECTIVE_ACTION_SUBMITTED to the managers who can see the case, CORRECTIVE_ACTION_DUE to the owner and CORRECTIVE_ACTION_OVERDUE to the owner and those managers. The last two are queued by the scheduler's reminder run only when a policy sets them, once per due date. A notice goes to the owner only while they can still open the action (role, clearance and case gate, AGENT-09 L1); the change is recorded and audited either way.
 
 ## Consequences
 
@@ -28,6 +28,13 @@ The committee may recommend non-disciplinary corrective actions and governance r
 - Nobody can waive an action until the Delegation of Authority names the holder; until then an action that should not be done must be completed with a note, or the case stays open.
 - Impact assessment after execution (S099) and post-sanction follow-up (S101) are not modelled; they need a sourced process.
 - Permissions are OWNER_DEFAULT pending the Delegation of Authority (SOURCE_REQUIRED).
+
+## Open questions (SOURCE_REQUIRED; raised with the owner by the coordinator)
+
+Recorded from AGENT-09's early look on 1940 (2026-10-12). Both fail closed or follow the seeded roles; nothing changes until the owner answers.
+
+1. **Approved items that need no action.** With `CORRECTIVE_ACTION_WAIVE` held by no role, an approved item that turns out to need no action blocks the case's closure until the Delegation of Authority names a holder.
+2. **A case subject as owner.** A case subject who holds the Implementation Owner role is not excluded as an action's owner unless a declared conflict or a portal link to the case excludes them. Whether subjects must always be excluded is the owner's call.
 
 ## Production mapping
 

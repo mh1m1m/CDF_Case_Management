@@ -696,15 +696,42 @@ describe("export builder (Q99, ADR-026)", () => {
     });
 
     await ownerScenario(async (s) => {
-      // With no approval stage needed, the authority's approval alone approves it.
+      // With no approval stage needed, the authority's approval alone approves it, and no approver can add a stage
+      // meanwhile. The case owner needs no approver permission to see and decide it (AGENT-09 re-look on 1930).
       await rule(s, "grcDeputy", "RESTRICTED_CASE", "ANY - - restricted NONE");
-      const { req } = await deputyRequests(s);
+      const { req, hash } = await deputyRequests(s);
       expect(await preview(s, req)).toMatchObject({
         approvals_required: 0,
         authority_approval_required: true,
       });
       expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:AWAITING_AUTHORITY_APPROVAL",
+        (tx) => tx`select api.decide_export(${req}, 'APPROVE', ${REASON}, ${hash})`,
+      );
+      // Test fixture only: the owner's role loses both approver permissions; the authority clause alone lets them in.
+      await s.asOwner();
+      await s.tx`delete from iam.role_permission
+                 where role_code = 'GRC_DIRECTOR' and permission_code in ('EXPORT_APPROVE', 'EXPORT_SECOND_APPROVE')`;
+      await s.as("grcDirector");
+      expect(await s.tx`select id from exchange.export_request where id = ${req}`).toHaveLength(1);
       expect(await authority(s, "grcDirector", req)).toBe("APPROVED");
+    });
+
+    await ownerScenario(async (s) => {
+      // The authority approves nothing a rule refuses or an approver could not see; a rejection is always possible.
+      const { req, hash } = await deputyRequests(s);
+      expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
+      await rule(s, "grcDeputy", "RESTRICTED_REFUSED", "ANY - - restricted REFUSE");
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:REFUSED_BY_RULE", (tx) => decideAuthority(tx, req, hash));
+      await s.asOwner();
+      await s.tx`insert into exchange.export_item (request_id, position, object_type, object_id, added_by)
+                 values (${req}, 2, 'FINDING', ${randomUUID()}, ${USERS.grcDeputy})`;
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:ITEMS_WITHHELD", (tx) => decideAuthority(tx, req, hash));
+      expect(await authority(s, "grcDirector", req, "REJECT")).toBe("REJECTED");
     });
 
     await ownerScenario(async (s) => {

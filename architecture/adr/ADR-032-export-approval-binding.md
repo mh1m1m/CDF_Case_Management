@@ -32,6 +32,14 @@ ADR-026 decides what the Export Builder is: requests, items, recipients and appr
 - Not decided here (SOURCE_REQUIRED): the purpose list, approved external domains, retention of generated exports, and whether XLSX needs its own rule.
 - Notifications: `EXPORT_APPROVAL_REQUESTED` to the eligible approvers of the next stage, `EXPORT_DECIDED` to the requester; ids only (N18).
 
+## Open questions (SOURCE_REQUIRED; raised with the owner by the coordinator)
+
+Recorded from AGENT-09's re-look on 1930 (2026-10-12). Each fails closed or follows the seeded rules; none is changed until the owner answers.
+
+1. **One person, two roles.** When the restricted case's owner also holds `EXPORT_APPROVE`, the same person can give the authority's consent and the only approval stage. Decision 6 allows it by the DEC-61 analogy; the owner may want the stage held by someone else.
+2. **Two-approval exports can stall.** `EXPORT_POLICY_ADMIN` and `EXPORT_SECOND_APPROVE` are both GRC Director only. Once every director has authored a rule that applies to an export, no one may give its second approval and it cannot complete (fails closed). The Delegation of Authority should name a second-approval holder who does not set policy.
+3. **A requirement that no longer fits.** If a case is un-restricted after the authority's decision was required, or its owner is not eligible as Restricted Case Authority, the export waits for a decision no one can give (fails closed). The way out today is to cancel and request again.
+
 ## Production mapping
 
 | Prototype                                           | Production (PRODUCTION_SUBSTITUTION_REQUIRED)                      |

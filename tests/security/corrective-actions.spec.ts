@@ -67,6 +67,23 @@ async function decidedPackage(
   return { ...f, remediation: rem!.id, decision: d!.id };
 }
 
+/** Round 1 goes to the authority and comes back; the remediation is withdrawn in the revision; round 2 is adopted and
+ *  decided with `outcome`. */
+async function secondRound(s: Scenario, outcome: "APPROVE_AS_RECOMMENDED" | "REJECT"): Promise<Decided> {
+  const f = await decidedPackage(s, null);
+  await s.as("committeeSecretary");
+  await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'RETURN_TO_COMMITTEE', now() - interval '1 hour',
+    'Chief Executive (synthetic)', 'MEMO-DEMO-0106', null, ${REASON})`;
+  await s.tx`select api.withdraw_recommendation_item(${f.remediation}, ${REASON})`;
+  expect(await voteOnPackage(s, f)).toBe("ADOPTED");
+  await s.as("committeeSecretary");
+  await s.tx`select api.submit_to_authority(${f.pkg})`;
+  const [d] = await s.tx<{ id: string }[]>`
+    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now() - interval '1 hour',
+      'Chief Executive (synthetic)', 'MEMO-DEMO-0107', null, ${REASON}) as id`;
+  return { ...f, decision: d!.id };
+}
+
 async function open(
   s: Scenario,
   actor: UserKey,
@@ -117,11 +134,13 @@ async function inApp(s: OwnerScenario, template: string, object: string): Promis
   return r!.n;
 }
 
-/** Every corrective-action notification goes to someone who can open the action (N18, AGENT-09 review of 1920). */
-async function recipientsSeeActions(s: OwnerScenario) {
+/** Every corrective-action notification (enqueued after `since`, when given) goes to someone who can open the action
+ *  (N18, AGENT-09 review of 1920). */
+async function recipientsSeeActions(s: OwnerScenario, since: string | null = null) {
   await s.asOwner();
   const rows = await s.tx<{ recipient_id: string; template_code: string; object_id: string }[]>`
-    select recipient_id, template_code, object_id from notify.outbox where object_type = 'CORRECTIVE_ACTION'`;
+    select recipient_id, template_code, object_id from notify.outbox
+    where object_type = 'CORRECTIVE_ACTION' and (${since}::text is null or created_at > ${since}::text::timestamptz)`;
   expect(rows.length).toBeGreaterThan(0);
   for (const r of rows) {
     await s.as(BY_ID[r.recipient_id]!);
@@ -129,6 +148,20 @@ async function recipientsSeeActions(s: OwnerScenario) {
     expect(seen, `${BY_ID[r.recipient_id]} ${r.template_code}`).toHaveLength(1);
   }
   await s.asOwner();
+}
+
+/** The outbox's clock (rows carry clock_timestamp()), to check only what is enqueued from here on. */
+async function mark(s: OwnerScenario): Promise<string> {
+  await s.asOwner();
+  const [r] = await s.tx<{ t: string }[]>`select clock_timestamp()::text as t`;
+  return r!.t;
+}
+
+/** A declared conflict on case 0002: the user fails the case gate from now on. */
+async function conflicted(s: OwnerScenario, user: UserKey) {
+  await s.asOwner();
+  await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
+             values (${caseB}, ${USERS[user]}, 'CONFLICT_DECLARED', 'Synthetic declared conflict')`;
 }
 
 async function audited(s: OwnerScenario, objectId: string): Promise<string[]> {
@@ -254,6 +287,46 @@ describe("opening corrective actions (ADR-033, Q72)", () => {
       await s.asOwner();
       const rows = await s.tx<{ action_type: string }[]>`select action_type from decision.corrective_action`;
       expect(rows).toEqual([{ action_type: "CORRECTIVE_ACTION" }]);
+    });
+  });
+});
+
+describe("opening: rounds and withdrawn items (AGENT-09 early look on 1940)", () => {
+  it("a withdrawn item is never executed, even with its earlier committee result", async () => {
+    await ownerScenario(async (s) => {
+      await implementationOwners(s, "financeEmployee");
+      const f = await secondRound(s, "APPROVE_AS_RECOMMENDED");
+      // The remediation was adopted in round 1 and withdrawn before round 2: it keeps its round-1 committee result,
+      // but is no longer part of what the authority approved.
+      await s.asOwner();
+      const [rem] = await s.tx<{ status: string; committee_result: string }[]>`
+        select status, committee_result from decision.recommendation_item where id = ${f.remediation}`;
+      expect(rem).toEqual({ status: "WITHDRAWN", committee_result: "APPROVED" });
+      await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () =>
+        open(s, "caseManager", f.remediation, "financeEmployee"),
+      );
+      const id = await open(s, "caseManager", f.corrective, "financeEmployee");
+      expect((await action(s, id)).authority_decision_id).toBe(f.decision);
+    });
+  });
+
+  it("only the decision on the package's current round counts", async () => {
+    await ownerScenario(async (s) => {
+      await implementationOwners(s, "financeEmployee");
+      const f = await secondRound(s, "REJECT");
+      await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () =>
+        open(s, "caseManager", f.corrective, "financeEmployee"),
+      );
+      // Test fixture only (no command records an approval in a round that is later reopened): an approving decision
+      // on round 1 does not count once the package is on round 2.
+      await s.asOwner();
+      await s.tx`insert into decision.authority_decision (package_id, case_id, package_round, authority_type, outcome,
+                   decided_at, decided_by_label, source_document_reference, recorded_by)
+                 values (${f.pkg}, ${caseB}, 1, 'CEO', 'APPROVE_AS_RECOMMENDED', now() - interval '2 hours',
+                         'Chief Executive (synthetic)', 'MEMO-DEMO-0108', ${USERS.committeeSecretary})`;
+      await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () =>
+        open(s, "caseManager", f.corrective, "financeEmployee"),
+      );
     });
   });
 });
@@ -451,6 +524,50 @@ describe("managing actions", () => {
         "CORRECTIVE_ACTION_OWNER_CHANGED",
         "CORRECTIVE_ACTION_DUE_DATE_CHANGED",
       ]);
+    });
+  });
+
+  it("an owner who can no longer open the action is told nothing more about it (AGENT-09 L1)", async () => {
+    await ownerScenario(async (s) => {
+      await implementationOwners(s, "financeEmployee", "employeeB");
+      const f = await decidedPackage(s);
+      const pending = await open(s, "caseManager", f.corrective, "financeEmployee");
+      const done = await open(s, "caseManager", f.corrective, "financeEmployee");
+      await s.as("financeEmployee");
+      await submit(s, pending);
+      await submit(s, done);
+      await s.as("grcDirector");
+      expect(await verify(s, done, "VERIFIED")).toBe("COMPLETED");
+      // A conflict arises: the owner fails the case gate and no longer sees either action.
+      await conflicted(s, "financeEmployee");
+      // Test fixture only: the Delegation of Authority will name the waiver holder (SOURCE_REQUIRED).
+      await s.tx`insert into iam.role_permission (role_code, permission_code)
+                 values ('GRC_DIRECTOR', 'CORRECTIVE_ACTION_WAIVE')`;
+      const since = await mark(s);
+      await s.as("financeEmployee");
+      expect(await s.tx`select id from decision.corrective_action`).toEqual([]);
+      // The managers carry on: a due-date change, a return, a reopening and a waiver are recorded, not told to the
+      // conflicted owner; the reassigned action goes to its new owner.
+      await s.as("caseManager");
+      await s.tx`select api.change_corrective_action_due_date(${pending}, (now() at time zone 'Asia/Riyadh')::date + 40, ${REASON})`;
+      expect(await verify(s, pending, "RETURNED", "Synthetic: attach the revised SOP.")).toBe("IN_PROGRESS");
+      await s.tx`select api.reopen_corrective_action(${done}, ${REASON})`;
+      await s.tx`select api.assign_corrective_action_owner(${done}, ${USERS.employeeB}, ${REASON})`;
+      await s.as("grcDirector");
+      await s.tx`select api.waive_corrective_action(${pending}, 'MEMO-DEMO-0105', ${REASON})`;
+      for (const id of [pending, done]) {
+        expect(await notified(s, "CORRECTIVE_ACTION_CHANGED", id)).toEqual([]);
+        expect(await notified(s, "CORRECTIVE_ACTION_RETURNED", id)).toEqual([]);
+      }
+      expect(await notified(s, "CORRECTIVE_ACTION_ASSIGNED", done)).toEqual(["employeeB", "financeEmployee"]);
+      expect(await audited(s, pending)).toEqual([
+        "CORRECTIVE_ACTION_OPENED",
+        "CORRECTIVE_ACTION_COMPLETION_SUBMITTED",
+        "CORRECTIVE_ACTION_DUE_DATE_CHANGED",
+        "CORRECTIVE_ACTION_RETURNED",
+        "CORRECTIVE_ACTION_WAIVED",
+      ]);
+      await recipientsSeeActions(s, since);
     });
   });
 
@@ -725,6 +842,11 @@ describe("policy (SOURCE_REQUIRED, configurable)", () => {
       expect(await notified(s, "CORRECTIVE_ACTION_OVERDUE", later)).toEqual([]);
       expect(await notified(s, "CORRECTIVE_ACTION_DUE", byDefault)).toEqual([]);
       await recipientsSeeActions(s);
+      // An owner who has lost the case gate is not reminded (AGENT-09 early look on 1940).
+      const quiet = await open(s, "caseManager", f.corrective, "financeEmployee", 6);
+      await conflicted(s, "financeEmployee");
+      expect(await emitReminders(s)).toBe(0);
+      expect(await notified(s, "CORRECTIVE_ACTION_DUE", quiet)).toEqual([]);
     });
   });
 });
