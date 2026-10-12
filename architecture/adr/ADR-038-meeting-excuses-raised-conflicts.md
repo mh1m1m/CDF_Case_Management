@@ -42,7 +42,8 @@ Q49 asks that the declaration, the decision, the recusal and the resulting restr
    - When nobody in the meeting holds the role, nobody decides (fail closed). The votes then wait until the subject declares the conflict, or the meeting closes and another is scheduled.
    - Every rule set takes CHAIR. No command sets the decider yet; one comes with the owner's answer.
 6. **Who reads what.**
-   - Concerns, with their reasons: the raiser, the secretary running the meeting and the decider, each only while cleared for the case. The subject and the other members do not. The subject learns the outcome through their conflict status.
+   - Concerns, with their reasons: the raiser, the secretary running the meeting and the decider, each only while cleared for the case (`authz.can_view_meeting_concern`, used by the read policy and by the decision command).
+   - Never the subject, not even a subject who runs the meeting as secretary (AGENT-09 S1); the other members do not either. The subject learns the outcome through their conflict status.
    - The ledger records `ATTENDANCE_RECORDED` (with `to` EXCUSED and the excuse id), `MEETING_CONFLICT_RAISED`, `MEETING_CONFLICT_DECIDED` and, when upheld, `COI_DECLARED` with source DECISION. Each carries ids and codes only, never a reason.
 7. **The catalogue follows (ADR-035).**
    - T7-B1.2-048 names `api.record_excused_absence`.
@@ -59,6 +60,8 @@ Q49 asks that the declaration, the decision, the recusal and the resulting restr
   - The proof of an excuse is registered as evidence, not attached to the excuse.
   - An invitee cannot raise a concern.
   - A concern left open when the meeting closes stays open on record.
+  - Failing closed can stall a meeting: when the chair is conflicted or has not declared, or is the subject with no deputy chair seated, one concern stops every vote in that meeting, and the raiser cannot withdraw it. The remedy is a new meeting (AGENT-09, information).
+  - `CONCERN_OPEN` tells someone who may raise that a concern about that participant is already open (AGENT-09, information).
 
 ## Production mapping
 

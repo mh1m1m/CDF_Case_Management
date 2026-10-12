@@ -450,6 +450,27 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
     });
   });
 
+  it("a concern about the secretary running the meeting is hidden from that secretary; the chair decides it", async () => {
+    await ownerScenario(async (s) => {
+      const f = await ready(s);
+      await s.as("legal");
+      const [k] = await raise(s, f.participant.committeeSecretary!);
+      expect(await concernsSeenBy(s, "committeeSecretary")).toEqual([]);
+      for (const d of ["UPHELD", "DISMISSED"]) {
+        await s.expectError("CDF_NOT_FOUND", () => decide(s, k!.id, d));
+      }
+      // The secretary still runs the meeting, and no vote opens while the concern is open.
+      await s.expectError(
+        "CDF_CONFLICT:CONFLICT_CONCERN_OPEN",
+        (tx) => tx`select api.open_vote_item(${f.meeting}, 'OTHER', null, 'Blocked (synthetic)')`,
+      );
+      expect(await concernsSeenBy(s, "committeeChair")).toEqual([k!.id]);
+      await decide(s, k!.id, "DISMISSED");
+      expect(await concernsSeenBy(s, "committeeSecretary")).toEqual([]);
+      expect(await concernsSeenBy(s, "legal")).toEqual([k!.id]);
+    });
+  });
+
   it("a rule set naming the secretary: the secretary decides, unless they raised it", async () => {
     await ownerScenario(async (s) => {
       // Fixture: the rule set in force names the secretary (no command sets it yet; SOURCE_REQUIRED).
@@ -477,6 +498,14 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
       await s.as("committeeChair");
       await s.expectError("CDF_NOT_FOUND", () => decide(s, k2!.id, "UPHELD"));
 
+      // A concern about the only secretary: hidden from them, and nobody decides (fail closed).
+      await s.as("legal");
+      const [k3] = await raise(s, f.participant.committeeSecretary!);
+      for (const u of ["committeeSecretary", "committeeChair"] as const) {
+        expect(await concernsSeenBy(s, u)).not.toContain(k3!.id);
+        await s.expectError("CDF_NOT_FOUND", () => decide(s, k3!.id, "UPHELD"));
+      }
+
       await s.asOwner();
       const rows = await s.tx<{ raised_as: string; status: string; decided_as: string | null }[]>`
         select raised_as, status, decided_as from committee.meeting_conflict_concern where meeting_id = ${f.meeting}
@@ -484,6 +513,7 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
       expect(rows).toEqual([
         { raised_as: "MEMBER", status: "DISMISSED", decided_as: "SECRETARY" },
         { raised_as: "SECRETARY", status: "OPEN", decided_as: null },
+        { raised_as: "MEMBER", status: "OPEN", decided_as: null },
       ]);
     });
   });

@@ -30,8 +30,8 @@
 --
 -- Controls:
 --   * Additive and non-destructive: two checks widened under their own names (attendance, declaration source), one
---     column with a default, two append-only tables with RLS (SELECT only, no write grants), three commands, one
---     predicate, one trigger. No 1890 command body changes; nothing is dropped, renamed or deleted.
+--     column with a default, two append-only tables with RLS (SELECT only, no write grants), three commands, two
+--     predicates, one trigger. No 1890 command body changes; nothing is dropped, renamed or deleted.
 --   * Reasons stay in their rows; audit events carry ids and codes only, never a reason.
 --   * The case-level part of T3-B1.2-050 (anyone on a case raising someone else's case conflict) is not built: whether
 --     an upheld case-level conflict suspends the subject's case access is an access-model decision (gap P11-G7, open).
@@ -106,7 +106,7 @@ comment on table committee.meeting_conflict_concern is
   'A conflict of interest raised about a meeting participant by another member or the secretary, and its decision '
   '(T3-B1.2-050 in a committee meeting, Q49; migration 2000, ADR-038). While one is open and its subject has not '
   'declared a conflict, no vote item opens in the meeting. Reasons are visible to the raiser, the secretary running the '
-  'meeting and the decider only.';
+  'meeting and the decider only, never to the subject.';
 
 -- -----------------------------------------------------------------------------
 -- Integrity
@@ -202,6 +202,25 @@ as $$
 $$;
 grant execute on function authz.meeting_concern_decider_seat(uuid) to authenticated;
 
+-- Who reads a concern and learns that it exists: the raiser, the secretary running the meeting and the decider, each
+-- still cleared for the case. Never its subject, not even a subject who runs the meeting as secretary (AGENT-09 S1).
+create function authz.can_view_meeting_concern(p_concern_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and exists (
+    select 1 from committee.meeting_conflict_concern c
+    join committee.meeting_participant t on t.id = c.participant_id
+    where c.id = p_concern_id
+      and t.user_id is distinct from authz.current_user_id()
+      and ((c.raised_by = authz.current_user_id() and authz.can_view_meeting(c.meeting_id))
+           or authz.can_manage_meeting(c.meeting_id)
+           or authz.meeting_concern_decider_seat(c.id) is not null)
+  );
+$$;
+grant execute on function authz.can_view_meeting_concern(uuid) to authenticated;
+
 -- -----------------------------------------------------------------------------
 -- RLS (SELECT only; no write grants)
 -- -----------------------------------------------------------------------------
@@ -215,11 +234,8 @@ create policy attendance_excuse_read on committee.attendance_excuse for select t
                       and authz.can_view_meeting(mp.meeting_id)));
 grant select on committee.attendance_excuse to authenticated;
 
--- The raiser, the secretary running the meeting and the decider, each still cleared for the case; not the subject.
 create policy meeting_conflict_concern_read on committee.meeting_conflict_concern for select to authenticated
-  using ((raised_by = authz.current_user_id() and authz.can_view_meeting(meeting_id))
-         or authz.can_manage_meeting(meeting_id)
-         or authz.meeting_concern_decider_seat(id) is not null);
+  using (authz.can_view_meeting_concern(id));
 grant select on committee.meeting_conflict_concern to authenticated;
 
 -- -----------------------------------------------------------------------------
@@ -337,9 +353,7 @@ declare
 begin
   select * into v_c from committee.meeting_conflict_concern c where c.id = p_concern_id;
   -- Only those who may read the concern learn that it exists.
-  if v_c.id is null or not authz.can_view_meeting(v_c.meeting_id)
-     or not (v_c.raised_by = v_actor or authz.can_manage_meeting(v_c.meeting_id)
-             or authz.meeting_concern_decider_seat(v_c.id) is not null) then
+  if v_c.id is null or not authz.can_view_meeting(v_c.meeting_id) or not authz.can_view_meeting_concern(v_c.id) then
     perform api._fail('NOT_FOUND');
   end if;
   v_m := committee.lock_visible_meeting(v_c.meeting_id);

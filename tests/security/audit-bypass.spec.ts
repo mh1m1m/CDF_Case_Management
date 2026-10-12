@@ -1835,6 +1835,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_grievance_assessment",
       "authz.can_view_interview",
       "authz.can_view_meeting",
+      "authz.can_view_meeting_concern",
       "authz.can_view_meeting_deliberation",
       "authz.can_view_meeting_roster",
       "authz.can_view_packet",
