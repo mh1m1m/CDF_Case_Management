@@ -676,6 +676,18 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.decide_meeting_conflict(${ids.concern!}, 'DISMISSED', 'Synthetic: walk concern dismissed.')`,
       },
+      // A witness invited and excluded (migration 2010).
+      {
+        fn: "exclude_meeting_witness",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const witness = await one(
+            s,
+            s.tx`select api.invite_to_meeting(${ids.meeting!}, 'WITNESS', ${USERS.employeeB}, null, false, ${REASON}) as id`,
+          );
+          return s.tx`select api.exclude_meeting_witness(${witness}, 'Synthetic: walk witness excluded.')`;
+        },
+      },
       // Recommendation package (migration 1900): drafted, voted and adopted in the open meeting, reviewed by Legal,
       // sent to the authority and decided.
       {

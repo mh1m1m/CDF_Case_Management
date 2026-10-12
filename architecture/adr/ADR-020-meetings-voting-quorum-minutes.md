@@ -1,6 +1,6 @@
 # ADR-020: Meetings, conflict of interest, quorum, voting and minutes
 
-- **Status:** Proposed (2026-10-12). Linear CDF-190. Implemented in migration 1890 (draft, not merged). Security-sensitive: AGENT-09 review before the implementing PR leaves draft. Amended by [ADR-038](ADR-038-meeting-excuses-raised-conflicts.md) (migration 2000): attendance may be EXCUSED with a reason, and a conflict raised by another participant holds the meeting's votes until it is decided.
+- **Status:** Proposed (2026-10-12). Linear CDF-190. Implemented in migration 1890 (draft, not merged). Security-sensitive: AGENT-09 review before the implementing PR leaves draft. Amended by [ADR-038](ADR-038-meeting-excuses-raised-conflicts.md) (migration 2000): attendance may be EXCUSED with a reason, and a conflict raised by another participant holds the meeting's votes until it is decided. Amended by [ADR-039](ADR-039-meeting-witness-exclusion.md) (migration 2010): the secretary may exclude a witness, who then no longer sees the meeting.
 - **Protocol:** §18–§21, §29, §39, §68, §87; owner Q&A Q35–Q36, Q41–Q70, Q97–Q98.
 
 ## Decision

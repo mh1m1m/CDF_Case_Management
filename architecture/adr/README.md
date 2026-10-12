@@ -40,5 +40,6 @@
 | [ADR-036](ADR-036-preliminary-closure-outcomes.md)              | Closure outcomes of the preliminary review                                      | Proposed |
 | [ADR-037](ADR-037-employee-notice-kinds.md)                     | Kinds of employee notice; the decision notice starts the grievance window       | Proposed |
 | [ADR-038](ADR-038-meeting-excuses-raised-conflicts.md)          | Excused attendance; conflicts raised by another meeting participant             | Proposed |
+| [ADR-039](ADR-039-meeting-witness-exclusion.md)                 | Excluding a witness from a committee meeting                                    | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.

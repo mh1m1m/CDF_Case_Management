@@ -517,6 +517,7 @@ interface MeetingTargets {
   voteItem: string;
   minutes: string;
   concern: string;
+  witness: string;
 }
 
 const MEETING_PROBES: Probe<MeetingTargets>[] = [
@@ -562,6 +563,11 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     fn: "decide_meeting_conflict",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.decide_meeting_conflict(${t.concern}, 'UPHELD', ${REASON})`,
+  },
+  {
+    fn: "exclude_meeting_witness",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.exclude_meeting_witness(${t.witness}, ${REASON})`,
   },
   {
     fn: "close_meeting",
@@ -1621,6 +1627,10 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
       await s.tx`select api.record_excused_absence(${m2Seats.find((r) => r.user_id === USERS.committeeChair)!.id}, ${REASON})`;
       const [k] = await s.tx<{ id: string }[]>`
         select api.raise_meeting_conflict(${m2Seats.find((r) => r.user_id === USERS.legal)!.id}, ${REASON}) as id`;
+      // An excluded witness there (migration 2010).
+      const [w] = await s.tx<{ id: string }[]>`
+        select api.invite_to_meeting(${m2!.id}, 'WITNESS', ${USERS.employeeB}, null, false, ${REASON}) as id`;
+      await s.tx`select api.exclude_meeting_witness(${w!.id}, ${REASON})`;
       await s.tx`select api.close_meeting(${m2!.id}, ${REASON})`;
       const [mi] = await s.tx<
         { id: string }[]
@@ -1634,6 +1644,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         voteItem: v!.id,
         minutes: mi!.id,
         concern: k!.id,
+        witness: w!.id,
       };
       const random: MeetingTargets = {
         committeeProceeding: randomUUID(),
@@ -1642,6 +1653,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         voteItem: randomUUID(),
         minutes: randomUUID(),
         concern: randomUUID(),
+        witness: randomUUID(),
       };
       const mismatches: string[] = [];
       for (const probe of MEETING_PROBES) {
@@ -1660,6 +1672,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "minutes_review",
         "attendance_excuse",
         "meeting_conflict_concern",
+        "witness_exclusion",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
       }
