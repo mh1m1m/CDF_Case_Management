@@ -1382,5 +1382,7 @@ export const ar: Messages = {
     GRIEVANCE_OUTCOME_RECORDED: "سجّلت اللجنة نتيجة تظلّمك.",
     GRIEVANCE_AUTHORITY_APPROVAL_NEEDED: "تظلّم على قضية مقيّدة يحتاج منك تسمية أمين للجنة.",
     GRIEVANCE_HANDLING_APPROVED: "تمت تسميتك لمعالجة تظلّم.",
+    EXPORT_APPROVAL_REQUESTED: "يوجد تصدير بانتظار موافقتك.",
+    EXPORT_DECIDED: "سُجّل قرار بشأن طلب التصدير الخاص بك.",
   },
 };

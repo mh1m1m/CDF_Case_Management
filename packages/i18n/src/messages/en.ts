@@ -1399,6 +1399,8 @@ export const en = {
     GRIEVANCE_AUTHORITY_APPROVAL_NEEDED:
       "A grievance on a restricted case needs you to name a committee secretary.",
     GRIEVANCE_HANDLING_APPROVED: "You have been named to handle a grievance.",
+    EXPORT_APPROVAL_REQUESTED: "An export is waiting for your approval.",
+    EXPORT_DECIDED: "A decision was recorded on your export.",
   },
 };
 

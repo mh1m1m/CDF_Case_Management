@@ -287,3 +287,13 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `notify.rule`       | Layered, effective-dated delivery rules | SYSTEM_MANDATORY from migrations only; closed, never edited |
 | `notify.preference` | A user's mutes                          | Mandatory templates cannot be muted                         |
 | `notify.outbox`     | One row per recipient and channel       | Template, ids and deep link only (N18); facts immutable     |
+
+## Export builder (migration 1930, ADR-026)
+
+| Table                       | Purpose                                                    | Notes                                                                                         |
+| --------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `exchange.approval_rule`    | Effective-dated export rules: second approval or refusal   | Matches audience, case classification, restricted cases, content type; seeded SOURCE_REQUIRED |
+| `exchange.export_request`   | One export of one case: format, audience, purpose, status  | External needs party and justification; bound to a submitted hash; final once sent or closed  |
+| `exchange.export_item`      | Object type and id of an exported item                     | No content: rendered per viewer at preview, approval and generation (N16)                     |
+| `exchange.export_recipient` | Internal users cleared for the case, or external addresses | EMAIL only; external addresses synthetic `@example.test` (PRODUCTION_SUBSTITUTION_REQUIRED)   |
+| `exchange.export_approval`  | One approval per stage, bound to the preview hash approved | Never the requester; stage 2 by a different person with EXPORT_SECOND_APPROVE                 |

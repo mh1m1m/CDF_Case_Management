@@ -116,6 +116,11 @@ export const PERMISSIONS = [
   "LEGAL_OPINION_GIVE",
   // Notification rules (migration 1920, ADR-025): event rules and committee defaults, never recipients or content.
   "NOTIFICATION_ADMIN",
+  // Export builder (migration 1930, ADR-026, Q99). OWNER_DEFAULT, SOURCE_REQUIRED: the Delegation of Authority.
+  "EXPORT_REQUEST",
+  "EXPORT_APPROVE",
+  "EXPORT_SECOND_APPROVE",
+  "EXPORT_POLICY_ADMIN",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -1128,12 +1133,88 @@ export const NOTIFICATION_TEMPLATES = [
   "GRIEVANCE_OUTCOME_RECORDED",
   "GRIEVANCE_AUTHORITY_APPROVAL_NEEDED",
   "GRIEVANCE_HANDLING_APPROVED",
+  // Export builder (migration 1930, ADR-026)
+  "EXPORT_APPROVAL_REQUESTED",
+  "EXPORT_DECIDED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
 export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
+
+// ---- Export builder (ADR-026, migration 1930, Q99) ----------------------------------------------------------
+export const EXPORT_FORMATS = ["PDF", "XLSX", "EMAIL"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+export const EXPORT_AUDIENCES = ["INTERNAL", "EXTERNAL"] as const;
+export type ExportAudience = (typeof EXPORT_AUDIENCES)[number];
+/** SOURCE_REQUIRED: the approved list of export purposes. */
+export const EXPORT_PURPOSES = [
+  "AUTHORITY_SUBMISSION",
+  "REGULATOR_REQUEST",
+  "LEGAL_COUNSEL",
+  "INTERNAL_REPORTING",
+  "AUDIT",
+  "OTHER",
+] as const;
+export type ExportPurpose = (typeof EXPORT_PURPOSES)[number];
+/** Exportable content. Evidence is not exportable until UX S2 merges; protected identity never is (N19). */
+export const EXPORT_OBJECT_TYPES = [
+  "CASE_SUMMARY",
+  "FINDING",
+  "RECOMMENDATION_PACKAGE",
+  "AUTHORITY_DECISION",
+  "MINUTES",
+] as const;
+export type ExportObjectType = (typeof EXPORT_OBJECT_TYPES)[number];
+export const EXPORT_STATUSES = [
+  "DRAFT",
+  "SUBMITTED",
+  "APPROVED",
+  "GENERATED",
+  "SENT",
+  "REJECTED",
+  "CANCELLED",
+] as const;
+export type ExportStatus = (typeof EXPORT_STATUSES)[number];
+
+/** One item as the viewer may see it; `content` is null when the item is withheld (N16). */
+export interface ExportDocumentItem {
+  position: number;
+  objectType: ExportObjectType;
+  objectId: string;
+  included: boolean;
+  content: Record<string, unknown> | null;
+}
+
+/** The rendered export: what a preview shows, what approvers approve and what generation renders. */
+export interface ExportDocument {
+  requestId: string;
+  caseId: string;
+  caseNumber: string;
+  classification: Classification;
+  format: ExportFormat;
+  audience: ExportAudience;
+  purpose: ExportPurpose;
+  externalParty: string | null;
+  items: ExportDocumentItem[];
+}
+
+export interface ExportPreview {
+  document: ExportDocument;
+  hash: string;
+  withheld: number;
+  approvalsRequired: number;
+  matchedRules: { code: string; action: "REQUIRE_SECOND_APPROVAL" | "REFUSE" }[];
+}
+
+/** What generation hands to rendering and delivery: the document, its hash, the private key and the addresses. */
+export interface GeneratedExport {
+  storageKey: string;
+  hash: string;
+  document: ExportDocument;
+  deliverTo: string[];
+}
 
 /** What the NotificationSender receives: recipient, template and link. Never case content (§39, N18). */
 export interface OutgoingNotification {

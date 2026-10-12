@@ -38,6 +38,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "FORM_VIEW",
     "FORM_PREPARE",
     "FORM_REVIEW",
+    "EXPORT_REQUEST",
+    "EXPORT_APPROVE",
   ],
   LEAD_INVESTIGATOR: [
     "CASE_ASSIGN",
@@ -50,6 +52,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "FORM_PREPARE",
     "FORM_REVIEW",
     "PRELIMINARY_PREPARE",
+    "EXPORT_REQUEST",
   ],
   INVESTIGATOR: [
     "CONFLICT_DECLARE",
@@ -103,6 +106,11 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "COMMITTEE_ADMIN",
     "PRELIMINARY_PREPARE",
     "PRELIMINARY_REVIEW",
+    // Export builder (migration 1930, ADR-026): OWNER_DEFAULT, SOURCE_REQUIRED (Delegation of Authority).
+    "EXPORT_REQUEST",
+    "EXPORT_APPROVE",
+    "EXPORT_SECOND_APPROVE",
+    "EXPORT_POLICY_ADMIN",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
   INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],

@@ -316,6 +316,7 @@ const VISIBLE: Record<string, string> = {
   LEGAL_REVIEW: "select count(*)::int as n from decision.legal_review_request where id = $1",
   DEFENCE_NOTICE: "select count(*)::int as n from grievance.defence_notice where id = $1",
   GRIEVANCE: "select count(*)::int as n from grievance.grievance where id = $1",
+  EXPORT: "select count(*)::int as n from exchange.export_request where id = $1",
 };
 
 async function outbox(s: OwnerScenario) {

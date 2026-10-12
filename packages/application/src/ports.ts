@@ -10,6 +10,7 @@ import type {
   CaseListItem,
   EvidenceItem,
   EvidenceRejectionCode,
+  ExportDocument,
   FormApprovalOutcome,
   FormData,
   FormDefinitionListItem,
@@ -391,4 +392,40 @@ export interface NotificationOutbox {
 export interface NotificationSender {
   readonly kind: "stub-email";
   send(notification: OutgoingNotification): Promise<boolean>;
+}
+
+// ---- Export builder (ADR-026, migration 1930) ---------------------------------------------------
+/** A rendered export file. */
+export interface RenderedExport {
+  body: Uint8Array;
+  contentType: string;
+  fileName: string;
+}
+
+/**
+ * Turns an approved export document into a file. PRODUCTION_SUBSTITUTION_REQUIRED: the prototype renderer writes
+ * canonical JSON; CDF document rendering (PDF/XLSX with classification banners) is a human decision.
+ */
+export interface ExportRenderer {
+  readonly kind: "stub-json";
+  render(document: ExportDocument): Promise<RenderedExport>;
+}
+
+/**
+ * Private storage for generated exports, keyed by the database's random key (exports/<uuid>); never overwritten.
+ * PRODUCTION_SUBSTITUTION_REQUIRED: a private Alibaba OSS export bucket with KMS encryption; the prototype keeps
+ * files in memory.
+ */
+export interface ExportStore {
+  readonly kind: "memory";
+  put(storageKey: string, file: RenderedExport): Promise<void>;
+}
+
+/**
+ * Delivers an EMAIL export. PRODUCTION_SUBSTITUTION_REQUIRED: the CDF mail relay with approved external domains;
+ * the prototype stub delivers to synthetic @example.test addresses only and sends nothing.
+ */
+export interface ExportMailer {
+  readonly kind: "stub-email";
+  send(to: readonly string[], file: RenderedExport): Promise<boolean>;
 }

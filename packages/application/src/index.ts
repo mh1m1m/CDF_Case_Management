@@ -20,3 +20,5 @@ export { createRecordsService } from "./records";
 export type { RecordsDeps, RecordsGateway, RecordsService } from "./records";
 export { composeNotificationEmail, createNotificationService } from "./notifications";
 export type { DispatchResult, NotificationDeps, NotificationService } from "./notifications";
+export { createExportService } from "./exports";
+export type { ExportDeps, ExportGateway, ExportService, GenerateResult } from "./exports";

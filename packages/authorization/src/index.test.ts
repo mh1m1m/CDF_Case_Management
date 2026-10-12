@@ -69,6 +69,7 @@ describe("role permission mirror", () => {
       "CONFLICT_DECLARE",
       "EVIDENCE_DOWNLOAD",
       "EVIDENCE_UPLOAD",
+      "EXPORT_REQUEST",
       "FORM_PREPARE",
       "FORM_REVIEW",
       "FORM_VIEW",

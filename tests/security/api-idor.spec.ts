@@ -835,6 +835,61 @@ const NOTIFICATION_PROBES: Probe<NotificationTargets>[] = [
   },
 ];
 
+// Export builder commands (migration 1930) take a case (creation) or an export request; never content.
+interface ExportTargets {
+  case: string;
+  request: string;
+}
+
+const EXPORT_PROBES: Probe<ExportTargets>[] = [
+  {
+    fn: "create_export_request",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'AUDIT', null, null)`,
+  },
+  {
+    fn: "add_export_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.add_export_item(${t.request}, 'CASE_SUMMARY', ${t.case})`,
+  },
+  {
+    fn: "add_export_recipient",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.add_export_recipient(${t.request}, 'INTERNAL', ${self}, null)`,
+  },
+  {
+    fn: "preview_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.preview_export(${t.request})`,
+  },
+  {
+    fn: "submit_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.submit_export(${t.request}, ${SHA}, 'RESTRICTED'::core.classification_level)`,
+  },
+  {
+    fn: "decide_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_export(${t.request}, 'APPROVE', ${REASON}, ${SHA})`,
+  },
+  {
+    fn: "generate_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.generate_export(${t.request})`,
+  },
+  {
+    fn: "record_export_sent",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_export_sent(${t.request})`,
+  },
+  {
+    fn: "cancel_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_export(${t.request}, ${REASON})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -848,6 +903,8 @@ const ADMIN_COMMANDS = [
   "set_action_authority_rule",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
   "set_notification_rule",
+  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case.
+  "set_export_rule",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
@@ -1080,6 +1137,7 @@ describe("catalog guard", () => {
       ...DECISION_PROBES.map((p) => p.fn),
       ...GRIEVANCE_PROBES.map((p) => p.fn),
       ...NOTIFICATION_PROBES.map((p) => p.fn),
+      ...EXPORT_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1606,6 +1664,49 @@ describe("IDOR: notifications (migration 1920)", () => {
       }
       expect(mismatches).toEqual([]);
       expect(await s.tx`select id from notify.outbox where recipient_id = ${USERS.legal}`).toEqual([]);
+    });
+  });
+});
+
+describe("IDOR: export requests (migration 1930)", () => {
+  // case manager's submitted external export of case 0002 (RESTRICTED). None of these can see case 0002 with an
+  // approval permission; investigatorA, the committee member and intake also lack EXPORT_* entirely.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "lead",
+    "committee",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "legal",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST', 'Regulator Alpha (synthetic)',
+          'Synthetic: the regulator asked for the case summary.') as id`;
+      await s.tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${caseB})`;
+      await s.tx`select api.add_export_recipient(${r!.id}, 'EXTERNAL', null, 'officer.alpha@example.test')`;
+      const [p] = await s.tx<{ h: string }[]>`select api.preview_export(${r!.id}) ->> 'hash' as h`;
+      await s.tx`select api.submit_export(${r!.id}, ${p!.h}, 'RESTRICTED'::core.classification_level)`;
+      await s.as(actor);
+      const real: ExportTargets = { case: caseB, request: r!.id };
+      const random: ExportTargets = { case: randomUUID(), request: randomUUID() };
+      const mismatches: string[] = [];
+      for (const probe of EXPORT_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of ["export_request", "export_item", "export_recipient", "export_approval"]) {
+        expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
+      }
     });
   });
 });

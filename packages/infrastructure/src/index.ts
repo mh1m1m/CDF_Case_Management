@@ -28,3 +28,10 @@ export {
 } from "./observability/scrub";
 export { PostgresNotificationOutbox } from "./notifications/outbox";
 export { StubEmailSender } from "./notifications/stub-email-sender";
+export { PostgresExportGateway } from "./db/export-gateway";
+export {
+  EXPORT_KEY_PATTERN,
+  InMemoryExportStore,
+  StubExportMailer,
+  StubJsonExportRenderer,
+} from "./exports/stubs";

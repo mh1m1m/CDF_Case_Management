@@ -1358,6 +1358,90 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.decide_grievance_admissibility(${ids.grievance2!}, 'INADMISSIBLE', null, ${REASON})`;
         },
       },
+      // Export builder (migration 1930): an external email export of case A's summary, approved, generated and
+      // sent; a second draft is cancelled. The walk rule is switched off (NONE) and matches nothing.
+      {
+        fn: "set_export_rule",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.set_export_rule('WALK_RULE', 'ANY', null, 'MINUTES', false, 'NONE', now(), 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "create_export_request",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.exportRequest = await one(
+            s,
+            s.tx`select api.create_export_request(${caseA}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST',
+              'Regulator Alpha (synthetic)', 'Synthetic: the regulator asked for the case summary.') as id`,
+          )),
+      },
+      {
+        fn: "add_export_item",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.add_export_item(${ids.exportRequest!}, 'CASE_SUMMARY', ${caseA})`,
+      },
+      {
+        fn: "add_export_recipient",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.add_export_recipient(${ids.exportRequest!}, 'EXTERNAL', null, 'walk.officer@example.test')`,
+      },
+      {
+        fn: "preview_export",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.exportHash = await one(
+            s,
+            s.tx`select api.preview_export(${ids.exportRequest!}) ->> 'hash' as h`,
+          )),
+      },
+      {
+        fn: "submit_export",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.submit_export(${ids.exportRequest!}, ${ids.exportHash!},
+            (select classification from case_mgmt.case_record where id = ${caseA}))`,
+      },
+      {
+        fn: "decide_export",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.decide_export(${ids.exportRequest!}, 'APPROVE', ${REASON}, ${ids.exportHash!})`,
+      },
+      {
+        fn: "generate_export",
+        actor: "caseManager",
+        run: async (s) => {
+          // Fixture: a second approval when the case's classification rule asks for one.
+          const status = await one(
+            s,
+            s.tx`select status from exchange.export_request where id = ${ids.exportRequest!}`,
+          );
+          if (status === "SUBMITTED") {
+            await s.as("grcDeputy");
+            await s.tx`select api.decide_export(${ids.exportRequest!}, 'APPROVE', ${REASON}, ${ids.exportHash!})`;
+            await s.as("caseManager");
+          }
+          return s.tx`select api.generate_export(${ids.exportRequest!})`;
+        },
+      },
+      {
+        fn: "record_export_sent",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.record_export_sent(${ids.exportRequest!})`,
+      },
+      {
+        fn: "cancel_export",
+        actor: "caseManager",
+        run: async (s) => {
+          const draft = await one(
+            s,
+            s.tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'AUDIT', null, null) as id`,
+          );
+          return s.tx`select api.cancel_export(${draft}, ${REASON})`;
+        },
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
@@ -1488,7 +1572,7 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records', 'config', 'decision', 'grievance', 'notify')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records', 'config', 'decision', 'grievance', 'notify', 'exchange')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
     // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers
@@ -1526,6 +1610,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_committee_proceeding",
       "authz.can_view_committee_registry",
       "authz.can_view_evidence",
+      "authz.can_view_export",
       "authz.can_view_form_instance",
       "authz.can_view_grievance",
       "authz.can_view_grievance_assessment",

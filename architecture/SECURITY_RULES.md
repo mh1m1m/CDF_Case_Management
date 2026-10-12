@@ -299,3 +299,13 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Email delivery and reminders run only through `notify.*` functions granted to the BFF login role, never to `authenticated` or `anon`.
 - Mandatory notifications (meeting invitations, minutes review, legal review assignment, defence notices, grievance decisions) cannot be muted. Rules are maintained only with `NOTIFICATION_ADMIN`.
 - Tests: `tests/security/notifications.spec.ts`, notification IDOR probes and the audit walk.
+
+## 20. Exports (migration 1930; ADR-026; Q99)
+
+- An export holds object ids only. Each item is rendered for the person looking at it with the same predicate as its table's RLS policy; an item they cannot see, from another case or missing is refused when added and listed as withheld afterwards (N16). Withheld items block submission, approval and generation.
+- The preview hash covers the rendered items, recipients, format, audience, purpose, justification and the case's current classification. Submission is bound to the requester's own preview; each approval and the generation recompute it, so any change answers `PREVIEW_CHANGED`. A rejection is always possible.
+- External exports need an external party, a justification, the requester's confirmation of the case's classification and one approval; a matching rule adds a second approval or refuses (seeded: SECRET refused, CONFIDENTIAL and minutes need two, restricted cases need one even internally; all SOURCE_REQUIRED). A rule that begins later binds pending exports.
+- Separation of duties: the requester never approves; the second approval is by a different person holding `EXPORT_SECOND_APPROVE`. Only the requester generates, sends or cancels. Drafts are visible to their requester only.
+- Internal recipients must be able to see the case when added, submitted and generated. External addresses never enter the audit ledger.
+- No item reads the report, the reporter's WB id or protected identity (N19); evidence is not exportable until UX S2 merges. Approved minutes export their narrative only.
+- Tests: `tests/security/export.spec.ts` (20 mutations of the controls killed), export IDOR probes and the audit walk.
