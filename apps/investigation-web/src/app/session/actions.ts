@@ -1,4 +1,5 @@
 "use server";
+import { redirect } from "next/navigation";
 import { identity } from "@/server/container";
 
 /**
@@ -12,4 +13,9 @@ export async function extendSessionAction(): Promise<boolean> {
   if (!session) return false;
   if (idp.touch) await idp.touch(session);
   return true;
+}
+
+export async function signOutAction() {
+  await (await identity()).signOut();
+  redirect("/login");
 }

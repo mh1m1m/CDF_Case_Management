@@ -111,8 +111,9 @@ test("legal files a hold request by exact case number in Arabic; no justificatio
   browser,
 }) => {
   const legal = await signIn(browser, "legal@example.test", "ar");
+  // The Records area opens on the legal-hold queue for a legal reviewer (their default view, S1).
   await legal.getByTestId("nav-records").click();
-  await legal.getByTestId("legal-holds-link").click();
+  await expect(legal).toHaveURL(/\/records\/legal-holds$/);
   await expect(legal.locator("html")).toHaveAttribute("dir", "rtl");
   const form = legal.getByTestId("lookup-form");
   await form.locator("#caseReference").fill("CDF-DEMO-2026-0001");

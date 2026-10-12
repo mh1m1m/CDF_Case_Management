@@ -8,13 +8,19 @@ import type {
   CaseDiscoveryResult,
   CaseListItem,
   IntakeReportItem,
+  LedgerEntry,
+  MyAccessEntry,
+  MyArea,
   MyCaseTask,
   MyWorkSummary,
+  PendingConflict,
   RecordsCatalogueEntry,
   ReportDetail,
   RestrictedCaseAuthority,
   TransitionOption,
   UserDirectoryEntry,
+  UserRegisterEntry,
+  WorkItem,
 } from "@cdf/contracts";
 import type { InvestigationGateway, UserRequestContext } from "@cdf/application";
 import { withUserContext, type Sql, type Tx } from "./security-context";
@@ -221,6 +227,27 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
     });
   }
 
+  pendingConflicts(ctx: UserRequestContext, caseId: string): Promise<PendingConflict[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<(Omit<PendingConflict, "declaredAt"> & { declaredAt: Date })[]>`
+        select k.id, k.user_id as "userId", u.display_name as "displayName", u.display_name_ar as "displayNameAr",
+               k.declaration, k.declared_at as "declaredAt"
+        from case_mgmt.conflict_check k join iam.user_profile u on u.id = k.user_id
+        where k.case_id = ${caseId} and k.is_current and k.status = 'CONFLICT_DECLARED'
+        order by k.declared_at`;
+      return rows.map((r) => ({ ...r, declaredAt: iso(r.declaredAt)! }));
+    });
+  }
+
+  decideConflict(ctx: UserRequestContext, i: { conflictId: string; decision: string; reason: string }) {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<
+        { id: string }[]
+      >`select api.decide_conflict(${i.conflictId}, ${i.decision}, ${i.reason}) as id`;
+      return row!.id;
+    });
+  }
+
   transitionCase(ctx: UserRequestContext, i: { caseId: string; transitionCode: string; reason?: string }) {
     return this.run(ctx, async (tx) => {
       const [row] = await tx<
@@ -312,6 +339,75 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         from api.my_work_summary()`;
       return row!;
     });
+  }
+
+  myAreas(ctx: UserRequestContext): Promise<MyArea[]> {
+    return this.run(
+      ctx,
+      (tx) => tx<MyArea[]>`
+        select area_code as area, actionable_count as "actionableCount", default_view as "defaultView"
+        from api.my_areas()`,
+    );
+  }
+
+  myWorkItems(ctx: UserRequestContext): Promise<WorkItem[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<
+        (Omit<WorkItem, "dueAt" | "sinceAt"> & { dueAt: Date | null; sinceAt: Date | null })[]
+      >`
+        select area, view, category, target_type as "targetType", target_id as "targetId", case_id as "caseId",
+               case_number as "caseNumber", due_at as "dueAt", due_source as "dueSource", since_at as "sinceAt"
+        from api.my_work_items()`;
+      return rows.map((r) => ({ ...r, dueAt: iso(r.dueAt), sinceAt: iso(r.sinceAt) }));
+    });
+  }
+
+  myAccess(ctx: UserRequestContext): Promise<MyAccessEntry[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<
+        (Omit<MyAccessEntry, "sinceAt" | "untilAt"> & { sinceAt: Date | null; untilAt: Date | null })[]
+      >`
+        select basis, code, case_id as "caseId", case_number as "caseNumber", since_at as "sinceAt",
+               until_at as "untilAt"
+        from api.my_access()`;
+      return rows.map((r) => ({ ...r, sinceAt: iso(r.sinceAt), untilAt: iso(r.untilAt) }));
+    });
+  }
+
+  auditLedger(
+    ctx: UserRequestContext,
+    categories: readonly LedgerEntry["category"][],
+    limit: number,
+  ): Promise<LedgerEntry[]> {
+    return this.run(ctx, async (tx) => {
+      // Metadata columns only: no reason, details, object id or case id (DEC-11).
+      const rows = await tx<(Omit<LedgerEntry, "occurredAt"> & { occurredAt: Date })[]>`
+        select seq::int as seq, occurred_at as "occurredAt", action, category, actor_type as "actorType",
+               coalesce(actor_roles, '{}') as "actorRoles", object_type as "objectType", outcome
+        from audit.audit_event where category = any(${[...categories]}::text[])
+        order by seq desc limit ${limit}`;
+      return rows.map((r) => ({ ...r, occurredAt: iso(r.occurredAt)! }));
+    });
+  }
+
+  auditChainBreaks(ctx: UserRequestContext): Promise<number> {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<{ n: number }[]>`select count(*)::int as n from api.verify_audit_chain()`;
+      return row!.n;
+    });
+  }
+
+  userRegister(ctx: UserRequestContext): Promise<UserRegisterEntry[]> {
+    return this.run(ctx, (tx) =>
+      tx<UserRegisterEntry[]>`
+        select p.id, p.display_name as "displayName", p.display_name_ar as "displayNameAr", p.email, p.department,
+               p.status::text as status,
+               coalesce(array_agg(a.role_code order by a.role_code) filter (where a.role_code is not null), '{}') as roles
+        from iam.user_profile p
+        left join iam.user_role_assignment a on a.user_id = p.id and a.status = 'ACTIVE'
+        group by p.id, p.display_name, p.display_name_ar, p.email, p.department, p.status
+        order by p.display_name`.then((r) => [...r]),
+    );
   }
 
   requestCaseForLegalHold(

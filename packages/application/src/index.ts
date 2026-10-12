@@ -2,7 +2,7 @@ export { AppError, toAppError } from "./errors";
 export type * from "./ports";
 export { createPortalService, PORTAL_ATTACHMENT_KIB_LIMIT, PORTAL_LIMITS } from "./portal";
 export type { AttachmentFile, AttachmentUploadResult, PortalDeps, PortalService } from "./portal";
-export { createInvestigationService } from "./investigation";
+export { LEDGER_PAGE, createInvestigationService } from "./investigation";
 export type { CommandResult, InvestigationService } from "./investigation";
 export { createEvidenceService } from "./evidence";
 export type {

@@ -3,6 +3,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { loadInvestigationServerEnv, securityHeaders } from "@cdf/config";
 import { identityProvider } from "./server/identity";
+import { safeReturnPath } from "./server/return-path";
 
 const PUBLIC_PATHS = ["/login", "/locale"];
 
@@ -26,7 +27,11 @@ export async function proxy(request: NextRequest) {
     (p) => request.nextUrl.pathname === p || request.nextUrl.pathname.startsWith(`${p}/`),
   );
   if (!session && !isPublic) {
-    response = NextResponse.redirect(new URL("/login", request.url), 303);
+    // A page opened while signed out comes back after sign-in (DEC-20); the login action re-validates the target.
+    const login = new URL("/login", request.url);
+    const back = safeReturnPath(`${request.nextUrl.pathname}${request.nextUrl.search}`);
+    if (request.method === "GET" && back !== "/") login.searchParams.set("next", back);
+    response = NextResponse.redirect(login, 303);
   } else if (session && idp.touch) {
     await idp.touch(session);
   }

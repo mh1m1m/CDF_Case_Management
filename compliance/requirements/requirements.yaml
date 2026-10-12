@@ -124,7 +124,7 @@ requirements:
       [
         core.consume_rate_limit,
         packages/application/src/portal.ts,
-        apps/investigation-web/src/app/login/actions.ts,
+        apps/investigation-web/src/app/(public)/login/actions.ts,
       ]
     tests: [tests/integration/first-slice.spec.ts]
     production_substitution: "WAF / API gateway rate limiting and bot protection"
@@ -238,7 +238,7 @@ requirements:
         api.create_case_from_report,
         api.list_restricted_case_authorities,
         authz.is_restricted_case_authority,
-        "apps/investigation-web/src/app/intake/[id]/restricted-case-fields.tsx",
+        "apps/investigation-web/src/app/(shell)/intake/[id]/restricted-case-fields.tsx",
       ]
     tests: [tests/security/restricted-case-authority.spec.ts, tests/e2e/restricted-case.spec.ts]
     notes: "Ordinary (non-restricted) cases keep the creator's TRIAGE grant until grant scope lands (S3, DEC-02/DEC-03)."
@@ -331,9 +331,35 @@ requirements:
       [
         packages/ui/src/command-form.tsx,
         packages/ui/src/confirm-dialog.tsx,
-        apps/investigation-web/src/app/confirmations.ts,
+        apps/investigation-web/src/app/(shell)/confirmations.ts,
       ]
     tests: [tests/e2e/command-form.spec.ts, packages/ui/src/command-form-fields.test.ts]
+
+  - id: CDF-UX-005
+    title: "Work-led shell: at most five areas from permission and relationship, a landing where the user's work is, and My Work listing only the user's own actionable items"
+    source: [UX audit 2026-10-10 RC-06, RC-07, RC-08, RC-12, ADR-016]
+    external_ids: []
+    linear_issues: [CDF-117, CDF-118, CDF-121, CDF-171, CDF-172]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001820_my_work_read_models.sql,
+        apps/investigation-web/src/app/(shell)/layout.tsx,
+        apps/investigation-web/src/app/(shell)/my-work,
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [tests/security/my-work-read-models.spec.ts, tests/e2e/shell.spec.ts, tests/accessibility/shell.spec.ts]
+    notes: "Committee (S5) and Reporting (S6) areas, pools and Done recently (S4), break-glass and reveal items (DEC-16) and further item fields (DEC-22) are not built yet."
+
+  - id: CDF-UX-006
+    title: "A declared conflict is decided from My Work on the case, explicitly and with a reason"
+    source: [UX audit 2026-10-10 RC-10, UX-016]
+    external_ids: []
+    linear_issues: [CDF-177]
+    status: COMPLETE
+    enforcement: [api.decide_conflict, "apps/investigation-web/src/app/(shell)/cases/[id]/page.tsx"]
+    tests: [tests/e2e/conflict-decision.spec.ts, tests/security/my-work-read-models.spec.ts]
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
@@ -365,7 +391,7 @@ requirements:
         packages/application/src/evidence.ts,
         packages/infrastructure/src/storage,
         packages/infrastructure/src/scanning,
-        "apps/investigation-web/src/app/cases/[id]/evidence/[versionId]/download/route.ts",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/evidence/[versionId]/download/route.ts",
       ]
     tests:
       [
@@ -411,7 +437,7 @@ requirements:
         packages/validation (startFormSchema … withdrawFormSchema),
         packages/application/src/forms.ts,
         packages/infrastructure/src/db/forms-gateway.ts,
-        "apps/investigation-web/src/app/cases/[id]/forms",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/forms",
       ]
     tests:
       [
@@ -1003,7 +1029,7 @@ requirements:
       - packages/application/src/portal.ts
       - apps/whistleblowing-web/src/app/report/attachments/route.ts
       - apps/whistleblowing-web/src/app/report/attachment-uploader.tsx
-      - apps/investigation-web/src/app/intake/[id]/attachments/[attachmentId]/route.ts
+      - apps/investigation-web/src/app/(shell)/intake/[id]/attachments/[attachmentId]/route.ts
     tests:
       - tests/security/reporter-attachments.spec.ts
       - packages/application/src/portal.test.ts

@@ -1,8 +1,9 @@
-// Translated 404 for unknown addresses and any page that calls notFound() without a nearer boundary (UX-080).
+// Translated 404 for unknown addresses (UX-080), in the public chrome: the root layout has none.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CDFSystemMessage, buttonClass } from "@cdf/ui";
 import { getTranslator } from "@/server/locale";
+import { PublicChrome } from "./public-chrome";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -12,10 +13,12 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function NotFound() {
   const t = await getTranslator();
   return (
-    <CDFSystemMessage testId="not-found" title={t("system.notFoundTitle")} body={t("system.notFoundBody")}>
-      <Link href="/" className={buttonClass("primary")}>
-        {t("system.backHome")}
-      </Link>
-    </CDFSystemMessage>
+    <PublicChrome t={t}>
+      <CDFSystemMessage testId="not-found" title={t("system.notFoundTitle")} body={t("system.notFoundBody")}>
+        <Link href="/" className={buttonClass("primary")}>
+          {t("system.backHome")}
+        </Link>
+      </CDFSystemMessage>
+    </PublicChrome>
   );
 }

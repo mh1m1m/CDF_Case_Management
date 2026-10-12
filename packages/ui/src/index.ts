@@ -6,5 +6,7 @@ export * from "./decision-panel";
 export * from "./field-errors";
 export * from "./identifier";
 export * from "./scroll-region";
+export * from "./shell";
 export * from "./status";
 export * from "./system-page";
+export * from "./work-item";
