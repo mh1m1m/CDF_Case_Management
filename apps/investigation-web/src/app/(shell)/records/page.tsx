@@ -5,14 +5,20 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { can, navigationFor } from "@cdf/authorization";
-import { RECORDS_STATES, type MyCaseTask, type RecordsCatalogueEntry } from "@cdf/contracts";
-import { formatDate, formatDateTime, type MessageKey } from "@cdf/i18n";
+import {
+  RECORDS_STATES,
+  type MyCaseTask,
+  type RecordsCatalogueEntry,
+  type RetentionQueueEntry,
+} from "@cdf/contracts";
+import { formatDate, formatDateTime, formatDays, isolate, type MessageKey } from "@cdf/i18n";
 import {
   CDFBadge,
   CDFCard,
   CDFCommandForm,
   CDFDescriptionList,
   CDFField,
+  CDFIdentifier,
   CDFPageHeader,
   CDFTable,
   buttonClass,
@@ -21,6 +27,7 @@ import {
 } from "@cdf/ui";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
+import { daysSince } from "@/server/work-routes";
 import { refreshEligibilityAction } from "./actions";
 import { LegalHoldBadge, RecordsStateBadge } from "./badges";
 
@@ -48,11 +55,19 @@ export default async function RecordsPage({
     legalHoldStatus: one(sp.hold),
   };
 
-  const [catalogue, summary, tasks] = await Promise.all([
+  // The shared retention queue (ADR-016 D8, DEC-37): for those who may classify; the database decides the rows.
+  const classifies = can(actor, "RETENTION_CLASS_ASSIGN");
+  const [catalogue, summary, tasks, queue] = await Promise.all([
     nav.recordsCatalogue ? service.searchRecordsCatalogue(ctx, actor, filters) : Promise.resolve(null),
     nav.myWork ? service.myWorkSummary(ctx) : Promise.resolve(null),
     nav.myWork ? service.myCaseTasks(ctx) : Promise.resolve([]),
+    classifies ? service.retentionReviewQueue(ctx) : Promise.resolve([]),
   ]);
+  const waiting = (archivedAt: string | null) => {
+    if (!archivedAt) return t("records.notSet");
+    const days = daysSince(archivedAt);
+    return days < 1 ? t("records.lessThanADay") : formatDays(t.locale, days);
+  };
   const caseLink = (caseId: string, caseNumber: string, testId: string) => (
     <Link
       href={`/records/${caseId}`}
@@ -80,6 +95,66 @@ export default async function RecordsPage({
           </Link>
         }
       />
+
+      {classifies ? (
+        <CDFCard title={t("records.queueTitle")} testId="retention-queue">
+          <p className="mb-3 text-sm text-cdf-text-secondary">{t("records.queueIntro")}</p>
+          <CDFTable<RetentionQueueEntry>
+            caption={t("records.queueTitle")}
+            testId="retention-queue-table"
+            rows={queue}
+            rowKey={(r) => r.caseId}
+            empty={t("records.queueEmpty")}
+            columns={[
+              {
+                header: t("records.caseNumber"),
+                cell: (r) => <CDFIdentifier>{r.caseNumber}</CDFIdentifier>,
+              },
+              {
+                header: t("records.classification"),
+                cell: (r) => (
+                  <CDFBadge tone={classificationTone(r.classification)}>
+                    {t(`classification.${r.classification}` as MessageKey)}
+                  </CDFBadge>
+                ),
+              },
+              {
+                header: t("records.archived"),
+                cell: (r) => (r.archivedAt ? formatDate(t.locale, r.archivedAt) : t("records.notSet")),
+              },
+              {
+                header: t("records.retentionClass"),
+                cell: (r) =>
+                  r.retentionClass === "UNASSIGNED" ? (
+                    t("records.notClassified")
+                  ) : (
+                    <span dir="ltr">{r.retentionClass}</span>
+                  ),
+              },
+              {
+                header: t("records.legalHold"),
+                cell: (r) => (
+                  <LegalHoldBadge status={r.legalHoldStatus} t={t} testId={`queue-hold-${r.caseNumber}`} />
+                ),
+              },
+              { header: t("records.inQueue"), cell: (r) => waiting(r.archivedAt) },
+              {
+                header: t("records.queueAction"),
+                cell: (r) => (
+                  <Link
+                    href={`/records/${r.caseId}#retention`}
+                    className="font-semibold underline underline-offset-4"
+                    data-testid={`queue-review-${r.caseNumber}`}
+                    aria-label={t("records.reviewClassificationOf", { number: isolate(r.caseNumber) })}
+                  >
+                    {t("records.reviewClassification")}
+                  </Link>
+                ),
+              },
+            ]}
+          />
+        </CDFCard>
+      ) : null}
 
       {summary ? (
         <CDFCard title={t("records.myWorkTitle")} testId="my-work-card">

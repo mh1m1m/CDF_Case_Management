@@ -1136,6 +1136,19 @@ export const ar: Messages = {
     retainUntil: "الاحتفاظ حتى",
     openRecord: "فتح سجل {number}",
     notSet: "غير محدد",
+    queueTitle: "بانتظار تصنيف مدة الحفظ",
+    queueIntro:
+      "قضايا مؤرشفة تنتظر تصنيف مدة الحفظ. يشترك في هذه القائمة كل موظفي السجلات المخوّلين بتصنيفها، ولا تُسند إلى شخص بعينه. الحجز القانوني لا يمنع التصنيف، وإنما يمنع الإتلاف.",
+    queueEmpty: "لا توجد قضية مؤرشفة بانتظار تصنيف مدة الحفظ.",
+    archived: "تاريخ الأرشفة",
+    inQueue: "مدة الانتظار",
+    lessThanADay: "أقل من يوم",
+    notClassified: "لم تُصنَّف بعد",
+    queueAction: "الإجراء",
+    reviewClassification: "مراجعة تصنيف مدة الحفظ",
+    reviewClassificationOf: "مراجعة تصنيف مدة الحفظ: {number}",
+    holdAllowsClassification:
+      "على هذه القضية حجز قانوني نشط. يمكنك تصنيفها مع ذلك: الحجز يمنع الإتلاف لا التصنيف.",
     myWorkTitle: "أعمالي",
     summary: {
       myRetentionTasks: "مهام الاحتفاظ",
@@ -1403,6 +1416,7 @@ export const ar: Messages = {
       HOLD_RELEASE_TO_DECIDE: "البتّ في رفع حجز قانوني",
       MY_HOLD_REQUEST: "طلب الحجز القانوني المقدم منك",
       MY_HOLD_RELEASE_REQUEST: "طلبك رفع حجز قانوني",
+      RETENTION_CLASSIFICATION: "مراجعة تصنيف مدة الحفظ",
     },
     task: "مهمة: {task}",
     caseRef: "القضية",

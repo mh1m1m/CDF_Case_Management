@@ -774,6 +774,7 @@ export const WORK_CATEGORIES = [
   "HOLD_RELEASE_TO_DECIDE",
   "MY_HOLD_REQUEST",
   "MY_HOLD_RELEASE_REQUEST",
+  "RETENTION_CLASSIFICATION",
   ...CASE_TASK_TYPES.map((t) => `TASK_${t.code}` as const),
 ] as const;
 export type WorkCategory = (typeof WORK_CATEGORIES)[number];
@@ -786,7 +787,9 @@ export type WorkTargetType =
   | "INTERVIEW"
   | "CASE_TASK"
   | "HOLD_REQUEST"
-  | "HOLD_RELEASE";
+  | "HOLD_RELEASE"
+  /** A case's records page (lifecycle metadata only). */
+  | "RECORD";
 
 /**
  * One item of the caller's work. Ids, codes and dates only: never a title, name or narrative (DEC-22 decides
@@ -804,6 +807,19 @@ export interface WorkItem {
   /** TASK, SCHEDULE, or WORKFLOW_SLA_PROVISIONAL until an approved SLA source exists (DEC-43). */
   dueSource: "TASK" | "SCHEDULE" | "WORKFLOW_SLA_PROVISIONAL" | null;
   sinceAt: string | null;
+}
+
+/**
+ * One archived case waiting for its retention class in the shared Records queue (`api.retention_review_queue()`;
+ * ADR-016 D8, DEC-37). Lifecycle metadata only, and only for cases the caller may classify; never a named assignee.
+ */
+export interface RetentionQueueEntry {
+  caseId: string;
+  caseNumber: string;
+  classification: Classification;
+  archivedAt: string | null;
+  retentionClass: string;
+  legalHoldStatus: "NONE" | "ACTIVE";
 }
 
 export const ACCESS_BASES = ["CLEARANCE", "ROLE", "ASSIGNMENT", "GRANT", "TASK", "BREAK_GLASS"] as const;

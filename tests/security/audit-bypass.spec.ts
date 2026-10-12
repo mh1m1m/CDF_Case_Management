@@ -72,6 +72,8 @@ const NOT_STATE_CHANGING = new Set([
   // S2 read models (migration 1830): a case's history and access roster, read inside an audited case view.
   "case_history",
   "case_access_roster",
+  // S2h (migration 1860): the shared retention queue; opening a record from it is audited by open_case_metadata.
+  "retention_review_queue",
 ]);
 
 interface Step {

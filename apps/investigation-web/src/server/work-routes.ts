@@ -65,6 +65,9 @@ export function itemHref(i: WorkItem): string {
       return i.caseId ? `/records/${i.caseId}` : "/records";
     case "HOLD_REQUEST":
       return "/records/legal-holds";
+    case "RECORD":
+      // The shared retention queue (ADR-016 D8): the record's retention form, which re-checks the purpose.
+      return `/records/${i.targetId}#retention`;
     default:
       return "/my-work";
   }
@@ -94,6 +97,11 @@ export function overdueKeys(items: readonly WorkItem[], now: number = Date.now()
       .filter((i) => i.dueAt !== null && Date.parse(i.dueAt) < now)
       .map((i) => `${i.category}:${i.targetId}`),
   );
+}
+
+/** Whole days since a moment (an item's age in a queue); 0 for less than a day. */
+export function daysSince(iso: string, now: number = Date.now()): number {
+  return Math.max(0, Math.floor((now - Date.parse(iso)) / 86_400_000));
 }
 
 /** Whether a due date has passed (a case's stage target, for example). */

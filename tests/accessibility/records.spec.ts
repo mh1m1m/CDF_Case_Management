@@ -17,6 +17,7 @@ for (const locale of ["ar", "en"] as const) {
     await records.goto("/records");
     await expect(records.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     await expect(records.getByTestId("catalogue-table")).toBeVisible();
+    await expect(records.getByTestId("retention-queue-table")).toBeVisible();
     await audit(records);
 
     // A record with the retention and hold forms, then the same record with an active hold.
@@ -32,6 +33,7 @@ for (const locale of ["ar", "en"] as const) {
       .fill("Synthetic: preservation required for a pending synthetic inquiry.");
     await place.locator('button[type="submit"]').click();
     await expect(records.getByTestId("holds-list")).toBeVisible();
+    await expect(records.getByTestId("retention-hold-note")).toBeVisible();
     await audit(records);
 
     // Disposition: request (officer), approve (director), execute, certificate.

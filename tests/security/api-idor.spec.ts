@@ -458,6 +458,8 @@ const GLOBAL_COMMANDS = [
   "my_areas",
   "my_work_items",
   "my_access",
+  // S2h (migration 1860): the shared retention queue, rows the caller may classify (ADR-016 D8).
+  "retention_review_queue",
   "request_case_for_legal_hold",
   "search_records_catalogue",
 ];

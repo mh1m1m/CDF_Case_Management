@@ -21,6 +21,7 @@ import type {
   MyWorkSummary,
   PendingConflict,
   RecordsCatalogueEntry,
+  RetentionQueueEntry,
   ReportDetail,
   ReportMessage,
   RestrictedCaseAuthority,
@@ -506,6 +507,16 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
                case_number as "caseNumber", due_at as "dueAt", due_source as "dueSource", since_at as "sinceAt"
         from api.my_work_items()`;
       return rows.map((r) => ({ ...r, dueAt: iso(r.dueAt), sinceAt: iso(r.sinceAt) }));
+    });
+  }
+
+  retentionReviewQueue(ctx: UserRequestContext): Promise<RetentionQueueEntry[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<(Omit<RetentionQueueEntry, "archivedAt"> & { archivedAt: Date | null })[]>`
+        select case_id as "caseId", case_number as "caseNumber", classification, archived_at as "archivedAt",
+               retention_class as "retentionClass", legal_hold_status as "legalHoldStatus"
+        from api.retention_review_queue()`;
+      return rows.map((r) => ({ ...r, archivedAt: iso(r.archivedAt) }));
     });
   }
 

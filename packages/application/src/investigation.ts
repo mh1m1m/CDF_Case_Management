@@ -135,6 +135,7 @@ export function createInvestigationService(deps: InvestigationDeps) {
     // can already act on, so there is no application pre-check beyond the authenticated session.
     myAreas: (ctx: UserRequestContext) => query(ctx, () => gateway.myAreas(ctx)),
     myWorkItems: (ctx: UserRequestContext) => query(ctx, () => gateway.myWorkItems(ctx)),
+    retentionReviewQueue: (ctx: UserRequestContext) => query(ctx, () => gateway.retentionReviewQueue(ctx)),
     myAccess: (ctx: UserRequestContext) => query(ctx, () => gateway.myAccess(ctx)),
 
     // Oversight (read only): the ledger for AUDIT_VIEW, security events for SECURITY_EVENT_VIEW. Metadata only;

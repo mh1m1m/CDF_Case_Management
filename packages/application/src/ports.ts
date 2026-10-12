@@ -28,6 +28,7 @@ import type {
   PendingConflict,
   PublicReportStatus,
   RecordsCatalogueEntry,
+  RetentionQueueEntry,
   ReportAttachmentItem,
   ReportDetail,
   RestrictedCaseAuthority,
@@ -300,6 +301,8 @@ export interface InvestigationGateway {
   // Shell read models (UX redesign S1, migration 1820): the caller's own areas, work and access basis.
   myAreas(ctx: UserRequestContext): Promise<MyArea[]>;
   myWorkItems(ctx: UserRequestContext): Promise<WorkItem[]>;
+  /** S2h (migration 1860): archived cases the caller may classify, shared by every records officer who may. */
+  retentionReviewQueue(ctx: UserRequestContext): Promise<RetentionQueueEntry[]>;
   myAccess(ctx: UserRequestContext): Promise<MyAccessEntry[]>;
   pendingConflicts(ctx: UserRequestContext, caseId: string): Promise<PendingConflict[]>;
   decideConflict(

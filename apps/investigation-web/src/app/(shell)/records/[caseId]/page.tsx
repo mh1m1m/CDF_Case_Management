@@ -135,41 +135,51 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
       </CDFCard>
 
       {cap.manageRetention && retentionOpen ? (
-        <CDFCard title={t("records.retentionTitle")} testId="retention-card">
-          <CDFCommandForm
-            action={assignRetentionClassAction.bind(null, r.caseId)}
-            locale={t.locale}
-            submitLabel={t("records.assignClass")}
-            variant="secondary"
-            testId="retention-form"
-            successMessage={t("records.classAssigned")}
-          >
-            <CDFField
-              id="retentionClass"
-              label={t("records.retentionClassLabel")}
-              hint={t("records.retentionClassHint")}
-              requiredLabel={t("common.required")}
+        // The target of the Records queue's "Review retention classification" (ADR-016 D8).
+        <div id="retention" tabIndex={-1}>
+          <CDFCard title={t("records.retentionTitle")} testId="retention-card">
+            {r.legalHoldStatus === "ACTIVE" ? (
+              <div className="mb-3">
+                <CDFAlert tone="info" testId="retention-hold-note">
+                  {t("records.holdAllowsClassification")}
+                </CDFAlert>
+              </div>
+            ) : null}
+            <CDFCommandForm
+              action={assignRetentionClassAction.bind(null, r.caseId)}
+              locale={t.locale}
+              submitLabel={t("records.assignClass")}
+              variant="secondary"
+              testId="retention-form"
+              successMessage={t("records.classAssigned")}
             >
-              <select
+              <CDFField
                 id="retentionClass"
-                name="retentionClass"
-                className={inputClass}
-                defaultValue={r.retentionClass === "UNASSIGNED" ? "" : r.retentionClass}
-                aria-describedby="retentionClass-hint"
-                required
+                label={t("records.retentionClassLabel")}
+                hint={t("records.retentionClassHint")}
+                requiredLabel={t("common.required")}
               >
-                <option value="" disabled>
-                  —
-                </option>
-                {classes.map((k) => (
-                  <option key={k.code} value={k.code}>
-                    {className(k.code)}
+                <select
+                  id="retentionClass"
+                  name="retentionClass"
+                  className={inputClass}
+                  defaultValue={r.retentionClass === "UNASSIGNED" ? "" : r.retentionClass}
+                  aria-describedby="retentionClass-hint"
+                  required
+                >
+                  <option value="" disabled>
+                    —
                   </option>
-                ))}
-              </select>
-            </CDFField>
-          </CDFCommandForm>
-        </CDFCard>
+                  {classes.map((k) => (
+                    <option key={k.code} value={k.code}>
+                      {className(k.code)}
+                    </option>
+                  ))}
+                </select>
+              </CDFField>
+            </CDFCommandForm>
+          </CDFCard>
+        </div>
       ) : null}
 
       <CDFCard title={t("records.holdsTitle")} testId="holds-card">

@@ -1,6 +1,6 @@
 # ADR-016: UX Target Architecture and Approved Access Decisions
 
-- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`. D4, D5 and D6 are implemented on the S2 branch (migrations 1840, 1830 and 1850), D6 up to the S5 packets. D2 and D3 are approved and not yet implemented (their phase is named in each decision).
+- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`. D4, D5 and D6 are implemented on the S2 branch (migrations 1840, 1830 and 1850), D6 up to the S5 packets. D2 and D3 are approved and not yet implemented (their phase is named in each decision). D8 (DEC-37, decided 2026-10-12) is implemented on the S2 branch (migration 1860) up to the S4 work item.
 - **Decision owner:** Fady, 2026-10-11 12:11 UTC, in the UI/UX audit thread: "IMPLEMENT THE UX REDESIGN", with the decision package recorded here.
 - **Source:** CDF-UX-AUDIT v1.0, run 2026-10-10/11 on synthetic data (report `UIUX_AUDIT_2026-10-10.md` and its summary, held in the project files, not in this repository). Decision IDs `DEC-nn`, debt IDs `UX-nnn` and step IDs `S0`–`S6` are the audit's. Its decision register is O17 §17.7; its gates are O28 §28.10.
 - **Extends:** ADR-014 (purpose-bound authorization). **Amends:** ADR-013 and ADR-014 on case-history audience (D5). **Unchanged:** ADR-003 (PostgreSQL/RLS, command-only writes), ADR-004 (identity vault), ADR-005 (append-only audit), ADR-006 and ADR-015 (evidence and reporter attachments).
@@ -306,6 +306,41 @@ UX-002 is re-rated only after that.
 - UX-002 stays open for the hosted check, which still could not be reached from the build environment;
 - reloading the receipt page re-submits the report, which is CDF-146.
 
+### D8. Archive triggers retention review in a shared Records queue (DEC-37, in part). Effective at S2; durable work item at S4.
+
+**Decision owner.** Fady, 2026-10-12 03:54 UTC, in the UI/UX audit thread, answering the DEC-37 card ("Other: queue now, durable shared-pool task at S4").
+
+**Decision.** Archive triggers retention review; routing is to the Records shared pool, not a fixed individual. Retention periods remain source-required. DEC-37 is separated into five parts:
+
+| Part                                                                    | Status                                                                                  |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1. Trigger: archiving creates a retention-review obligation             | APPROVED                                                                                |
+| 2. Routing: the shared Records queue (pool)                             | APPROVED                                                                                |
+| 3. Named assignee: only by claim or assignment after the item is queued | APPROVED                                                                                |
+| 4. Retention classes and periods                                        | SOURCE_REQUIRED until the governing CDF policy is confirmed (ADR-013 D2)                |
+| 5. Who may archive                                                      | OPEN. Today: `WORKFLOW_ADVANCE` on the case (Case Manager or Lead), a prototype default |
+
+- **Now (S2).** When a case enters `ARCHIVED`, it appears in Records work as "Retention classification required" «بانتظار تصنيف مدة الحفظ». The item is derived from the case's state. It creates no individual assignment, no routing rule and no implied owner, and any authorised records officer may pick it up.
+- **S4.** A durable `RETENTION_REVIEW` work item in the pool `RECORDS_RETENTION_POOL` replaces the derived entry: archive, item created, an authorised officer claims it or is assigned it, classification, item completed. No hard-coded rule chooses an officer. Individual ownership comes only from a claim or from an approved workload rule.
+- **Legal hold.** A hold overrides destruction and disposition, not classification. A held case may be classified, but no disposition eligibility may mature into execution while the hold is active.
+- **What Records sees.** Case number, classification, archived date, retention class status, the legal-hold indicator where the viewer may see it, the age in the queue, and one action: "Review retention classification". The item grants only the records purpose needed to classify: never `CASE_VIEW_FULL`, evidence, interviews or findings.
+
+**Implementation (S2, migration 1860).**
+
+- **The obligation.** `records_state = 'ARCHIVED'`. The case is archived and its class is not yet confirmed; the shipped default class is `UNASSIGNED`, which stands for "no class". Confirming a class (`api.assign_retention_class`) moves the case to `RETENTION`, which ends the obligation. A legal hold never stops that command.
+- **The pool.** `api.retention_review_queue()` returns the case to anyone who may classify it from the records catalogue: the catalogue scope (closed, not restricted, within clearance, no conflict) together with `ARCHIVE_RECORD_ADMINISTER` and `RETENTION_CLASS_ASSIGN`. That is the shared branch of `authz.can_manage_retention`. The rows carry lifecycle metadata only.
+- **My Work.** `api.my_work_items()` adds one `RETENTION_CLASSIFICATION` item per queued case in the Records area. The item links to the record's retention form, which re-checks the purpose.
+- **An existing task.** A `RETENTION_REVIEW` case task (ADR-014) is an individual assignment, so its holder sees the task instead of the queue item.
+- **Restricted cases.** They never enter the shared queue (ADR-014 §9). An officer reaches one only through a `RETENTION_REVIEW` task given by someone who can see the case. The open point is routing a restricted case's retention review without naming a person; it comes at S4 with the pool.
+- **Tests.** `tests/security/retention-review-queue.spec.ts` (RRQ-01 to RRQ-09) covers:
+  - archiving creates exactly one item, the same for every officer;
+  - archiving twice creates no second item;
+  - nobody else gets it, and clearance, restricted cases and another officer's task are respected;
+  - lifecycle metadata only, no case content;
+  - a hold keeps the item and classification still works;
+  - disposition stays blocked under the hold;
+  - classifying records the class and closes the item for everyone, audited.
+
 ## Delivery governance
 
 - **Unit path.** Every unit of work follows Requirement → Decision → Linear → Branch → PR → Test → Hosted validation. Delivery goes through the redesign epics and coherent capabilities, not one ticket per debt item.
@@ -326,7 +361,7 @@ UX-002 is re-rated only after that.
 - **Still OPEN.** These decisions are not made here. Each is raised when its gate is reached (audit O28 §28.10):
   - DEC-22 (My Work row fields, S1);
   - DEC-47, DEC-20, DEC-16, DEC-14, DEC-29 and DEC-32 (S1);
-  - DEC-54, DEC-37, DEC-38, DEC-40, DEC-41 and DEC-25 (S2);
+  - DEC-54, DEC-38, DEC-40, DEC-41 and DEC-25 (S2), and the open parts of DEC-37 (D8);
   - DEC-04, DEC-05, DEC-19, DEC-31, DEC-35, DEC-49 and DEC-50 (S3);
   - the S4–S6 and portal-track decisions;
   - DEC-59 and DEC-60 (verification).

@@ -62,6 +62,15 @@ export function formatDate(locale: Locale, value: string | Date): string {
   }).format(d);
 }
 
+/** A whole number of days ("3 days", «3 أيام») with the locale's own plural forms. */
+export function formatDays(locale: Locale, days: number): string {
+  return new Intl.NumberFormat(locale === "ar" ? "ar-SA-u-nu-latn" : "en-GB", {
+    style: "unit",
+    unit: "day",
+    unitDisplay: "long",
+  }).format(days);
+}
+
 /**
  * Wraps a value (a name, a date, a list) in first-strong isolates (U+2068 … U+2069) before it goes into a translated
  * sentence, so it keeps its own direction: an Arabic date or a Latin name does not reorder the words around it.

@@ -58,6 +58,60 @@ test("a records officer classifies an archived case and places a legal hold (Eng
   await page.context().close();
 });
 
+test("an archived case waits in the shared retention queue for every records officer and leaves it when classified (ADR-016 D8)", async ({
+  browser,
+}) => {
+  const c = await archivedCase("queue");
+
+  // Records officer Xi, in Arabic: the queue on Records and the item in My Work, with no named assignee.
+  const xi = await signIn(browser, "records.b@example.test", "ar");
+  await xi.goto("/records");
+  const queue = xi.getByTestId("retention-queue");
+  await expect(queue.getByRole("heading", { level: 2 })).toHaveText("بانتظار تصنيف مدة الحفظ");
+  const row = queue.locator("tr", { hasText: c.caseNumber });
+  await expect(row).toContainText("لم تُصنَّف بعد");
+  await expect(row).toContainText("أقل من يوم");
+  await expect(xi.getByTestId(`queue-hold-${c.caseNumber}`)).toHaveText("لا يوجد حجز قانوني");
+  await expect(xi.getByTestId(`queue-review-${c.caseNumber}`)).toHaveText("مراجعة تصنيف مدة الحفظ");
+  // Lifecycle metadata only: the case title never appears.
+  await expect(xi.locator("main")).not.toContainText("Records e2e case");
+  await xi.goto("/my-work");
+  const item = xi.getByTestId("work-item-RETENTION_CLASSIFICATION").filter({ hasText: c.caseNumber });
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText("مراجعة تصنيف مدة الحفظ");
+
+  // Records officer Nu, in English, picks it up from the same queue and classifies it.
+  const nu = await signIn(browser, "records@example.test", "en");
+  await nu.goto("/records");
+  await nu.getByTestId(`queue-review-${c.caseNumber}`).click();
+  await expect(nu).toHaveURL(new RegExp(`/records/${c.caseId}#retention$`));
+  const retention = nu.getByTestId("retention-form");
+  await retention.locator("#retentionClass").selectOption("WB_CASE_NOT_INVESTIGATED");
+  await submit(nu, "retention-form");
+  await expect(nu.getByTestId("record-state")).toHaveText("In retention");
+
+  // Classified: gone from the queue and from My Work, for both officers.
+  await nu.goto("/records");
+  await expect(nu.getByTestId(`queue-review-${c.caseNumber}`)).toHaveCount(0);
+  await nu.context().close();
+  await xi.goto("/records");
+  await expect(xi.getByTestId(`queue-review-${c.caseNumber}`)).toHaveCount(0);
+  await xi.goto("/my-work");
+  await expect(
+    xi.getByTestId("work-item-RETENTION_CLASSIFICATION").filter({ hasText: c.caseNumber }),
+  ).toHaveCount(0);
+  await xi.context().close();
+
+  // The case manager who archived it has no Records queue (their Records page is their own hold requests).
+  const manager = await signIn(browser, "casemanager@example.test", "en");
+  await manager.goto("/records");
+  await expect(manager.getByTestId("my-work-card")).toBeVisible();
+  await expect(manager.getByTestId("retention-queue")).toHaveCount(0);
+  await manager.goto("/my-work");
+  await expect(manager.getByTestId("work-item-RETENTION_CLASSIFICATION")).toHaveCount(0);
+  await manager.context().close();
+});
+
 test("disposition is requested, approved by someone else in Arabic, executed and certified", async ({
   browser,
 }) => {

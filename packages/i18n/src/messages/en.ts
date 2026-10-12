@@ -1157,6 +1157,19 @@ export const en = {
     retainUntil: "Retain until",
     openRecord: "Open the record for {number}",
     notSet: "Not set",
+    queueTitle: "Retention classification required",
+    queueIntro:
+      "Archived cases waiting for a retention class. Every records officer who may classify them shares this queue; nobody is assigned. A legal hold does not stop classification, only disposition.",
+    queueEmpty: "No archived case is waiting for a retention class.",
+    archived: "Archived",
+    inQueue: "Waiting",
+    lessThanADay: "Less than a day",
+    notClassified: "Not classified yet",
+    queueAction: "Action",
+    reviewClassification: "Review retention classification",
+    reviewClassificationOf: "Review retention classification: {number}",
+    holdAllowsClassification:
+      "A legal hold is active on this case. You can still classify it: the hold stops disposition, not classification.",
     myWorkTitle: "My work",
     summary: {
       myRetentionTasks: "Retention tasks",
@@ -1430,6 +1443,7 @@ export const en = {
       HOLD_RELEASE_TO_DECIDE: "Decide a legal hold release",
       MY_HOLD_REQUEST: "Your legal hold request",
       MY_HOLD_RELEASE_REQUEST: "Your request to release a legal hold",
+      RETENTION_CLASSIFICATION: "Review retention classification",
     },
     task: "Task: {task}",
     caseRef: "Case",
