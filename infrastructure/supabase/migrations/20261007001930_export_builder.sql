@@ -12,6 +12,9 @@
 --   export_recipient  INTERNAL users cleared for the case, or EXTERNAL addresses (synthetic @example.test only;
 --                     PRODUCTION_SUBSTITUTION_REQUIRED: the CDF approved-domain list). EMAIL format only.
 --   export_approval   one row per approval stage, bound to the preview hash the approver saw.
+--   restricted_export_approval
+--                     the Restricted Case Authority's decision on one export of a restricted case, bound to the
+--                     submitted hash; single use (DEC-61/62 precedent, SOURCE_REQUIRED rule seeded on).
 --
 -- Controls:
 --   * Every item is rendered with the same authz predicates as its table's RLS policy; an item the caller cannot see
@@ -22,7 +25,10 @@
 --   * EXTERNAL always needs a justification, an external party, the requester's confirmation of the case's
 --     classification and at least one approval; a matching rule adds a second approval or refuses (Q99).
 --   * Separation of duties: the requester never approves, and the second approval is by a different person holding
---     EXPORT_SECOND_APPROVE. Approvers must see every item.
+--     EXPORT_SECOND_APPROVE. Approvers must see every item. A policy administrator who authored a version, in force
+--     since the export was created, of a rule that applies to it can never decide it (AGENT-09 X1).
+--   * Restricted case: a REQUIRE_AUTHORITY_APPROVAL rule (seeded on, SOURCE_REQUIRED) needs the case's Restricted
+--     Case Authority to approve the export as submitted before it is approved (DEC-61/62 precedent).
 --   * Protected identity is never rendered: no item reads protected_identity, the report or the reporter WB id (N19).
 --     Evidence is not exportable until UX S2 merges (ADR-031).
 --   * Rendering and delivery are ports (ExportRenderer, ExportStore, ExportMailer); the prototype adapters are stubs.
@@ -61,7 +67,8 @@ create table exchange.approval_rule (
   object_type        text check (object_type in (
                        'CASE_SUMMARY', 'FINDING', 'RECOMMENDATION_PACKAGE', 'AUTHORITY_DECISION', 'MINUTES')),
   restricted_only    boolean not null default false,
-  action             text not null check (action in ('REQUIRE_SECOND_APPROVAL', 'REFUSE', 'NONE')),
+  action             text not null check (action in (
+                       'REQUIRE_SECOND_APPROVAL', 'REQUIRE_AUTHORITY_APPROVAL', 'REFUSE', 'NONE')),
   source_status      text not null check (source_status in ('OWNER_DEFAULT', 'SOURCE_REQUIRED', 'APPROVED')),
   reason             text check (length(reason) between 5 and 2000),
   effective_from     timestamptz not null,
@@ -84,7 +91,10 @@ values
    '2026-01-01T00:00:00Z'),
   ('EXTERNAL_MINUTES', 'EXTERNAL', null, 'MINUTES', false, 'REQUIRE_SECOND_APPROVAL', 'SOURCE_REQUIRED',
    '2026-01-01T00:00:00Z'),
-  ('RESTRICTED_CASE', 'ANY', null, null, true, 'REQUIRE_SECOND_APPROVAL', 'SOURCE_REQUIRED', '2026-01-01T00:00:00Z');
+  ('RESTRICTED_CASE', 'ANY', null, null, true, 'REQUIRE_SECOND_APPROVAL', 'SOURCE_REQUIRED', '2026-01-01T00:00:00Z'),
+  -- Follows DEC-61/62 for exports until the owner decides (raised by the coordinator; not an owner decision).
+  ('RESTRICTED_CASE_AUTHORITY', 'ANY', null, null, true, 'REQUIRE_AUTHORITY_APPROVAL', 'SOURCE_REQUIRED',
+   '2026-01-01T00:00:00Z');
 
 create table exchange.export_request (
   id                       uuid primary key default gen_random_uuid(),
@@ -100,6 +110,7 @@ create table exchange.export_request (
                              'DRAFT', 'SUBMITTED', 'APPROVED', 'GENERATED', 'SENT', 'REJECTED', 'CANCELLED')),
   classification_at_submit core.classification_level,
   approvals_required       int check (approvals_required between 0 and 2),
+  authority_approval_required boolean not null default false,
   matched_rules            text[] not null default '{}',
   preview_hash             text check (preview_hash ~ '^[0-9a-f]{64}$'),
   previewed_at             timestamptz,
@@ -175,12 +186,31 @@ create table exchange.export_approval (
 create index export_approval_approver on exchange.export_approval (approver_id);
 comment on table exchange.export_approval is 'Export approvals, one per stage, bound to the preview hash approved.';
 
+-- DEC-61/62 precedent: on a restricted case the case's Restricted Case Authority decides each export as submitted.
+-- One decision per export. It is the authority's consent, not an approval stage, so the case owner may decide an
+-- export they requested themselves (as with DEC-61 referrals); the approval stages are still other people.
+create table exchange.restricted_export_approval (
+  id           uuid primary key default gen_random_uuid(),
+  request_id   uuid not null unique references exchange.export_request (id),
+  case_id      uuid not null references case_mgmt.case_record (id),
+  decided_by   uuid not null references iam.user_profile (id),
+  decision     text not null check (decision in ('APPROVED', 'REJECTED')),
+  reason       text not null check (length(reason) between 5 and 2000),
+  preview_hash text not null check (preview_hash ~ '^[0-9a-f]{64}$'),
+  decided_at   timestamptz not null default now()
+);
+create index restricted_export_approval_case on exchange.restricted_export_approval (case_id);
+create index restricted_export_approval_decided_by on exchange.restricted_export_approval (decided_by);
+comment on table exchange.restricted_export_approval is
+  'The Restricted Case Authority''s decision on one export of a restricted case, bound to the submitted hash.';
+
 -- Records keep their facts: items, recipients and approvals never change; requests change state only through the
 -- commands, keep their identity, and are final once sent, rejected or cancelled (or generated, for files).
 do $$
 declare t text;
 begin
-  foreach t in array array['exchange.export_item', 'exchange.export_recipient', 'exchange.export_approval'] loop
+  foreach t in array array['exchange.export_item', 'exchange.export_recipient', 'exchange.export_approval',
+                           'exchange.restricted_export_approval'] loop
     execute format('create trigger no_update before update on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
@@ -225,8 +255,9 @@ create trigger approval_rule_protect before update on exchange.approval_rule
 -- -----------------------------------------------------------------------------
 -- Authorization predicate
 -- -----------------------------------------------------------------------------
--- A draft is its requester's alone; once submitted, approvers who can see the case see it too. Everyone loses it with
--- the case (§19). Answers for the caller only.
+-- A draft is its requester's alone; once submitted, approvers who can see the case see it too, and so does the
+-- Restricted Case Authority who owns a restricted case. Everyone loses it with the case (§19). Answers for the caller
+-- only.
 create function authz.can_view_export(p_request_id uuid)
 returns boolean
 language sql stable security definer
@@ -237,7 +268,10 @@ as $$
     where r.id = p_request_id and authz.can_view_case(r.case_id)
       and (r.requested_by = authz.current_user_id()
            or (r.status <> 'DRAFT'
-               and (authz.has_permission('EXPORT_APPROVE') or authz.has_permission('EXPORT_SECOND_APPROVE'))))
+               and (authz.has_permission('EXPORT_APPROVE') or authz.has_permission('EXPORT_SECOND_APPROVE')
+                    or exists (select 1 from case_mgmt.case_record c
+                               where c.id = r.case_id and c.is_restricted and c.owner_id = authz.current_user_id()
+                                 and authz.is_restricted_case_authority(authz.current_user_id(), c.classification)))))
   );
 $$;
 revoke all on function authz.can_view_export(uuid) from public, anon;
@@ -251,6 +285,7 @@ alter table exchange.export_request enable row level security;
 alter table exchange.export_item enable row level security;
 alter table exchange.export_recipient enable row level security;
 alter table exchange.export_approval enable row level security;
+alter table exchange.restricted_export_approval enable row level security;
 
 create policy approval_rule_read on exchange.approval_rule for select to authenticated
   using (authz.current_user_id() is not null);
@@ -267,6 +302,9 @@ grant select on exchange.export_recipient to authenticated;
 create policy export_approval_read on exchange.export_approval for select to authenticated
   using (authz.can_view_export(request_id));
 grant select on exchange.export_approval to authenticated;
+create policy restricted_export_approval_read on exchange.restricted_export_approval for select to authenticated
+  using (authz.can_view_export(request_id));
+grant select on exchange.restricted_export_approval to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Rendering (internal; runs inside the definer commands, for the calling user)
@@ -372,25 +410,74 @@ as $$
   select count(*)::int from jsonb_array_elements(p_document -> 'items') e where not (e ->> 'included')::boolean;
 $$;
 
--- Rules in force that match the request now (Q99): audience, the case's classification and restriction, and the
--- content types it holds.
+-- Whether one rule version's conditions fit the request (Q99): audience, the case's classification and restriction,
+-- and the content types it holds. Says nothing about when the version is in force or what it does.
+create function exchange.rule_matches(p_rule exchange.approval_rule, p_request_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select exists (
+    select 1 from exchange.export_request q join case_mgmt.case_record c on c.id = q.case_id
+    where q.id = p_request_id
+      and p_rule.audience in ('ANY', q.audience)
+      and (p_rule.min_classification is null or c.classification >= p_rule.min_classification)
+      and (not p_rule.restricted_only or c.is_restricted)
+      and (p_rule.object_type is null
+           or exists (select 1 from exchange.export_item i where i.request_id = q.id and i.object_type = p_rule.object_type))
+  );
+$$;
+
+-- Rules in force that match the request now.
 create function exchange.matched_rules(p_request_id uuid)
 returns table (code text, action text)
 language sql stable
 set search_path = ''
 as $$
   select r.code, r.action
-  from exchange.export_request q
-  join case_mgmt.case_record c on c.id = q.case_id
-  join exchange.approval_rule r
-    on r.effective_from <= now() and (r.effective_to is null or r.effective_to > now()) and r.action <> 'NONE'
-   and r.audience in ('ANY', q.audience)
-   and (r.min_classification is null or c.classification >= r.min_classification)
-   and (not r.restricted_only or c.is_restricted)
-   and (r.object_type is null
-        or exists (select 1 from exchange.export_item i where i.request_id = q.id and i.object_type = r.object_type))
-  where q.id = p_request_id
+  from exchange.approval_rule r
+  where r.effective_from <= now() and (r.effective_to is null or r.effective_to > now()) and r.action <> 'NONE'
+    and exchange.rule_matches(r, p_request_id)
   order by r.code;
+$$;
+
+-- AGENT-09 X1, separation of duties: whoever set a control does not pass it. True when the user authored a version,
+-- in force at any time since the export was created, of a rule code that has ever had a version applying to the
+-- export, whatever that version does (a NONE or a narrowed version of an applicable code counts).
+create function exchange.authored_rule_in_force(p_request_id uuid, p_user_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from exchange.export_request q
+    join exchange.approval_rule mine
+      on mine.created_by = p_user_id and mine.effective_from <= now()
+     and (mine.effective_to is null or mine.effective_to > q.created_at)
+    where q.id = p_request_id
+      and exists (select 1 from exchange.approval_rule v where v.code = mine.code and exchange.rule_matches(v, q.id))
+  );
+$$;
+
+-- Whether the export needs its Restricted Case Authority's approval: once required, always required.
+create function exchange.authority_approval_required(p_request_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select coalesce((select q.authority_approval_required from exchange.export_request q where q.id = p_request_id), false)
+         or exists (select 1 from exchange.matched_rules(p_request_id) m where m.action = 'REQUIRE_AUTHORITY_APPROVAL');
+$$;
+
+-- Whether the Restricted Case Authority approved the export exactly as submitted.
+create function exchange.authority_approved(p_request_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select exists (select 1 from exchange.restricted_export_approval a join exchange.export_request q on q.id = a.request_id
+                 where a.request_id = p_request_id and a.decision = 'APPROVED' and a.preview_hash = q.submitted_hash);
 $$;
 
 -- External exports need one approval; a matching REQUIRE_SECOND_APPROVAL rule adds one.
@@ -417,8 +504,8 @@ as $$
   );
 $$;
 
--- Who may give an approval stage: holds the stage's permission, can see the case, is not the requester and has not
--- approved this request already. Internal (it answers about other users).
+-- Who may give an approval stage: holds the stage's permission, can see the case, is not the requester, has not
+-- approved this request already and authored no rule in force for it (X1). Internal (it answers about other users).
 create function exchange.eligible_approvers(p_request_id uuid, p_stage int)
 returns table (user_id uuid)
 language sql stable
@@ -430,7 +517,8 @@ as $$
   where q.id = p_request_id
     and authz.user_has_permission(u.id, case p_stage when 1 then 'EXPORT_APPROVE' else 'EXPORT_SECOND_APPROVE' end)
     and authz.user_can_view_case(u.id, q.case_id)
-    and not exists (select 1 from exchange.export_approval a where a.request_id = q.id and a.approver_id = u.id);
+    and not exists (select 1 from exchange.export_approval a where a.request_id = q.id and a.approver_id = u.id)
+    and not exchange.authored_rule_in_force(q.id, u.id);
 $$;
 
 -- Locks a request the caller can see. With p_own, only its requester, still holding EXPORT_REQUEST, may act on it.
@@ -463,9 +551,10 @@ $$;
 
 revoke all on function
   exchange.protect_records(), exchange.render_item(text, uuid, uuid), exchange.build_document(uuid),
-  exchange.document_hash(jsonb), exchange.withheld_count(jsonb), exchange.matched_rules(uuid),
-  exchange.approvals_required(uuid), exchange.recipients_eligible(uuid), exchange.eligible_approvers(uuid, int),
-  exchange.lock_request(uuid, boolean), exchange.touch_draft(uuid)
+  exchange.document_hash(jsonb), exchange.withheld_count(jsonb), exchange.rule_matches(exchange.approval_rule, uuid),
+  exchange.matched_rules(uuid), exchange.authored_rule_in_force(uuid, uuid), exchange.authority_approval_required(uuid),
+  exchange.authority_approved(uuid), exchange.approvals_required(uuid), exchange.recipients_eligible(uuid),
+  exchange.eligible_approvers(uuid, int), exchange.lock_request(uuid, boolean), exchange.touch_draft(uuid)
 from public, anon, authenticated;
 
 -- -----------------------------------------------------------------------------
@@ -479,12 +568,14 @@ alter table notify.outbox add constraint outbox_object_type_check check (object_
   'COMMITTEE', 'MEETING', 'MINUTES', 'LEGAL_REVIEW', 'DEFENCE_NOTICE', 'GRIEVANCE', 'EXPORT'));
 
 insert into notify.template (code, object_type, is_mandatory, description) values
-  ('EXPORT_APPROVAL_REQUESTED', 'EXPORT', true, 'An export awaits the user''s approval (Q99)'),
-  ('EXPORT_DECIDED',            'EXPORT', true, 'The user''s export was approved or rejected (Q99)');
+  ('EXPORT_APPROVAL_REQUESTED',           'EXPORT', true, 'An export awaits the user''s approval (Q99)'),
+  ('EXPORT_AUTHORITY_APPROVAL_REQUESTED', 'EXPORT', true,
+   'An export of a restricted case the user owns awaits their decision as Restricted Case Authority'),
+  ('EXPORT_DECIDED',                      'EXPORT', true, 'The user''s export was approved or rejected (Q99)');
 insert into notify.rule (layer, template_code, channel, enabled, effective_from, reason)
 select 'SYSTEM_MANDATORY', t.code, c.channel, true, '2026-01-01T00:00:00Z', 'Synthetic default: mandatory notice (ADR-025)'
 from notify.template t cross join (values ('IN_APP'), ('EMAIL')) c (channel)
-where t.code in ('EXPORT_APPROVAL_REQUESTED', 'EXPORT_DECIDED');
+where t.code in ('EXPORT_APPROVAL_REQUESTED', 'EXPORT_AUTHORITY_APPROVAL_REQUESTED', 'EXPORT_DECIDED');
 
 create or replace function notify.deep_link(p_object_type text, p_object_id uuid)
 returns text
@@ -502,8 +593,9 @@ as $$
          end;
 $$;
 
--- Submission asks the stage-1 approvers; a first approval of a two-approval export asks the stage-2 approvers; the
--- final decision tells the requester. A request approved at submission (no approval needed) notifies nobody.
+-- Submission asks the stage-1 approvers; a first approval of a two-approval export asks the stage-2 approvers; an
+-- export needing its Restricted Case Authority asks the case owner; the final decision tells the requester. A request
+-- approved at submission (no approval needed) notifies nobody.
 create function notify.on_export_request()
 returns trigger
 language plpgsql
@@ -516,10 +608,21 @@ declare
 begin
   if new.status = 'SUBMITTED' then
     v_stage := 1 + (select count(*)::int from exchange.export_approval a where a.request_id = new.id);
-    for v_user in select e.user_id from exchange.eligible_approvers(new.id, v_stage) e loop
-      perform notify.enqueue('EXPORT_APPROVAL_REQUESTED', v_user, new.id, null,
-                             'export-approval:' || new.id || ':' || v_stage);
-    end loop;
+    if v_stage <= new.approvals_required then
+      for v_user in select e.user_id from exchange.eligible_approvers(new.id, v_stage) e loop
+        perform notify.enqueue('EXPORT_APPROVAL_REQUESTED', v_user, new.id, null,
+                               'export-approval:' || new.id || ':' || v_stage);
+      end loop;
+    end if;
+    if new.authority_approval_required
+       and not exists (select 1 from exchange.restricted_export_approval a where a.request_id = new.id) then
+      select c.owner_id into v_user from case_mgmt.case_record c
+       where c.id = new.case_id and c.is_restricted and authz.is_restricted_case_authority(c.owner_id, c.classification)
+         and authz.user_can_view_case(c.owner_id, c.id);
+      if v_user is not null then
+        perform notify.enqueue('EXPORT_AUTHORITY_APPROVAL_REQUESTED', v_user, new.id, null, 'export-authority:' || new.id);
+      end if;
+    end if;
   elsif old.status = 'SUBMITTED' and new.status in ('APPROVED', 'REJECTED') then
     perform notify.enqueue('EXPORT_DECIDED', new.requested_by, new.id, null, 'export-decided:' || new.id);
   end if;
@@ -557,7 +660,7 @@ begin
     perform api._fail('INVALID', 'object_type');
   end if;
   if p_restricted_only is null then perform api._fail('INVALID', 'restricted_only'); end if;
-  if p_action is null or p_action not in ('REQUIRE_SECOND_APPROVAL', 'REFUSE', 'NONE') then
+  if p_action is null or p_action not in ('REQUIRE_SECOND_APPROVAL', 'REQUIRE_AUTHORITY_APPROVAL', 'REFUSE', 'NONE') then
     perform api._fail('INVALID', 'action');
   end if;
   if p_effective_from is null or p_effective_from < now() then perform api._fail('INVALID', 'effective_from'); end if;
@@ -736,7 +839,8 @@ begin
                        'preview_hash', v_hash));
   return jsonb_build_object(
     'document', v_doc, 'hash', v_hash, 'withheld', v_withheld,
-    'approvals_required', exchange.approvals_required(v.id),
+    'approvals_required', greatest(coalesce(v.approvals_required, 0), exchange.approvals_required(v.id)),
+    'authority_approval_required', exchange.authority_approval_required(v.id),
     'matched_rules', coalesce((select jsonb_agg(jsonb_build_object('code', m.code, 'action', m.action))
                                from exchange.matched_rules(v.id) m), '[]'::jsonb));
 end;
@@ -756,6 +860,7 @@ declare
   v_doc jsonb;
   v_hash text;
   v_required int;
+  v_authority boolean;
   v_rules text[];
   v_status text;
 begin
@@ -782,12 +887,14 @@ begin
     perform api._fail('CONFLICT', 'REFUSED_BY_RULE');
   end if;
   v_required := exchange.approvals_required(v.id);
+  v_authority := exchange.authority_approval_required(v.id);
   select coalesce(array_agg(m.code order by m.code), '{}') into v_rules from exchange.matched_rules(v.id) m;
-  v_status := case when v_required = 0 then 'APPROVED' else 'SUBMITTED' end;
+  v_status := case when v_required = 0 and not v_authority then 'APPROVED' else 'SUBMITTED' end;
   update exchange.export_request
      set status = v_status, classification_at_submit = v_class, approvals_required = v_required,
-         matched_rules = v_rules, submitted_hash = v_hash, submitted_at = now(),
-         decided_at = case when v_required = 0 then now() end, updated_at = now(), row_version = row_version + 1
+         authority_approval_required = v_authority, matched_rules = v_rules, submitted_hash = v_hash,
+         submitted_at = now(), decided_at = case when v_status = 'APPROVED' then now() end, updated_at = now(),
+         row_version = row_version + 1
    where id = v.id;
   perform audit.record_event('EXPORT_SUBMITTED', 'BUSINESS', 'SUCCESS', v.case_id, 'export_request', v.id::text,
     v.justification,
@@ -797,7 +904,8 @@ begin
                                                where r.request_id = v.id and r.kind = 'INTERNAL'),
                        'external_recipients', (select count(*) from exchange.export_recipient r
                                                where r.request_id = v.id and r.kind = 'EXTERNAL'),
-                       'approvals_required', v_required, 'matched_rules', to_jsonb(v_rules), 'preview_hash', v_hash));
+                       'approvals_required', v_required, 'authority_approval_required', v_authority,
+                       'matched_rules', to_jsonb(v_rules), 'preview_hash', v_hash));
   return v_status;
 end;
 $$;
@@ -818,23 +926,29 @@ declare
   v_hash text;
   v_reason text;
   v_required int;
+  v_authority boolean;
   v_status text;
 begin
   v := exchange.lock_request(p_request_id, false);
   if v.status <> 'SUBMITTED' then perform api._fail('CONFLICT', 'NOT_SUBMITTED'); end if;
   v_stage := 1 + (select count(*)::int from exchange.export_approval a where a.request_id = v.id);
-  -- Separation of duties: the requester and an earlier approver are refused, as is anyone without the stage's
-  -- permission.
+  -- Separation of duties: the requester, an earlier approver and the author of a rule in force for the export (X1)
+  -- are refused, as is anyone without the stage's permission.
   if v.requested_by = v_actor
      or exists (select 1 from exchange.export_approval a where a.request_id = v.id and a.approver_id = v_actor)
+     or exchange.authored_rule_in_force(v.id, v_actor)
      or not authz.has_permission(case v_stage when 1 then 'EXPORT_APPROVE' else 'EXPORT_SECOND_APPROVE' end) then
     perform api._fail('FORBIDDEN');
   end if;
   if p_decision is null or p_decision not in ('APPROVE', 'REJECT') then perform api._fail('INVALID', 'decision'); end if;
   v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  -- A rule that began after submission can raise the approvals needed, never lower them.
+  v_required := greatest(v.approvals_required, exchange.approvals_required(v.id));
+  v_authority := exchange.authority_approval_required(v.id);
+  -- Every stage is given; only the Restricted Case Authority's decision is outstanding.
+  if v_stage > v_required then perform api._fail('CONFLICT', 'AWAITING_AUTHORITY_APPROVAL'); end if;
   v_doc := exchange.build_document(v.id);
   v_hash := exchange.document_hash(v_doc);
-  v_required := v.approvals_required;
   -- An approval must see every item, and exactly what was submitted. A rejection releases nothing, so it is always
   -- possible: it records the hash of what the approver saw.
   if p_decision = 'APPROVE' then
@@ -845,22 +959,87 @@ begin
     if exists (select 1 from exchange.matched_rules(v.id) m where m.action = 'REFUSE') then
       perform api._fail('CONFLICT', 'REFUSED_BY_RULE');
     end if;
-    -- A rule that began after submission can raise the approvals needed, never lower them.
-    v_required := greatest(v_required, exchange.approvals_required(v.id));
   end if;
   insert into exchange.export_approval (request_id, stage, approver_id, decision, reason, preview_hash)
   values (v.id, v_stage, v_actor, case p_decision when 'APPROVE' then 'APPROVED' else 'REJECTED' end, v_reason, v_hash);
   v_status := case when p_decision = 'REJECT' then 'REJECTED'
-                   when v_stage >= v_required then 'APPROVED'
+                   when v_stage >= v_required and (not v_authority or exchange.authority_approved(v.id)) then 'APPROVED'
                    else 'SUBMITTED' end;
   update exchange.export_request
-     set status = v_status, approvals_required = v_required,
+     set status = v_status, approvals_required = v_required, authority_approval_required = v_authority,
          decided_at = case when v_status <> 'SUBMITTED' then now() end, updated_at = now(),
          row_version = row_version + 1
    where id = v.id;
   perform audit.record_event(case p_decision when 'APPROVE' then 'EXPORT_APPROVED' else 'EXPORT_REJECTED' end,
     'BUSINESS', 'SUCCESS', v.case_id, 'export_request', v.id::text, v_reason,
-    jsonb_build_object('stage', v_stage, 'approvals_required', v_required, 'status', v_status, 'preview_hash', v_hash));
+    jsonb_build_object('stage', v_stage, 'approvals_required', v_required, 'authority_approval_required', v_authority,
+                       'status', v_status, 'preview_hash', v_hash));
+  return v_status;
+end;
+$$;
+
+-- DEC-61/62 precedent (SOURCE_REQUIRED rule RESTRICTED_CASE_AUTHORITY): the case owner, eligible as Restricted Case
+-- Authority, approves or rejects one submitted export of the restricted case, as submitted. Single use. The export
+-- is approved once this and every approval stage are given.
+create function api.decide_restricted_export(p_request_id uuid, p_decision text, p_reason text, p_preview_hash text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v exchange.export_request;
+  v_case case_mgmt.case_record;
+  v_doc jsonb;
+  v_hash text;
+  v_reason text;
+  v_required int;
+  v_status text;
+begin
+  v := exchange.lock_request(p_request_id, false);
+  select * into v_case from case_mgmt.case_record c where c.id = v.case_id;
+  if not v_case.is_restricted then perform api._fail('CONFLICT', 'CASE_NOT_RESTRICTED'); end if;
+  if v_case.owner_id is distinct from v_actor
+     or not authz.is_restricted_case_authority(v_actor, v_case.classification) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  if v.status <> 'SUBMITTED' then perform api._fail('CONFLICT', 'NOT_SUBMITTED'); end if;
+  if not exchange.authority_approval_required(v.id) then
+    perform api._fail('CONFLICT', 'AUTHORITY_APPROVAL_NOT_REQUIRED');
+  end if;
+  if exists (select 1 from exchange.restricted_export_approval a where a.request_id = v.id) then
+    perform api._fail('CONFLICT', 'ALREADY_DECIDED');
+  end if;
+  if p_decision is null or p_decision not in ('APPROVE', 'REJECT') then perform api._fail('INVALID', 'decision'); end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  v_doc := exchange.build_document(v.id);
+  v_hash := exchange.document_hash(v_doc);
+  if p_decision = 'APPROVE' then
+    if exchange.withheld_count(v_doc) > 0 then perform api._fail('CONFLICT', 'ITEMS_WITHHELD'); end if;
+    if v_hash <> v.submitted_hash or p_preview_hash is distinct from v.submitted_hash then
+      perform api._fail('CONFLICT', 'PREVIEW_CHANGED');
+    end if;
+    if exists (select 1 from exchange.matched_rules(v.id) m where m.action = 'REFUSE') then
+      perform api._fail('CONFLICT', 'REFUSED_BY_RULE');
+    end if;
+  end if;
+  insert into exchange.restricted_export_approval (request_id, case_id, decided_by, decision, reason, preview_hash)
+  values (v.id, v.case_id, v_actor, case p_decision when 'APPROVE' then 'APPROVED' else 'REJECTED' end, v_reason, v_hash);
+  v_required := greatest(v.approvals_required, exchange.approvals_required(v.id));
+  v_status := case when p_decision = 'REJECT' then 'REJECTED'
+                   when (select count(*) from exchange.export_approval a
+                         where a.request_id = v.id and a.decision = 'APPROVED') >= v_required then 'APPROVED'
+                   else 'SUBMITTED' end;
+  update exchange.export_request
+     set status = v_status, approvals_required = v_required, authority_approval_required = true,
+         decided_at = case when v_status <> 'SUBMITTED' then now() end, updated_at = now(),
+         row_version = row_version + 1
+   where id = v.id;
+  perform audit.record_event(case p_decision when 'APPROVE' then 'RESTRICTED_EXPORT_APPROVED'
+                                             else 'RESTRICTED_EXPORT_REJECTED' end,
+    'BUSINESS', 'SUCCESS', v.case_id, 'export_request', v.id::text, v_reason,
+    jsonb_build_object('classification', v_case.classification, 'approvals_required', v_required,
+                       'status', v_status, 'preview_hash', v_hash));
   return v_status;
 end;
 $$;
@@ -868,9 +1047,10 @@ $$;
 -- -----------------------------------------------------------------------------
 -- Generation and delivery (the requester)
 -- -----------------------------------------------------------------------------
--- Re-checks everything as it stands now: items, hash, rules, approvals and recipients. Returns the document to render,
--- the private storage key it is written to and, for EMAIL, the addresses to deliver to. The caller renders and stores
--- the file in the same transaction (ExportService), so a failed write leaves the request APPROVED.
+-- Re-checks everything as it stands now: items, hash, rules, approvals, the authority's approval and recipients.
+-- Returns the document to render, the private storage key it is written to and, for EMAIL, who to deliver to:
+-- internal recipients by user id (the mail adapter resolves the address), external ones by address. The caller
+-- renders and stores the file in the same transaction (ExportService), so a failed write leaves the request APPROVED.
 create function api.generate_export(p_request_id uuid)
 returns jsonb
 language plpgsql security definer
@@ -896,6 +1076,9 @@ begin
   select count(*)::int into v_approved from exchange.export_approval a
    where a.request_id = v.id and a.decision = 'APPROVED';
   if exchange.approvals_required(v.id) > v_approved then perform api._fail('CONFLICT', 'APPROVALS_CHANGED'); end if;
+  if exchange.authority_approval_required(v.id) and not exchange.authority_approved(v.id) then
+    perform api._fail('CONFLICT', 'AUTHORITY_APPROVAL_REQUIRED');
+  end if;
   if not exchange.recipients_eligible(v.id) then perform api._fail('CONFLICT', 'RECIPIENT_NOT_ELIGIBLE'); end if;
   update exchange.export_request
      set status = 'GENERATED', storage_key = v_key, generated_at = now(), updated_at = now(),
@@ -907,8 +1090,10 @@ begin
   return jsonb_build_object(
     'storage_key', v_key, 'hash', v_hash, 'document', v_doc,
     'deliver_to', case when v.format = 'EMAIL' then
-      coalesce((select jsonb_agg(coalesce(r.email, u.email) order by coalesce(r.email, u.email))
-                  from exchange.export_recipient r left join iam.user_profile u on u.id = r.user_id
+      coalesce((select jsonb_agg(case r.kind when 'INTERNAL' then jsonb_build_object('kind', r.kind, 'user_id', r.user_id)
+                                             else jsonb_build_object('kind', r.kind, 'email', r.email) end
+                                 order by r.kind, coalesce(r.user_id::text, r.email))
+                  from exchange.export_recipient r
                  where r.request_id = v.id), '[]'::jsonb)
       else '[]'::jsonb end);
 end;
@@ -967,6 +1152,7 @@ grant execute on function
   api.preview_export(uuid),
   api.submit_export(uuid, text, core.classification_level),
   api.decide_export(uuid, text, text, text),
+  api.decide_restricted_export(uuid, text, text, text),
   api.generate_export(uuid),
   api.record_export_sent(uuid),
   api.cancel_export(uuid, text)

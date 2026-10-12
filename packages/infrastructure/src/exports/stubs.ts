@@ -2,9 +2,10 @@
 // PRODUCTION_SUBSTITUTION_REQUIRED:
 //   StubJsonExportRenderer  → CDF document rendering (PDF/XLSX with classification banners and page marking)
 //   InMemoryExportStore     → a private Alibaba OSS export bucket, KMS-encrypted, write-once
-//   StubExportMailer        → the CDF mail relay with an approved external-domain list
+//   StubExportMailer        → the CDF mail relay with an approved external-domain list, and the corporate directory
+//                             lookup of internal recipients' addresses
 import type { ExportMailer, ExportRenderer, ExportStore, RenderedExport } from "@cdf/application";
-import type { ExportDocument } from "@cdf/contracts";
+import type { ExportDelivery, ExportDocument } from "@cdf/contracts";
 
 /** Exports keys produced by api.generate_export only; anything else is refused (no path traversal). */
 export const EXPORT_KEY_PATTERN = /^exports\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -35,13 +36,21 @@ export class InMemoryExportStore implements ExportStore {
   }
 }
 
-/** Sends nothing. Accepts synthetic @example.test addresses only and remembers the last deliveries for tests. */
+const SYNTHETIC_ADDRESS = /^[a-z0-9._%+-]{1,64}@example\.test$/;
+const USER_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+
+/**
+ * Sends nothing and looks up no address: internal recipients stay user ids, external ones must be synthetic
+ * @example.test addresses. Remembers the last deliveries for tests.
+ */
 export class StubExportMailer implements ExportMailer {
   readonly kind = "stub-email" as const;
-  readonly delivered: { to: string[]; fileName: string }[] = [];
+  readonly delivered: { to: ExportDelivery[]; fileName: string }[] = [];
 
-  async send(to: readonly string[], file: RenderedExport): Promise<boolean> {
-    if (to.length === 0 || !to.every((a) => /^[a-z0-9._%+-]{1,64}@example\.test$/.test(a))) return false;
+  async send(to: readonly ExportDelivery[], file: RenderedExport): Promise<boolean> {
+    const valid = (d: ExportDelivery) =>
+      d.kind === "INTERNAL" ? USER_ID.test(d.userId) : SYNTHETIC_ADDRESS.test(d.email);
+    if (to.length === 0 || !to.every(valid)) return false;
     this.delivered.push({ to: [...to], fileName: file.fileName });
     if (this.delivered.length > 100) this.delivered.shift();
     return true;

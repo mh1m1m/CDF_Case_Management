@@ -10,6 +10,7 @@ import type {
   CaseListItem,
   EvidenceItem,
   EvidenceRejectionCode,
+  ExportDelivery,
   ExportDocument,
   FormApprovalOutcome,
   FormData,
@@ -23,15 +24,15 @@ import type {
   MyArea,
   MyCaseTask,
   MyWorkSummary,
-  PendingConflict,
   OutgoingNotification,
+  PendingConflict,
   PublicReportStatus,
   RecordsCatalogueEntry,
   ReportAttachmentItem,
   ReportDetail,
-  RestrictedCaseAuthority,
   ReportMessage,
   ReporterMode,
+  RestrictedCaseAuthority,
   UserDirectoryEntry,
   UserRegisterEntry,
   WorkItem,
@@ -427,5 +428,6 @@ export interface ExportStore {
  */
 export interface ExportMailer {
   readonly kind: "stub-email";
-  send(to: readonly string[], file: RenderedExport): Promise<boolean>;
+  /** Internal recipients arrive by user id: resolving their address is the adapter's job (directory lookup). */
+  send(to: readonly ExportDelivery[], file: RenderedExport): Promise<boolean>;
 }

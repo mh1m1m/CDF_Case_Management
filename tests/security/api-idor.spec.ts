@@ -874,6 +874,11 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
     call: (tx, t) => tx`select api.decide_export(${t.request}, 'APPROVE', ${REASON}, ${SHA})`,
   },
   {
+    fn: "decide_restricted_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_restricted_export(${t.request}, 'APPROVE', ${REASON}, ${SHA})`,
+  },
+  {
     fn: "generate_export",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.generate_export(${t.request})`,
@@ -1704,7 +1709,13 @@ describe("IDOR: export requests (migration 1930)", () => {
           mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
       }
       expect(mismatches).toEqual([]);
-      for (const table of ["export_request", "export_item", "export_recipient", "export_approval"]) {
+      for (const table of [
+        "export_request",
+        "export_item",
+        "export_recipient",
+        "export_approval",
+        "restricted_export_approval",
+      ]) {
         expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
       }
     });

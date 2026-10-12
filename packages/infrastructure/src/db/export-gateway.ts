@@ -4,6 +4,7 @@ import type { ExportGateway, UserRequestContext } from "@cdf/application";
 import type {
   Classification,
   ExportAudience,
+  ExportDelivery,
   ExportDocument,
   ExportFormat,
   ExportObjectType,
@@ -31,6 +32,11 @@ interface DocumentRow {
     content: Record<string, unknown> | null;
   }[];
 }
+
+type DeliveryRow = { kind: "INTERNAL"; user_id: string } | { kind: "EXTERNAL"; email: string };
+
+const toDelivery = (d: DeliveryRow): ExportDelivery =>
+  d.kind === "INTERNAL" ? { kind: "INTERNAL", userId: d.user_id } : { kind: "EXTERNAL", email: d.email };
 
 const toDocument = (d: DocumentRow): ExportDocument => ({
   requestId: d.request_id,
@@ -92,6 +98,7 @@ export class PostgresExportGateway implements ExportGateway {
             hash: string;
             withheld: number;
             approvals_required: number;
+            authority_approval_required: boolean;
             matched_rules: ExportPreview["matchedRules"];
           };
         }[]
@@ -102,6 +109,7 @@ export class PostgresExportGateway implements ExportGateway {
         hash: p.hash,
         withheld: p.withheld,
         approvalsRequired: p.approvals_required,
+        authorityApprovalRequired: p.authority_approval_required,
         matchedRules: p.matched_rules,
       };
     });
@@ -123,6 +131,17 @@ export class PostgresExportGateway implements ExportGateway {
     });
   }
 
+  decideRestricted(
+    ctx: UserRequestContext,
+    i: Parameters<ExportGateway["decide"]>[1],
+  ): Promise<ExportStatus> {
+    return this.run(ctx, async (tx) => {
+      const [r] = await tx<{ status: ExportStatus }[]>`
+        select api.decide_restricted_export(${i.requestId}, ${i.decision}, ${i.reason}, ${i.previewHash}) as status`;
+      return r!.status;
+    });
+  }
+
   generate<T>(
     ctx: UserRequestContext,
     requestId: string,
@@ -130,13 +149,13 @@ export class PostgresExportGateway implements ExportGateway {
   ): Promise<{ generated: GeneratedExport; written: T }> {
     return this.run(ctx, async (tx) => {
       const [r] = await tx<
-        { g: { storage_key: string; hash: string; document: DocumentRow; deliver_to: string[] } }[]
+        { g: { storage_key: string; hash: string; document: DocumentRow; deliver_to: DeliveryRow[] } }[]
       >`select api.generate_export(${requestId}) as g`;
       const generated: GeneratedExport = {
         storageKey: r!.g.storage_key,
         hash: r!.g.hash,
         document: toDocument(r!.g.document),
-        deliverTo: r!.g.deliver_to,
+        deliverTo: r!.g.deliver_to.map(toDelivery),
       };
       // Inside the transaction: a failed render or write rolls the generation back.
       return { generated, written: await write(generated) };

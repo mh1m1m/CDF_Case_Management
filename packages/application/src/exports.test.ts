@@ -2,7 +2,7 @@
 // that renders and stores inside the gateway's transaction, and delivery recorded only when the mailer accepts it.
 // The database side (per-item authorization, hashes, approvals) is in tests/security/export.spec.ts.
 import { describe, expect, it } from "vitest";
-import type { Actor, ExportDocument, GeneratedExport, Permission } from "@cdf/contracts";
+import type { Actor, ExportDelivery, ExportDocument, GeneratedExport, Permission } from "@cdf/contracts";
 import type { SecurityEvent } from "@cdf/audit";
 import { createExportService, type ExportGateway } from "./exports";
 import type { RenderedExport } from "./ports";
@@ -29,6 +29,8 @@ function actor(permissions: Permission[]): Actor {
 }
 const requester = actor(["EXPORT_REQUEST"]);
 const approver = actor(["EXPORT_APPROVE"]);
+const authority = actor(["RESTRICTED_CASE_AUTHORITY"]);
+const INTERNAL_RECIPIENT = "a0000000-0000-4000-8000-000000000004";
 const nobody = actor(["FORM_VIEW"]);
 
 function document(format: ExportDocument["format"]): ExportDocument {
@@ -51,12 +53,18 @@ function harness(
   const calls: string[] = [];
   const events: SecurityEvent[] = [];
   const stored: [string, RenderedExport][] = [];
-  const sent: string[][] = [];
+  const sent: ExportDelivery[][] = [];
   const generated: GeneratedExport = {
     storageKey: KEY,
     hash: HASH,
     document: document(opts.format ?? "PDF"),
-    deliverTo: opts.format === "EMAIL" ? ["officer.alpha@example.test"] : [],
+    deliverTo:
+      opts.format === "EMAIL"
+        ? [
+            { kind: "EXTERNAL", email: "officer.alpha@example.test" },
+            { kind: "INTERNAL", userId: INTERNAL_RECIPIENT },
+          ]
+        : [],
   };
   const gateway: ExportGateway = {
     create: async () => (calls.push("create"), REQUEST),
@@ -69,11 +77,13 @@ function harness(
         hash: HASH,
         withheld: 0,
         approvalsRequired: 1,
+        authorityApprovalRequired: false,
         matchedRules: [],
       };
     },
     submit: async () => (calls.push("submit"), "SUBMITTED"),
     decide: async () => (calls.push("decide"), "APPROVED"),
+    decideRestricted: async () => (calls.push("decideRestricted"), "APPROVED"),
     generate: async (_ctx, _id, write) => {
       calls.push("generate");
       const written = await write(generated); // a throw here aborts the transaction
@@ -164,6 +174,26 @@ describe("export service", () => {
     ).toBe(true);
   });
 
+  it("only a Restricted Case Authority reaches the gateway for a restricted export's authority decision", async () => {
+    const { service, calls, events } = harness();
+    const input = {
+      requestId: REQUEST,
+      decision: "APPROVE",
+      reason: "Synthetic: the authority approves.",
+      previewHash: HASH,
+    };
+    expect(await service.decideRestricted(ctx, approver, input)).toMatchObject({
+      ok: false,
+      error: { kind: "FORBIDDEN" },
+    });
+    expect(events.map((e) => e.metadata)).toEqual([
+      { command: "decide_restricted_export", outcome: "FORBIDDEN" },
+    ]);
+    expect(calls).toEqual([]);
+    expect(await service.decideRestricted(ctx, authority, input)).toEqual({ ok: true, value: "APPROVED" });
+    expect(calls).toEqual(["decideRestricted"]);
+  });
+
   it("a file export is rendered and stored inside the generation transaction, and never mailed", async () => {
     const { service, calls, stored, sent } = harness({ format: "PDF" });
     const r = await service.generate(ctx, requester, { requestId: REQUEST });
@@ -190,7 +220,12 @@ describe("export service", () => {
       ok: true,
       value: { status: "SENT", delivered: true },
     });
-    expect(ok.sent).toEqual([["officer.alpha@example.test"]]);
+    expect(ok.sent).toEqual([
+      [
+        { kind: "EXTERNAL", email: "officer.alpha@example.test" },
+        { kind: "INTERNAL", userId: INTERNAL_RECIPIENT },
+      ],
+    ]);
     expect(ok.calls).toEqual(["generate", "commit", "recordSent"]);
 
     for (const mailer of ["refuse", "throw"] as const) {

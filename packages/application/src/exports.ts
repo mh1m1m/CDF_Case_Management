@@ -38,6 +38,8 @@ export interface ExportGateway {
   preview(ctx: UserRequestContext, requestId: string): Promise<ExportPreview>;
   submit(ctx: UserRequestContext, input: In<typeof submitExportSchema>): Promise<ExportStatus>;
   decide(ctx: UserRequestContext, input: In<typeof decideExportSchema>): Promise<ExportStatus>;
+  /** The Restricted Case Authority's decision on an export of a restricted case it owns (DEC-61/62 precedent). */
+  decideRestricted(ctx: UserRequestContext, input: In<typeof decideExportSchema>): Promise<ExportStatus>;
   /** Runs api.generate_export and `write` in one transaction: if `write` throws, nothing is generated. */
   generate<T>(
     ctx: UserRequestContext,
@@ -66,6 +68,7 @@ export interface GenerateResult {
 
 const REQUESTER: readonly Permission[] = ["EXPORT_REQUEST"];
 const APPROVER: readonly Permission[] = ["EXPORT_APPROVE", "EXPORT_SECOND_APPROVE"];
+const AUTHORITY: readonly Permission[] = ["RESTRICTED_CASE_AUTHORITY"];
 
 export function createExportService(deps: ExportDeps) {
   const { gateway, renderer, store, mailer, securityEvents } = deps;
@@ -185,7 +188,7 @@ export function createExportService(deps: ExportDeps) {
         "preview_export",
         exportRequestRefSchema,
         raw,
-        [...REQUESTER, ...APPROVER],
+        [...REQUESTER, ...APPROVER, ...AUTHORITY],
         (i) => gateway.preview(ctx, i.requestId),
         (i) => i.requestId,
       ),
@@ -211,6 +214,19 @@ export function createExportService(deps: ExportDeps) {
         raw,
         APPROVER,
         (i) => gateway.decide(ctx, i),
+        (i) => i.requestId,
+      ),
+
+    /** Only the case owner, as its Restricted Case Authority, gets past the database; others answer NOT_FOUND. */
+    decideRestricted: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "decide_restricted_export",
+        decideExportSchema,
+        raw,
+        AUTHORITY,
+        (i) => gateway.decideRestricted(ctx, i),
         (i) => i.requestId,
       ),
 

@@ -1442,6 +1442,23 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.cancel_export(${draft}, ${REASON})`;
         },
       },
+      {
+        fn: "decide_restricted_export",
+        actor: "grcDirector",
+        run: async (s) => {
+          // Fixture: grcDirector, owner and Restricted Case Authority of case 0003, exports its summary internally.
+          const exec = await caseId("0003");
+          const request = await one(
+            s,
+            s.tx`select api.create_export_request(${exec}, 'PDF', 'INTERNAL', 'AUDIT', null, null) as id`,
+          );
+          await s.tx`select api.add_export_item(${request}, 'CASE_SUMMARY', ${exec})`;
+          const hash = await one(s, s.tx`select api.preview_export(${request}) ->> 'hash' as h`);
+          await s.tx`select api.submit_export(${request}, ${hash},
+            (select classification from case_mgmt.case_record where id = ${exec}))`;
+          return s.tx`select api.decide_restricted_export(${request}, 'APPROVE', ${REASON}, ${hash})`;
+        },
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);

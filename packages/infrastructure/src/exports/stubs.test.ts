@@ -33,12 +33,19 @@ describe("export stubs", () => {
     await expect(store.put(KEY, file)).rejects.toThrow("already used");
   });
 
-  it("delivers to synthetic addresses only", async () => {
+  it("delivers to synthetic addresses and internal user ids only, and looks up no address", async () => {
     const mailer = new StubExportMailer();
     const file = await new StubJsonExportRenderer().render(doc);
-    expect(await mailer.send(["officer@regulator.example.com"], file)).toBe(false);
+    const internal = { kind: "INTERNAL", userId: "a0000000-0000-4000-8000-000000000004" } as const;
+    const external = { kind: "EXTERNAL", email: "officer.alpha@example.test" } as const;
+    expect(await mailer.send([{ kind: "EXTERNAL", email: "officer@regulator.example.com" }], file)).toBe(
+      false,
+    );
+    expect(await mailer.send([{ kind: "INTERNAL", userId: "investigator.a@example.test" }], file)).toBe(
+      false,
+    );
     expect(await mailer.send([], file)).toBe(false);
-    expect(await mailer.send(["officer.alpha@example.test"], file)).toBe(true);
-    expect(mailer.delivered).toEqual([{ to: ["officer.alpha@example.test"], fileName: file.fileName }]);
+    expect(await mailer.send([external, internal], file)).toBe(true);
+    expect(mailer.delivered).toEqual([{ to: [external, internal], fileName: file.fileName }]);
   });
 });

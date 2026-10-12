@@ -290,10 +290,11 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 
 ## Export builder (migration 1930, ADR-026, ADR-032)
 
-| Table                       | Purpose                                                    | Notes                                                                                         |
-| --------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `exchange.approval_rule`    | Effective-dated export rules: second approval or refusal   | Matches audience, case classification, restricted cases, content type; seeded SOURCE_REQUIRED |
-| `exchange.export_request`   | One export of one case: format, audience, purpose, status  | External needs party and justification; bound to a submitted hash; final once sent or closed  |
-| `exchange.export_item`      | Object type and id of an exported item                     | No content: rendered per viewer at preview, approval and generation (N16)                     |
-| `exchange.export_recipient` | Internal users cleared for the case, or external addresses | EMAIL only; external addresses synthetic `@example.test` (PRODUCTION_SUBSTITUTION_REQUIRED)   |
-| `exchange.export_approval`  | One approval per stage, bound to the preview hash approved | Never the requester; stage 2 by a different person with EXPORT_SECOND_APPROVE                 |
+| Table                                 | Purpose                                                                      | Notes                                                                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exchange.approval_rule`              | Effective-dated export rules: second approval, authority approval or refusal | Matches audience, case classification, restricted cases, content type; seeded SOURCE_REQUIRED; an author never decides exports it applies to |
+| `exchange.export_request`             | One export of one case: format, audience, purpose, status                    | External needs party and justification; bound to a submitted hash; final once sent or closed                                                 |
+| `exchange.export_item`                | Object type and id of an exported item                                       | No content: rendered per viewer at preview, approval and generation (N16)                                                                    |
+| `exchange.export_recipient`           | Internal users cleared for the case, or external addresses                   | EMAIL only; external addresses synthetic `@example.test` (PRODUCTION_SUBSTITUTION_REQUIRED)                                                  |
+| `exchange.export_approval`            | One approval per stage, bound to the preview hash approved                   | Never the requester; stage 2 by a different person with EXPORT_SECOND_APPROVE                                                                |
+| `exchange.restricted_export_approval` | The Restricted Case Authority's decision on one export of a restricted case  | Case owner only; bound to the submitted hash; one per export (DEC-61/62 precedent)                                                           |

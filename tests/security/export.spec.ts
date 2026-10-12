@@ -1,7 +1,9 @@
 // Business architecture rebase phase 9 (migration 1930, ADR-026, Q99): the export builder.
 // N16 per-item authorization, N19 no protected identity, separation of duties, preview binding, the classification
-// check and rule-driven second approval. Every step runs through the api.* commands as `authenticated`; the owner
-// connection is used only to plant a withheld item (an item that has since become invisible) and to read the outbox.
+// check, rule-driven second approval, the rule author's exclusion (AGENT-09 X1) and the Restricted Case Authority's
+// decision on a restricted case (DEC-61/62 precedent). Every step runs through the api.* commands as `authenticated`;
+// the owner connection is used only to plant a withheld item (an item that has since become invisible) and to read
+// the outbox.
 import { beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
@@ -62,6 +64,7 @@ interface Preview {
   hash: string;
   withheld: number;
   approvals_required: number;
+  authority_approval_required: boolean;
   matched_rules: { code: string; action: string }[];
   document: {
     items: { included: boolean; object_type: string; content: Record<string, unknown> | null }[];
@@ -91,13 +94,42 @@ async function decide(s: Scenario, actor: UserKey, request: string, decision = "
 interface Generated {
   storage_key: string;
   hash: string;
-  deliver_to: string[];
+  deliver_to: ({ kind: "INTERNAL"; user_id: string } | { kind: "EXTERNAL"; email: string })[];
   document: unknown;
 }
 
 async function generate(s: Scenario, request: string): Promise<Generated> {
   const [r] = await s.tx<{ g: Generated }[]>`select api.generate_export(${request}) as g`;
   return r!.g;
+}
+
+/** The Restricted Case Authority's decision, on the hash the actor previews. */
+async function authority(
+  s: Scenario,
+  actor: UserKey,
+  request: string,
+  decision = "APPROVE",
+): Promise<string> {
+  await s.as(actor);
+  const p = await preview(s, request);
+  const [r] = await s.tx<{ status: string }[]>`
+    select api.decide_restricted_export(${request}, ${decision}, ${REASON}, ${p.hash}) as status`;
+  return r!.status;
+}
+
+async function rule(s: Scenario, actor: UserKey, code: string, args: string) {
+  await s.as(actor);
+  const [audience, min, objectType, restricted, action] = args.split(" ");
+  await s.tx`select api.set_export_rule(${code}, ${audience!}, ${min === "-" ? null : min!}::core.classification_level,
+    ${objectType === "-" ? null : objectType!}, ${restricted === "restricted"}, ${action!}, now(), 'SOURCE_REQUIRED',
+    ${REASON})`;
+}
+
+async function storedApprovals(s: OwnerScenario, request: string): Promise<number> {
+  await s.asOwner();
+  const [r] = await s.tx<{ n: number }[]>`
+    select approvals_required as n from exchange.export_request where id = ${request}`;
+  return r!.n;
 }
 
 const BY_ID = Object.fromEntries(Object.entries(USERS).map(([k, v]) => [v, k])) as Record<string, UserKey>;
@@ -331,7 +363,12 @@ describe("export builder (Q99, ADR-026)", () => {
         await s.expectError("CDF_FORBIDDEN", call);
       await s.as("lead");
       const g = await generate(s, req);
-      expect(g.deliver_to).toEqual(["investigator.a@example.test", "officer.alpha@example.test"]);
+      // Internal recipients by id only (AGENT-09 note ii): the mail adapter resolves their addresses.
+      expect(g.deliver_to).toEqual([
+        { kind: "EXTERNAL", email: "officer.alpha@example.test" },
+        { kind: "INTERNAL", user_id: USERS.investigatorA },
+      ]);
+      expect(JSON.stringify(g)).not.toContain("investigator.a@");
       await s.tx`select api.record_export_sent(${req})`;
       const [row] = await s.tx<{ status: string; approvals: number }[]>`
         select q.status, (select count(*)::int from exchange.export_approval a where a.request_id = q.id) as approvals
@@ -459,6 +496,7 @@ describe("export builder (Q99, ADR-026)", () => {
         "EXTERNAL_CONFIDENTIAL",
         "EXTERNAL_SECRET",
         "RESTRICTED_CASE",
+        "RESTRICTED_CASE_AUTHORITY",
       ]);
       await s.expectError(
         "CDF_CONFLICT:REFUSED_BY_RULE",
@@ -474,7 +512,10 @@ describe("export builder (Q99, ADR-026)", () => {
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.preview_export(${internal})`);
       await s.as("grcDirector");
       await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
-      expect(await decide(s, "grcDeputy", internal)).toBe("APPROVED");
+      // The approval stage is given; the case's Restricted Case Authority (its owner, here also the requester:
+      // consent, not an approval stage) still decides.
+      expect(await decide(s, "grcDeputy", internal)).toBe("SUBMITTED");
+      expect(await authority(s, "grcDirector", internal)).toBe("APPROVED");
 
       // Only EXPORT_POLICY_ADMIN sets rules; a rule in force from now binds an approved, ungenerated export.
       const pending = await draft(s, "lead", caseA);
@@ -537,6 +578,168 @@ describe("export builder (Q99, ADR-026)", () => {
         "status",
         "version_no",
       ]);
+    });
+  });
+  it("X1: a policy administrator who changed a rule that applies to an export can never decide it", async () => {
+    await ownerScenario(async (s) => {
+      // AGENT-09's probe: the director switches the confidential rule off, narrowed so its own version matches nothing.
+      await s.as("grcDirector");
+      await s.tx`select api.set_export_rule('EXTERNAL_CONFIDENTIAL', 'EXTERNAL', 'SECRET', null, false, 'NONE', now(),
+        'APPROVED', ${REASON})`;
+      const req = await draft(s, "lead", caseA, { audience: "EXTERNAL" });
+      await addItem(s, req, "CASE_SUMMARY", caseA);
+      const p = await preview(s, req);
+      expect(p.approvals_required).toBe(1);
+      expect(await submit(s, req, "CONFIDENTIAL")).toBe("SUBMITTED");
+      // The author is neither asked nor allowed to decide, either way.
+      expect(await notified(s, "EXPORT_APPROVAL_REQUESTED", req)).toEqual(["caseManager", "grcDeputy"]);
+      await s.as("grcDirector");
+      for (const decision of ["APPROVE", "REJECT"]) {
+        await s.expectError(
+          "CDF_FORBIDDEN",
+          (tx) => tx`select api.decide_export(${req}, ${decision}, ${REASON}, ${p.hash})`,
+        );
+      }
+      // Authoring a rule that never applied to the export does not exclude anyone.
+      await rule(s, "grcDeputy", "EXTERNAL_MINUTES", "EXTERNAL - MINUTES unrestricted NONE");
+      expect(await decide(s, "grcDeputy", req)).toBe("APPROVED");
+      await s.as("lead");
+      expect((await generate(s, req)).hash).toBe(p.hash);
+    });
+  });
+
+  it("a rule that begins after submission raises the approvals needed, and a refusal stops generation", async () => {
+    await ownerScenario(async (s) => {
+      await rule(s, "grcDeputy", "EXTERNAL_CONFIDENTIAL", "EXTERNAL CONFIDENTIAL - unrestricted NONE");
+      const req = await draft(s, "lead", caseA, { audience: "EXTERNAL" });
+      await addItem(s, req, "CASE_SUMMARY", caseA);
+      expect(await submit(s, req, "CONFIDENTIAL")).toBe("SUBMITTED");
+      expect(await storedApprovals(s, req)).toBe(1);
+      await rule(
+        s,
+        "grcDeputy",
+        "EXTERNAL_SUMMARY",
+        "EXTERNAL - CASE_SUMMARY unrestricted REQUIRE_SECOND_APPROVAL",
+      );
+      // The first approval no longer suffices; the second stage goes to someone who set no rule for it.
+      expect(await decide(s, "caseManager", req)).toBe("SUBMITTED");
+      expect(await storedApprovals(s, req)).toBe(2);
+      expect(await notified(s, "EXPORT_APPROVAL_REQUESTED", req)).toEqual(["caseManager", "grcDirector"]);
+      expect(await decide(s, "grcDirector", req)).toBe("APPROVED");
+      // A refusing rule in force after approval stops generation.
+      await rule(s, "grcDirector", "EXTERNAL_SUMMARY_REFUSED", "EXTERNAL - CASE_SUMMARY unrestricted REFUSE");
+      await s.as("lead");
+      await s.expectError("CDF_CONFLICT:REFUSED_BY_RULE", (tx) => tx`select api.generate_export(${req})`);
+    });
+  });
+
+  it("restricted case: its Restricted Case Authority decides each export as submitted (DEC-61/62 precedent)", async () => {
+    const deputyRequests = async (s: OwnerScenario): Promise<{ req: string; hash: string }> => {
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
+      const req = await draft(s, "grcDeputy", caseExec);
+      await addItem(s, req, "CASE_SUMMARY", caseExec);
+      const p = await preview(s, req);
+      return { req, hash: p.hash };
+    };
+    const decideAuthority = (tx: Tx, req: string, hash: string, decision = "APPROVE") =>
+      tx`select api.decide_restricted_export(${req}, ${decision}, ${REASON}, ${hash})`;
+
+    await ownerScenario(async (s) => {
+      const { req, hash } = await deputyRequests(s);
+      expect(await preview(s, req)).toMatchObject({
+        approvals_required: 1,
+        authority_approval_required: true,
+      });
+      expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
+      expect(await notified(s, "EXPORT_AUTHORITY_APPROVAL_REQUESTED", req)).toEqual(["grcDirector"]);
+      // Outsiders cannot tell it exists; the requester holds the authority permission but does not own the case.
+      for (const actor of ["lead", "caseManager"] as const) {
+        await s.as(actor);
+        await s.expectError("CDF_NOT_FOUND", (tx) => decideAuthority(tx, req, hash));
+      }
+      await s.as("grcDeputy");
+      await s.expectError("CDF_FORBIDDEN", (tx) => decideAuthority(tx, req, hash));
+      // The owner decides exactly what was submitted, once.
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:PREVIEW_CHANGED", (tx) => decideAuthority(tx, req, "0".repeat(64)));
+      await s.expectError("CDF_INVALID:decision", (tx) => decideAuthority(tx, req, hash, "MAYBE"));
+      expect(await authority(s, "grcDirector", req)).toBe("SUBMITTED");
+      await s.expectError("CDF_CONFLICT:ALREADY_DECIDED", (tx) => decideAuthority(tx, req, hash));
+      await s.as("grcDeputy");
+      await s.expectError("CDF_CONFLICT:NOT_APPROVED", (tx) => tx`select api.generate_export(${req})`);
+      expect(await decide(s, "grcDirector", req)).toBe("APPROVED");
+      expect(await notified(s, "EXPORT_DECIDED", req)).toEqual(["grcDeputy"]);
+      await s.as("grcDeputy");
+      expect((await generate(s, req)).hash).toBe(hash);
+      await s.as("dpo");
+      const events = await s.tx<{ action: string }[]>`
+        select action from audit.audit_event where object_id = ${req} and action like '%APPROVED' order by seq`;
+      expect(events.map((e) => e.action)).toEqual(["RESTRICTED_EXPORT_APPROVED", "EXPORT_APPROVED"]);
+    });
+
+    await ownerScenario(async (s) => {
+      // The stage is given first; switching the rule off after submission does not remove the authority's say; the
+      // authority rejects, so the export is rejected.
+      const { req, hash } = await deputyRequests(s);
+      expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
+      await rule(s, "grcDeputy", "RESTRICTED_CASE_AUTHORITY", "ANY - - restricted NONE");
+      expect(await decide(s, "grcDirector", req)).toBe("SUBMITTED");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.decide_export(${req}, 'APPROVE', ${REASON}, ${hash})`,
+      );
+      expect(await authority(s, "grcDirector", req, "REJECT")).toBe("REJECTED");
+      expect(await notified(s, "EXPORT_DECIDED", req)).toEqual(["grcDeputy"]);
+      await s.as("grcDeputy");
+      await s.expectError("CDF_CONFLICT:NOT_APPROVED", (tx) => tx`select api.generate_export(${req})`);
+    });
+
+    await ownerScenario(async (s) => {
+      // With no approval stage needed, the authority's approval alone approves it.
+      await rule(s, "grcDeputy", "RESTRICTED_CASE", "ANY - - restricted NONE");
+      const { req } = await deputyRequests(s);
+      expect(await preview(s, req)).toMatchObject({
+        approvals_required: 0,
+        authority_approval_required: true,
+      });
+      expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
+      expect(await authority(s, "grcDirector", req)).toBe("APPROVED");
+    });
+
+    await ownerScenario(async (s) => {
+      // Configurable: switched off, no authority decision is asked for; switched on later, generation stops.
+      await rule(s, "grcDeputy", "RESTRICTED_CASE_AUTHORITY", "ANY - - restricted NONE");
+      const { req, hash } = await deputyRequests(s);
+      expect(await preview(s, req)).toMatchObject({ authority_approval_required: false });
+      expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
+      expect(await notified(s, "EXPORT_AUTHORITY_APPROVAL_REQUESTED", req)).toEqual([]);
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:AUTHORITY_APPROVAL_NOT_REQUIRED", (tx) =>
+        decideAuthority(tx, req, hash),
+      );
+      expect(await decide(s, "grcDirector", req)).toBe("APPROVED");
+      await rule(
+        s,
+        "grcDeputy",
+        "RESTRICTED_AUTHORITY_LATE",
+        "ANY - - restricted REQUIRE_AUTHORITY_APPROVAL",
+      );
+      await s.as("grcDeputy");
+      await s.expectError(
+        "CDF_CONFLICT:AUTHORITY_APPROVAL_REQUIRED",
+        (tx) => tx`select api.generate_export(${req})`,
+      );
+    });
+
+    await scenario(async (s) => {
+      const req = await draft(s, "lead", caseA, { audience: "EXTERNAL" });
+      await addItem(s, req, "CASE_SUMMARY", caseA);
+      expect(await submit(s, req, "CONFIDENTIAL")).toBe("SUBMITTED");
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:CASE_NOT_RESTRICTED", (tx) =>
+        decideAuthority(tx, req, "0".repeat(64)),
+      );
     });
   });
 });

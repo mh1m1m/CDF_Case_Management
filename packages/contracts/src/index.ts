@@ -1135,6 +1135,7 @@ export const NOTIFICATION_TEMPLATES = [
   "GRIEVANCE_HANDLING_APPROVED",
   // Export builder (migration 1930, ADR-026)
   "EXPORT_APPROVAL_REQUESTED",
+  "EXPORT_AUTHORITY_APPROVAL_REQUESTED",
   "EXPORT_DECIDED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
@@ -1200,20 +1201,34 @@ export interface ExportDocument {
   items: ExportDocumentItem[];
 }
 
+/** What a rule in force does to a matching export (SOURCE_REQUIRED rules; NONE switches a code off). */
+export const EXPORT_RULE_ACTIONS = [
+  "REQUIRE_SECOND_APPROVAL",
+  "REQUIRE_AUTHORITY_APPROVAL",
+  "REFUSE",
+  "NONE",
+] as const;
+export type ExportRuleAction = (typeof EXPORT_RULE_ACTIONS)[number];
+
 export interface ExportPreview {
   document: ExportDocument;
   hash: string;
   withheld: number;
   approvalsRequired: number;
-  matchedRules: { code: string; action: "REQUIRE_SECOND_APPROVAL" | "REFUSE" }[];
+  /** A restricted case's export also needs its Restricted Case Authority's decision (DEC-61/62 precedent). */
+  authorityApprovalRequired: boolean;
+  matchedRules: { code: string; action: Exclude<ExportRuleAction, "NONE"> }[];
 }
 
-/** What generation hands to rendering and delivery: the document, its hash, the private key and the addresses. */
+/** Who an EMAIL export goes to: internal users by id (the mail adapter resolves the address), external addresses. */
+export type ExportDelivery = { kind: "INTERNAL"; userId: string } | { kind: "EXTERNAL"; email: string };
+
+/** What generation hands to rendering and delivery: the document, its hash, the private key and the recipients. */
 export interface GeneratedExport {
   storageKey: string;
   hash: string;
   document: ExportDocument;
-  deliverTo: string[];
+  deliverTo: ExportDelivery[];
 }
 
 /** What the NotificationSender receives: recipient, template and link. Never case content (§39, N18). */
