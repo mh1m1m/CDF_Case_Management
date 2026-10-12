@@ -49,8 +49,16 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "FORM_VIEW",
     "FORM_PREPARE",
     "FORM_REVIEW",
+    "PRELIMINARY_PREPARE",
   ],
-  INVESTIGATOR: ["CONFLICT_DECLARE", "EVIDENCE_UPLOAD", "EVIDENCE_DOWNLOAD", "FORM_VIEW", "FORM_PREPARE"],
+  INVESTIGATOR: [
+    "CONFLICT_DECLARE",
+    "EVIDENCE_UPLOAD",
+    "EVIDENCE_DOWNLOAD",
+    "FORM_VIEW",
+    "FORM_PREPARE",
+    "PRELIMINARY_PREPARE",
+  ],
   COMMITTEE_SECRETARY: ["CONFLICT_DECLARE", "FORM_VIEW", "FORM_PREPARE"],
   COMMITTEE_CHAIR: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW", "FORM_REVIEW", "FORM_APPROVE"],
   COMMITTEE_MEMBER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW"],
@@ -92,12 +100,15 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "DISPOSITION_TASK_VIEW",
     "BREAK_GLASS_APPROVE",
     "COMMITTEE_ADMIN",
+    "PRELIMINARY_PREPARE",
+    "PRELIMINARY_REVIEW",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
   INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],
   SOC_ANALYST: ["SECURITY_EVENT_VIEW"],
   // COMMITTEE_ADMIN maintains committee seats and rules only (ADR-019, Q28); it opens no proceeding or case.
-  PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN", "COMMITTEE_ADMIN"],
+  // SECTOR_ADMIN maintains sectors and positions only; it shows no referral or case (migration 1880).
+  PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN", "COMMITTEE_ADMIN", "SECTOR_ADMIN"],
   // Form entitlements (ADR-011) give these roles their first permissions; the rest come in later phases.
   // DB_ADMIN never receives application permissions (§21).
   COMPLIANCE: ["FORM_VIEW", "FORM_PREPARE", "FORM_REVIEW"],
@@ -119,7 +130,13 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "LEGAL_HOLD_REQUEST",
     "CASE_DISCOVER",
   ],
-  REFERRER: [],
+  // Direct referral (Q1–Q4): preparing needs a current sector position; approving needs the head position or an
+  // active delegation. Preliminary review (Q11–Q20): the GRC Sector Head has no case access, only a purpose-bound
+  // view of recommendations awaiting their approval (ADR-031).
+  REFERRER: ["REFERRAL_PREPARE"],
+  SECTOR_HEAD: ["REFERRAL_PREPARE", "REFERRAL_SECTOR_APPROVE"],
+  COMPLIANCE_SECTION_MANAGER: ["PRELIMINARY_PREPARE", "COMMITTEE_ADMIN"],
+  GRC_SECTOR_HEAD: ["PRELIMINARY_APPROVE"],
   DB_ADMIN: [],
 };
 

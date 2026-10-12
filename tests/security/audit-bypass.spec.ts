@@ -69,6 +69,9 @@ const NOT_STATE_CHANGING = new Set([
   "open_report_attachment",
   // DEC-01 (ADR-016): names of the people a restricted case may be handed to; opening the report is audited.
   "list_restricted_case_authorities",
+  // Direct referral and preliminary review (migration 1880): the caller's next actions and approval queue.
+  "referral_available_actions",
+  "preliminary_approval_queue",
 ]);
 
 interface Step {
@@ -517,6 +520,154 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.close_proceeding(${p!.id}, 'CONCLUDED', 'CORRECTIVE_ACTION', ${REASON})`;
         },
       },
+      // Direct referral (migration 1880): a sector with a head, members and a delegate; a referral approved by the
+      // delegate, rejected, objected to and accepted (a case with a committee proceeding); a second referral
+      // rejected, resubmitted and withdrawn.
+      {
+        fn: "create_sector",
+        actor: "platformAdmin",
+        run: async (s) =>
+          (ids.sector = await one(
+            s,
+            s.tx`select api.create_sector('WLK', 'Walk Sector (synthetic)', 'قطاع التجربة (تجريبي)') as id`,
+          )),
+      },
+      {
+        fn: "appoint_sector_member",
+        actor: "platformAdmin",
+        run: async (s) => {
+          for (const [user, position] of [
+            ["employee", "MEMBER"],
+            ["sectorHead", "HEAD"],
+            ["employeeB", "MEMBER"],
+          ] as const) {
+            await s.tx`select api.appoint_sector_member(${ids.sector!}, ${USERS[user]}, ${position}, now(), null, 'DEMO-SECTOR-APPT')`;
+          }
+          return (ids.sectorMembership = await one(
+            s,
+            s.tx`select api.appoint_sector_member(${ids.sector!}, ${USERS.financeEmployee}, 'MEMBER', now(), null, 'DEMO-SECTOR-APPT') as id`,
+          ));
+        },
+      },
+      {
+        fn: "delegate_referral_approval",
+        actor: "sectorHead",
+        run: async (s) =>
+          (ids.delegation = await one(
+            s,
+            s.tx`select api.delegate_referral_approval(${ids.sector!}, ${USERS.employeeB}, now(), now() + interval '7 days',
+              'DEMO-DELEGATION-01', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "create_referral",
+        actor: "employee",
+        run: async (s) =>
+          (ids.referral = await one(
+            s,
+            s.tx`select api.create_referral(${ids.sector!}, 'Walk referral (synthetic)', 'Synthetic: referral summary for the walk.',
+              'FRAUD', 'RESTRICTED'::core.classification_level) as id`,
+          )),
+      },
+      {
+        fn: "update_referral",
+        actor: "employee",
+        run: (s) =>
+          s.tx`select api.update_referral(${ids.referral!}, 'Walk referral (synthetic)', 'Synthetic: referral summary, edited.',
+            'FRAUD', 'RESTRICTED'::core.classification_level)`,
+      },
+      {
+        fn: "submit_referral",
+        actor: "employee",
+        run: (s) => s.tx`select api.submit_referral(${ids.referral!}, null)`,
+      },
+      {
+        fn: "sector_decide_referral",
+        actor: "employeeB",
+        run: (s) => s.tx`select api.sector_decide_referral(${ids.referral!}, 'APPROVE', null, null)`,
+      },
+      {
+        fn: "secretary_decide_referral",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.secretary_decide_referral(${ids.referral!}, 'REJECT', array['MISSING_DOCUMENTS'], null, null)`,
+      },
+      {
+        fn: "object_to_referral_rejection",
+        actor: "sectorHead",
+        run: (s) =>
+          s.tx`select api.object_to_referral_rejection(${ids.referral!}, 'Synthetic: the documents were attached.')`,
+      },
+      {
+        fn: "secretary_decide_referral",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.secretary_decide_referral(${ids.referral!}, 'ACCEPT', null, null, ${USERS.caseManager})`,
+      },
+      {
+        fn: "comment_on_referral",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.comment_on_referral(${ids.referral!}, 'Synthetic: accepted, see the case.')`,
+      },
+      {
+        fn: "resubmit_referral",
+        actor: "employee",
+        run: async (s) => {
+          ids.referral2 = await one(
+            s,
+            s.tx`select api.create_referral(${ids.sector!}, 'Second walk referral (synthetic)', 'Synthetic: second referral summary.',
+              'MISCONDUCT', 'RESTRICTED'::core.classification_level) as id`,
+          );
+          await s.tx`select api.submit_referral(${ids.referral2!}, null)`;
+          await s.as("sectorHead");
+          await s.tx`select api.sector_decide_referral(${ids.referral2!}, 'APPROVE', null, null)`;
+          await s.as("committeeSecretary");
+          await s.tx`select api.secretary_decide_referral(${ids.referral2!}, 'REJECT', array['OUT_OF_SCOPE'], null, null)`;
+          await s.as("employee");
+          return s.tx`select api.resubmit_referral(${ids.referral2!}, null)`;
+        },
+      },
+      {
+        fn: "withdraw_referral",
+        actor: "employee",
+        run: (s) => s.tx`select api.withdraw_referral(${ids.referral2!}, ${REASON})`,
+      },
+      {
+        fn: "revoke_referral_delegation",
+        actor: "sectorHead",
+        run: (s) => s.tx`select api.revoke_referral_delegation(${ids.delegation!}, ${REASON})`,
+      },
+      {
+        fn: "end_sector_membership",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.end_sector_membership(${ids.sectorMembership!}, now() + interval '1 day', ${REASON})`,
+      },
+      // Preliminary review (migration 1880): prepared by the assigned investigator, endorsed by the GRC Director,
+      // approved by the GRC Sector Head.
+      {
+        fn: "prepare_preliminary_recommendation",
+        actor: "investigatorA",
+        run: async (s) =>
+          (ids.recommendation = await one(
+            s,
+            s.tx`select api.prepare_preliminary_recommendation(${caseA}, 'INVESTIGATION_WARRANTED',
+              'Synthetic: the walk recommendation rationale.') as id`,
+          )),
+      },
+      {
+        fn: "review_preliminary_recommendation",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.review_preliminary_recommendation(${ids.recommendation!}, 'ENDORSE', null, null)`,
+      },
+      {
+        fn: "approve_preliminary_recommendation",
+        actor: "grcSectorHead",
+        run: (s) =>
+          s.tx`select api.approve_preliminary_recommendation(${ids.recommendation!}, 'APPROVE', null, null)`,
+      },
       // Forms engine (CDF-50): an investigation form through save, prepare and review (its final state), a
       // committee form through review and approval by three different people, a draft withdrawn, and the
       // audited open of an instance.
@@ -847,10 +998,13 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_evidence",
       "authz.can_view_form_instance",
       "authz.can_view_interview",
+      "authz.can_view_preliminary_recommendation",
       "authz.can_view_proceeding",
       "authz.can_view_records",
       "authz.can_view_records_catalogue",
+      "authz.can_view_referral",
       "authz.can_view_report",
+      "authz.can_view_sector_roster",
       "authz.current_clearance",
       "authz.current_roles",
       "authz.current_subject",

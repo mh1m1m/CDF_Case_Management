@@ -105,6 +105,13 @@ export const PERMISSIONS = [
   "BREAK_GLASS_APPROVE",
   // Committee registry (ADR-018, ADR-019): maintains seats and rules, never proceedings or case content.
   "COMMITTEE_ADMIN",
+  // Direct referral and preliminary review (migration 1880).
+  "SECTOR_ADMIN",
+  "REFERRAL_PREPARE",
+  "REFERRAL_SECTOR_APPROVE",
+  "PRELIMINARY_PREPARE",
+  "PRELIMINARY_REVIEW",
+  "PRELIMINARY_APPROVE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -453,6 +460,9 @@ export const ROLES = [
   "DECISION_AUTHORITY",
   "IMPLEMENTATION_OWNER",
   "REFERRER",
+  "SECTOR_HEAD",
+  "COMPLIANCE_SECTION_MANAGER",
+  "GRC_SECTOR_HEAD",
 ] as const;
 export type Role = (typeof ROLES)[number];
 
@@ -845,6 +855,7 @@ export const STATUS_CODES = {
     "EMERGENCY_CLOSURE",
     "INCONCLUSIVE",
     "INCIDENT_LOGGED",
+    "INVESTIGATION_WARRANTED",
     "NON_PROCESSABLE",
     "NOT_FEASIBLE",
     "NOT_SERIOUS",
@@ -874,3 +885,80 @@ export const STATUS_CODES = {
   ],
 } as const satisfies Record<string, readonly string[]>;
 export type StatusCodeDimension = keyof typeof STATUS_CODES;
+
+// ---- Direct referral and preliminary review (migration 1880; Q1–Q20) ------------------------------
+/** Status of a direct referral (intake.referral.status). */
+export const REFERRAL_STATUSES = [
+  "DRAFT",
+  "SUBMITTED_TO_HEAD",
+  "SUBMITTED_TO_SECRETARY",
+  "RETURNED_FOR_COMPLETION",
+  "REJECTED",
+  "OBJECTED",
+  "ACCEPTED",
+  "WITHDRAWN",
+] as const;
+export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
+
+/** History rows of a referral (intake.referral_event.event_type). */
+export const REFERRAL_EVENT_TYPES = [
+  "CREATED",
+  "UPDATED",
+  "SUBMITTED",
+  "SECTOR_APPROVED",
+  "SECTOR_RETURNED",
+  "ACCEPTED",
+  "RETURNED_FOR_COMPLETION",
+  "REJECTED",
+  "RESUBMITTED",
+  "OBJECTED",
+  "WITHDRAWN",
+  "COMMENTED",
+] as const;
+export type ReferralEventType = (typeof REFERRAL_EVENT_TYPES)[number];
+
+/** Next actions api.referral_available_actions can offer the caller. */
+export const REFERRAL_ACTIONS = [
+  "UPDATE",
+  "SUBMIT",
+  "SECTOR_APPROVE",
+  "SECTOR_RETURN",
+  "ACCEPT",
+  "RETURN_FOR_COMPLETION",
+  "REJECT",
+  "RESUBMIT",
+  "OBJECT",
+  "WITHDRAW",
+  "COMMENT",
+] as const;
+export type ReferralAction = (typeof REFERRAL_ACTIONS)[number];
+
+export const SECTOR_POSITIONS = ["HEAD", "MEMBER"] as const;
+export type SectorPosition = (typeof SECTOR_POSITIONS)[number];
+
+/** Outcomes a preliminary review may recommend; each is also an OUTCOME_CODE. */
+export const PRELIMINARY_OUTCOMES = [
+  "NO_ACTION",
+  "OUT_OF_SCOPE",
+  "DUPLICATE",
+  "TRANSFERRED",
+  "NON_PROCESSABLE",
+  "INVESTIGATION_WARRANTED",
+  "REFERRED_TO_COMMITTEE",
+] as const;
+export type PreliminaryOutcome = (typeof PRELIMINARY_OUTCOMES)[number];
+
+export const PRELIMINARY_RECOMMENDATION_STATUSES = [
+  "AWAITING_REVIEW",
+  "AWAITING_APPROVAL",
+  "RETURNED",
+  "APPROVED",
+] as const;
+export type PreliminaryRecommendationStatus = (typeof PRELIMINARY_RECOMMENDATION_STATUSES)[number];
+
+export const PRELIMINARY_PREPARER_ROLES = [
+  "INVESTIGATOR",
+  "LEAD_INVESTIGATOR",
+  "COMPLIANCE_SECTION_MANAGER",
+  "GRC_DIRECTOR",
+] as const;

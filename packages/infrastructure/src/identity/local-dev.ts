@@ -29,6 +29,12 @@ export const LOCAL_DEV_USERS: Readonly<Record<string, string>> = {
   "records.b@example.test": "a0000000-0000-4000-8000-000000000020",
   "legal@example.test": "a0000000-0000-4000-8000-000000000021",
   "legal.b@example.test": "a0000000-0000-4000-8000-000000000022",
+  "employee.rho@example.test": "a0000000-0000-4000-8000-000000000023",
+  "sector.head@example.test": "a0000000-0000-4000-8000-000000000024",
+  "employee.phi@example.test": "a0000000-0000-4000-8000-000000000025",
+  "compliance.mgr@example.test": "a0000000-0000-4000-8000-000000000026",
+  "grc.sector.head@example.test": "a0000000-0000-4000-8000-000000000027",
+  "employee.chi@example.test": "a0000000-0000-4000-8000-000000000028",
 };
 
 export const SESSION_COOKIE = "cdf_session";

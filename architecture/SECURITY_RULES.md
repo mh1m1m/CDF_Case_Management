@@ -249,3 +249,14 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Snapshots, memberships and rule sets are protected by triggers: snapshots never change, memberships can only be ended earlier, rule sets only gain an end date, and nothing is deleted.
 - Grievance firewall (Q45–Q46): anyone who voted in an Investigation Committee proceeding of the case is snapshotted into that case's Grievance Committee proceeding as non-voting.
 - Tests: `tests/security/committee-registry.spec.ts`, IDOR probes and the audit walk.
+
+## 15. Direct referral and preliminary review (migration 1880; Q1–Q20)
+
+- A referral is visible to its preparer, to the sector's head and active delegate once submitted, to the Investigation Committee's current secretaries once it has reached them, and to whoever can see the case it became; every viewer also needs clearance for its classification (`authz.can_view_referral`). Other sector members, `SECTOR_ADMIN`, `COMMITTEE_ADMIN`, `PLATFORM_ADMIN` and `CASE_VIEW_ALL` see nothing.
+- Preparing needs `REFERRAL_PREPARE` and a current sector position. Sector approval needs the HEAD position with `REFERRAL_SECTOR_APPROVE`, or an unrevoked delegation in its window whose delegator is still head and whose delegate is still a member. Delegations are forward-dated only, need an end and an evidence reference, and may be revoked by the delegator or `SECTOR_ADMIN`.
+- Separation of duties: the preparer never approves their own referral (even as head); the secretary cannot decide a referral they prepared or approved for the sector; a preliminary reviewer is never the preparer; the approver is neither.
+- Returns and rejections need one to ten structured `RETURN_REASON` codes; `OTHER` needs a comment. A rejection may be objected to once; the rejection that answers an objection cannot be objected to again (escalation: SOURCE_REQUIRED).
+- Acceptance names an eligible case owner (the same rule as every owner assignment) and needs a constituted committee; otherwise nothing is created. The preparer, head and secretary gain no case access from it.
+- The GRC Sector Head has no case access. `authz.can_view_preliminary_recommendation` shows them, purpose-bound (ADR-031), a recommendation awaiting their approval or one they decided, on a non-restricted, undisposed case within clearance and without conflict; `api.preliminary_approval_queue` lists case numbers only. A restricted case needs an explicit grant first.
+- Audit metadata for referral and preliminary-review events carries ids, statuses and codes, never comments or rationale. History rows, closed referrals and decided recommendations are protected by triggers.
+- Tests: `tests/security/referral-preliminary.spec.ts`, referral IDOR probes, preliminary IDOR probes and the audit walk.

@@ -46,6 +46,8 @@ interface Targets {
   allegation: string;
   proceeding: string;
   finding: string;
+  // Preliminary review (migration 1880)
+  recommendation: string;
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
@@ -407,6 +409,87 @@ const PROBES: Probe[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.withdraw_form(${t.formInstance}, ${REASON})`,
   },
+  // Preliminary review (migration 1880).
+  {
+    fn: "prepare_preliminary_recommendation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.prepare_preliminary_recommendation(${t.case}, 'NO_ACTION', 'Synthetic: probe rationale text.')`,
+  },
+  {
+    fn: "review_preliminary_recommendation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.review_preliminary_recommendation(${t.recommendation}, 'RETURN', array['OTHER'], 'Probe.')`,
+  },
+  {
+    fn: "approve_preliminary_recommendation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.approve_preliminary_recommendation(${t.recommendation}, 'APPROVE', null, null)`,
+  },
+];
+
+// Direct referral commands (migration 1880) take a referral or a delegation, never a case.
+interface ReferralTargets {
+  referral: string;
+  delegation: string;
+}
+
+const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
+  {
+    fn: "update_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.update_referral(${t.referral}, 'Probe title', 'Synthetic: probe summary.', 'FRAUD', 'INTERNAL'::core.classification_level)`,
+  },
+  {
+    fn: "submit_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_referral(${t.referral}, null)`,
+  },
+  {
+    fn: "sector_decide_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.sector_decide_referral(${t.referral}, 'APPROVE', null, null)`,
+  },
+  {
+    fn: "secretary_decide_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.secretary_decide_referral(${t.referral}, 'ACCEPT', null, null, ${self})`,
+  },
+  {
+    fn: "resubmit_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resubmit_referral(${t.referral}, null)`,
+  },
+  {
+    fn: "object_to_referral_rejection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.object_to_referral_rejection(${t.referral}, 'Synthetic: probe objection.')`,
+  },
+  {
+    fn: "withdraw_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_referral(${t.referral}, ${REASON})`,
+  },
+  {
+    fn: "comment_on_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.comment_on_referral(${t.referral}, 'Probe comment.')`,
+  },
+  {
+    fn: "referral_available_actions",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.referral_available_actions(${t.referral})`,
+  },
+  {
+    fn: "revoke_referral_delegation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revoke_referral_delegation(${t.delegation}, ${REASON})`,
+  },
 ];
 
 // Records, retention and legal hold commands (ADR-013) take their own objects: a hold, a release request,
@@ -477,7 +560,14 @@ const ADMIN_COMMANDS = [
   "appoint_committee_member",
   "end_committee_membership",
   "set_committee_rule_set",
+  // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
+  "create_sector",
+  "appoint_sector_member",
+  "end_sector_membership",
 ];
+// Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
+// Covered in referral-preliminary.spec.ts.
+const SECTOR_COMMANDS = ["create_referral", "delegate_referral_approval"];
 // The caller's own tasks and counts, the authorised catalogue search, the exact-number lookup (a case number,
 // never a UUID; PBA-T16 to T18) and task housekeeping take no object id (CDF-73).
 const GLOBAL_COMMANDS = [
@@ -493,6 +583,8 @@ const GLOBAL_COMMANDS = [
   "my_access",
   "request_case_for_legal_hold",
   "search_records_catalogue",
+  // Migration 1880: the caller's purpose-bound approval queue.
+  "preliminary_approval_queue",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -625,7 +717,8 @@ async function domainObjects(
   s: Scenario,
   target: string,
   editor: UserKey,
-): Promise<Pick<Targets, "allegation" | "proceeding" | "finding">> {
+  preparer: UserKey,
+): Promise<Pick<Targets, "allegation" | "proceeding" | "finding" | "recommendation">> {
   await s.as(editor);
   const [p] = await s.tx<{ id: string }[]>`
     select api.open_proceeding(${target}, 'INVESTIGATION', null, 'Synthetic: probe proceeding.') as id`;
@@ -633,7 +726,10 @@ async function domainObjects(
     select api.add_allegation(${target}, 'FRAUD', 'Synthetic: probe allegation text.', null, null, null) as id`;
   const [f] = await s.tx<{ id: string }[]>`
     select api.record_finding(${a!.id}, null, ${p!.id}, 'INCONCLUSIVE', 'Synthetic: probe finding rationale.') as id`;
-  return { allegation: a!.id, proceeding: p!.id, finding: f!.id };
+  await s.as(preparer);
+  const [r] = await s.tx<{ id: string }[]>`
+    select api.prepare_preliminary_recommendation(${target}, 'NO_ACTION', 'Synthetic: probe recommendation.') as id`;
+  return { allegation: a!.id, proceeding: p!.id, finding: f!.id, recommendation: r!.id };
 }
 
 async function outcomeOf<T>(s: Scenario, probe: Probe<T>, t: T, self: string): Promise<string> {
@@ -672,6 +768,7 @@ const randomTargets = (): Targets => ({
   allegation: randomUUID(),
   proceeding: randomUUID(),
   finding: randomUUID(),
+  recommendation: randomUUID(),
 });
 
 describe("catalog guard", () => {
@@ -683,7 +780,9 @@ describe("catalog guard", () => {
     const covered = new Set([
       ...PROBES.map((p) => p.fn),
       ...RECORDS_PROBES.map((p) => p.fn),
+      ...REFERRAL_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
+      ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
     ]);
     expect(rows.map((r) => r.name).filter((n) => !covered.has(n))).toEqual([]);
@@ -717,7 +816,10 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
         which === "B"
           ? await purposeObjects(s, target, "caseManager", "legal", true)
           : await purposeObjects(s, target, "grcDirector", "grcDirector", false);
-      const domain = await domainObjects(s, target, which === "B" ? "caseManager" : "grcDirector");
+      const domain =
+        which === "B"
+          ? await domainObjects(s, target, "caseManager", "investigatorB")
+          : await domainObjects(s, target, "grcDirector", "grcDirector");
       const inside =
         which === "B"
           ? await insiderObjects(
@@ -914,6 +1016,53 @@ describe("IDOR: records commands give outsiders the same answer for real objects
   });
 });
 
+describe("IDOR: referral commands give outsiders the same answer for real objects as for random UUIDs", () => {
+  // A referral submitted to the Operations head and a delegation from the head to the preparer. Outsiders: another
+  // Operations member, a Finance member, case staff, committee people without a seat, oversight roles and the
+  // preliminary-review roles. (SECTOR_ADMIN may revoke delegations, so the platform admin is tested apart.)
+  const OUTSIDERS: UserKey[] = [
+    "employeeB",
+    "financeEmployee",
+    "investigatorA",
+    "caseManager",
+    "grcDirector",
+    "committee",
+    "committeeSecretary",
+    "internalAudit",
+    "dpo",
+    "complianceManager",
+    "grcSectorHead",
+  ];
+  const OPS = "b0000000-0000-4000-8000-000000000001";
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("sectorHead");
+      const [d] = await s.tx<{ id: string }[]>`
+        select api.delegate_referral_approval(${OPS}, ${USERS.employee}, now(), now() + interval '7 days',
+          'DEMO-DELEGATION-PROBE', 'Synthetic: probe delegation.') as id`;
+      await s.as("employee");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.create_referral(${OPS}, 'Probe referral (synthetic)', 'Synthetic: probe referral summary.', 'FRAUD',
+          'RESTRICTED'::core.classification_level) as id`;
+      await s.tx`select api.submit_referral(${r!.id}, null)`;
+      await s.as(actor);
+      const real: ReferralTargets = { referral: r!.id, delegation: d!.id };
+      const random: ReferralTargets = { referral: randomUUID(), delegation: randomUUID() };
+      const mismatches: string[] = [];
+      for (const probe of REFERRAL_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select id from intake.referral`).toEqual([]);
+      expect(await s.tx`select id from intake.referral_event`).toEqual([]);
+    });
+  });
+});
+
 describe("cross-case object substitution", () => {
   it("an insider on case A cannot act on case B's objects by passing them to commands", async () => {
     const seeded = await seedObjects("0002");
@@ -1015,7 +1164,7 @@ describe("non-object commands", () => {
     const seeded = await seedObjects("0002");
     await scenario(async (s) => {
       const purpose = await purposeObjects(s, caseB, "caseManager", "legal", true);
-      const domain = await domainObjects(s, caseB, "caseManager");
+      const domain = await domainObjects(s, caseB, "caseManager", "investigatorB");
       const inside = await insiderObjects(
         s,
         caseB,
