@@ -36,5 +36,6 @@
 | [ADR-032](ADR-032-export-approval-binding.md)                   | Export approval rules, preview binding and generation                           | Proposed |
 | [ADR-033](ADR-033-corrective-action-tracking.md)                | Corrective-action tracking                                                      | Proposed |
 | [ADR-034](ADR-034-bcp-import-pipeline.md)                       | Continuity workbook template BCP-1 and the governed import pipeline             | Proposed |
+| [ADR-035](ADR-035-form-status-catalogue-reference-data.md)      | The form and status catalogue as grounded reference data                        | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.

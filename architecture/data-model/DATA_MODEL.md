@@ -316,3 +316,17 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `exchange.bcp_import_batch`    | One staged workbook for one case: control row, file SHA-256, status, preview and submitted hashes           | Importer and approver differ; at most one open batch per case and workbook id; the file itself is not kept     |
 | `exchange.bcp_import_row`      | A staged row: cells as strings, state, failing column, resolution with reason, last dry-run outcome         | Immutable from submission; visible with its batch only                                                         |
 | `exchange.bcp_provenance`      | Offline origin of each imported object: workbook, sheet, row id, original time, recorder, importer, markers | Append-only; unique per case, workbook and row id (re-import is a no-op); visible with the object it describes |
+
+## Form and status catalogue (migration 1970, ADR-035)
+
+Reference data only: written by the migration, readable by every ACTIVE user, never by the anonymous role, writable by no application role. Nothing in it is case content.
+
+| Table                           | Purpose                                                                                               | Notes                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `config.target_class`           | The 15 classes a legacy form becomes (USER_FORM … RETIRED)                                            | What each class needs and produces                                                                                            |
+| `config.target_module`          | The 61 target modules: domain object, commands, permissions, UI surface, delivery state, migrations   | Delivered (IMPLEMENTED or PARTIAL) exactly when it names migrations; commands, permissions and migrations are tested to exist |
+| `config.legacy_catalogue`       | The six source catalogues (two status lists, CDF_CASE_V1, three form sources) and their sizes         | Each size equals its mapped rows (tested)                                                                                     |
+| `config.status_dimension`       | The 24 status dimensions: STORED, STATUS_CODE, DERIVED or PLANNED, and the column that holds each     | A stored dimension names its relation and column                                                                              |
+| `config.status_dimension_value` | Each dimension's values, ACTIVE or PLANNED, with the derivation of a derived value                    | Equal to the column's check constraint or the active status codes (tested)                                                    |
+| `config.legacy_status_map`      | 305 legacy statuses → dimension value, audit event (IMPLEMENTED or PLANNED), domain object, module    | Key (catalogue, code); links across the two lists (`same_as`, `code_conflict`); nothing is deleted                            |
+| `config.legacy_form_map`        | 462 legacy forms and controls → target class, module, merge target, disposition, data owner, statuses | Key (catalogue, sequence); USER_FORM only in the two user-entered form modules; `gap_ref` P11-G1–G6                           |
