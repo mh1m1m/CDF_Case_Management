@@ -224,6 +224,15 @@ describe("rule layers (ADR-025)", () => {
   });
 });
 
+/**
+ * Back to the BFF login role itself, which the delivery job connects as: on the BFF connection, `reset role` leaves
+ * `authenticated`. (The owner cannot assume cdf_bff on a Supabase stack, where it is not a superuser.)
+ */
+async function asBffLogin(s: Scenario) {
+  await s.tx`reset role`;
+  await s.tx`select set_config('request.jwt.claims', '', true)`;
+}
+
 describe("server-only email delivery and reminders", () => {
   it("authenticated and anon cannot claim, settle or schedule; the BFF login role can", async () => {
     await scenario(async (s) => {
@@ -240,11 +249,10 @@ describe("server-only email delivery and reminders", () => {
   });
 
   it("the sender sees recipient, template and link only; delivery settles, failures give up after five attempts", async () => {
-    await ownerScenario(async (s) => {
+    await scenario(async (s) => {
       await seat(s, ic, SEATS);
       await scheduleMeeting(s, ic, caseB);
-      await s.asOwner();
-      await s.tx.unsafe("set local role cdf_bff");
+      await asBffLogin(s);
       const batch = await s.tx<
         { id: string; recipient_id: string; template_code: string; deep_link: string }[]
       >`
@@ -279,7 +287,7 @@ describe("server-only email delivery and reminders", () => {
   });
 
   it("a defence response due within two days is reminded once", async () => {
-    await ownerScenario(async (s) => {
+    await scenario(async (s) => {
       await s.as("caseManager");
       const [subj] = await s.tx<{ id: string }[]>`
         select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
@@ -290,8 +298,7 @@ describe("server-only email delivery and reminders", () => {
         ${[a!.id]}::uuid[], now() + interval '1 day')`;
       await s.tx`select api.issue_defence_notice(${subj!.id}, 'Synthetic: a later notice.',
         ${[a!.id]}::uuid[], now() + interval '10 days')`;
-      await s.asOwner();
-      await s.tx.unsafe("set local role cdf_bff");
+      await asBffLogin(s);
       expect((await s.tx<{ n: number }[]>`select notify.emit_due_reminders() as n`)[0]!.n).toBe(1);
       expect((await s.tx<{ n: number }[]>`select notify.emit_due_reminders() as n`)[0]!.n).toBe(0);
       await s.as("employee");
