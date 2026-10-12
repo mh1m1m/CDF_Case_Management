@@ -1,0 +1,8 @@
+"use client";
+// Translated error page inside the chrome (UX-080). Generic text plus the error reference;
+// never the message, a stack trace or SQL (§82).
+import { CDFRouteError } from "@cdf/ui";
+
+export default function RouteError(props: { error: Error & { digest?: string }; reset: () => void }) {
+  return <CDFRouteError {...props} home={{ href: "/", label: "system.backHome" }} />;
+}
