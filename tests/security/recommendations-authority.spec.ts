@@ -470,7 +470,12 @@ describe("AGENT-09 review of 1900 (W1, W2, reviewer eligibility)", () => {
       expect(await s.tx`select id from decision.recommendation_package`).toHaveLength(1);
       // A secretary who declared a conflict no longer manages the package.
       await s.as("committeeSecretary");
+      const manages = async () =>
+        (await s.tx<{ ok: boolean }[]>`select authz.can_manage_recommendation_package(${f.pkg}) as ok`)[0]!
+          .ok;
+      expect(await manages()).toBe(true);
       await s.tx`select api.declare_meeting_conflict(${f.meeting.participant.committeeSecretary!}, 'CONFLICT_DECLARED', 'Synthetic: related party.')`;
+      expect(await manages()).toBe(false);
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.submit_to_authority(${f.pkg})`);
       await s.expectError(
         "CDF_FORBIDDEN",

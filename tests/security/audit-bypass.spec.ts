@@ -1288,7 +1288,7 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records', 'config', 'decision')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
     // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers

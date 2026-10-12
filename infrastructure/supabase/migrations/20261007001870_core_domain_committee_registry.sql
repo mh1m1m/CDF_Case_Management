@@ -1367,3 +1367,92 @@ grant execute on function
   api.set_committee_rule_set(uuid, timestamptz, text, numeric, boolean, int, boolean, int, text, text, text, text),
   api.refer_case_to_committee(uuid, uuid, uuid, text)
 to authenticated;
+
+-- -----------------------------------------------------------------------------
+-- Sidebar (UX S1, migration 1820): COMMITTEE_ADMIN and the later *_ADMIN permissions are administration only.
+-- -----------------------------------------------------------------------------
+create or replace function api.my_areas()
+returns table (area_code text, actionable_count int, default_view text)
+language sql stable security definer
+set search_path = ''
+as $$
+  with me as (
+    select u.id from iam.user_profile u where u.id = authz.current_user_id() and u.status = 'ACTIVE'
+  ),
+  work as (select w.area, w.view from api.my_work_items() w),
+  live as (
+    select
+      exists (select 1 from case_mgmt.case_assignment a, me
+               where a.user_id = me.id and a.status = 'ACTIVE' and authz.can_view_case(a.case_id)) as assigned,
+      -- Any non-TRIAGE grant the caller can use today. COMMITTEE, REVIEW and AUDIT grants count until their own
+      -- areas arrive (Committee S5) and grant scope is enforced (S3, DEC-02); the sidebar must not hide a case
+      -- the caller can reach now.
+      exists (select 1 from case_mgmt.case_access_grant g, me
+               where g.user_id = me.id and g.status = 'ACTIVE' and g.scope <> 'TRIAGE'
+                 and g.effective_from <= now() and (g.effective_to is null or g.effective_to > now())
+                 and authz.can_view_case(g.case_id)) as case_grant,
+      exists (select 1 from case_mgmt.case_access_grant g
+                join workflow.workflow_instance w on w.case_id = g.case_id
+                join workflow.workflow_state s on s.workflow_code = w.workflow_code and s.code = w.current_state, me
+               where g.user_id = me.id and g.status = 'ACTIVE' and g.scope = 'TRIAGE'
+                 and g.effective_from <= now() and (g.effective_to is null or g.effective_to > now())
+                 and s.sequence < 60 and authz.can_view_case(g.case_id)) as triage_before_handover,
+      exists (select 1 from case_mgmt.case_access_grant g, me
+               where g.user_id = me.id and g.status = 'ACTIVE'
+                 and g.effective_from <= now() and (g.effective_to is null or g.effective_to > now())) as any_grant,
+      exists (select 1 from case_mgmt.case_task t, me
+               where t.assigned_user_id = me.id and t.status in ('OPEN', 'IN_PROGRESS') and t.expires_at > now()) as task,
+      exists (select 1 from records.case_record_catalogue k where authz.can_view_records_catalogue(k.case_id)) as catalogue_row
+  ),
+  gates as (
+    select 'MY_WORK'::text as area_code,
+           (exists (select 1 from iam.role_permission rp
+                      join iam.user_role_assignment ura on ura.role_code = rp.role_code, me
+                     where ura.user_id = me.id and ura.status = 'ACTIVE'
+                       and ura.effective_from <= current_date
+                       and (ura.effective_to is null or ura.effective_to >= current_date)
+                       -- Rebase (1870+): administration permissions (*_ADMIN: committee seats, sectors, notification
+                       -- rules) produce no personal work, so they do not show My Work on their own.
+                       and rp.permission_code not in ('AUDIT_VIEW', 'SECURITY_EVENT_VIEW', 'ARCHIVE_RECORD_VIEW')
+                       and rp.permission_code not like '%\_ADMIN')
+            or l.assigned or l.any_grant or l.task or exists (select 1 from work)) as shown,
+           'needs-action'::text as default_view, 1 as ord
+      from live l
+    union all
+    select 'INTAKE', authz.has_permission('INTAKE_VIEW'), 'new', 2 from live
+    union all
+    select 'CASES',
+           authz.has_permission('CASE_VIEW_ALL') or l.assigned or l.case_grant or l.triage_before_handover,
+           case when authz.has_permission('CASE_VIEW_ALL') then 'all' else 'my-cases' end, 3
+      from live l
+    union all
+    select 'RECORDS',
+           authz.has_permission('RETENTION_TASK_VIEW') or authz.has_permission('DISPOSITION_TASK_VIEW')
+           or authz.has_permission('LEGAL_HOLD_REVIEW') or authz.has_permission('LEGAL_HOLD_RELEASE')
+           or authz.has_permission('DISPOSITION_APPROVE') or authz.has_permission('ARCHIVE_RECORD_ADMINISTER')
+           or (authz.has_permission('ARCHIVE_RECORD_VIEW') and l.catalogue_row)
+           or exists (select 1 from work w where w.area = 'RECORDS'),
+           case when l.task or authz.has_permission('RETENTION_TASK_VIEW') or authz.has_permission('DISPOSITION_TASK_VIEW')
+                  then 'my-tasks'
+                when authz.has_permission('LEGAL_HOLD_REVIEW') or authz.has_permission('LEGAL_HOLD_RELEASE')
+                  or exists (select 1 from work w where w.area = 'RECORDS') then 'legal-holds'
+                else 'catalogue' end, 5
+      from live l
+    union all
+    select 'OVERSIGHT', authz.has_permission('AUDIT_VIEW') or authz.has_permission('SECURITY_EVENT_VIEW'),
+           case when authz.has_permission('AUDIT_VIEW') then 'ledger' else 'security-events' end, 6 from live
+    union all
+    select 'ADMINISTRATION', authz.has_permission('USER_ADMIN') or authz.has_permission('ROLE_ADMIN'), 'users', 7
+      from live
+  )
+  select g.area_code,
+         case
+           when g.area_code in ('OVERSIGHT', 'ADMINISTRATION') then 0  -- never a count derived from cases
+           when g.area_code = 'MY_WORK' then (select count(*) from work w where w.view = 'NEEDS_ACTION')::int
+           else (select count(*) from work w where w.view = 'NEEDS_ACTION' and w.area = g.area_code)::int
+         end,
+         g.default_view
+    from gates g
+   where g.shown and exists (select 1 from me)
+   order by g.ord;
+$$;

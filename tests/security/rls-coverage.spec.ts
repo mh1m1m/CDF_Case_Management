@@ -16,6 +16,7 @@ const APP_SCHEMAS = [
   "forms",
   "records",
   "committee",
+  "decision",
   "config",
   "api",
   "public_api",
