@@ -42,6 +42,7 @@
 - AGENT-09 review of 1890 (V1–V5): attendance is frozen while any vote item of the meeting is undecided (`VOTE_IN_PROGRESS`); the secretary records ABSENT / UNABLE_TO_VOTE / RECUSED only for a member who is not present (`MEMBER_PRESENT`); the chair breaks a tie only with a counted, non-recused vote of their own on the item; a member sees the deliberation only after declaring NO_CONFLICT (PENDING is fail safe); an invitee outside the proceeding sees only their own participant row (`authz.can_view_meeting_roster`).
 - When nobody votes APPROVE or REJECT the item closes as `NO_DECISION` (or `TIED`, per the rule set's `no_substantive_vote_outcome`, SOURCE_REQUIRED); the chair never decides it alone.
 - Conflict declarations are per meeting (Q41). A member who declared a conflict in an earlier meeting of the same proceeding cannot declare NO_CONFLICT in a later one (`PRIOR_CONFLICT_DECLARED`). A meeting declaration is not written to the case's `conflict_check`: removing all case access stays the case team's decision.
+- Recorded from AGENT-09's clearance (procedural, no change): a member arriving while an item is open is marked PRESENT only after that item closes; a chair who abstained may still give the casting vote (usual rule, SOURCE_REQUIRED).
 - Minutes snapshots hold attendance, conflict statuses and results, never individual choices. With no eligible reviewer the minutes are final at once. Deemed approval needs the window to have passed and a recorded reminder (`api.record_minutes_reminder`).
 
 ## Consequences

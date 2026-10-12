@@ -24,6 +24,8 @@ import {
   placeHold,
   requestDisposition,
 } from "../support/records";
+import { committeeIds } from "../support/committee";
+import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
 
 interface Targets {
   case: string;
@@ -660,6 +662,78 @@ const RECORDS_PROBES: Probe<RecordsTargets>[] = [
   },
 ];
 
+// Recommendation, legal review and authority commands (migration 1900) take a committee proceeding, a meeting, a
+// package, an item, a legal review request or a packet; never a case.
+interface DecisionTargets {
+  committeeProceeding: string;
+  meeting: string;
+  pkg: string;
+  item: string;
+  request: string;
+  packet: string;
+}
+
+const DECISION_PROBES: Probe<DecisionTargets>[] = [
+  {
+    fn: "create_recommendation_package",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.create_recommendation_package(${t.committeeProceeding}, 'PACKAGE')`,
+  },
+  {
+    fn: "add_recommendation_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.add_recommendation_item(${t.pkg}, 'OTHER', null, null, 'Probe recommendation text.', null, null)`,
+  },
+  {
+    fn: "withdraw_recommendation_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_recommendation_item(${t.item}, ${REASON})`,
+  },
+  {
+    fn: "submit_package_for_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_package_for_vote(${t.pkg})`,
+  },
+  {
+    fn: "open_package_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_package_vote(${t.meeting}, ${t.pkg})`,
+  },
+  {
+    fn: "record_package_adoption",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_package_adoption(${t.pkg})`,
+  },
+  {
+    fn: "request_legal_review",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.request_legal_review(${t.pkg}, ${self}, ${REASON}, null, null)`,
+  },
+  {
+    fn: "open_packet",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_packet(${t.packet})`,
+  },
+  {
+    fn: "give_legal_opinion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.give_legal_opinion(${t.request}, 'CONCURS', null)`,
+  },
+  {
+    fn: "submit_to_authority",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_to_authority(${t.pkg})`,
+  },
+  {
+    fn: "record_authority_decision",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_authority_decision(${t.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(), 'Probe authority',
+        'MEMO-PROBE-0001', null, null)`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -669,6 +743,8 @@ const ADMIN_COMMANDS = [
   "appoint_committee_member",
   "end_committee_membership",
   "set_committee_rule_set",
+  // Recommendation authority rules (migration 1900): COMMITTEE_ADMIN only, no case.
+  "set_action_authority_rule",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
@@ -891,6 +967,7 @@ describe("catalog guard", () => {
       ...RECORDS_PROBES.map((p) => p.fn),
       ...REFERRAL_PROBES.map((p) => p.fn),
       ...MEETING_PROBES.map((p) => p.fn),
+      ...DECISION_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1257,6 +1334,65 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "minutes_review",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: recommendation, legal review and authority objects (migration 1900)", () => {
+  // Nobody here sits on the proceeding, is assigned the legal review or works the case. legalB (the assigned
+  // reviewer) and the case team are covered by recommendations-authority.spec.ts.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "grcSectorHead",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      const { ic } = await committeeIds();
+      const f = await draftPackage(s, ic, await caseId("0002"));
+      await voteOnPackage(s, f);
+      const { request, packet } = await requestLegalReview(s, f);
+      await s.as(actor);
+      const real: DecisionTargets = {
+        committeeProceeding: f.meeting.committeeProceeding,
+        meeting: f.meeting.meeting,
+        pkg: f.pkg,
+        item: f.sanction,
+        request,
+        packet,
+      };
+      const random: DecisionTargets = {
+        committeeProceeding: randomUUID(),
+        meeting: randomUUID(),
+        pkg: randomUUID(),
+        item: randomUUID(),
+        request: randomUUID(),
+        packet: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of DECISION_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "recommendation_package",
+        "recommendation_item",
+        "legal_review_request",
+        "packet",
+        "packet_item",
+        "authority_decision",
+      ]) {
+        expect(await s.tx`select id from ${s.tx("decision." + table)}`, table).toEqual([]);
       }
     });
   });

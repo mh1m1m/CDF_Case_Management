@@ -1,6 +1,6 @@
 # ADR-022: Legal review packets
 
-- **Status:** Proposed (2026-10-12). Linear CDF-192. Security-sensitive (purpose-bound access).
+- **Status:** Proposed (2026-10-12). Linear CDF-192. Implemented in migration 1900 (draft, not merged). Security-sensitive (purpose-bound access).
 - **Protocol:** §19–§22, §40, §87; owner Q&A Q40, Q73–Q77; ADR-014; ADR-016 DEC-02, DEC-09; ADR-031.
 
 ## Decision
@@ -10,6 +10,12 @@
 3. The legal reviewer sees only the items of requests assigned to them (`authz.can_view_legal_packet`); no case discovery, no protected identity.
 4. Legal may attend a meeting as an invitee, but the formal opinion is a separate packet step (Q76).
 5. Opinion CONCURS / CONCURS_WITH_COMMENTS / CONFLICTS. CONFLICTS returns the package to the committee (RETURNED_BY_LEGAL); both recommendation and opinion are preserved and both go to the authority if the committee re-adopts (Q77).
+
+## Implementation notes (migration 1900)
+
+- `decision.legal_review_request` assigns one reviewer holding `LEGAL_OPINION_GIVE` (granted to LEGAL_REVIEWER), cleared for the case and not the requester. Basis RULE when an approved item is a sanction, legal action or external referral (`decision.legal_review_required`; the full rule is SOURCE_REQUIRED), else SECRETARY_ELECTED.
+- The request creates an immutable LEGAL_REVIEW packet of the adopted items plus the findings and approved minutes of this proceeding the secretary selects (Q75). The reviewer reads the packet (`api.open_packet`, audited PACKET_VIEWED) and their own request, nothing else of the case.
+- CONCURS or CONCURS_WITH_COMMENTS leaves the package ADOPTED; CONFLICTS (with a text) returns it to the committee (Q77). An opinion covers only its round: a revised package needs a new review before it can go to the authority.
 
 ## Requirements
 

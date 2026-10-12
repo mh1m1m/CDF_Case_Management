@@ -4,9 +4,11 @@ import {
   SINGLE_HOLDER_SEATS,
   addBusinessDays,
   isBusinessDay,
+  isCaseWide,
   isEffectiveAt,
   isQuorate,
   isVotingSeat,
+  legalReviewRequired,
   periodsOverlap,
   proceedingDisplayNumber,
   quorumThreshold,
@@ -108,5 +110,20 @@ describe("vote tally and outcome (Q55–Q63)", () => {
     // Everyone abstained or recused: the chair never decides alone (AGENT-09 V5).
     expect(voteOutcome({ approve: 0, reject: 0 }, true, true)).toBe("NO_DECISION");
     expect(voteOutcome({ approve: 0, reject: 0 }, true, true, "TIED")).toBe("TIED");
+  });
+});
+
+describe("recommendations (ADR-021, ADR-022)", () => {
+  it("needs legal review for sanctions, legal action and external referral only", () => {
+    expect(legalReviewRequired(["CORRECTIVE_ACTION", "GOVERNANCE_REMEDIATION"])).toBe(false);
+    expect(legalReviewRequired(["CORRECTIVE_ACTION", "DISCIPLINARY_SANCTION"])).toBe(true);
+    expect(legalReviewRequired(["EXTERNAL_REFERRAL"])).toBe(true);
+    expect(legalReviewRequired([])).toBe(false);
+  });
+
+  it("an item without subjects or allegations is case-wide", () => {
+    expect(isCaseWide(0, 0)).toBe(true);
+    expect(isCaseWide(1, 0)).toBe(false);
+    expect(isCaseWide(0, 2)).toBe(false);
   });
 });

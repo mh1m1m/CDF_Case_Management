@@ -8,6 +8,7 @@ import type {
   ProceedingStatus,
   ProceedingType,
   QuorumType,
+  RecommendationItemType,
   VoteChoice,
   VoteResult,
 } from "@cdf/contracts";
@@ -158,4 +159,22 @@ export function voteOutcome(
   if (tally.reject > tally.approve) return "REJECTED";
   if (tally.approve === 0) return noSubstantiveVoteOutcome;
   return castingVoteAvailable ? "AWAITING_CASTING_VOTE" : "TIED";
+}
+
+/**
+ * Q74 (SOURCE_REQUIRED: the full rule): an adopted package needs legal review before the authority when any approved
+ * item is a sanction, legal action or external referral. Mirrors decision.legal_review_required.
+ */
+export const LEGAL_REVIEW_REQUIRED_TYPES: readonly RecommendationItemType[] = [
+  "DISCIPLINARY_SANCTION",
+  "LEGAL_ACTION",
+  "EXTERNAL_REFERRAL",
+];
+export function legalReviewRequired(approvedItemTypes: readonly RecommendationItemType[]): boolean {
+  return approvedItemTypes.some((t) => LEGAL_REVIEW_REQUIRED_TYPES.includes(t));
+}
+
+/** Q89: an item that names no subject and no allegation applies to the whole case. */
+export function isCaseWide(subjectCount: number, allegationCount: number): boolean {
+  return subjectCount === 0 && allegationCount === 0;
 }

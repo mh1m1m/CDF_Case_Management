@@ -112,6 +112,8 @@ export const PERMISSIONS = [
   "PRELIMINARY_PREPARE",
   "PRELIMINARY_REVIEW",
   "PRELIMINARY_APPROVE",
+  // Legal review of recommendation packages (migration 1900, ADR-022): the assigned reviewer's opinion.
+  "LEGAL_OPINION_GIVE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -1016,3 +1018,46 @@ export const MINUTES_STATUSES = [
   "SUPERSEDED",
 ] as const;
 export type MinutesStatus = (typeof MINUTES_STATUSES)[number];
+
+// ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
+export const RECOMMENDATION_ITEM_TYPES = [
+  "FINDING",
+  "DISCIPLINARY_SANCTION",
+  "CORRECTIVE_ACTION",
+  "GOVERNANCE_REMEDIATION",
+  "EXTERNAL_REFERRAL",
+  "NO_VIOLATION",
+  "CLOSE_WITHOUT_SANCTION",
+  "LEGAL_ACTION",
+  "OTHER",
+] as const;
+export type RecommendationItemType = (typeof RECOMMENDATION_ITEM_TYPES)[number];
+export const RECOMMENDATION_PACKAGE_STATUSES = [
+  "DRAFT",
+  "VOTING",
+  "ADOPTED",
+  "IN_LEGAL_REVIEW",
+  "RETURNED_BY_LEGAL",
+  "AWAITING_AUTHORITY",
+  "RETURNED_BY_AUTHORITY",
+  "DECIDED",
+] as const;
+export type RecommendationPackageStatus = (typeof RECOMMENDATION_PACKAGE_STATUSES)[number];
+/** Q87: a free-text sanction is flagged in every view and export. */
+export const SANCTION_VERIFICATION_STATUSES = ["CATALOGUE", "PROPOSED_UNVERIFIED", "NOT_APPLICABLE"] as const;
+export type SanctionVerificationStatus = (typeof SANCTION_VERIFICATION_STATUSES)[number];
+export const LEGAL_OPINIONS = ["CONCURS", "CONCURS_WITH_COMMENTS", "CONFLICTS"] as const;
+export type LegalOpinion = (typeof LEGAL_OPINIONS)[number];
+export const AUTHORITY_TYPES = ["CEO", "BOARD", "DELEGATED_EXECUTIVE", "OTHER"] as const;
+export type AuthorityType = (typeof AUTHORITY_TYPES)[number];
+export const AUTHORITY_OUTCOMES = [
+  "APPROVE_AS_RECOMMENDED",
+  "MODIFY",
+  "REJECT",
+  "RETURN_TO_COMMITTEE",
+  "APPROVE_PARTIALLY",
+  "OTHER",
+] as const;
+export type AuthorityOutcome = (typeof AUTHORITY_OUTCOMES)[number];
+export const PACKET_PURPOSES = ["LEGAL_REVIEW", "AUTHORITY_DECISION"] as const;
+export type PacketPurpose = (typeof PACKET_PURPOSES)[number];

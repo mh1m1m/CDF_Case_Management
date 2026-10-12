@@ -73,6 +73,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "LEGAL_HOLD_REVIEW",
     "CASE_DISCOVER",
     "BREAK_GLASS_REQUEST",
+    "LEGAL_OPINION_GIVE",
   ],
   HR_REVIEWER: ["CONFLICT_DECLARE", "EVIDENCE_DOWNLOAD", "FORM_VIEW"],
   GRC_DIRECTOR: [

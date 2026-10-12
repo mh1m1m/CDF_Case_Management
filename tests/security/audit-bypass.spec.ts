@@ -626,6 +626,111 @@ describe("every state-changing command writes its audit event in the same transa
           return r;
         },
       },
+      // Recommendation package (migration 1900): drafted, voted and adopted in the open meeting, reviewed by Legal,
+      // sent to the authority and decided.
+      {
+        fn: "set_action_authority_rule",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_action_authority_rule('CORRECTIVE_ACTION', 'DELEGATED_EXECUTIVE', now(), 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "create_recommendation_package",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.pkg = await one(
+            s,
+            s.tx`select api.create_recommendation_package(${ids.committeeProceeding!}, 'PACKAGE') as id`,
+          )),
+      },
+      {
+        fn: "add_recommendation_item",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          ids.recItem = await one(
+            s,
+            s.tx`select api.add_recommendation_item(${ids.pkg!}, 'OTHER', null, null, 'Synthetic: walk recommendation.', null, null) as id`,
+          );
+          return s.tx`select api.add_recommendation_item(${ids.pkg!}, 'CORRECTIVE_ACTION', null, null,
+            'Synthetic: walk corrective action.', null, null)`;
+        },
+      },
+      {
+        fn: "withdraw_recommendation_item",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.withdraw_recommendation_item(${ids.recItem!}, ${REASON})`,
+      },
+      {
+        fn: "submit_package_for_vote",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.submit_package_for_vote(${ids.pkg!})`,
+      },
+      {
+        fn: "open_package_vote",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const r = await s.tx`select api.open_package_vote(${ids.meeting!}, ${ids.pkg!})`;
+          ids.pkgVote = await one(s, s.tx`select id from committee.vote_item where package_id = ${ids.pkg!}`);
+          return r;
+        },
+      },
+      {
+        fn: "cast_vote",
+        actor: "committee",
+        run: (s) => s.tx`select api.cast_vote(${ids.pkgVote!}, 'APPROVE', null)`,
+      },
+      {
+        fn: "cast_vote",
+        actor: "committeeChair",
+        run: (s) => s.tx`select api.cast_vote(${ids.pkgVote!}, 'APPROVE', null)`,
+      },
+      {
+        fn: "close_vote_item",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.close_vote_item(${ids.pkgVote!}, null)`,
+      },
+      {
+        fn: "record_package_adoption",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.record_package_adoption(${ids.pkg!})`,
+      },
+      {
+        fn: "request_legal_review",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          ids.legalRequest = await one(
+            s,
+            s.tx`select api.request_legal_review(${ids.pkg!}, ${USERS.legalB}, ${REASON}, null, null) as id`,
+          );
+          ids.packet = await one(
+            s,
+            s.tx`select id from decision.packet where legal_review_request_id = ${ids.legalRequest}`,
+          );
+          return ids.legalRequest;
+        },
+      },
+      {
+        fn: "open_packet",
+        actor: "legalB",
+        run: (s) => s.tx`select api.open_packet(${ids.packet!})`,
+      },
+      {
+        fn: "give_legal_opinion",
+        actor: "legalB",
+        run: (s) => s.tx`select api.give_legal_opinion(${ids.legalRequest!}, 'CONCURS', null)`,
+      },
+      {
+        fn: "submit_to_authority",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.submit_to_authority(${ids.pkg!})`,
+      },
+      {
+        fn: "record_authority_decision",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.record_authority_decision(${ids.pkg!}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED',
+            now() - interval '1 hour', 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON})`,
+      },
       {
         fn: "close_meeting",
         actor: "committeeSecretary",
@@ -1151,6 +1256,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_edit_case",
       "authz.can_manage_disposition",
       "authz.can_manage_meeting",
+      "authz.can_manage_recommendation_package",
       "authz.can_manage_retention",
       "authz.can_prepare_form",
       "authz.can_record_findings",
@@ -1173,8 +1279,10 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_meeting",
       "authz.can_view_meeting_deliberation",
       "authz.can_view_meeting_roster",
+      "authz.can_view_packet",
       "authz.can_view_preliminary_recommendation",
       "authz.can_view_proceeding",
+      "authz.can_view_recommendation_package",
       "authz.can_view_records",
       "authz.can_view_records_catalogue",
       "authz.can_view_referral",

@@ -272,3 +272,12 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Meetings, participants, vote items and minutes cannot be deleted; votes, conflict declarations, casting votes and minute reviews are append-only; closed meetings and items are frozen by triggers.
 - PRODUCTION_SUBSTITUTION_REQUIRED: the manual meeting provider (pasted link) stands in for Microsoft Teams; the reminder and the deemed-approval run stand in for the notification engine and scheduler.
 - Tests: `tests/security/committee-meetings.spec.ts`, `tests/security/committee-access.spec.ts`, meeting IDOR probes and the audit walk.
+
+## 17. Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023, ADR-031)
+
+- Packages are written only by the committee's seated, cleared secretary; adoption happens only through committee votes bound to the package and its round. Members and the case team read packages; nobody else does.
+- A free-text sanction is PROPOSED_UNVERIFIED and stays so (check constraint and trigger).
+- The legal reviewer is assigned explicitly, holds `LEGAL_OPINION_GIVE`, passes the case gate and reaches only the LEGAL_REVIEW packet and their own request (N14). Packet reads are audited.
+- Packets are immutable snapshots without evidence or reporter identity (N19).
+- An authority decision needs a source document reference (N15) and the authority type the effective-dated rule names; decided packages are frozen; decisions and item outcomes are append-only.
+- Tests: `tests/security/recommendations-authority.spec.ts`, decision IDOR probes and the audit walk.
