@@ -1,22 +1,37 @@
 # Architecture Decision Records
 
-| ADR                                                             | Title                                                   | Status   |
-| --------------------------------------------------------------- | ------------------------------------------------------- | -------- |
-| [ADR-001](ADR-001-supabase-for-prototype.md)                    | Supabase as prototype infrastructure                    | Accepted |
-| [ADR-002](ADR-002-separate-public-and-internal-apps.md)         | Separate public and internal applications               | Accepted |
-| [ADR-003](ADR-003-postgresql-rls-security-model.md)             | PostgreSQL / RLS security model and command-only writes | Accepted |
-| [ADR-004](ADR-004-whistleblower-identity-vault.md)              | Whistleblower identity vault                            | Accepted |
-| [ADR-005](ADR-005-append-only-audit-ledger.md)                  | Append-only, hash-chained audit ledger                  | Accepted |
-| [ADR-006](ADR-006-evidence-storage-abstraction.md)              | Evidence storage abstraction                            | Accepted |
-| [ADR-007](ADR-007-workflow-engine.md)                           | Data-driven workflow engine                             | Accepted |
-| [ADR-008](ADR-008-production-portability.md)                    | Production portability strategy                         | Accepted |
-| [ADR-009](ADR-009-monorepo-and-adapter-packages.md)             | Monorepo layout and adapter package                     | Accepted |
-| [ADR-010](ADR-010-identity-and-sessions.md)                     | Identity providers and session handling                 | Accepted |
-| [ADR-011](ADR-011-forms-engine.md)                              | Data-driven forms engine for the WB-FRM catalogue       | Accepted |
-| [ADR-012](ADR-012-interviews.md)                                | Interviews domain                                       | Accepted |
-| [ADR-013](ADR-013-records-retention-legal-hold.md)              | Records, retention, legal hold and disposition          | Proposed |
-| [ADR-014](ADR-014-purpose-bound-records-legal-authorization.md) | Purpose-bound records and legal authorization model     | Proposed |
-| [ADR-015](ADR-015-reporter-attachments.md)                      | Reporter attachments via public_api                     | Proposed |
-| [ADR-016](ADR-016-ux-target-and-access-decisions.md)            | UX target architecture and approved access decisions    | Accepted |
+| ADR                                                             | Title                                                                           | Status   |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------- |
+| [ADR-001](ADR-001-supabase-for-prototype.md)                    | Supabase as prototype infrastructure                                            | Accepted |
+| [ADR-002](ADR-002-separate-public-and-internal-apps.md)         | Separate public and internal applications                                       | Accepted |
+| [ADR-003](ADR-003-postgresql-rls-security-model.md)             | PostgreSQL / RLS security model and command-only writes                         | Accepted |
+| [ADR-004](ADR-004-whistleblower-identity-vault.md)              | Whistleblower identity vault                                                    | Accepted |
+| [ADR-005](ADR-005-append-only-audit-ledger.md)                  | Append-only, hash-chained audit ledger                                          | Accepted |
+| [ADR-006](ADR-006-evidence-storage-abstraction.md)              | Evidence storage abstraction                                                    | Accepted |
+| [ADR-007](ADR-007-workflow-engine.md)                           | Data-driven workflow engine                                                     | Accepted |
+| [ADR-008](ADR-008-production-portability.md)                    | Production portability strategy                                                 | Accepted |
+| [ADR-009](ADR-009-monorepo-and-adapter-packages.md)             | Monorepo layout and adapter package                                             | Accepted |
+| [ADR-010](ADR-010-identity-and-sessions.md)                     | Identity providers and session handling                                         | Accepted |
+| [ADR-011](ADR-011-forms-engine.md)                              | Data-driven forms engine for the WB-FRM catalogue                               | Accepted |
+| [ADR-012](ADR-012-interviews.md)                                | Interviews domain                                                               | Accepted |
+| [ADR-013](ADR-013-records-retention-legal-hold.md)              | Records, retention, legal hold and disposition                                  | Proposed |
+| [ADR-014](ADR-014-purpose-bound-records-legal-authorization.md) | Purpose-bound records and legal authorization model                             | Proposed |
+| [ADR-015](ADR-015-reporter-attachments.md)                      | Reporter attachments via public_api                                             | Proposed |
+| [ADR-016](ADR-016-ux-target-and-access-decisions.md)            | UX target architecture and approved access decisions                            | Accepted |
+| [ADR-017](ADR-017-case-and-proceeding-model.md)                 | Case and Proceeding model, intake paths, direct referral and preliminary review | Proposed |
+| [ADR-018](ADR-018-committee-registry.md)                        | Committee registry and committee proceedings                                    | Proposed |
+| [ADR-019](ADR-019-committee-membership-effective-dating.md)     | Committee membership, seats and effective dating                                | Proposed |
+| [ADR-020](ADR-020-meetings-voting-quorum-minutes.md)            | Meetings, conflict of interest, quorum, voting and minutes                      | Proposed |
+| [ADR-021](ADR-021-recommendation-packages-sanctions.md)         | Recommendation packages and the sanction catalogue                              | Proposed |
+| [ADR-022](ADR-022-legal-review-packets.md)                      | Legal review packets                                                            | Proposed |
+| [ADR-023](ADR-023-competent-authority-external-decision.md)     | Competent authority and externally made decisions                               | Proposed |
+| [ADR-024](ADR-024-grievance-and-independence.md)                | Grievance proceedings, employee defence and the independence firewall           | Proposed |
+| [ADR-025](ADR-025-notification-engine.md)                       | Notification engine                                                             | Proposed |
+| [ADR-026](ADR-026-export-builder-and-email.md)                  | Export Builder and external email                                               | Proposed |
+| [ADR-027](ADR-027-bcp-workbook-and-import.md)                   | Business continuity workbook and governed import                                | Proposed |
+| [ADR-028](ADR-028-form-catalogue-rationalization.md)            | Form catalogue rationalization                                                  | Proposed |
+| [ADR-029](ADR-029-status-catalogue-rationalization.md)          | Status catalogue rationalization                                                | Proposed |
+| [ADR-030](ADR-030-guided-workflow-ux.md)                        | Guided workflow UX and committee navigation                                     | Proposed |
+| [ADR-031](ADR-031-purpose-bound-packet-access.md)               | Purpose-bound packet access                                                     | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.
