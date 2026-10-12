@@ -17,6 +17,10 @@
 - The request creates an immutable LEGAL_REVIEW packet of the adopted items plus the findings and approved minutes of this proceeding the secretary selects (Q75). The reviewer reads the packet (`api.open_packet`, audited PACKET_VIEWED) and their own request, nothing else of the case.
 - CONCURS or CONCURS_WITH_COMMENTS leaves the package ADOPTED; CONFLICTS (with a text) returns it to the committee (Q77). An opinion covers only its round: a revised package needs a new review before it can go to the authority.
 
+- AGENT-09 W2 (DEC-01, DEC-61 pattern): on a restricted case each legal review needs the case's Restricted Case Authority (the case owner) to approve it and name the reviewer (`decision.restricted_legal_review_approval`, single use, audited RESTRICTED_LEGAL_REVIEW_APPROVED); without it `AUTHORITY_APPROVAL_REQUIRED`. Pending Fady's decision card; if he chooses refusal instead, restricted cases get a plain CONFLICT refusal.
+- Reviewer eligibility is re-checked on every read: removing the LEGAL_REVIEWER role, a case conflict or a clearance below the case removes the packet; the opinion is then refused.
+- Recorded from AGENT-09's review (no change now): the reviewer keeps the packet after giving the opinion (could become time-bound); packet snapshots carry subject display names and the minutes narrative the secretary selects.
+
 ## Requirements
 
 Q40, Q73–Q77; negative test N14.

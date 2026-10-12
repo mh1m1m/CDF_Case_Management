@@ -788,6 +788,56 @@ describe("every state-changing command writes its audit event in the same transa
         },
       },
       {
+        // AGENT-09 W2: a legal review on the restricted case needs its authority's approval naming the reviewer.
+        // Fixture: the secretary, the chair, the member and the reviewer are cleared to SECRET (the rule in force needs
+        // two present); the approved referral is used.
+        fn: "approve_restricted_legal_review",
+        actor: "grcDirector",
+        run: async (s) => {
+          const exec = await caseId("0003");
+          await (s as OwnerScenario).asOwner();
+          await s.tx`update iam.user_profile set clearance = 'SECRET'
+                     where id in (${USERS.committeeSecretary}, ${USERS.committeeChair}, ${USERS.committee}, ${USERS.legalB})`;
+          await s.as("grcDirector");
+          const cp = await one(
+            s,
+            s.tx`select api.refer_case_to_committee(${exec}, ${ids.committee!}, null, ${REASON}) as id`,
+          );
+          await s.as("committeeSecretary");
+          const m = await one(
+            s,
+            s.tx`select api.schedule_meeting(${cp}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+              now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`,
+          );
+          const seats = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${m} and is_voting`;
+          for (const [user, key] of [
+            [USERS.committee, "committee"],
+            [USERS.committeeChair, "committeeChair"],
+          ] as const) {
+            await s.as(key);
+            await s.tx`select api.declare_meeting_conflict(${seats.find((r) => r.user_id === user)!.id}, 'NO_CONFLICT', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_meeting(${m}, ${REASON})`;
+          for (const r of seats) await s.tx`select api.record_attendance(${r.id}, 'PRESENT')`;
+          const pkg = await one(s, s.tx`select api.create_recommendation_package(${cp}, 'PACKAGE') as id`);
+          await s.tx`select api.add_recommendation_item(${pkg}, 'OTHER', null, null, 'Synthetic: restricted walk item.', null, null)`;
+          await s.tx`select api.submit_package_for_vote(${pkg})`;
+          await s.tx`select api.open_package_vote(${m}, ${pkg})`;
+          const vi = await one(s, s.tx`select id from committee.vote_item where package_id = ${pkg}`);
+          for (const key of ["committee", "committeeChair"] as const) {
+            await s.as(key);
+            await s.tx`select api.cast_vote(${vi}, 'APPROVE', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.close_vote_item(${vi}, null)`;
+          await s.tx`select api.record_package_adoption(${pkg})`;
+          await s.as("grcDirector");
+          return s.tx`select api.approve_restricted_legal_review(${pkg}, ${USERS.legalB}, ${REASON})`;
+        },
+      },
+      {
         fn: "close_proceeding",
         actor: "caseManager",
         run: async (s) => {

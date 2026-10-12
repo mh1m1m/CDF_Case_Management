@@ -232,6 +232,28 @@ create table decision.packet_item (
 );
 comment on table decision.packet_item is 'One snapshotted item of a packet (ADR-031). Readers reach only these rows.';
 
+-- DEC-01 / DEC-61 pattern (AGENT-09 W2): on a restricted case, a legal review gives a new person packet access, so the
+-- case's Restricted Case Authority approves each request and names the reviewer. Single use.
+create table decision.restricted_legal_review_approval (
+  id                      uuid primary key default gen_random_uuid(),
+  case_id                 uuid not null references case_mgmt.case_record (id),
+  package_id              uuid not null references decision.recommendation_package (id),
+  reviewer_id             uuid not null references iam.user_profile (id),
+  approved_by             uuid not null references iam.user_profile (id),
+  reason                  text not null check (length(reason) between 5 and 2000),
+  approved_at             timestamptz not null default now(),
+  legal_review_request_id uuid unique references decision.legal_review_request (id),
+  used_at                 timestamptz,
+  check ((legal_review_request_id is null) = (used_at is null))
+);
+create unique index restricted_legal_review_approval_open on decision.restricted_legal_review_approval (package_id)
+  where legal_review_request_id is null;
+create index restricted_legal_review_approval_case on decision.restricted_legal_review_approval (case_id);
+create index restricted_legal_review_approval_reviewer on decision.restricted_legal_review_approval (reviewer_id);
+create index restricted_legal_review_approval_approved_by on decision.restricted_legal_review_approval (approved_by);
+comment on table decision.restricted_legal_review_approval is
+  'The Restricted Case Authority''s approval of one legal review on a restricted case, naming the reviewer (AGENT-09 W2).';
+
 -- -----------------------------------------------------------------------------
 -- Authority decisions
 -- -----------------------------------------------------------------------------
@@ -286,7 +308,7 @@ begin
   end loop;
   foreach t in array array['decision.sanction_catalogue', 'decision.authority_type', 'decision.action_authority_rule',
                            'decision.recommendation_package', 'decision.recommendation_item',
-                           'decision.legal_review_request'] loop
+                           'decision.legal_review_request', 'decision.restricted_legal_review_approval'] loop
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
   end loop;
@@ -318,6 +340,12 @@ begin
           <> (to_jsonb(old) - array['status', 'opinion', 'opinion_text', 'opinion_at']) then
       raise exception 'legal review request % is answered or its identity is immutable', old.id using errcode = 'insufficient_privilege';
     end if;
+  elsif tg_table_name = 'restricted_legal_review_approval' then
+    if old.legal_review_request_id is not null
+       or (to_jsonb(new) - array['legal_review_request_id', 'used_at'])
+          <> (to_jsonb(old) - array['legal_review_request_id', 'used_at']) then
+      raise exception 'approval % is used or immutable', old.id using errcode = 'insufficient_privilege';
+    end if;
   elsif tg_table_name = 'action_authority_rule' then
     if (to_jsonb(new) - 'effective_to') <> (to_jsonb(old) - 'effective_to') or old.effective_to is not null then
       raise exception 'authority rule % can only be given an end, once', old.id using errcode = 'insufficient_privilege';
@@ -334,12 +362,41 @@ create trigger legal_review_request_protect before update on decision.legal_revi
   for each row execute function decision.protect_records();
 create trigger action_authority_rule_protect before update on decision.action_authority_rule
   for each row execute function decision.protect_records();
+create trigger restricted_legal_review_approval_protect before update on decision.restricted_legal_review_approval
+  for each row execute function decision.protect_records();
 
 -- -----------------------------------------------------------------------------
 -- Authorization predicates
 -- -----------------------------------------------------------------------------
--- Packages, items and decisions: whoever sees the committee proceeding (cleared members and secretaries, and the case
--- team). Legal reviewers are not in this set unless they also sit on the proceeding.
+-- A proceeding participant who declared a conflict in any meeting of the proceeding (ADR-020, Q42/Q44; consistent with
+-- PRIOR_CONFLICT_DECLARED). Internal: answers about any user, so it is not granted.
+create function authz.has_meeting_conflict(p_user_id uuid, p_committee_proceeding_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from committee.meeting_participant mp
+    join committee.meeting m on m.id = mp.meeting_id
+    where m.committee_proceeding_id = p_committee_proceeding_id and mp.user_id = p_user_id
+      and mp.coi_status = 'CONFLICT_DECLARED'
+  );
+$$;
+
+-- The committee side of the recommendation work: proceeding viewers who have not declared a meeting conflict in it
+-- (AGENT-09 W1), or the case team. Internal.
+create function authz.sees_proceeding_deliberation(p_committee_proceeding_id uuid, p_case_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select (authz.can_view_committee_proceeding(p_committee_proceeding_id)
+          and not authz.has_meeting_conflict(authz.current_user_id(), p_committee_proceeding_id))
+      or authz.can_view_case(p_case_id);
+$$;
+
+-- Packages, items and decisions: proceeding viewers without a meeting conflict, and the case team. Legal reviewers are
+-- not in this set unless they also sit on the proceeding.
 create function authz.can_view_recommendation_package(p_package_id uuid)
 returns boolean
 language sql stable security definer
@@ -347,7 +404,7 @@ set search_path = ''
 as $$
   select authz.current_user_id() is not null and exists (
     select 1 from decision.recommendation_package p
-    where p.id = p_package_id and authz.can_view_committee_proceeding(p.committee_proceeding_id)
+    where p.id = p_package_id and authz.sees_proceeding_deliberation(p.committee_proceeding_id, p.case_id)
   );
 $$;
 
@@ -362,10 +419,12 @@ as $$
     join committee.committee_proceeding cp on cp.id = p.committee_proceeding_id
     where p.id = p_package_id and authz.is_committee_secretary(cp.committee_id)
       and authz.user_case_gate(authz.current_user_id(), p.case_id)
+      and not authz.has_meeting_conflict(authz.current_user_id(), cp.id)
   );
 $$;
 
--- N14 (ADR-031): a packet is read by the proceeding's viewers, and a legal-review packet also by its assigned
+-- N14 (ADR-031): a packet is read by the proceeding's viewers without a meeting conflict and the case team, and a
+-- legal-review packet also by its assigned
 -- reviewer, who holds LEGAL_OPINION_GIVE and is cleared for the case. The reviewer reaches nothing else.
 create function authz.can_view_packet(p_packet_id uuid)
 returns boolean
@@ -375,7 +434,7 @@ as $$
   select authz.current_user_id() is not null and exists (
     select 1 from decision.packet k
     where k.id = p_packet_id
-      and (authz.can_view_committee_proceeding(k.committee_proceeding_id)
+      and (authz.sees_proceeding_deliberation(k.committee_proceeding_id, k.case_id)
            or (k.purpose = 'LEGAL_REVIEW'
                and authz.has_permission('LEGAL_OPINION_GIVE')
                and authz.user_case_gate(authz.current_user_id(), k.case_id)
@@ -384,6 +443,8 @@ as $$
   );
 $$;
 
+revoke all on function authz.has_meeting_conflict(uuid, uuid), authz.sees_proceeding_deliberation(uuid, uuid)
+  from public, anon, authenticated;
 grant execute on function
   authz.can_view_recommendation_package(uuid), authz.can_manage_recommendation_package(uuid), authz.can_view_packet(uuid)
 to authenticated;
@@ -403,6 +464,7 @@ alter table decision.packet enable row level security;
 alter table decision.packet_item enable row level security;
 alter table decision.authority_decision enable row level security;
 alter table decision.authority_item_decision enable row level security;
+alter table decision.restricted_legal_review_approval enable row level security;
 
 create policy sanction_catalogue_read on decision.sanction_catalogue for select to authenticated
   using (authz.current_user_id() is not null);
@@ -449,6 +511,9 @@ create policy authority_item_decision_read on decision.authority_item_decision f
   using (exists (select 1 from decision.authority_decision d
                  where d.id = decision_id and authz.can_view_recommendation_package(d.package_id)));
 grant select on decision.authority_item_decision to authenticated;
+create policy restricted_legal_review_approval_read on decision.restricted_legal_review_approval for select to authenticated
+  using (authz.can_view_case(case_id));
+grant select on decision.restricted_legal_review_approval to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Internal helpers
@@ -584,7 +649,8 @@ begin
     perform api._fail('NOT_FOUND');
   end if;
   select * into v_cp from committee.committee_proceeding cp where cp.id = p_committee_proceeding_id for update;
-  if not authz.is_committee_secretary(v_cp.committee_id) or not authz.user_case_gate(v_actor, v_cp.case_id) then
+  if not authz.is_committee_secretary(v_cp.committee_id) or not authz.user_case_gate(v_actor, v_cp.case_id)
+     or authz.has_meeting_conflict(v_actor, v_cp.id) then
     perform api._fail('FORBIDDEN');
   end if;
   select c.kind into v_kind from committee.committee c where c.id = v_cp.committee_id;
@@ -847,6 +913,7 @@ declare
   v_minutes uuid[] := coalesce(p_minutes_ids, '{}');
   v_classification core.classification_level;
   v_items int;
+  v_approval uuid;
 begin
   v_p := decision.lock_managed_package(p_package_id);
   if v_p.status <> 'ADOPTED' then perform api._fail('CONFLICT', 'PACKAGE_NOT_ADOPTED'); end if;
@@ -874,12 +941,22 @@ begin
     perform api._fail('INVALID', 'minutes_ids');
   end if;
   select c.classification into v_classification from case_mgmt.case_record c where c.id = v_p.case_id;
+  -- AGENT-09 W2: a restricted case needs its authority's unused approval naming this reviewer.
+  if exists (select 1 from case_mgmt.case_record c where c.id = v_p.case_id and c.is_restricted) then
+    select a.id into v_approval from decision.restricted_legal_review_approval a
+    where a.package_id = v_p.id and a.legal_review_request_id is null and a.reviewer_id = p_assigned_to
+    for update;
+    if v_approval is null then perform api._fail('CONFLICT', 'AUTHORITY_APPROVAL_REQUIRED'); end if;
+  end if;
 
   insert into decision.legal_review_request (package_id, case_id, package_round, basis, assigned_to, reason, requested_by)
   values (v_p.id, v_p.case_id, v_p.round_no,
           case when decision.legal_review_required(v_p.id) then 'RULE' else 'SECRETARY_ELECTED' end,
           p_assigned_to, api._require_text(p_reason, 'reason', 5, 2000), v_actor)
   returning id into v_req;
+  if v_approval is not null then
+    update decision.restricted_legal_review_approval set legal_review_request_id = v_req, used_at = now() where id = v_approval;
+  end if;
   insert into decision.packet (case_id, committee_proceeding_id, package_id, purpose, legal_review_request_id,
                                classification, created_by)
   values (v_p.case_id, v_p.committee_proceeding_id, v_p.id, 'LEGAL_REVIEW', v_req, v_classification, v_actor)
@@ -907,11 +984,55 @@ begin
    where id = v_p.id;
   perform audit.record_event('LEGAL_REVIEW_REQUESTED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'legal_review_request', v_req::text,
     null, jsonb_build_object('package_id', v_p.id, 'round_no', v_p.round_no, 'assigned_to', p_assigned_to,
-                             'packet_id', v_packet));
+                             'packet_id', v_packet, 'restricted_approval_id', v_approval));
   perform audit.record_event('PACKET_CREATED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'packet', v_packet::text, null,
     jsonb_build_object('purpose', 'LEGAL_REVIEW', 'items', v_items, 'findings', cardinality(v_findings),
                        'minutes', cardinality(v_minutes)));
   return v_req;
+end;
+$$;
+
+-- AGENT-09 W2 (DEC-01, DEC-61 pattern): the case owner, eligible as a Restricted Case Authority for the case
+-- classification, approves one legal review of the adopted package by a named reviewer.
+create function api.approve_restricted_legal_review(p_package_id uuid, p_reviewer_id uuid, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_p decision.recommendation_package;
+  v_case case_mgmt.case_record;
+  v_id uuid;
+  v_reason text;
+begin
+  if p_package_id is null or not authz.can_view_recommendation_package(p_package_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v_p from decision.recommendation_package p where p.id = p_package_id for update;
+  select * into v_case from case_mgmt.case_record c where c.id = v_p.case_id;
+  if not v_case.is_restricted then perform api._fail('CONFLICT', 'CASE_NOT_RESTRICTED'); end if;
+  if v_case.owner_id is distinct from v_actor
+     or not authz.is_restricted_case_authority(v_actor, v_case.classification) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  if v_case.records_state <> 'ACTIVE' then perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE'); end if;
+  if v_p.status <> 'ADOPTED' then perform api._fail('CONFLICT', 'PACKAGE_NOT_ADOPTED'); end if;
+  if p_reviewer_id is null or p_reviewer_id = v_actor
+     or not authz.user_has_permission(p_reviewer_id, 'LEGAL_OPINION_GIVE')
+     or not authz.user_case_gate(p_reviewer_id, v_p.case_id) then
+    perform api._fail('INVALID', 'reviewer_id');
+  end if;
+  if exists (select 1 from decision.restricted_legal_review_approval a
+             where a.package_id = v_p.id and a.legal_review_request_id is null) then
+    perform api._fail('CONFLICT', 'APPROVAL_ALREADY_PENDING');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  insert into decision.restricted_legal_review_approval (case_id, package_id, reviewer_id, approved_by, reason)
+  values (v_p.case_id, v_p.id, p_reviewer_id, v_actor, v_reason)
+  returning id into v_id;
+  perform audit.record_event('RESTRICTED_LEGAL_REVIEW_APPROVED', 'BUSINESS', 'SUCCESS', v_p.case_id,
+    'restricted_legal_review_approval', v_id::text, v_reason,
+    jsonb_build_object('package_id', v_p.id, 'reviewer_id', p_reviewer_id, 'classification', v_case.classification));
+  return v_id;
 end;
 $$;
 
@@ -1153,6 +1274,7 @@ grant execute on function
   api.open_package_vote(uuid, uuid),
   api.record_package_adoption(uuid),
   api.request_legal_review(uuid, uuid, text, uuid[], uuid[]),
+  api.approve_restricted_legal_review(uuid, uuid, text),
   api.open_packet(uuid),
   api.give_legal_opinion(uuid, text, text),
   api.submit_to_authority(uuid),

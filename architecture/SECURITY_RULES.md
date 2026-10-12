@@ -279,5 +279,6 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - A free-text sanction is PROPOSED_UNVERIFIED and stays so (check constraint and trigger).
 - The legal reviewer is assigned explicitly, holds `LEGAL_OPINION_GIVE`, passes the case gate and reaches only the LEGAL_REVIEW packet and their own request (N14). Packet reads are audited.
 - Packets are immutable snapshots without evidence or reporter identity (N19).
+- A member who declared a conflict in any meeting of the proceeding sees no package, item, packet or opinion (AGENT-09 W1). On a restricted case each legal review needs the Restricted Case Authority's single-use approval naming the reviewer (AGENT-09 W2).
 - An authority decision needs a source document reference (N15) and the authority type the effective-dated rule names; decided packages are frozen; decisions and item outcomes are append-only.
 - Tests: `tests/security/recommendations-authority.spec.ts`, decision IDOR probes and the audit walk.

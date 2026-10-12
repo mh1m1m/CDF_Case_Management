@@ -445,3 +445,167 @@ describe("authority decisions (ADR-023, N15)", () => {
     });
   });
 });
+
+describe("AGENT-09 review of 1900 (W1, W2, reviewer eligibility)", () => {
+  it("a member who declared a meeting conflict sees no package, items, scope, packet or opinion (W1)", async () => {
+    await scenario(async (s) => {
+      const f = await draftPackage(s, ic, caseB);
+      await voteOnPackage(s, f);
+      const { request, packet } = await requestLegalReview(s, f);
+      await s.as("legalB");
+      await s.tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`;
+      await s.as("legal");
+      expect(await s.tx`select id from decision.recommendation_package`).toHaveLength(1);
+      await s.tx`select api.declare_meeting_conflict(${f.meeting.participant.legal!}, 'CONFLICT_DECLARED', 'Synthetic: related party.')`;
+      expect(await s.tx`select id from decision.recommendation_package`).toEqual([]);
+      expect(await s.tx`select id from decision.recommendation_item`).toEqual([]);
+      expect(await s.tx`select item_id from decision.recommendation_item_subject`).toEqual([]);
+      expect(await s.tx`select item_id from decision.recommendation_item_allegation`).toEqual([]);
+      expect(await s.tx`select id from decision.packet`).toEqual([]);
+      expect(await s.tx`select id from decision.packet_item`).toEqual([]);
+      expect(await s.tx`select id from decision.legal_review_request`).toEqual([]);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.open_packet(${packet})`);
+      // The case team keeps its view.
+      await s.as("caseManager");
+      expect(await s.tx`select id from decision.recommendation_package`).toHaveLength(1);
+      // A secretary who declared a conflict no longer manages the package.
+      await s.as("committeeSecretary");
+      await s.tx`select api.declare_meeting_conflict(${f.meeting.participant.committeeSecretary!}, 'CONFLICT_DECLARED', 'Synthetic: related party.')`;
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.submit_to_authority(${f.pkg})`);
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.create_recommendation_package(${f.meeting.committeeProceeding}, 'PACKAGE')`,
+      );
+    });
+  });
+
+  it("on a restricted case a legal review needs the case authority's approval naming the reviewer (W2)", async () => {
+    await ownerScenario(async (s) => {
+      const caseExec = await caseId("0003"); // SECRET, restricted, owner grcDirector
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'SECRET'
+                 where id in (${USERS.committeeSecretary}, ${USERS.legalB})`;
+      const { seat } = await import("../support/committee");
+      await seat(s, ic, [
+        ["committeeChair", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"],
+        ["grcDeputy", "MEMBER"],
+      ]);
+      await s.as("grcDirector");
+      await s.tx`select api.approve_restricted_committee_referral(${caseExec}, ${ic}, ${REASON})`;
+      const [cp] = await s.tx<{ id: string }[]>`
+        select api.refer_case_to_committee(${caseExec}, ${ic}, null, ${REASON}) as id`;
+      await s.as("committeeSecretary");
+      const [m] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${cp!.id}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`;
+      const [p] = await s.tx<{ id: string }[]>`
+        select id from committee.meeting_participant where meeting_id = ${m!.id} and user_id = ${USERS.grcDeputy}`;
+      await s.as("grcDeputy");
+      await s.tx`select api.declare_meeting_conflict(${p!.id}, 'NO_CONFLICT', null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+      await s.tx`select api.record_attendance(${p!.id}, 'PRESENT')`;
+      const [pkg] = await s.tx<
+        { id: string }[]
+      >`select api.create_recommendation_package(${cp!.id}, 'PACKAGE') as id`;
+      await s.tx`select api.add_recommendation_item(${pkg!.id}, 'CORRECTIVE_ACTION', null, null,
+                   'Synthetic: tighten the approval controls.', null, null)`;
+      await s.tx`select api.submit_package_for_vote(${pkg!.id})`;
+      await s.tx`select api.open_package_vote(${m!.id}, ${pkg!.id})`;
+      const [vi] = await s.tx<
+        { id: string }[]
+      >`select id from committee.vote_item where package_id = ${pkg!.id}`;
+      await s.as("grcDeputy");
+      await s.tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+      await s.tx`select api.record_package_adoption(${pkg!.id})`;
+
+      await s.expectError(
+        "CDF_CONFLICT:AUTHORITY_APPROVAL_REQUIRED",
+        (tx) => tx`select api.request_legal_review(${pkg!.id}, ${USERS.legalB}, ${REASON}, null, null)`,
+      );
+      // Only the case's own authority approves; it names a reviewer who is eligible and cleared.
+      for (const u of ["grcDeputy", "committeeSecretary"] as const) {
+        await s.as(u);
+        await s.expectError(
+          "CDF_FORBIDDEN",
+          (tx) => tx`select api.approve_restricted_legal_review(${pkg!.id}, ${USERS.legalB}, ${REASON})`,
+        );
+      }
+      await s.as("legalB");
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.approve_restricted_legal_review(${pkg!.id}, ${USERS.legalB}, ${REASON})`,
+      );
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_INVALID:reviewer_id",
+        (tx) => tx`select api.approve_restricted_legal_review(${pkg!.id}, ${USERS.legal}, ${REASON})`,
+      );
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.approve_restricted_legal_review(${pkg!.id}, ${USERS.legalB}, ${REASON}) as id`;
+      // The approval covers the named reviewer only.
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'SECRET' where id = ${USERS.legal}`;
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:AUTHORITY_APPROVAL_REQUIRED",
+        (tx) => tx`select api.request_legal_review(${pkg!.id}, ${USERS.legal}, ${REASON}, null, null)`,
+      );
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.request_legal_review(${pkg!.id}, ${USERS.legalB}, ${REASON}, null, null) as id`;
+      // The case team sees the approval, used once by this request.
+      await s.as("grcDirector");
+      const [used] = await s.tx<{ legal_review_request_id: string }[]>`
+        select legal_review_request_id from decision.restricted_legal_review_approval where id = ${a!.id}`;
+      expect(used!.legal_review_request_id).toBe(r!.id);
+      await s.as("legalB");
+      expect(await s.tx`select id from decision.packet`).toHaveLength(1);
+    });
+  });
+
+  it("a conflicted or uncleared reviewer cannot be assigned", async () => {
+    await ownerScenario(async (s) => {
+      const f = await draftPackage(s, ic, caseB);
+      await voteOnPackage(s, f);
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'INTERNAL' where id = ${USERS.legalB}`;
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_INVALID:assigned_to",
+        (tx) => tx`select api.request_legal_review(${f.pkg}, ${USERS.legalB}, ${REASON}, null, null)`,
+      );
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'CONFIDENTIAL' where id = ${USERS.legalB}`;
+      await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
+                 values (${caseB}, ${USERS.legalB}, 'CONFLICT_DECLARED', 'Synthetic conflict')`;
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_INVALID:assigned_to",
+        (tx) => tx`select api.request_legal_review(${f.pkg}, ${USERS.legalB}, ${REASON}, null, null)`,
+      );
+    });
+  });
+
+  it("a reviewer whose legal reviewer role is removed loses the packet and cannot give the opinion", async () => {
+    await scenario(async (s) => {
+      const f = await draftPackage(s, ic, caseB);
+      await voteOnPackage(s, f);
+      const { request, packet } = await requestLegalReview(s, f);
+      const [ra] = await admin<{ id: string }[]>`
+        select id from iam.user_role_assignment where user_id = ${USERS.legalB} and role_code = 'LEGAL_REVIEWER'`;
+      await s.as("platformAdmin");
+      await s.tx`select api.revoke_role(${ra!.id}, ${REASON})`;
+      await s.as("legalB");
+      expect(await s.tx`select id from decision.packet`).toEqual([]);
+      expect(await s.tx`select id from decision.packet_item`).toEqual([]);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.open_packet(${packet})`);
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`,
+      );
+    });
+  });
+});

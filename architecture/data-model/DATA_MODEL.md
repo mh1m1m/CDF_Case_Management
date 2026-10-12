@@ -249,18 +249,19 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 
 ## Recommendations, legal review and authority decisions (migration 1900, ADR-021 to ADR-023, ADR-031)
 
-| Table                                     | Purpose                                               | Notes                                                                                |
-| ----------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `decision.sanction_catalogue`             | Governed sanction codes                               | Synthetic seed; legal basis SOURCE_REQUIRED                                          |
-| `decision.authority_type`                 | CEO, BOARD, DELEGATED_EXECUTIVE, OTHER                | Reference data                                                                       |
-| `decision.action_authority_rule`          | Which authority decides which item type               | Effective-dated; DISCIPLINARY_SANCTION → CEO seeded; `api.set_action_authority_rule` |
-| `decision.recommendation_package`         | A committee's recommendations in a proceeding         | Status lifecycle and rounds; frozen once DECIDED                                     |
-| `decision.recommendation_item`            | One recommendation                                    | Sanction code xor PROPOSED_UNVERIFIED text; case-wide or scoped; committee result    |
-| `decision.recommendation_item_subject`    | Item scope by subject                                 | Append-only                                                                          |
-| `decision.recommendation_item_allegation` | Item scope by allegation                              | Append-only                                                                          |
-| `decision.legal_review_request`           | Assigned legal review and its opinion                 | One reviewer; RULE or SECRETARY_ELECTED; per round                                   |
-| `decision.packet`, `decision.packet_item` | Purpose-bound snapshots                               | LEGAL_REVIEW or AUTHORITY_DECISION; append-only                                      |
-| `decision.authority_decision`             | Externally made decision                              | Source document reference NOT NULL; append-only                                      |
-| `decision.authority_item_decision`        | Per-item outcome for partial approval or modification | Append-only                                                                          |
+| Table                                       | Purpose                                                | Notes                                                                                |
+| ------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `decision.sanction_catalogue`               | Governed sanction codes                                | Synthetic seed; legal basis SOURCE_REQUIRED                                          |
+| `decision.authority_type`                   | CEO, BOARD, DELEGATED_EXECUTIVE, OTHER                 | Reference data                                                                       |
+| `decision.action_authority_rule`            | Which authority decides which item type                | Effective-dated; DISCIPLINARY_SANCTION → CEO seeded; `api.set_action_authority_rule` |
+| `decision.recommendation_package`           | A committee's recommendations in a proceeding          | Status lifecycle and rounds; frozen once DECIDED                                     |
+| `decision.recommendation_item`              | One recommendation                                     | Sanction code xor PROPOSED_UNVERIFIED text; case-wide or scoped; committee result    |
+| `decision.recommendation_item_subject`      | Item scope by subject                                  | Append-only                                                                          |
+| `decision.recommendation_item_allegation`   | Item scope by allegation                               | Append-only                                                                          |
+| `decision.legal_review_request`             | Assigned legal review and its opinion                  | One reviewer; RULE or SECRETARY_ELECTED; per round                                   |
+| `decision.packet`, `decision.packet_item`   | Purpose-bound snapshots                                | LEGAL_REVIEW or AUTHORITY_DECISION; append-only                                      |
+| `decision.authority_decision`               | Externally made decision                               | Source document reference NOT NULL; append-only                                      |
+| `decision.authority_item_decision`          | Per-item outcome for partial approval or modification  | Append-only                                                                          |
+| `decision.restricted_legal_review_approval` | Restricted Case Authority approval of one legal review | Names the reviewer; used once (AGENT-09 W2)                                          |
 
 `committee.vote_item` gains `package_id`, `recommendation_item_id` and `package_round` (1900).

@@ -15,6 +15,8 @@
 - `decision.packet` and `decision.packet_item` are append-only snapshots. `authz.can_view_packet`: the proceeding's viewers, and for a LEGAL_REVIEW packet its assigned reviewer while they hold `LEGAL_OPINION_GIVE` and pass `authz.user_case_gate` (a later case conflict removes it at once).
 - Packet items are recommendation items, findings, approved minutes and legal opinions only: no evidence (until UX S2 merges), no reporter data (N19). Every read through `api.open_packet` is audited.
 
+- AGENT-09 W1: a proceeding participant who declared a conflict in any meeting of the proceeding loses the committee-side view of packages, items, scope, packets and opinions (`authz.has_meeting_conflict`, consistent with PRIOR_CONFLICT_DECLARED); the case team keeps its view. A conflicted secretary no longer manages packages.
+
 ## Requirements
 
 DEC-02, DEC-09, Q75, Q99; negative tests N14, N19.

@@ -711,6 +711,11 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
     call: (tx, t, self) => tx`select api.request_legal_review(${t.pkg}, ${self}, ${REASON}, null, null)`,
   },
   {
+    fn: "approve_restricted_legal_review",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.approve_restricted_legal_review(${t.pkg}, ${self}, ${REASON})`,
+  },
+  {
     fn: "open_packet",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.open_packet(${t.packet})`,
