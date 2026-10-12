@@ -947,6 +947,58 @@ const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
   },
 ];
 
+// Continuity workbook import (migration 1960): staging names a case in the workbook's control sheet; every other
+// command takes a batch or one of its rows.
+interface BcpTargets {
+  case: string;
+  caseNumber: string;
+  batch: string;
+  row: string;
+}
+
+const BCP_PROBES: Probe<BcpTargets>[] = [
+  {
+    fn: "stage_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.stage_bcp_import(
+        jsonb_build_object('TEMPLATE_VERSION', 'BCP-1', 'WORKBOOK_ID', 'BCP-PROBE-1', 'CASE_ID', ${t.case}::text,
+                           'CASE_NUMBER', ${t.caseNumber}::text, 'OFFLINE_FROM', '2026-01-01T00:00:00Z',
+                           'PREPARED_BY', 'lead@example.test'),
+        ${SHA}, '[]'::jsonb)`,
+  },
+  {
+    fn: "resolve_bcp_row",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resolve_bcp_row(${t.row}, 'SKIP', ${REASON})`,
+  },
+  {
+    fn: "preview_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.preview_bcp_import(${t.batch})`,
+  },
+  {
+    fn: "submit_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_bcp_import(${t.batch}, ${SHA})`,
+  },
+  {
+    fn: "decide_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_bcp_import(${t.batch}, 'APPROVE', ${REASON}, ${SHA})`,
+  },
+  {
+    fn: "apply_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.apply_bcp_import(${t.batch}, ${SHA})`,
+  },
+  {
+    fn: "cancel_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_bcp_import(${t.batch}, ${REASON})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1198,6 +1250,7 @@ describe("catalog guard", () => {
       ...NOTIFICATION_PROBES.map((p) => p.fn),
       ...EXPORT_PROBES.map((p) => p.fn),
       ...CORRECTIVE_ACTION_PROBES.map((p) => p.fn),
+      ...BCP_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1825,6 +1878,67 @@ describe("IDOR: corrective actions (migration 1940)", () => {
       expect(mismatches).toEqual([]);
       for (const table of ["corrective_action", "corrective_action_event"]) {
         expect(await s.tx`select id from ${s.tx("decision." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: continuity workbook imports (migration 1960)", () => {
+  // A submitted batch on case 0002 staged by the case manager and recorded offline by the lead investigator. None of
+  // these can see case 0002; the committee secretary and platform administrator hold other governance roles.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "committeeSecretary",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "legal",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      const [b] = await s.tx<{ id: string; number: string }[]>`
+        with c as (
+          select id, case_number, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at
+          from case_mgmt.case_record where id = ${caseB}
+        )
+        select api.stage_bcp_import(
+          jsonb_build_object('TEMPLATE_VERSION', 'BCP-1', 'WORKBOOK_ID', 'BCP-PROBE-2', 'CASE_ID', c.id::text,
+                             'CASE_NUMBER', c.case_number, 'OFFLINE_FROM', c.at, 'PREPARED_BY', 'lead@example.test'),
+          ${SHA},
+          jsonb_build_array(jsonb_build_object('sheet', '05_SUBJECTS', 'row_number', 3, 'has_formula', false, 'cells',
+            jsonb_build_object('ROW_ID', 'BCP-PS1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'lead@example.test',
+                               'DISPLAY_LABEL', 'Employee Probe (synthetic)', 'SUBJECT_CATEGORY', 'EMPLOYEE')))) as id,
+          c.case_number as number
+        from c`;
+      const [row] = await s.tx<
+        { id: string }[]
+      >`select id from exchange.bcp_import_row where batch_id = ${b!.id}`;
+      const [p] = await s.tx<{ h: string }[]>`select api.preview_bcp_import(${b!.id}) ->> 'hash' as h`;
+      await s.tx`select api.submit_bcp_import(${b!.id}, ${p!.h})`;
+      await s.as(actor);
+      const real: BcpTargets = { case: caseB, caseNumber: b!.number, batch: b!.id, row: row!.id };
+      const random: BcpTargets = {
+        case: randomUUID(),
+        caseNumber: "CDF-DEMO-2026-9999",
+        batch: randomUUID(),
+        row: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of BCP_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of ["bcp_import_batch", "bcp_import_row", "bcp_provenance"]) {
+        expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
       }
     });
   });

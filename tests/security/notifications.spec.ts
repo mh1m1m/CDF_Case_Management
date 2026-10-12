@@ -318,6 +318,7 @@ const VISIBLE: Record<string, string> = {
   GRIEVANCE: "select count(*)::int as n from grievance.grievance where id = $1",
   EXPORT: "select count(*)::int as n from exchange.export_request where id = $1",
   CORRECTIVE_ACTION: "select count(*)::int as n from decision.corrective_action where id = $1",
+  BCP_IMPORT: "select count(*)::int as n from exchange.bcp_import_batch where id = $1",
 };
 
 async function outbox(s: OwnerScenario) {

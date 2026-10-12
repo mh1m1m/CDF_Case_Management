@@ -79,6 +79,28 @@ const NOT_STATE_CHANGING = new Set([
   "my_defence_notices",
 ]);
 
+/** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
+ *  creation (ADR-034): a subject to import and a recorded-only row to skip. */
+function stageWalkWorkbook(s: Scenario, workbookId: string) {
+  return s.tx`
+    with c as (
+      select id, case_number, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at
+      from case_mgmt.case_record where id = ${caseA}
+    )
+    select api.stage_bcp_import(
+      jsonb_build_object('TEMPLATE_VERSION', 'BCP-1', 'WORKBOOK_ID', ${workbookId}::text, 'CASE_ID', c.id::text,
+                         'CASE_NUMBER', c.case_number, 'OFFLINE_FROM', c.at, 'PREPARED_BY', 'lead@example.test'),
+      repeat('a', 64),
+      jsonb_build_array(
+        jsonb_build_object('sheet', '05_SUBJECTS', 'row_number', 3, 'has_formula', false, 'cells',
+          jsonb_build_object('ROW_ID', 'BCP-WS1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'lead@example.test',
+                             'DISPLAY_LABEL', 'Employee Walk (synthetic)', 'SUBJECT_CATEGORY', 'EMPLOYEE')),
+        jsonb_build_object('sheet', '02_CASE_MASTER', 'row_number', 3, 'has_formula', false, 'cells',
+          jsonb_build_object('ROW_ID', 'BCP-WC1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'lead@example.test',
+                             'DETAILS', 'Synthetic: noted during the outage.')))) as id
+    from c`;
+}
+
 interface Step {
   fn: string;
   actor: UserKey;
@@ -1522,6 +1544,53 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.decide_restricted_export(${request}, 'APPROVE', ${REASON}, ${hash})`;
         },
       },
+      // Continuity workbook import (migration 1960, ADR-034): a subject recorded offline and a recorded-only row.
+      {
+        fn: "stage_bcp_import",
+        actor: "caseManager",
+        run: async (s) => (ids.bcpBatch = await one(s, stageWalkWorkbook(s, "BCP-WALK-1"))),
+      },
+      {
+        fn: "resolve_bcp_row",
+        actor: "caseManager",
+        run: async (s) => {
+          const unsupported = await one(
+            s,
+            s.tx`select id from exchange.bcp_import_row where batch_id = ${ids.bcpBatch!} and state = 'UNSUPPORTED'`,
+          );
+          return s.tx`select api.resolve_bcp_row(${unsupported}, 'SKIP', 'Synthetic: entered online after the outage.')`;
+        },
+      },
+      {
+        fn: "preview_bcp_import",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.bcpHash = await one(s, s.tx`select api.preview_bcp_import(${ids.bcpBatch!}) ->> 'hash' as h`)),
+      },
+      {
+        fn: "submit_bcp_import",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.submit_bcp_import(${ids.bcpBatch!}, ${ids.bcpHash!})`,
+      },
+      {
+        fn: "decide_bcp_import",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.decide_bcp_import(${ids.bcpBatch!}, 'APPROVE', ${REASON}, ${ids.bcpHash!})`,
+      },
+      {
+        fn: "apply_bcp_import",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.apply_bcp_import(${ids.bcpBatch!}, ${ids.bcpHash!})`,
+      },
+      {
+        fn: "cancel_bcp_import",
+        actor: "caseManager",
+        run: async (s) => {
+          const batch = await one(s, stageWalkWorkbook(s, "BCP-WALK-2"));
+          return s.tx`select api.cancel_bcp_import(${batch}, ${REASON})`;
+        },
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
@@ -1691,6 +1760,8 @@ describe("audit internals are not reachable", () => {
       "authz.can_review_interviews",
       "authz.can_review_legal_hold",
       "authz.can_upload_evidence",
+      "authz.can_view_bcp_import",
+      "authz.can_view_bcp_provenance",
       "authz.can_view_case",
       "authz.can_view_case_content",
       "authz.can_view_case_metadata",

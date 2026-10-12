@@ -42,6 +42,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "EXPORT_APPROVE",
     // Corrective actions (migration 1940, ADR-033): OWNER_DEFAULT, SOURCE_REQUIRED (Delegation of Authority).
     "CORRECTIVE_ACTION_MANAGE",
+    // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED.
+    "BCP_IMPORT",
+    "BCP_IMPORT_APPROVE",
   ],
   LEAD_INVESTIGATOR: [
     "CASE_ASSIGN",
@@ -55,6 +58,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "FORM_REVIEW",
     "PRELIMINARY_PREPARE",
     "EXPORT_REQUEST",
+    "BCP_IMPORT",
   ],
   INVESTIGATOR: [
     "CONFLICT_DECLARE",
@@ -116,6 +120,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     // Corrective actions (migration 1940, ADR-033): OWNER_DEFAULT. CORRECTIVE_ACTION_WAIVE is held by no role.
     "CORRECTIVE_ACTION_MANAGE",
     "CORRECTIVE_ACTION_POLICY_ADMIN",
+    // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED.
+    "BCP_IMPORT",
+    "BCP_IMPORT_APPROVE",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
   INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],

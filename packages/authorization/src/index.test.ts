@@ -65,6 +65,7 @@ describe("role permission mirror", () => {
 
   it("unions and de-duplicates permissions", () => {
     expect(permissionsForRoles(["INVESTIGATOR", "LEAD_INVESTIGATOR"])).toEqual([
+      "BCP_IMPORT",
       "CASE_ASSIGN",
       "CONFLICT_DECLARE",
       "EVIDENCE_DOWNLOAD",

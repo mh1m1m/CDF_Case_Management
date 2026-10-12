@@ -1391,5 +1391,7 @@ export const ar: Messages = {
     CORRECTIVE_ACTION_SUBMITTED: "إجراء تصحيحي بانتظار التحقق.",
     CORRECTIVE_ACTION_DUE: "تذكير: يقترب موعد استحقاق إجراء تصحيحي تتولاه.",
     CORRECTIVE_ACTION_OVERDUE: "تجاوز إجراء تصحيحي موعد استحقاقه.",
+    BCP_IMPORT_APPROVAL_REQUESTED: "استيراد من مصنف استمرارية الأعمال بانتظار موافقتك.",
+    BCP_IMPORT_DECIDED: "سُجّل قرار بشأن استيراد مصنف استمرارية الأعمال الذي قدمته.",
   },
 };

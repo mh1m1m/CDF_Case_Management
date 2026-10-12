@@ -5,6 +5,7 @@
 
 import type { RelationshipToFund, ReporterMode } from "./intake";
 export * from "./intake";
+export * from "./bcp";
 
 export const CLASSIFICATION_LEVELS = ["INTERNAL", "RESTRICTED", "CONFIDENTIAL", "SECRET"] as const;
 export type Classification = (typeof CLASSIFICATION_LEVELS)[number];
@@ -126,6 +127,9 @@ export const PERMISSIONS = [
   "CORRECTIVE_ACTION_OWN",
   "CORRECTIVE_ACTION_WAIVE",
   "CORRECTIVE_ACTION_POLICY_ADMIN",
+  // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED ("authorized continuity users").
+  "BCP_IMPORT",
+  "BCP_IMPORT_APPROVE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -1149,6 +1153,9 @@ export const NOTIFICATION_TEMPLATES = [
   "CORRECTIVE_ACTION_SUBMITTED",
   "CORRECTIVE_ACTION_DUE",
   "CORRECTIVE_ACTION_OVERDUE",
+  // Continuity workbook import (migration 1960, ADR-034)
+  "BCP_IMPORT_APPROVAL_REQUESTED",
+  "BCP_IMPORT_DECIDED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
