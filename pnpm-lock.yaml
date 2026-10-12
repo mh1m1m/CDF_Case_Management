@@ -312,6 +312,9 @@ importers:
       '@cdf/infrastructure':
         specifier: workspace:*
         version: link:../packages/infrastructure
+      '@cdf/validation':
+        specifier: workspace:*
+        version: link:../packages/validation
       '@cdf/workflow':
         specifier: workspace:*
         version: link:../packages/workflow

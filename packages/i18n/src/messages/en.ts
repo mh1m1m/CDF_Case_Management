@@ -1412,6 +1412,59 @@ export const en = {
     BCP_IMPORT_APPROVAL_REQUESTED: "A continuity workbook import is waiting for your approval.",
     BCP_IMPORT_DECIDED: "A decision was recorded on your continuity workbook import.",
   },
+  bcpTemplate: {
+    readme: {
+      line1:
+        "Business continuity workbook BCP-1. Synthetic reference implementation: never enter real CDF data.",
+      line2: "Use this workbook only while the platform is unavailable, for one case. Fill 01_CONTROL first.",
+      line3:
+        "Row 1 of every sheet holds the column codes and row 2 their labels. Do not change either; enter data from row 3.",
+      line4:
+        "Give every row a ROW_ID that never changes (BCP- followed by letters, digits or hyphens, or a UUID).",
+      line5: "Type dates as text: YYYY-MM-DD, or YYYY-MM-DDTHH:MM:SSZ for times. Do not use formulas.",
+      line6:
+        "RECORDED_OFFLINE_BY is the platform email of the person who recorded the row; ORIGINAL_EVENT_AT is when it happened.",
+      line7:
+        "After restoration, the rows are validated, compared, approved by a second person and imported with their offline origin kept.",
+      line8:
+        "Sheets 05, 06, 18 and 21 are imported; rows on the other sheets are recorded for re-entry online.",
+    },
+    columns: {
+      TEMPLATE_VERSION: "Template version",
+      WORKBOOK_ID: "Workbook ID",
+      CASE_ID: "Case ID (platform)",
+      CASE_NUMBER: "Case number",
+      OFFLINE_FROM: "Offline from",
+      OFFLINE_TO: "Offline to",
+      PREPARED_BY: "Prepared by (email)",
+      ROW_ID: "Row ID",
+      OBJECT_ID: "Platform object ID",
+      ORIGINAL_EVENT_AT: "When it happened",
+      RECORDED_OFFLINE_BY: "Recorded by (email)",
+      REFERENCE_ID: "Related platform ID",
+      DETAILS: "Details",
+      DISPLAY_LABEL: "Subject label",
+      SUBJECT_CATEGORY: "Subject category",
+      CATEGORY: "Allegation category",
+      DESCRIPTION: "Description",
+      SUBJECT_REF: "Subject (ROW_ID or platform ID)",
+      POLICY_REFERENCE: "Policy reference",
+      LAW_REFERENCE: "Law reference",
+      NOTICE_ID: "Defence notice ID",
+      CHANNEL: "Received through",
+      ORIGINAL_SUBMISSION_DATE: "Original submission date",
+      RESPONSE_TEXT: "Response",
+      ORIGINAL_DOCUMENT_REFERENCE: "Original document reference",
+      RECOMMENDATION_ITEM_ID: "Approved recommendation item ID",
+      TITLE: "Title",
+      OWNER: "Owner (email)",
+      DUE_DATE: "Due date",
+      BATCH_ID: "Import batch ID",
+      IMPORTED_AT: "Imported at",
+      IMPORTED_BY: "Imported by (email)",
+      RESULT: "Result",
+    },
+  },
 };
 
 type Widen<T> = { [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };

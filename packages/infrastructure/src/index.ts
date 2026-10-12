@@ -30,9 +30,14 @@ export { PostgresNotificationOutbox } from "./notifications/outbox";
 export { StubEmailSender } from "./notifications/stub-email-sender";
 export { PostgresExportGateway } from "./db/export-gateway";
 export { PostgresCorrectiveActionGateway } from "./db/corrective-action-gateway";
+export { PostgresBcpImportGateway } from "./db/bcp-import-gateway";
 export {
   EXPORT_KEY_PATTERN,
   InMemoryExportStore,
   StubExportMailer,
   StubJsonExportRenderer,
 } from "./exports/stubs";
+// Continuity workbook (ADR-034): the SpreadsheetML subset reader behind WorkbookReader, and the template writer.
+export { BCP_WORKBOOK_LIMITS, SpreadsheetMlSubsetReader, readWorkbook } from "./bcp/workbook-reader";
+export { bcpTemplateSheets, buildBcpTemplate, type BcpTemplateText } from "./bcp/template";
+export { writeWorkbook, type WrittenSheet } from "./bcp/workbook-writer";

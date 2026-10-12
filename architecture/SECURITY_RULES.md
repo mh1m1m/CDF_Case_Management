@@ -321,3 +321,13 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - A case does not close while an approved actionable item has no action or an action that is not completed or waived.
 - Notifications carry ids only; verification requests and escalations go only to managers who can see the case. Reminders and escalation run from the server-only reminder job and only when a policy sets them; the seeded policy sets none.
 - Tests: `tests/security/corrective-actions.spec.ts` (mutations of the controls killed; see the 1940 review notes), corrective-action IDOR probes and the audit walk.
+
+## 22. Continuity workbook import (migration 1960; ADR-027, ADR-034; Q100)
+
+- The uploaded workbook is untrusted. The application accepts only an `.xlsx` file of at most 10 MiB from someone holding `BCP_IMPORT`, scans it (only CLEAN is read), and reads it through the `WorkbookReader` port: container sizes, entry count and compression ratio are checked before anything is inflated, inflation is capped, unsafe or duplicate paths, encryption, ZIP64, macros, embedded objects, external links, DTDs and entity declarations refuse the file, and every cell is returned as a string. Refusals are codes; no cell text, file name or content reaches a log, event or error.
+- The workbook must be template BCP-1 and name, in its control row, the case it is uploaded from. Every row is validated with the same column rules in the application and in `api.stage_bcp_import`, which also requires the importer to see the case (`NOT_FOUND` otherwise).
+- Rows are classified NEW, CONFLICT, ALREADY_IMPORTED, UNSUPPORTED or INVALID; nothing is overwritten silently, and every explicit resolution carries a reason and is audited.
+- The preview is a dry run of the real `api.*` commands as the importer, always rolled back. Submission is bound to the importer's own clean preview; rows and resolutions are immutable from then on.
+- A different person approves: `BCP_IMPORT_APPROVE`, sees the case, is not the importer and recorded no row offline; the approval is bound to the submitted hash. Only the importer applies, in one transaction, through the same commands; any failure aborts the whole import. An import grants nothing the importer could not do online.
+- Provenance (original time, offline recorder, importer, markers) is append-only and readable only by those who can see the object it describes. Notifications carry ids only and go to people who can open the batch.
+- Tests: `tests/security/bcp-import.spec.ts`, `tests/integration/bcp-import-upload.spec.ts`, the reader's unit tests, BCP IDOR probes and the audit walk.

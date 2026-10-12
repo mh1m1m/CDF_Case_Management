@@ -197,6 +197,8 @@ export const BCP_FIRST_DATA_ROW = 3;
 /** Upper bounds the application and the database both enforce. */
 export const BCP_MAX_ROWS = 2000;
 export const BCP_MAX_CELL_LENGTH = 20000;
+/** The largest workbook file accepted; checked before the file is scanned or read. */
+export const BCP_MAX_WORKBOOK_BYTES = 10 * 1024 * 1024;
 
 export const BCP_BATCH_STATUSES = [
   "STAGED",
@@ -254,4 +256,44 @@ export interface BcpImportCounts {
   skipped: number;
   kept: number;
   already_imported: number;
+}
+
+/** A workbook as the reader returns it: every cell a string, formula cells flagged, empty cells left out. */
+export interface BcpWorkbookCell {
+  /** 1-based column (A = 1). */
+  column: number;
+  value: string;
+  formula: boolean;
+}
+
+export interface BcpWorkbookRow {
+  /** 1-based row number as in the sheet. */
+  row: number;
+  cells: BcpWorkbookCell[];
+}
+
+export interface BcpWorkbookSheet {
+  name: string;
+  rows: BcpWorkbookRow[];
+}
+
+export interface BcpWorkbook {
+  sheets: BcpWorkbookSheet[];
+}
+
+/** A staged batch as its importer sees it, or an approver once it is submitted (authz.can_view_bcp_import). */
+export interface BcpImportBatch {
+  id: string;
+  caseId: string;
+  workbookId: string;
+  templateVersion: string;
+  status: BcpBatchStatus;
+  importedBy: string;
+  previewHash: string | null;
+  previewClean: boolean;
+  /** The hash an approval and the import are bound to. */
+  submittedHash: string | null;
+  createdAt: string;
+  submittedAt: string | null;
+  decidedAt: string | null;
 }

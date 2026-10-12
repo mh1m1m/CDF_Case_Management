@@ -6,6 +6,7 @@
 // case's clock, the outbox and the audit ledger, and to probe the triggers.
 import { beforeAll, describe, expect, it } from "vitest";
 import { BCP_TEMPLATE } from "@cdf/contracts";
+import { bcpCellOk, bcpNormalize, bcpSheet } from "@cdf/validation";
 import {
   USERS,
   admin,
@@ -880,6 +881,111 @@ describe("BCP import: validation of the control sheet and every cell (§45)", ()
         select state, detail from exchange.bcp_import_row where batch_id = ${closed}`;
       expect(w).toEqual({ state: "INVALID", detail: "ORIGINAL_EVENT_AT" });
     });
+  });
+});
+
+describe("BCP import: the application applies the database's column rules (§45)", () => {
+  it("normalizes and judges every kind of cell exactly as exchange.bcp_cell_ok does", async () => {
+    const U = "6F9619FF-8B86-4011-B42D-00CF4FC964FF";
+    const samples: [string, string, string][] = [
+      ...["BCP-1", "bcp-1", " BCP-2 ", "BCP-1000", "BCP-", "BCP-X", ""].map((v): [string, string, string] => [
+        "01_CONTROL",
+        "TEMPLATE_VERSION",
+        v,
+      ]),
+      ...[
+        "BCP-S1",
+        "bcp-s1",
+        "BCP--",
+        `BCP-${"A".repeat(60)}`,
+        `BCP-${"A".repeat(61)}`,
+        U,
+        "S1",
+        "BCP-S_1",
+        "",
+      ].map((v): [string, string, string] => ["05_SUBJECTS", "ROW_ID", v]),
+      ...["", "BCP-S9", U.toLowerCase(), "{" + U + "}", "subject"].map((v): [string, string, string] => [
+        "06_ALLEGATIONS",
+        "SUBJECT_REF",
+        v,
+      ]),
+      ...["", U, "not-a-uuid", `${U}0`].map((v): [string, string, string] => ["05_SUBJECTS", "OBJECT_ID", v]),
+      ...[
+        "2026-10-01T09:30:00Z",
+        "2026-10-01T09:30Z",
+        "2026-10-01T09:30:00.123456Z",
+        "2026-10-01T09:30:00.1234567Z",
+        "2026-02-29T00:00:00Z",
+        "2024-02-29T00:00:00Z",
+        "2026-02-30T00:00:00Z",
+        "2026-04-31T00:00:00Z",
+        "2026-13-01T00:00:00Z",
+        "2026-00-10T00:00:00Z",
+        "2026-01-01T24:00:00Z",
+        "2026-01-01T24:00:01Z",
+        "2026-01-01T23:60:00Z",
+        "2026-01-01T23:59:60Z",
+        "2026-01-01T23:59:61Z",
+        "2026-01-01T10:00:00+03:00",
+        "2026-01-01T10:00:00-15:00",
+        "2026-01-01T10:00:00+16:00",
+        "2026-01-01T10:00:00",
+        "2026-01-01 10:00:00Z",
+        "0000-01-01T00:00:00Z",
+        "45000",
+        "",
+      ].map((v): [string, string, string] => ["05_SUBJECTS", "ORIGINAL_EVENT_AT", v]),
+      ...["2026-12-31", "2026-02-30", "2026-1-1", "31/12/2026", "0000-01-01", ""].map(
+        (v): [string, string, string] => ["21_CORRECTIVE_ACTIONS", "DUE_DATE", v],
+      ),
+      ...[
+        "lead@example.test",
+        "LEAD@EXAMPLE.TEST",
+        "lead",
+        "a b@example.test",
+        "lead@",
+        "",
+        " lead@example.test ",
+      ].map((v): [string, string, string] => ["05_SUBJECTS", "RECORDED_OFFLINE_BY", v]),
+      ...["EMPLOYEE", "employee", "OTHER", ""].map((v): [string, string, string] => [
+        "05_SUBJECTS",
+        "SUBJECT_CATEGORY",
+        v,
+      ]),
+      ...["MISCONDUCT", "misconduct", "AB", "MIS-CONDUCT", ""].map((v): [string, string, string] => [
+        "06_ALLEGATIONS",
+        "CATEGORY",
+        v,
+      ]),
+      ...["A", "AB", " A ", "x".repeat(200), "x".repeat(201), ""].map((v): [string, string, string] => [
+        "05_SUBJECTS",
+        "DISPLAY_LABEL",
+        v,
+      ]),
+      ...["", "A", "Policy 7"].map((v): [string, string, string] => [
+        "06_ALLEGATIONS",
+        "POLICY_REFERENCE",
+        v,
+      ]),
+    ];
+    const db = await admin<{ i: number; ok: boolean; v: string | null }[]>`
+      select s.i::int as i, exchange.bcp_cell_ok(c, exchange.bcp_normalize(c.kind, s.raw)) as ok,
+             exchange.bcp_normalize(c.kind, s.raw) as v
+      from unnest(${samples.map((x) => x[0])}::text[], ${samples.map((x) => x[1])}::text[],
+                  ${samples.map((x) => x[2])}::text[]) with ordinality as s(sheet, col, raw, i)
+      join exchange.bcp_template_column c
+        on c.template_version = 'BCP-1' and c.sheet_code = s.sheet and c.column_code = s.col
+      order by s.i`;
+    expect(db).toHaveLength(samples.length);
+    const differences = samples.flatMap(([sheet, col, raw], k) => {
+      const column = bcpSheet(sheet)!.columns.find((c) => c.code === col)!;
+      const v = bcpNormalize(column.kind, raw);
+      const ok = bcpCellOk(column, v);
+      return ok === db[k]!.ok && v === db[k]!.v
+        ? []
+        : [`${sheet}.${col} ${JSON.stringify(raw)}: app ${ok}/${v} db ${db[k]!.ok}/${db[k]!.v}`];
+    });
+    expect(differences).toEqual([]);
   });
 });
 

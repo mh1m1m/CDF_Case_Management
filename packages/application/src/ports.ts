@@ -4,6 +4,7 @@
 import type {
   Actor,
   AttachmentSource,
+  BcpWorkbook,
   AuditTimelineEntry,
   CaseDetail,
   CaseDiscoveryResult,
@@ -112,6 +113,19 @@ export interface ScanResult {
 export interface MalwareScanner {
   readonly name: string;
   scan(content: Uint8Array, hint: { contentType: string; objectKey: string }): Promise<ScanResult>;
+}
+
+export type WorkbookReadResult = { ok: true; workbook: BcpWorkbook } | { ok: false; code: string };
+
+/**
+ * Reads an uploaded continuity workbook (ADR-034 D3). The upload is untrusted: an implementation checks sizes and
+ * entry counts before inflating, refuses DTDs, external entities, macros and embedded content, and returns every
+ * cell as a string. A refusal carries a stable code, never file content.
+ * PRODUCTION_SUBSTITUTION_REQUIRED: a vetted workbook reader in the CDF runtime.
+ */
+export interface WorkbookReader {
+  readonly name: string;
+  read(bytes: Uint8Array): WorkbookReadResult;
 }
 
 export interface RegisteredEvidenceVersion {

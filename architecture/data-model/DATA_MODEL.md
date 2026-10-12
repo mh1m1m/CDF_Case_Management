@@ -306,3 +306,13 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `decision.corrective_action_policy` | Effective-dated per action type: due period, reminder, escalation, evidence  | Seeded as empty SOURCE_REQUIRED placeholders; versions never edited                                |
 | `decision.corrective_action`        | One action from an approved CORRECTIVE_ACTION or GOVERNANCE_REMEDIATION item | Item and authority decision fixed; owner, due date, status; never deleted; WAIVED is final         |
 | `decision.corrective_action_event`  | Append-only history of each action                                           | Opening, owner and due-date changes, progress, completion, verification, return, reopening, waiver |
+
+## Continuity workbook import (migration 1960, ADR-034)
+
+| Table                          | Purpose                                                                                                     | Notes                                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `exchange.bcp_template_sheet`  | The sheets of template BCP-1 and the command each imported sheet runs                                       | Reference data; equal to `BCP_TEMPLATE` in `@cdf/contracts` (tested)                                           |
+| `exchange.bcp_template_column` | Each sheet's columns: kind, required, length, allowed values                                                | Reference data; the database's column rules (`exchange.bcp_cell_ok`)                                           |
+| `exchange.bcp_import_batch`    | One staged workbook for one case: control row, file SHA-256, status, preview and submitted hashes           | Importer and approver differ; at most one open batch per case and workbook id; the file itself is not kept     |
+| `exchange.bcp_import_row`      | A staged row: cells as strings, state, failing column, resolution with reason, last dry-run outcome         | Immutable from submission; visible with its batch only                                                         |
+| `exchange.bcp_provenance`      | Offline origin of each imported object: workbook, sheet, row id, original time, recorder, importer, markers | Append-only; unique per case, workbook and row id (re-import is a no-op); visible with the object it describes |
