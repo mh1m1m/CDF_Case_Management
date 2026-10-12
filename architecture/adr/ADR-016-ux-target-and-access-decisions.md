@@ -338,7 +338,7 @@ UX-002 is re-rated only after that.
   - the person chooses one officer, and `api.create_case_task(case, 'RETENTION_REVIEW', officer, purpose)` gives the task (audited `CASE_TASK_ASSIGNED`). A person routes; no rule chooses the officer, as part 3 requires;
   - a cancelled or lapsed task brings the item back.
 - **Completing the review.** Classifying is the outcome of a retention review, so `api.assign_retention_class` also completes the caller's own open `RETENTION_REVIEW` task on the case (audited `CASE_TASK_COMPLETED`). The task leaves their work and its access ends with it; the record page then returns them to Records with a notice.
-- **Tests.** `tests/security/retention-review-queue.spec.ts` (RRQ-01 to RRQ-13) covers:
+- **Tests.** `tests/security/retention-review-queue.spec.ts` (RRQ-01 to RRQ-15) covers:
   - archiving creates exactly one item, the same for every officer;
   - archiving twice creates no second item;
   - nobody else gets it, and clearance, restricted cases and another officer's task are respected;
@@ -349,7 +349,9 @@ UX-002 is re-rated only after that.
   - a restricted case goes to its authority, who routes it to one eligible officer; the task stands for the item, opens no content, and completes with the class, audited;
   - a case the pool can take is never routed;
   - above every officer's clearance, the authorities are told no officer is eligible, and the task command refuses one;
-  - the reviewer list refuses everyone else, and a cancelled or lapsed task brings the item back.
+  - the reviewer list refuses everyone else, and a cancelled or lapsed task brings the item back;
+  - classifying completes only the classifier's own task; another officer's task on the case stays open;
+  - a task whose holder has lost the role or the clearance no longer stands for the obligation, so the item comes back.
 
 ## Delivery governance
 

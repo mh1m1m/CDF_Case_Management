@@ -506,6 +506,72 @@ describe("retention review queue at archive (ADR-016 D8, DEC-37)", () => {
       expect(await retentionWork(s, "recordsB", caseExec)).toEqual([]);
     });
   });
+
+  // AGENT-09's review of the routing delta: completion is the classifier's own, never another officer's.
+  it("RRQ-14: classifying completes only the classifier's own task; another officer's task stays open", async () => {
+    await ownerScenario(async (s) => {
+      await closeAndArchive(s, caseB);
+      const mine = await giveTask(s, caseB, "records", "RETENTION_REVIEW");
+      const theirs = await giveTask(s, caseB, "recordsB", "RETENTION_REVIEW");
+      await s.as("records");
+      await s.tx`select api.assign_retention_class(${caseB}, 'WB_CASE_NOT_INVESTIGATED')`;
+
+      await s.asOwner();
+      const tasks = await s.tx<{ id: string; status: string; closed_by: string | null }[]>`
+        select id, status, closed_by from case_mgmt.case_task where id in (${mine}, ${theirs})`;
+      expect(tasks.find((t) => t.id === mine)).toMatchObject({
+        status: "COMPLETED",
+        closed_by: USERS.records,
+      });
+      expect(tasks.find((t) => t.id === theirs)).toMatchObject({ status: "OPEN", closed_by: null });
+      expect((await retentionWork(s, "recordsB")).map((w) => [w.category, w.target_id])).toEqual([
+        ["TASK_RETENTION_REVIEW", theirs],
+      ]);
+      await s.as("internalAudit");
+      const completed = await s.tx<{ object_id: string }[]>`
+        select object_id from audit.audit_event where action = 'CASE_TASK_COMPLETED' and case_id = ${caseB}`;
+      expect(completed).toEqual([{ object_id: mine }]);
+    });
+  });
+
+  // A task stands for the obligation only while its holder can still act on it.
+  it("RRQ-15: a task whose holder lost the role or the clearance no longer hides the obligation", async () => {
+    for (const lose of ["role", "clearance"] as const) {
+      await ownerScenario(async (s) => {
+        await setArchived(s, caseExec, "CONFIDENTIAL");
+        const taskId = await routeTo(s, "grcDirector", caseExec, "recordsB");
+        expect(await routeWork(s, "grcDirector", caseExec), lose).toEqual([]);
+
+        await s.asOwner();
+        if (lose === "role") {
+          await s.tx`update iam.user_role_assignment set status = 'REVOKED', revoked_at = now(),
+                       revocation_reason = 'Synthetic: left records.'
+                     where user_id = ${USERS.recordsB} and role_code = 'RECORDS_OFFICER'`;
+        } else {
+          await s.tx`update iam.user_profile set clearance = 'RESTRICTED' where id = ${USERS.recordsB}`;
+        }
+        const [task] = await s.tx<{ status: string }[]>`
+          select status from case_mgmt.case_task where id = ${taskId}`;
+        expect(task!.status, lose).toBe("OPEN"); // still open, but its holder can no longer classify
+
+        expect(
+          (await routeWork(s, "grcDirector", caseExec)).map((w) => w.category),
+          lose,
+        ).toEqual(["RETENTION_TO_ROUTE"]);
+        expect(await canRoute(s, "grcDirector", caseExec), lose).toBe(true);
+        expect(
+          (await reviewers(s, "grcDirector", caseExec)).map((r) => r.user_id),
+          lose,
+        ).toEqual([USERS.records]);
+        // The holder keeps no case reference: without the role the item is gone; without the clearance it is masked.
+        const left = await retentionWork(s, "recordsB", caseExec);
+        expect(
+          left.map((w) => [w.case_id, w.case_number]),
+          lose,
+        ).toEqual(lose === "role" ? [] : [[null, null]]);
+      });
+    }
+  });
 });
 
 /** Moves a case to ARCHIVED at a given classification as the owner (fixture; no workflow event). */
