@@ -18,6 +18,7 @@ import {
 } from "../support/db";
 import { REASON, committeeIds } from "../support/committee";
 import { caseFacts, draftPackage, voteOnPackage } from "../support/decision";
+import { closeAndArchive } from "../support/records";
 
 const SHA = "a".repeat(64);
 const WORKBOOK = "BCP-DEMO-0002-WB1";
@@ -207,6 +208,13 @@ async function recipientsSeeBatches(s: OwnerScenario) {
   await s.asOwner();
 }
 
+/** Test fixture: `user` declares a conflict on case 0002, which hides the case from them (§19). */
+async function conflicted(s: OwnerScenario, user: UserKey) {
+  await s.asOwner();
+  await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
+             values (${caseB}, ${USERS[user]}, 'CONFLICT_DECLARED', 'Synthetic declared conflict')`;
+}
+
 async function audited(s: OwnerScenario, batch: string): Promise<string[]> {
   await s.asOwner();
   const list = await s.tx<{ action: string }[]>`
@@ -235,7 +243,7 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
       const [auditBefore] = await s.tx<{ n: number }[]>`select count(*)::int as n from audit.audit_event`;
 
       const batch = await stage(s, "caseManager", control(t, caseB), [
-        subjectRow(3, "bcp-s1", t.now),
+        subjectRow(3, "bcp-s1", t.created),
         allegationRow(3, "BCP-A1", t.now, "BCP-S1"),
         allegationRow(4, "BCP-A2", t.now, facts.subject),
         allegationRow(5, "BCP-A3", t.dayBefore, "BCP-S1"),
@@ -286,7 +294,20 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
       );
       await resolve(s, staged["BCP-A3"]!.id, "SKIP");
       await resolve(s, staged["BCP-C1"]!.id, "SKIP");
-      // A resolution clears the preview: the old hash no longer submits.
+      // A resolution clears the preview, and only the importer's own preview submits: not even the batch's current
+      // hash, computed elsewhere.
+      await s.asOwner();
+      const [cleared] = await s.tx<
+        { preview_hash: string | null; preview_clean: boolean; current: string }[]
+      >`
+        select preview_hash, preview_clean, exchange.bcp_batch_hash(id) as current
+        from exchange.bcp_import_batch where id = ${batch}`;
+      expect([cleared!.preview_hash, cleared!.preview_clean]).toEqual([null, false]);
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_CONFLICT:PREVIEW_CHANGED",
+        (tx) => tx`select api.submit_bcp_import(${batch}, ${cleared!.current})`,
+      );
       await s.expectError(
         "CDF_CONFLICT:PREVIEW_CHANGED",
         (tx) => tx`select api.submit_bcp_import(${batch}, ${p.hash})`,
@@ -298,6 +319,15 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
         (tx) => tx`select api.submit_bcp_import(${batch}, ${"b".repeat(64)})`,
       );
       expect(await submit(s, batch)).toBe("SUBMITTED");
+      // From submission rows are fixed, and nothing is applied before an approval.
+      await s.expectError(
+        "CDF_CONFLICT:NOT_STAGED",
+        (tx) => tx`select api.resolve_bcp_row(${staged["BCP-S1"]!.id}, 'SKIP', ${WHY})`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:NOT_APPROVED",
+        (tx) => tx`select api.apply_bcp_import(${batch}, ${p.hash})`,
+      );
       expect(await notified(s, "BCP_IMPORT_APPROVAL_REQUESTED", batch)).toEqual(["grcDeputy", "grcDirector"]);
 
       // A different person approves; the importer never does, and only the importer applies.
@@ -320,6 +350,12 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
         (tx) => tx`select api.decide_bcp_import(${batch}, 'APPROVE', 'ok', ${p.hash})`,
       );
       expect(await decide(s, "grcDirector", batch)).toBe("APPROVED");
+      // A decision is made once: another eligible approver cannot overturn it.
+      await s.as("grcDeputy");
+      await s.expectError(
+        "CDF_CONFLICT:NOT_SUBMITTED",
+        (tx) => tx`select api.decide_bcp_import(${batch}, 'REJECT', ${REASON}, ${p.hash})`,
+      );
       expect(await notified(s, "BCP_IMPORT_DECIDED", batch)).toEqual(["caseManager"]);
       await recipientsSeeBatches(s);
       await s.as("grcDirector");
@@ -373,6 +409,11 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
         expect(r.markers).toEqual(["RECORDED_OFFLINE", "IMPORTED_LATER"]);
         expect(r.workbook_id).toBe(WORKBOOK);
       }
+      // The original event time survives the import (ADR-034 D8).
+      const [original] = await s.tx<{ same: boolean }[]>`
+        select original_event_at = ${t.created}::text::timestamptz as same
+        from exchange.bcp_provenance where batch_id = ${batch} and row_key = 'BCP-S1'`;
+      expect(original!.same).toBe(true);
       const byKey = Object.fromEntries(prov.map((r) => [r.row_key, r.object_id]));
       const [a1] = await s.tx<{ subject_id: string; created_by: string }[]>`
         select subject_id, created_by from case_mgmt.allegation where id = ${byKey["BCP-A1"]!}`;
@@ -566,6 +607,43 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
       );
     });
   });
+
+  it("stages an event time before the offline window as INVALID, even after the case was created", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      const batch = await stage(s, "caseManager", control(t, caseB, { OFFLINE_FROM: t.now }), [
+        subjectRow(3, "BCP-S1", t.created),
+        subjectRow(4, "BCP-S2", t.now),
+      ]);
+      const staged = await rows(s, batch);
+      expect([staged["BCP-S1"]!.state, staged["BCP-S1"]!.detail]).toEqual(["INVALID", "ORIGINAL_EVENT_AT"]);
+      expect([staged["BCP-S2"]!.state, staged["BCP-S2"]!.detail]).toEqual(["NEW", null]);
+    });
+  });
+
+  it("resolves row references within one workbook only, and only to subjects", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      await importAll(s, control(t, caseB), [subjectRow(3, "BCP-S1", t.now)]);
+      const plain = (n: number, key: string) =>
+        row("06_ALLEGATIONS", n, key, t.now, {
+          CATEGORY: "MISCONDUCT",
+          DESCRIPTION: "Synthetic: allegation recorded during the outage.",
+        });
+      const batch = await stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: "BCP-DEMO-0002-WB2" }), [
+        plain(3, "BCP-A3"),
+        // BCP-S1 belongs to another workbook of the same case; BCP-A3 is not a subject.
+        allegationRow(4, "BCP-A1", t.now, "BCP-S1"),
+        allegationRow(5, "BCP-A2", t.now, "BCP-A3"),
+      ]);
+      const p = await preview(s, batch);
+      expect(Object.fromEntries(p.rows.map((r) => [r.row_key, r.outcome]))).toEqual({
+        "BCP-A3": "OK",
+        "BCP-A1": "CDF_INVALID:SUBJECT_REF",
+        "BCP-A2": "CDF_INVALID:SUBJECT_REF",
+      });
+    });
+  });
 });
 
 describe("BCP import: who may stage, see, approve and apply", () => {
@@ -739,6 +817,105 @@ describe("BCP import: who may stage, see, approve and apply", () => {
       expect(
         await s.tx`select id from exchange.bcp_provenance where batch_id = ${batch} and object_type <> 'corrective_action'`,
       ).toHaveLength(0);
+      // Nobody else outside the case does.
+      for (const outsider of ["investigatorA", "committee", "platformAdmin", "employee"] as UserKey[]) {
+        await s.as(outsider);
+        expect(
+          await s.tx`select id from exchange.bcp_provenance where object_id = ${a!.id}`,
+          outsider,
+        ).toHaveLength(0);
+      }
+
+      // Probe of the internal row runner (owner connection with the importer's claims): an item or notice the
+      // importer can see must still belong to the batch's own case. Here the batch claims to be case 0001's.
+      await s.as("caseManager");
+      const [notice] = await s.tx<{ id: string }[]>`
+        select api.issue_defence_notice(${f.subject}, 'Synthetic: you are invited to respond.',
+          ${[f.allegation]}::uuid[], now() + interval '14 days') as id`;
+      await s.asOwner();
+      await s.tx`select set_config('request.jwt.claims', ${JSON.stringify({ sub: USERS.caseManager, role: "authenticated" })}, true)`;
+      const elsewhere = (sheet: string, cells: Record<string, string>) => (tx: typeof s.tx) =>
+        tx`select exchange.bcp_execute_row(
+             jsonb_populate_record(b, jsonb_build_object('case_id', ${caseA}::uuid)),
+             jsonb_populate_record(r, jsonb_build_object('sheet_code', ${sheet}::text, 'cells', ${tx.json(cells)}::jsonb)),
+             '{}'::jsonb)
+           from exchange.bcp_import_batch b join exchange.bcp_import_row r on r.batch_id = b.id
+           where b.id = ${batch} limit 1`;
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        elsewhere("21_CORRECTIVE_ACTIONS", {
+          RECOMMENDATION_ITEM_ID: f.corrective,
+          TITLE: "Synthetic: second approver on payments",
+          DESCRIPTION: "Synthetic: agreed with the owner during the outage.",
+          OWNER: EMAIL.employeeB!,
+          DUE_DATE: t.tomorrow.slice(0, 10),
+        }),
+      );
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        elsewhere("18_EMPLOYEE_NOTICE", {
+          NOTICE_ID: notice!.id,
+          CHANNEL: "PHYSICAL_SUBMISSION",
+          ORIGINAL_SUBMISSION_DATE: t.now,
+          RESPONSE_TEXT: "Synthetic: written defence handed to the secretary.",
+          ORIGINAL_DOCUMENT_REFERENCE: "PAPER-DEMO-0002",
+        }),
+      );
+    });
+  });
+
+  it("loses a batch with the case or the permission: a conflicted importer or approver sees and does nothing (§19)", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      const batch = await stage(s, "caseManager", control(t, caseB), [subjectRow(3, "BCP-S1", t.now)]);
+      const staged = await rows(s, batch);
+      // Test fixture only: the importer's role loses BCP_IMPORT; their batch stays visible, every command is refused.
+      await s.asOwner();
+      await s.tx`delete from iam.role_permission where role_code = 'CASE_MANAGER' and permission_code = 'BCP_IMPORT'`;
+      await s.as("caseManager");
+      expect(await s.tx`select id from exchange.bcp_import_batch where id = ${batch}`).toHaveLength(1);
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.resolve_bcp_row(${staged["BCP-S1"]!.id}, 'SKIP', ${WHY})`,
+      );
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.preview_bcp_import(${batch})`);
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.submit_bcp_import(${batch}, ${SHA})`);
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.apply_bcp_import(${batch}, ${SHA})`);
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.cancel_bcp_import(${batch}, ${REASON})`);
+      await s.asOwner();
+      await s.tx`insert into iam.role_permission (role_code, permission_code) values ('CASE_MANAGER', 'BCP_IMPORT')`;
+      // An approver who declares a conflict is not asked, loses the batch and cannot decide it.
+      await conflicted(s, "grcDirector");
+      await s.as("caseManager");
+      expect(await submit(s, batch)).toBe("SUBMITTED");
+      expect(await notified(s, "BCP_IMPORT_APPROVAL_REQUESTED", batch)).toEqual(["grcDeputy"]);
+      await s.as("grcDirector");
+      expect(await s.tx`select id from exchange.bcp_import_batch where id = ${batch}`).toHaveLength(0);
+      expect(await s.tx`select id from exchange.bcp_import_row where batch_id = ${batch}`).toHaveLength(0);
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.decide_bcp_import(${batch}, 'APPROVE', ${REASON}, ${SHA})`,
+      );
+      // So does the importer.
+      await conflicted(s, "caseManager");
+      await s.as("caseManager");
+      expect(await s.tx`select id from exchange.bcp_import_batch where id = ${batch}`).toHaveLength(0);
+      expect(await s.tx`select id from exchange.bcp_import_row where batch_id = ${batch}`).toHaveLength(0);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.cancel_bcp_import(${batch}, ${REASON})`);
+    });
+  });
+
+  it("stages nothing on a closed or archived case", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      await closeAndArchive(s, caseB);
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_CONFLICT:CASE_NOT_ACTIVE",
+        (tx) =>
+          tx`select api.stage_bcp_import(${tx.json(control(t, caseB) as never)}::jsonb, ${SHA},
+             ${tx.json([subjectRow(3, "BCP-S1", t.now)] as never)}::jsonb)`,
+      );
     });
   });
 });
@@ -1065,6 +1242,11 @@ describe("BCP import: integrity", () => {
       );
       await s.expectError(
         "",
+        (tx) =>
+          tx`update exchange.bcp_import_batch set decision_reason = 'Synthetic: rewritten reason.' where id = ${batch}`,
+      );
+      await s.expectError(
+        "",
         (tx) => tx`update exchange.bcp_import_row set resolution = 'SKIP' where batch_id = ${batch}`,
       );
       await s.expectError("", (tx) => tx`delete from exchange.bcp_import_row where batch_id = ${batch}`);
@@ -1082,6 +1264,23 @@ describe("BCP import: integrity", () => {
         "",
         (tx) => tx`update exchange.bcp_import_batch set case_id = ${caseA} where id = ${open}`,
       );
+      // A submitted batch keeps the hash its approval will be bound to.
+      await s.as("caseManager");
+      expect(await submit(s, open)).toBe("SUBMITTED");
+      await s.asOwner();
+      await s.expectError(
+        "",
+        (tx) =>
+          tx`update exchange.bcp_import_batch set submitted_hash = ${"e".repeat(64)} where id = ${open}`,
+      );
     });
+  });
+
+  it("reports a command's own error codes only, never database text (§82)", async () => {
+    const [codes] = await admin<{ raw: string; found: string; conflict: string }[]>`
+      select exchange.bcp_error_code('duplicate key value violates unique constraint "case_subject_pkey"') as raw,
+             exchange.bcp_error_code('CDF_NOT_FOUND') as found,
+             exchange.bcp_error_code('CDF_CONFLICT:BATCH_OPEN') as conflict`;
+    expect(codes).toEqual({ raw: "CDF_ERROR", found: "CDF_NOT_FOUND", conflict: "CDF_CONFLICT:BATCH_OPEN" });
   });
 });
