@@ -1274,9 +1274,25 @@ describe("every state-changing command writes its audit event in the same transa
             { n: string }[]
           >`select case_number as n from case_mgmt.case_record where id = ${exec}`;
           await s.as("committeeSecretary");
-          await s.tx`select api.record_grievance('LINKED', ${c!.n}, 'Employee Psi (synthetic)', null, null, null, 'EMAIL',
-            now(), now() - interval '2 days', 'Synthetic: walk restricted grievance.', 'EMAIL-DEMO-WALK3')`;
+          ids.restrictedGrievance = await one(
+            s,
+            s.tx`select api.record_grievance('LINKED', ${c!.n}, 'Employee Psi (synthetic)', null, null, null, 'EMAIL',
+              now(), now() - interval '2 days', 'Synthetic: walk restricted grievance.', 'EMAIL-DEMO-WALK3') as id`,
+          );
           return r;
+        },
+      },
+      {
+        // G2b: the owner names a second, cleared secretary to handle that grievance.
+        fn: "approve_restricted_grievance_handling",
+        actor: "grcDirector",
+        run: async (s) => {
+          await s.as("platformAdmin");
+          await s.tx`select api.appoint_committee_member(${ids.gc!}, ${USERS.grcDeputy}, 'ALTERNATE_SECRETARY', now(), null,
+            'DEMO-APPT-GC')`;
+          await s.as("grcDirector");
+          return s.tx`select api.approve_restricted_grievance_handling(${ids.restrictedGrievance!}, ${USERS.grcDeputy},
+            ${REASON})`;
         },
       },
       {

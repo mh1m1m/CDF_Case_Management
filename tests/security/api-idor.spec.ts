@@ -789,6 +789,13 @@ const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
     call: (tx, t) =>
       tx`select api.record_defence_response(${t.notice}, 'EMAIL', now(), 'Probe response text.', 'EMAIL-PROBE-0001')`,
   },
+  // AGENT-09 G2b (migration 1910): the Restricted Case Authority names a secretary to handle a received grievance.
+  {
+    fn: "approve_restricted_grievance_handling",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.approve_restricted_grievance_handling(${t.grievance}, ${self}, ${REASON})`,
+  },
   {
     fn: "file_grievance",
     outcome: "NOT_FOUND",

@@ -55,7 +55,8 @@ insert into notify.template (code, object_type, is_mandatory, description) value
   ('DEFENCE_DUE_REMINDER',             'DEFENCE_NOTICE', true,  'A defence response is due soon (Q90)'),
   ('GRIEVANCE_RECEIVED',               'GRIEVANCE',      false, 'A grievance awaits the Grievance Committee Secretary (Q92)'),
   ('GRIEVANCE_ADMISSIBILITY_DECIDED',  'GRIEVANCE',      true,  'The grievant''s grievance was admitted or found inadmissible (Q93)'),
-  ('GRIEVANCE_OUTCOME_RECORDED',       'GRIEVANCE',      true,  'The Grievance Committee recorded its outcome (Q95)');
+  ('GRIEVANCE_OUTCOME_RECORDED',       'GRIEVANCE',      true,  'The Grievance Committee recorded its outcome (Q95)'),
+  ('GRIEVANCE_AUTHORITY_APPROVAL_NEEDED', 'GRIEVANCE',    true,  'A grievance on a restricted case waits for its Restricted Case Authority to name a secretary (G2b)');
 
 create table notify.rule (
   id             uuid primary key default gen_random_uuid(),
@@ -304,8 +305,11 @@ security definer
 set search_path = ''
 as $$
 begin
-  perform notify.enqueue('MEETING_INVITATION', new.user_id, new.meeting_id, notify.meeting_committee(new.meeting_id),
-                         'meeting-invitation:' || new.id);
+  -- AGENT-09 review of 1920: an invitation goes only to a participant who passes the case gate.
+  if authz.user_case_gate(new.user_id, (select m.case_id from committee.meeting m where m.id = new.meeting_id)) then
+    perform notify.enqueue('MEETING_INVITATION', new.user_id, new.meeting_id, notify.meeting_committee(new.meeting_id),
+                           'meeting-invitation:' || new.id);
+  end if;
   return null;
 end;
 $$;
@@ -322,8 +326,11 @@ declare
   v_user uuid;
 begin
   if new.status = 'CANCELLED' and old.status <> 'CANCELLED' then
+    -- AGENT-09 N2: only participants who still pass the case gate and have no meeting conflict in the proceeding.
     for v_user in select distinct mp.user_id from committee.meeting_participant mp
-                  where mp.meeting_id = new.id and mp.user_id is not null loop
+                  where mp.meeting_id = new.id and mp.user_id is not null
+                    and authz.user_case_gate(mp.user_id, new.case_id)
+                    and not authz.has_meeting_conflict(mp.user_id, new.committee_proceeding_id) loop
       perform notify.enqueue('MEETING_CANCELLED', v_user, new.id, notify.meeting_committee(new.id),
                              'meeting-cancelled:' || new.id);
     end loop;
@@ -412,9 +419,18 @@ begin
   if tg_op = 'INSERT' then
     for v_user in select m.user_id from committee.membership m
                   where m.committee_id = v_gc and m.seat in ('SECRETARY', 'ALTERNATE_SECRETARY')
-                    and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now()) loop
+                    and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())
+                    -- AGENT-09 N1 / G2b: only a secretary who may handle it is told the grievance exists.
+                    and authz.user_can_handle_grievance(m.user_id, new.id) loop
       perform notify.enqueue('GRIEVANCE_RECEIVED', v_user, new.id, v_gc, 'grievance-received:' || new.id);
     end loop;
+    -- G2b: a portal grievance on a restricted case reaches no secretary until the case owner names one, so the owner
+    -- is asked. (A secretary who records one already holds an approval or works the case.)
+    if new.channel = 'EMPLOYEE_PORTAL' then
+      perform notify.enqueue('GRIEVANCE_AUTHORITY_APPROVAL_NEEDED', c.owner_id, new.id, null,
+                             'grievance-authority:' || new.id)
+      from case_mgmt.case_record c where c.id = new.case_id and c.is_restricted;
+    end if;
   elsif new.status in ('ADMITTED', 'INADMISSIBLE') and old.status not in ('ADMITTED', 'INADMISSIBLE') then
     perform notify.enqueue('GRIEVANCE_ADMISSIBILITY_DECIDED', new.grievant_user_id, new.id, v_gc,
                            'grievance-admissibility:' || new.id);

@@ -499,3 +499,159 @@ describe("AGENT-09 review of 1910 (G1–G3, outcome vote binding)", () => {
     });
   });
 });
+
+describe("AGENT-09 re-check of 1910 (G2b, G3b, approval checks)", () => {
+  const RESTRICTED_GC: [Parameters<typeof seat>[2][number][0], string][] = [
+    ["committee", "CHAIR"],
+    ["grcDeputy", "SECRETARY"],
+    ["grcSectorHead", "ALTERNATE_SECRETARY"],
+  ];
+  const caseNumber = async (id: string) =>
+    (await admin<{ n: string }[]>`select case_number as n from case_mgmt.case_record where id = ${id}`)[0]!.n;
+  const visible = async (s: Scenario, grievance: string) =>
+    (await s.tx`select id from grievance.grievance where id = ${grievance}`).length === 1;
+
+  it("a portal grievance on a restricted case reaches a secretary only once its authority names them (G2b)", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, RESTRICTED_GC);
+      await s.as("grcDirector");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseExec}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [l] = await s.tx<{ id: string }[]>`
+        select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON}) as id`;
+      await s.as("employee");
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.file_grievance(${l!.id}, now() - interval '2 days', 'Synthetic: grievance grounds.') as id`;
+      for (const user of ["grcDeputy", "grcSectorHead"] as const) {
+        await s.as(user);
+        expect(await visible(s, g!.id), user).toBe(false);
+        await s.expectError(
+          "CDF_NOT_FOUND",
+          (tx) => tx`select api.assess_grievance_admissibility(${g!.id}, 'INADMISSIBLE', null, ${REASON})`,
+        );
+      }
+      await s.asOwner();
+      const notices = await s.tx<{ recipient_id: string; template_code: string }[]>`
+        select distinct recipient_id, template_code from notify.outbox where object_id = ${g!.id}`;
+      expect(notices).toEqual([
+        { recipient_id: USERS.grcDirector, template_code: "GRIEVANCE_AUTHORITY_APPROVAL_NEEDED" },
+      ]);
+
+      const approve = (secretary: string) =>
+        s.tx`select api.approve_restricted_grievance_handling(${g!.id}, ${secretary}, ${REASON}) as id`;
+      await s.as("caseManager");
+      await s.expectError("CDF_NOT_FOUND", () => approve(USERS.grcDeputy));
+      await s.as("grcDirector");
+      await s.expectError("CDF_INVALID:secretary_id", () => approve(USERS.grcDirector));
+      await approve(USERS.grcDeputy);
+      await s.expectError("CDF_CONFLICT:ALREADY_APPROVED", () => approve(USERS.grcDeputy));
+      await s.as("grcDeputy");
+      expect(await visible(s, g!.id)).toBe(true);
+      await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'INADMISSIBLE', null, ${REASON})`;
+      await s.as("grcSectorHead");
+      expect(await visible(s, g!.id)).toBe(false);
+    });
+  });
+
+  it("the authority can name only a secretary cleared for the case (G2b)", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, [
+        ["committee", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"], // CONFIDENTIAL: not cleared for the SECRET case
+        ["grcDeputy", "ALTERNATE_SECRETARY"],
+      ]);
+      await s.as("grcDirector");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseExec}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [l] = await s.tx<{ id: string }[]>`
+        select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON}) as id`;
+      await s.as("employee");
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.file_grievance(${l!.id}, now() - interval '2 days', 'Synthetic: grievance grounds.') as id`;
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_INVALID:secretary_id",
+        (tx) =>
+          tx`select api.approve_restricted_grievance_handling(${g!.id}, ${USERS.committeeSecretary}, ${REASON})`,
+      );
+      await s.tx`select api.approve_restricted_grievance_handling(${g!.id}, ${USERS.grcDeputy}, ${REASON})`;
+    });
+  });
+
+  it("a recorded grievance on a restricted case is handled by its approved recorder only (G2b)", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, RESTRICTED_GC);
+      await s.as("grcDirector");
+      await s.tx`select api.approve_restricted_grievance_recording(${caseExec}, ${USERS.grcDeputy}, ${REASON})`;
+      await s.as("grcDeputy");
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.record_grievance('LINKED', ${await caseNumber(caseExec)}, 'Employee Psi (synthetic)', null, null, null,
+          'EMAIL', now(), now() - interval '2 days', 'Synthetic: restricted grievance grounds.', 'EMAIL-DEMO-0011') as id`;
+      expect(await visible(s, g!.id)).toBe(true);
+      await s.as("grcSectorHead");
+      expect(await visible(s, g!.id)).toBe(false);
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.assess_grievance_admissibility(${g!.id}, 'INADMISSIBLE', null, ${REASON})`,
+      );
+    });
+  });
+
+  it("a secretary who sat on the case's Investigation Committee does not assess its grievance (G3b, N9)", async () => {
+    await scenario(async (s) => {
+      await seat(s, ic, IC_SEATS); // legal is an IC voting member
+      await refer(s, ic, caseB);
+      await seat(s, gc, [
+        ["committee", "CHAIR"],
+        ["legal", "SECRETARY"],
+        ["investigatorB", "ALTERNATE_SECRETARY"],
+      ]);
+      const ids = await twoSubjects(s);
+      await s.as("employee");
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.file_grievance(${ids.sigmaLink!}, now() - interval '1 day', 'Synthetic: grievance grounds.') as id`;
+      await s.as("legal");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.assess_grievance_admissibility(${g!.id}, 'INADMISSIBLE', null, ${REASON})`,
+      );
+      await s.as("investigatorB");
+      await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
+    });
+  });
+
+  it("a grievant stays conflicted for their case after their portal link is revoked (G1)", async () => {
+    await ownerScenario(async (s) => {
+      const ids = await twoSubjects(s);
+      await s.as("employee");
+      await s.tx`select api.file_grievance(${ids.sigmaLink!}, now() - interval '1 day', 'Synthetic: grievance grounds.')`;
+      await s.as("caseManager");
+      await s.tx`select api.revoke_subject_portal_link(${ids.sigmaLink!}, ${REASON})`;
+      await s.asOwner();
+      const [r] = await s.tx<
+        { gate: boolean }[]
+      >`select authz.user_case_gate(${USERS.employee}, ${caseB}) as gate`;
+      expect(r!.gate).toBe(false);
+    });
+  });
+
+  it("only the case owner holding the authority approves, and only a seated, cleared secretary is named (G2)", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, [
+        ["committee", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"], // CONFIDENTIAL: not cleared for the SECRET case
+        ["grcDeputy", "ALTERNATE_SECRETARY"],
+      ]);
+      const approve = (recorder: string) =>
+        s.tx`select api.approve_restricted_grievance_recording(${caseExec}, ${recorder}, ${REASON}) as id`;
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
+      await s.expectError("CDF_INVALID:recorder_id", () => approve(USERS.committeeSecretary));
+      await s.expectError("CDF_INVALID:recorder_id", () => approve(USERS.grcSectorHead)); // cleared, holds no seat
+      // grcDeputy works the case and holds the authority, but does not own the case.
+      await s.as("grcDeputy");
+      await s.expectError("CDF_FORBIDDEN", () => approve(USERS.grcDeputy));
+      await s.expectError("CDF_FORBIDDEN", () => approve(USERS.grcSectorHead));
+    });
+  });
+});

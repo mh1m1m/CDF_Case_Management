@@ -3,13 +3,22 @@
 // recipient, honour the rule layers (mandatory, committee default, event rule, user mute) and are delivered by email
 // only through server-only functions the BFF login role holds.
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, caseId, ownerScenario, scenario, type Scenario } from "../support/db";
-import { REASON, committeeIds, scheduleMeeting, seat } from "../support/committee";
+import {
+  USERS,
+  caseId,
+  ownerScenario,
+  scenario,
+  type OwnerScenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
+import { IC_SEATS, REASON, committeeIds, openWithPresent, scheduleMeeting, seat } from "../support/committee";
 
-let caseB: string, ic: string, gc: string;
+let caseB: string, caseR: string, ic: string, gc: string;
 
 beforeAll(async () => {
   caseB = await caseId("0002");
+  caseR = await caseId("0003");
   ({ ic, gc } = await committeeIds());
 });
 
@@ -287,6 +296,182 @@ describe("server-only email delivery and reminders", () => {
       expect((await s.tx<{ n: number }[]>`select notify.emit_due_reminders() as n`)[0]!.n).toBe(0);
       await s.as("employee");
       expect(await mine(s, "DEFENCE_DUE_REMINDER")).toHaveLength(1);
+    });
+  });
+});
+
+// AGENT-09 review of 1920 (adopted from its probe): every notification row goes to someone who can open its object.
+const BY_ID = Object.fromEntries(Object.entries(USERS).map(([k, v]) => [v, k])) as Record<string, UserKey>;
+const VISIBLE: Record<string, string> = {
+  COMMITTEE: "select count(*)::int as n from committee.committee where id = $1",
+  MEETING: "select count(*)::int as n from committee.meeting where id = $1",
+  MINUTES: "select count(*)::int as n from committee.minutes where id = $1",
+  LEGAL_REVIEW: "select count(*)::int as n from decision.legal_review_request where id = $1",
+  DEFENCE_NOTICE: "select count(*)::int as n from grievance.defence_notice where id = $1",
+  GRIEVANCE: "select count(*)::int as n from grievance.grievance where id = $1",
+};
+
+async function outbox(s: OwnerScenario) {
+  await s.asOwner();
+  return s.tx<{ recipient_id: string; template_code: string; object_type: string; object_id: string }[]>`
+    select recipient_id, template_code, object_type, object_id from notify.outbox order by created_at`;
+}
+
+async function expectRecipientsSeeObjects(s: OwnerScenario) {
+  for (const r of await outbox(s)) {
+    await s.as(BY_ID[r.recipient_id]!);
+    const [v] = await s.tx.unsafe<{ n: number }[]>(VISIBLE[r.object_type]!, [r.object_id]);
+    expect(v!.n, `${BY_ID[r.recipient_id]} ${r.template_code}`).toBe(1);
+  }
+  await s.asOwner();
+}
+
+async function received(s: OwnerScenario, template: string): Promise<string[]> {
+  const rows = (await outbox(s)).filter((r) => r.template_code === template);
+  return [...new Set(rows.map((r) => `${r.object_id}:${BY_ID[r.recipient_id]!}`))].map(
+    (k) => k.split(":")[1]!,
+  );
+}
+
+async function declareCaseConflict(s: OwnerScenario, caseIdValue: string, user: UserKey) {
+  await s.asOwner();
+  await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
+             values (${caseIdValue}, ${USERS[user]}, 'CONFLICT_DECLARED', 'Synthetic declared conflict')`;
+}
+
+describe("AGENT-09 review of 1920", () => {
+  it("restricted referral: excluded seats and uncleared invitees are never notified", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, [
+        ["grcSectorHead", "CHAIR"],
+        ["grcDeputy", "SECRETARY"],
+        ["committee", "MEMBER"],
+        ["legal", "MEMBER"],
+        ["committeeSecretary", "ALTERNATE_SECRETARY"],
+      ]);
+      await s.as("grcDirector");
+      await s.tx`select api.approve_restricted_committee_referral(${caseR}, ${ic}, ${REASON})`;
+      const [cp] = await s.tx<{ id: string }[]>`
+        select api.refer_case_to_committee(${caseR}, ${ic}, null, ${REASON}) as id`;
+      await s.as("grcDeputy");
+      const [m] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${cp!.id}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '1 day', now() + interval '1 day 2 hours', ${REASON}) as id`;
+      await s.tx`savepoint invite`;
+      await s.tx`select api.invite_to_meeting(${m!.id}, 'EXPERT', ${USERS.investigatorA}, null, true, ${REASON})`.catch(
+        async () => s.tx`rollback to savepoint invite`,
+      );
+      await s.tx`select api.cancel_meeting(${m!.id}, ${REASON})`;
+      expect(await received(s, "MEETING_CANCELLED")).not.toContain("investigatorA");
+      await expectRecipientsSeeObjects(s);
+    });
+  });
+
+  it("N1: a conflicted or uncleared Grievance Committee secretary is not told of a grievance", async () => {
+    await ownerScenario(async (s) => {
+      await declareCaseConflict(s, caseB, "committeeSecretary");
+      await seat(s, gc, [
+        ["committeeChair", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"],
+        ["grcDeputy", "ALTERNATE_SECRETARY"],
+        ["investigatorA", "MEMBER"],
+      ]);
+      await s.as("caseManager");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [l] = await s.tx<{ id: string }[]>`
+        select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON}) as id`;
+      await s.as("employee");
+      await s.tx`select api.file_grievance(${l!.id}, now() - interval '5 days', 'Synthetic: grievance grounds.')`;
+      expect(await received(s, "GRIEVANCE_RECEIVED")).toEqual(["grcDeputy"]);
+      // The CONFIDENTIAL-cleared secretary is not told of a grievance recorded on the SECRET restricted case.
+      await s.as("grcDirector");
+      await s.tx`select api.approve_restricted_grievance_recording(${caseR}, ${USERS.grcDeputy}, ${REASON})`;
+      await s.as("grcDeputy");
+      await s.tx`select api.record_grievance('LINKED', 'CDF-DEMO-2026-0003', 'Grievant Phi (synthetic)', null, null, null,
+        'EMAIL', now(), now() - interval '3 days', 'Synthetic: grievance grounds text.', 'EMAIL-DEMO-0009')`;
+      // The approved recorder records it themselves; nobody else on the committee is told of the restricted case.
+      expect(await received(s, "GRIEVANCE_RECEIVED")).toEqual(["grcDeputy"]);
+      await expectRecipientsSeeObjects(s);
+    });
+  });
+
+  it("N2: a cancelled meeting is not announced to a meeting-conflicted or case-conflicted participant", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await s.as("legal");
+      await s.tx`select api.declare_meeting_conflict(${f.participant.legal!}, 'CONFLICT_DECLARED', 'Synthetic: conflict.')`;
+      await declareCaseConflict(s, caseB, "legalB");
+      await s.as("committeeSecretary");
+      await s.tx`select api.cancel_meeting(${f.meeting}, ${REASON})`;
+      const cancelled = await received(s, "MEETING_CANCELLED");
+      expect(cancelled).toContain("committeeChair");
+      expect(cancelled).not.toContain("legal");
+      expect(cancelled).not.toContain("legalB");
+      // legalB's earlier invitation stays in their list; it carries no content and its meeting now answers NOT_FOUND.
+    });
+  });
+
+  it("a member conflicted after referral and before scheduling is not invited", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      await declareCaseConflict(s, caseB, "legalB");
+      await scheduleMeeting(s, ic, caseB);
+      expect(await received(s, "MEETING_INVITATION")).not.toContain("legalB");
+      await expectRecipientsSeeObjects(s);
+    });
+  });
+
+  it("a suspended user receives nothing", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      await s.asOwner();
+      await s.tx`update iam.user_profile set status = 'SUSPENDED' where id = ${USERS.legalB}`;
+      await s.as("caseManager");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.add_allegation(${caseB}, 'FRAUD', 'Synthetic: allegation.', ${subj!.id}, null, null) as id`;
+      await s.tx`select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON})`;
+      await s.asOwner();
+      await s.tx`update iam.user_profile set status = 'SUSPENDED' where id = ${USERS.employee}`;
+      await s.as("caseManager");
+      await s.tx`select api.issue_defence_notice(${subj!.id}, 'Synthetic: you are invited to respond.',
+        ${[a!.id]}::uuid[], now() + interval '1 day')`;
+      expect(await received(s, "DEFENCE_NOTICE_ISSUED")).toEqual([]);
+    });
+  });
+
+  it("minutes review requests go only to members recorded present, never to an absent member or the secretary", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await openWithPresent(s, f, ["committeeChair", "legal", "lead"]);
+      await s.tx`select api.record_attendance(${f.participant.legalB!}, 'ABSENT')`;
+      await s.tx`select api.close_meeting(${f.meeting}, ${REASON})`;
+      await s.tx`select api.generate_minutes(${f.meeting}, 'Synthetic minutes narrative.')`;
+      expect((await received(s, "MINUTES_REVIEW_REQUESTED")).sort()).toEqual([
+        "committeeChair",
+        "lead",
+        "legal",
+      ]);
+    });
+  });
+
+  it("a defence notice is not sent to a revoked portal link", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.add_allegation(${caseB}, 'FRAUD', 'Synthetic: allegation.', ${subj!.id}, null, null) as id`;
+      const [l] = await s.tx<{ id: string }[]>`
+        select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON}) as id`;
+      await s.tx`select api.revoke_subject_portal_link(${l!.id}, ${REASON})`;
+      await s.tx`select api.issue_defence_notice(${subj!.id}, 'Synthetic: you are invited to respond.',
+        ${[a!.id]}::uuid[], now() + interval '1 day')`;
+      expect(await received(s, "DEFENCE_NOTICE_ISSUED")).toEqual([]);
     });
   });
 });

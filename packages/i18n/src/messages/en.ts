@@ -1396,6 +1396,8 @@ export const en = {
     GRIEVANCE_RECEIVED: "A new grievance awaits the committee secretary.",
     GRIEVANCE_ADMISSIBILITY_DECIDED: "A decision was made on whether your grievance is admissible.",
     GRIEVANCE_OUTCOME_RECORDED: "The committee recorded the outcome of your grievance.",
+    GRIEVANCE_AUTHORITY_APPROVAL_NEEDED:
+      "A grievance on a restricted case needs you to name a committee secretary.",
   },
 };
 
