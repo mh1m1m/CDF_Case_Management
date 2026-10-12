@@ -2,7 +2,7 @@
 // which are authoritative (ADR-006, ADR-007).
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
-import { CASE_TASK_TYPES, PERMISSIONS, STATUS_CODES } from "@cdf/contracts";
+import { CASE_TASK_TYPES, PERMISSIONS, PRELIMINARY_OUTCOMES, STATUS_CODES } from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES, FORM_DEFINITIONS, FORM_ENTITLEMENTS } from "@cdf/domain";
 import { messagesFor, type Messages } from "@cdf/i18n";
 import { STATES, TRANSITIONS } from "@cdf/workflow";
@@ -75,6 +75,16 @@ describe("mirrors", () => {
       .map(([dimension, codes]) => ({ dimension, codes: [...codes].sort() }))
       .sort((a, b) => (a.dimension < b.dimension ? -1 : 1));
     expect(rows).toEqual(fromTs);
+  });
+
+  it("preliminary outcomes match the recommendation's check and are all active outcome codes (1880, 1980)", async () => {
+    const [row] = await admin<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conname = 'preliminary_recommendation_recommended_outcome_check'
+        and conrelid = 'case_mgmt.preliminary_recommendation'::regclass`;
+    const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+    expect(fromCheck).toEqual([...PRELIMINARY_OUTCOMES].sort());
+    for (const code of PRELIMINARY_OUTCOMES) expect(STATUS_CODES.OUTCOME_CODE, code).toContain(code);
   });
 
   it("permission codes match iam.permission", async () => {

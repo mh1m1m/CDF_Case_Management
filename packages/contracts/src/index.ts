@@ -960,7 +960,7 @@ export type ReferralAction = (typeof REFERRAL_ACTIONS)[number];
 export const SECTOR_POSITIONS = ["HEAD", "MEMBER"] as const;
 export type SectorPosition = (typeof SECTOR_POSITIONS)[number];
 
-/** Outcomes a preliminary review may recommend; each is also an OUTCOME_CODE. */
+/** Outcomes a preliminary review may recommend; each is also an OUTCOME_CODE (closures from migration 1980, ADR-036). */
 export const PRELIMINARY_OUTCOMES = [
   "NO_ACTION",
   "OUT_OF_SCOPE",
@@ -969,6 +969,11 @@ export const PRELIMINARY_OUTCOMES = [
   "NON_PROCESSABLE",
   "INVESTIGATION_WARRANTED",
   "REFERRED_TO_COMMITTEE",
+  "NOT_SERIOUS",
+  "NOT_SUBSTANTIATED",
+  "CHANNEL_ABUSE",
+  "NOT_FEASIBLE",
+  "NO_PERSONAL_JURISDICTION",
 ] as const;
 export type PreliminaryOutcome = (typeof PRELIMINARY_OUTCOMES)[number];
 

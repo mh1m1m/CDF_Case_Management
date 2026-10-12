@@ -37,5 +37,6 @@
 | [ADR-033](ADR-033-corrective-action-tracking.md)                | Corrective-action tracking                                                      | Proposed |
 | [ADR-034](ADR-034-bcp-import-pipeline.md)                       | Continuity workbook template BCP-1 and the governed import pipeline             | Proposed |
 | [ADR-035](ADR-035-form-status-catalogue-reference-data.md)      | The form and status catalogue as grounded reference data                        | Proposed |
+| [ADR-036](ADR-036-preliminary-closure-outcomes.md)              | Closure outcomes of the preliminary review                                      | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.

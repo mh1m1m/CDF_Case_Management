@@ -513,12 +513,17 @@ describe("the documents equal the database", () => {
         .map((c) => ({ code: code(c[0]!), name_en: c[1], delivery_state: c[2], ui_surface: c[3] }))
         .sort(byCode),
     ).toEqual(db.sort(byCode));
-    const gaps = docTable("FORM_CATALOGUE_RATIONALIZATION.md", "## 6. Gaps found while mapping").map(
-      (c) => c[0],
-    );
+    // An open gap is referenced from the rows it affects; the migration that closes a gap clears its references.
+    const register = docTable("FORM_CATALOGUE_RATIONALIZATION.md", "## 6. Gaps found while mapping");
     const used = await admin<{ gap_ref: string }[]>`
       select gap_ref from config.legacy_form_map where gap_ref is not null
       union select gap_ref from config.legacy_status_map where gap_ref is not null order by 1`;
-    expect(used.map((r) => r.gap_ref)).toEqual(gaps);
+    expect(used.map((r) => r.gap_ref)).toEqual(register.filter((c) => c[1] === "OPEN").map((c) => c[0]));
+    const closed = register.filter((c) => c[1] !== "OPEN");
+    const numbers = new Set(readdirSync(MIGRATIONS).map((f) => f.slice(10, 14)));
+    for (const c of closed) {
+      expect(c[1], c[0]).toMatch(/^CLOSED \(migration \d{4}, ADR-\d{3}\)$/);
+      expect(numbers.has(c[1]!.slice(18, 22)), c[0]).toBe(true);
+    }
   });
 });

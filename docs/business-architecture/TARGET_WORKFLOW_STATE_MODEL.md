@@ -61,6 +61,8 @@ GRIEVANCE (LINKED to a decision, or STANDALONE / DIRECT_GRIEVANCE) ─▶ admiss
 | AWAITING_APPROVAL | `api.approve_preliminary_recommendation` | CONCLUDED / RETURNED         | GRC_SECTOR_HEAD                                          | approver ≠ preparer                               |
 | RETURNED          | `api.prepare_preliminary_recommendation` | AWAITING_REVIEW              | preparer                                                 | return reasons from a structured list             |
 
+Approval concludes the proceeding with the recommended outcome: INVESTIGATION_WARRANTED or REFERRED_TO_COMMITTEE to go on, or a closure (NO_ACTION, OUT_OF_SCOPE, DUPLICATE, TRANSFERRED, NON_PROCESSABLE, and since migration 1980 NOT_SERIOUS, NOT_SUBSTANTIATED, CHANNEL_ABUSE, NOT_FEASIBLE, NO_PERSONAL_JURISDICTION; ADR-036).
+
 ### 3.3 Committee proceeding
 
 OPEN → IN_DELIBERATION (first meeting held) → RECOMMENDATION_DRAFTED → RECOMMENDATION_ADOPTED (vote closed with quorum) → AWAITING_LEGAL_REVIEW? → AWAITING_AUTHORITY_DECISION → CONCLUDED, with RETURNED_BY_LEGAL / RETURNED_BY_AUTHORITY looping back to IN_DELIBERATION.
