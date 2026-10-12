@@ -66,8 +66,11 @@ export function itemHref(i: WorkItem): string {
     case "HOLD_REQUEST":
       return "/records/legal-holds";
     case "RECORD":
-      // The shared retention queue (ADR-016 D8): the record's retention form, which re-checks the purpose.
-      return `/records/${i.targetId}#retention`;
+      // ADR-016 D8: the record's retention form for the shared queue, or its routing form for a case the queue
+      // cannot take. Both re-check the purpose in the database.
+      return i.category === "RETENTION_TO_ROUTE"
+        ? `/records/${i.targetId}#route-retention`
+        : `/records/${i.targetId}#retention`;
     default:
       return "/my-work";
   }

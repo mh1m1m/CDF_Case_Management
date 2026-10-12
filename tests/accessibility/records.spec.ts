@@ -1,10 +1,15 @@
 // WCAG 2.2 AA checks (§43, REC-T51) on the records screens (CDF-71) in Arabic (RTL) and English (LTR): the
-// queue, a record with a hold and every records form open, the legal-hold requests page with a validation
-// error, and a disposition certificate.
+// queue, a record with a hold and every records form open, a restricted case's retention routing form, the
+// legal-hold requests page with a validation error, and a disposition certificate.
 import { expect, test } from "@playwright/test";
 import { audit } from "./axe";
 import { signIn } from "../e2e/support";
-import { archivedCase, closeFixtureConnections, eligibleCase } from "../e2e/records-fixture";
+import {
+  archivedCase,
+  closeFixtureConnections,
+  eligibleCase,
+  restrictedArchivedCase,
+} from "../e2e/records-fixture";
 
 test.afterAll(closeFixtureConnections);
 
@@ -61,6 +66,18 @@ for (const locale of ["ar", "en"] as const) {
     await expect(records.getByTestId("certificate-verified")).toBeVisible();
     await audit(records);
     await records.context().close();
+
+    // A restricted archived case's routing form (ADR-016 D8), for its accountable authority, with an error.
+    const restricted = await restrictedArchivedCase(`a11y-route-${locale}`);
+    const manager = await signIn(browser, "casemanager@example.test", locale);
+    await manager.goto(`/records/${restricted.caseId}`);
+    const route = manager.getByTestId("route-retention-form");
+    await expect(route).toBeVisible();
+    await audit(manager);
+    await route.locator('button[type="submit"]').click();
+    await expect(route.getByTestId("error-summary")).toBeVisible();
+    await audit(manager);
+    await manager.context().close();
 
     // Legal hold requests with a validation error.
     const legal = await signIn(browser, "legal@example.test", locale);

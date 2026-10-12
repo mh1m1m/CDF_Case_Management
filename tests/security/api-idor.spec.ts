@@ -85,6 +85,12 @@ const PROBES: Probe[] = [
     outcome: "EMPTY",
     call: (tx, t) => tx`select * from api.case_access_roster(${t.case})`,
   },
+  // S2h (migration 1860): the officers a retention review may be routed to, refused as for a missing case.
+  {
+    fn: "list_retention_reviewers",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select * from api.list_retention_reviewers(${t.case})`,
+  },
   {
     fn: "case_history",
     outcome: "EMPTY",

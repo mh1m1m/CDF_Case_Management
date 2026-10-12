@@ -24,12 +24,13 @@ import {
   requestDisposition,
 } from "../support/records";
 
-let caseB: string, caseExec: string, numberB: string;
+let caseB: string, caseExec: string, numberB: string, numberExec: string;
 beforeAll(async () => {
   [caseB, caseExec] = await Promise.all([caseId("0002"), caseId("0003")]);
-  const [row] = await admin<{ case_number: string }[]>`
-    select case_number from case_mgmt.case_record where id = ${caseB}`;
-  numberB = row!.case_number;
+  const numbers = await admin<{ id: string; case_number: string }[]>`
+    select id, case_number from case_mgmt.case_record where id in (${caseB}, ${caseExec})`;
+  numberB = numbers.find((r) => r.id === caseB)!.case_number;
+  numberExec = numbers.find((r) => r.id === caseExec)!.case_number;
 });
 
 interface QueueRow {
@@ -103,6 +104,39 @@ const NOT_RECORDS: UserKey[] = [
   "legalB",
   "revoked",
 ];
+const EVERYONE: UserKey[] = [...NOT_RECORDS, "records", "recordsB"];
+
+/** The caller's "route this retention review" item on one case. */
+async function routeWork(s: Scenario, user: UserKey, id: string) {
+  await s.as(user);
+  return s.tx<
+    {
+      area: string;
+      view: string;
+      category: string;
+      target_type: string;
+      case_id: string | null;
+      case_number: string | null;
+    }[]
+  >`
+    select area, view, category, target_type, case_id, case_number from api.my_work_items()
+    where category = 'RETENTION_TO_ROUTE' and target_id = ${id}`;
+}
+
+async function canRoute(s: Scenario, user: UserKey, id: string): Promise<boolean> {
+  await s.as(user);
+  const [row] = await s.tx<{ ok: boolean }[]>`select authz.can_route_retention_review(${id}) as ok`;
+  return row!.ok;
+}
+
+async function reviewers(s: Scenario, user: UserKey, id: string) {
+  await s.as(user);
+  return s.tx<{ user_id: string; display_name: string; display_name_ar: string }[]>`
+    select * from api.list_retention_reviewers(${id})`;
+}
+
+const routeTo = (s: Scenario, by: UserKey, id: string, officer: UserKey) =>
+  giveTask(s, id, officer, "RETENTION_REVIEW", { by });
 
 describe("retention review queue at archive (ADR-016 D8, DEC-37)", () => {
   it("RRQ-01: archiving creates exactly one queue item, the same for every records officer and assigned to nobody", async () => {
@@ -212,6 +246,11 @@ describe("retention review queue at archive (ADR-016 D8, DEC-37)", () => {
       expect((await retentionWork(s, "recordsB")).map((w) => w.category)).toEqual([
         "RETENTION_CLASSIFICATION",
       ]);
+      // The task holder classifies: their task completes and the queue item ends, for both officers.
+      await s.as("records");
+      await s.tx`select api.assign_retention_class(${caseB}, 'WB_CASE_NOT_INVESTIGATED')`;
+      expect(await retentionWork(s, "records")).toEqual([]);
+      expect(await retentionWork(s, "recordsB")).toEqual([]);
     });
   });
 
@@ -318,6 +357,153 @@ describe("retention review queue at archive (ADR-016 D8, DEC-37)", () => {
       expect(audit).toEqual([
         { actor_id: USERS.recordsB, metadata: { from: "UNASSIGNED", to: "WB_CASE_NOT_INVESTIGATED" } },
       ]);
+    });
+  });
+
+  // AGENT-09's follow-up to D8: an archived case the shared pool cannot take is never left without a prompt.
+  it("RRQ-10: a restricted archived case goes to its case authority, who routes it to one eligible officer", async () => {
+    await ownerScenario(async (s) => {
+      await setArchived(s, caseExec, "CONFIDENTIAL");
+      expect(await routeWork(s, "grcDirector", caseExec)).toEqual([
+        {
+          area: "CASES",
+          view: "NEEDS_ACTION",
+          category: "RETENTION_TO_ROUTE",
+          target_type: "RECORD",
+          case_id: caseExec,
+          case_number: numberExec,
+        },
+      ]);
+      expect(await canRoute(s, "grcDirector", caseExec)).toBe(true);
+      for (const user of EVERYONE.filter((u) => u !== "grcDirector")) {
+        expect(await routeWork(s, user, caseExec), user).toEqual([]);
+        expect(await canRoute(s, user, caseExec), user).toBe(false);
+      }
+
+      // The officers the task command would accept: names only.
+      const list = await reviewers(s, "grcDirector", caseExec);
+      expect(list.map((r) => r.user_id).sort()).toEqual([USERS.records, USERS.recordsB].sort());
+      expect(Object.keys(list[0]!).sort()).toEqual(["display_name", "display_name_ar", "user_id"]);
+
+      // A person chooses the officer; the task then stands for the obligation.
+      const taskId = await routeTo(s, "grcDirector", caseExec, "recordsB");
+      expect(await routeWork(s, "grcDirector", caseExec)).toEqual([]);
+      expect(await canRoute(s, "grcDirector", caseExec)).toBe(false);
+      expect((await retentionWork(s, "recordsB", caseExec)).map((w) => [w.category, w.target_id])).toEqual([
+        ["TASK_RETENTION_REVIEW", taskId],
+      ]);
+      expect(await retentionWork(s, "records", caseExec)).toEqual([]);
+      expect((await reviewers(s, "grcDirector", caseExec)).map((r) => r.user_id)).toEqual([USERS.records]);
+
+      await s.as("internalAudit");
+      const audit = await s.tx<{ actor_id: string; metadata: Record<string, unknown> }[]>`
+        select actor_id, metadata from audit.audit_event
+        where action = 'CASE_TASK_ASSIGNED' and case_id = ${caseExec} and object_id = ${taskId}`;
+      expect(audit).toHaveLength(1);
+      expect(audit[0]).toMatchObject({
+        actor_id: USERS.grcDirector,
+        metadata: { task_type: "RETENTION_REVIEW", assigned_user_id: USERS.recordsB },
+      });
+
+      // The task is for classification only: it never opens the case, and classifying ends the work.
+      await s.as("recordsB");
+      const [opened] = await s.tx<{ ok: boolean }[]>`select api.open_case(${caseExec}) as ok`;
+      expect(opened!.ok).toBe(false);
+      await s.tx`select api.assign_retention_class(${caseExec}, 'WB_CASE_NOT_INVESTIGATED')`;
+      await s.as("grcDirector");
+      expect((await recordsState(s.tx, caseExec)).records_state).toBe("RETENTION");
+      expect(await routeWork(s, "grcDirector", caseExec)).toEqual([]);
+      // Classifying completes the officer's task: it leaves their work, and the task's access ends with it.
+      expect(await retentionWork(s, "recordsB", caseExec)).toEqual([]);
+      await s.asOwner();
+      const [task] = await s.tx<{ status: string; closed_by: string; closure_reason: string }[]>`
+        select status, closed_by, closure_reason from case_mgmt.case_task where id = ${taskId}`;
+      expect(task).toEqual({
+        status: "COMPLETED",
+        closed_by: USERS.recordsB,
+        closure_reason: "RETENTION_CLASS_ASSIGNED",
+      });
+      await s.as("recordsB");
+      const [after] = await s.tx<{ ok: boolean }[]>`select authz.can_view_case_metadata(${caseExec}) as ok`;
+      expect(after!.ok).toBe(false);
+      await s.as("internalAudit");
+      const completed = await s.tx<{ actor_id: string }[]>`
+        select actor_id from audit.audit_event
+        where action = 'CASE_TASK_COMPLETED' and case_id = ${caseExec} and object_id = ${taskId}`;
+      expect(completed).toEqual([{ actor_id: USERS.recordsB }]);
+    });
+  });
+
+  it("RRQ-11: a case the shared pool can take is never routed: the pool is its route", async () => {
+    await scenario(async (s) => {
+      await closeAndArchive(s, caseB);
+      for (const user of EVERYONE) {
+        expect(await routeWork(s, user, caseB), user).toEqual([]);
+        expect(await canRoute(s, user, caseB), user).toBe(false);
+      }
+    });
+  });
+
+  it("RRQ-12: above every officer's clearance, the case authorities are told no officer is eligible", async () => {
+    await ownerScenario(async (s) => {
+      await setArchived(s, caseB, "SECRET");
+      for (const user of ["grcDirector", "grcDeputy"] as const) {
+        expect(
+          (await routeWork(s, user, caseB)).map((w) => w.category),
+          user,
+        ).toEqual(["RETENTION_TO_ROUTE"]);
+        expect(await reviewers(s, user, caseB), user).toEqual([]);
+      }
+      for (const user of EVERYONE.filter((u) => u !== "grcDirector" && u !== "grcDeputy")) {
+        expect(await routeWork(s, user, caseB), user).toEqual([]);
+      }
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_INVALID:assigned_user_id",
+        (tx) => tx`select api.create_case_task(${caseB}, 'RETENTION_REVIEW', ${USERS.records},
+                                                'Synthetic: retention review purpose.')`,
+      );
+    });
+  });
+
+  it("RRQ-13: the reviewer list refuses everyone else; a cancelled or lapsed task brings the item back", async () => {
+    await ownerScenario(async (s) => {
+      await setArchived(s, caseExec, "CONFIDENTIAL");
+      for (const user of ["records", "recordsB", "caseManager", "legal", "investigatorA"] as const) {
+        await s.as(user);
+        await s.expectError(
+          "CDF_NOT_FOUND",
+          (tx) => tx`select * from api.list_retention_reviewers(${caseExec})`,
+        );
+      }
+      const taskId = await routeTo(s, "grcDirector", caseExec, "records");
+      expect(await routeWork(s, "grcDirector", caseExec)).toEqual([]);
+      // The task holder sees the case's metadata but may not route records tasks on a restricted case.
+      await s.as("records");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select * from api.list_retention_reviewers(${caseExec})`,
+      );
+
+      await s.as("grcDirector");
+      await s.tx`select api.cancel_case_task(${taskId}, 'Synthetic: officer unavailable.')`;
+      expect((await routeWork(s, "grcDirector", caseExec)).map((w) => w.category)).toEqual([
+        "RETENTION_TO_ROUTE",
+      ]);
+
+      // A task whose window has lapsed does not stand for the obligation (fixture: the command refuses to create
+      // one, and now() is fixed for the whole transaction).
+      await s.asOwner();
+      await s.tx`
+        insert into case_mgmt.case_task (case_id, task_type, assigned_user_id, assigned_role, purpose, scope, created_by,
+                                         access_granted_at, expires_at)
+        values (${caseExec}, 'RETENTION_REVIEW', ${USERS.recordsB}, 'RECORDS_OFFICER', 'Synthetic: lapsed retention task.',
+                '{CASE_VIEW_METADATA,RETENTION_TASK_VIEW,RETENTION_TASK_EXECUTE}', ${USERS.grcDirector},
+                now() - interval '2 days', now() - interval '1 day')`;
+      expect((await routeWork(s, "grcDirector", caseExec)).map((w) => w.category)).toEqual([
+        "RETENTION_TO_ROUTE",
+      ]);
+      expect(await retentionWork(s, "recordsB", caseExec)).toEqual([]);
     });
   });
 });

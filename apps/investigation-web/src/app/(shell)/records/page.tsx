@@ -13,6 +13,7 @@ import {
 } from "@cdf/contracts";
 import { formatDate, formatDateTime, formatDays, isolate, type MessageKey } from "@cdf/i18n";
 import {
+  CDFAlert,
   CDFBadge,
   CDFCard,
   CDFCommandForm,
@@ -49,6 +50,7 @@ export default async function RecordsPage({
   const t = await getTranslator();
   const service = investigationService();
   const sp = await searchParams;
+  const reviewed = one(sp.reviewed) === "1";
   const filters = {
     caseNumber: one(sp.caseNumber),
     archiveStatus: one(sp.state),
@@ -95,6 +97,14 @@ export default async function RecordsPage({
           </Link>
         }
       />
+
+      {reviewed ? (
+        <div className="mb-4">
+          <CDFAlert tone="success" testId="retention-reviewed">
+            {t("records.reviewedNotice")}
+          </CDFAlert>
+        </div>
+      ) : null}
 
       {classifies ? (
         <CDFCard title={t("records.queueTitle")} testId="retention-queue">

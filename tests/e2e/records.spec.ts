@@ -4,7 +4,13 @@
 // case discovery outside the catalogue, no write controls on archived or disposed cases).
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "./support";
-import { archivedCase, closeFixtureConnections, eligibleCase, TEST_CLASS } from "./records-fixture";
+import {
+  archivedCase,
+  closeFixtureConnections,
+  eligibleCase,
+  restrictedArchivedCase,
+  TEST_CLASS,
+} from "./records-fixture";
 
 test.afterAll(closeFixtureConnections);
 
@@ -110,6 +116,68 @@ test("an archived case waits in the shared retention queue for every records off
   await manager.goto("/my-work");
   await expect(manager.getByTestId("work-item-RETENTION_CLASSIFICATION")).toHaveCount(0);
   await manager.context().close();
+});
+
+test("a restricted archived case is routed by its authority to one records officer, whose task ends with the class (ADR-016 D8)", async ({
+  browser,
+}) => {
+  const c = await restrictedArchivedCase("route");
+
+  // The shared queue never takes a restricted case.
+  const nu = await signIn(browser, "records@example.test", "en");
+  await nu.goto("/records");
+  await expect(nu.getByTestId("retention-queue")).toBeVisible();
+  await expect(nu.getByTestId(`queue-review-${c.caseNumber}`)).toHaveCount(0);
+  await nu.context().close();
+
+  // The case manager, its accountable authority, routes it from My Work, in English.
+  const manager = await signIn(browser, "casemanager@example.test", "en");
+  await manager.goto("/my-work");
+  const item = manager.getByTestId("work-item-RETENTION_TO_ROUTE").filter({ hasText: c.caseNumber });
+  await expect(item).toContainText("Route a retention review");
+  await item.getByRole("link").first().click();
+  await expect(manager).toHaveURL(new RegExp(`/records/${c.caseId}#route-retention$`));
+  const form = manager.getByTestId("route-retention-form");
+  await expect(form.locator("#route-purpose")).toHaveValue(
+    "Confirm the retention class of this archived case.",
+  );
+  await expect(form.locator("#route-reviewer option")).toHaveText([
+    "—",
+    "Records Officer Nu",
+    "Records Officer Xi",
+  ]);
+  await form.locator("#route-reviewer").selectOption({ label: "Records Officer Xi" });
+  await submit(manager, "route-retention-form");
+  await expect(manager).toHaveURL(new RegExp(`/records/${c.caseId}\\?routed=1$`));
+  await expect(manager.getByTestId("retention-routed")).toContainText("Retention review routed.");
+  await expect(manager.getByTestId("route-retention-card")).toHaveCount(0);
+  await manager.goto("/my-work");
+  await expect(
+    manager.getByTestId("work-item-RETENTION_TO_ROUTE").filter({ hasText: c.caseNumber }),
+  ).toHaveCount(0);
+  await manager.context().close();
+
+  // Officer Xi, in Arabic: a task of their own (not a queue item), classified from the record.
+  const xi = await signIn(browser, "records.b@example.test", "ar");
+  await xi.goto("/my-work");
+  await expect(
+    xi.getByTestId("work-item-TASK_RETENTION_REVIEW").filter({ hasText: c.caseNumber }),
+  ).toHaveCount(1);
+  await xi.goto(`/records/${c.caseId}`);
+  await expect(xi.getByTestId("route-retention-card")).toHaveCount(0);
+  await expect(xi.locator("main")).not.toContainText("Records e2e restricted case");
+  await xi.getByTestId("retention-form").locator("#retentionClass").selectOption("WB_CASE_NOT_INVESTIGATED");
+  await submit(xi, "retention-form");
+  // The class completes the task and its access ends: back on Records, told so, and the record is gone.
+  await expect(xi).toHaveURL(/\/records\?reviewed=1$/);
+  await expect(xi.getByTestId("retention-reviewed")).toContainText("اكتملت مهمة مراجعة مدة الحفظ");
+  await xi.goto("/my-work");
+  await expect(
+    xi.getByTestId("work-item-TASK_RETENTION_REVIEW").filter({ hasText: c.caseNumber }),
+  ).toHaveCount(0);
+  const gone = await xi.goto(`/records/${c.caseId}`);
+  expect(gone?.status()).toBe(404);
+  await xi.context().close();
 });
 
 test("disposition is requested, approved by someone else in Arabic, executed and certified", async ({

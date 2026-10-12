@@ -305,6 +305,8 @@ export interface RecordCapabilities {
   applyLegalHold: boolean;
   releaseLegalHold: boolean;
   requestLegalHold: boolean;
+  /** The shared Records pool cannot take this archived case and nobody holds a usable retention task on it. */
+  routeRetention: boolean;
 }
 
 export interface DispositionRequestInfo {
@@ -775,6 +777,7 @@ export const WORK_CATEGORIES = [
   "MY_HOLD_REQUEST",
   "MY_HOLD_RELEASE_REQUEST",
   "RETENTION_CLASSIFICATION",
+  "RETENTION_TO_ROUTE",
   ...CASE_TASK_TYPES.map((t) => `TASK_${t.code}` as const),
 ] as const;
 export type WorkCategory = (typeof WORK_CATEGORIES)[number];
@@ -820,6 +823,13 @@ export interface RetentionQueueEntry {
   archivedAt: string | null;
   retentionClass: string;
   legalHoldStatus: "NONE" | "ACTIVE";
+}
+
+/** A records officer a case's retention review may be routed to (eligible role, cleared, no conflict). Names only. */
+export interface RetentionReviewer {
+  userId: string;
+  displayName: string;
+  displayNameAr: string;
 }
 
 export const ACCESS_BASES = ["CLEARANCE", "ROLE", "ASSIGNMENT", "GRANT", "TASK", "BREAK_GLASS"] as const;

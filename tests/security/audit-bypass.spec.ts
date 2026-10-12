@@ -73,7 +73,10 @@ const NOT_STATE_CHANGING = new Set([
   "case_history",
   "case_access_roster",
   // S2h (migration 1860): the shared retention queue; opening a record from it is audited by open_case_metadata.
+  // The officers a case authority may route a retention review to: names only; the routing itself is
+  // api.create_case_task, audited as CASE_TASK_ASSIGNED.
   "retention_review_queue",
+  "list_retention_reviewers",
 ]);
 
 interface Step {
@@ -757,6 +760,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_review_form",
       "authz.can_review_interviews",
       "authz.can_review_legal_hold",
+      "authz.can_route_retention_review",
       "authz.can_upload_evidence",
       "authz.can_view_case",
       "authz.can_view_case_content",

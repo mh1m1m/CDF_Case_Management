@@ -15,6 +15,7 @@ import type {
   Permission,
   RecordDetail,
   RetentionClassOption,
+  RetentionReviewer,
 } from "@cdf/contracts";
 import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
@@ -29,6 +30,7 @@ import {
   requestHoldReleaseSchema,
   requestLegalHoldSchema,
   reviewHoldRequestSchema,
+  routeRetentionReviewSchema,
 } from "@cdf/validation";
 import { z } from "zod";
 import { AppError, toAppError } from "./errors";
@@ -44,16 +46,30 @@ export interface RecordsGateway {
   /** Records RECORDS_CASE_METADATA_VIEWED (or a SECURITY denial) and returns null when missing or not visible. */
   getRecord(ctx: UserRequestContext, caseId: string): Promise<RecordDetail | null>;
   listRetentionClasses(ctx: UserRequestContext): Promise<RetentionClassOption[]>;
+  /** Officers a retention review may be routed to on this case (api.list_retention_reviewers; ADR-016 D8). */
+  listRetentionReviewers(ctx: UserRequestContext, caseId: string): Promise<RetentionReviewer[]>;
   /** Hold requests the caller filed, is assigned to review, or may route (RLS decides). */
   listHoldRequests(ctx: UserRequestContext): Promise<LegalHoldRequestInfo[]>;
   /** Returns null when missing or not visible; `verified` is recomputed by the database. */
   getCertificate(ctx: UserRequestContext, certificateId: string): Promise<DispositionCertificateView | null>;
-  assignRetentionClass(ctx: UserRequestContext, input: In<typeof assignRetentionClassSchema>): Promise<void>;
+  /**
+   * `recordVisible` is false when the class ended the caller's access: a routed RETENTION_REVIEW task completes
+   * with the class (ADR-016 D8), and its purpose-bound access ends with it.
+   */
+  assignRetentionClass(
+    ctx: UserRequestContext,
+    input: In<typeof assignRetentionClassSchema>,
+  ): Promise<{ recordVisible: boolean }>;
   placeLegalHold(ctx: UserRequestContext, input: In<typeof placeLegalHoldSchema>): Promise<string>;
   requestHoldRelease(ctx: UserRequestContext, input: In<typeof requestHoldReleaseSchema>): Promise<string>;
   decideHoldRelease(ctx: UserRequestContext, input: In<typeof decideHoldReleaseSchema>): Promise<void>;
   requestLegalHold(ctx: UserRequestContext, input: In<typeof requestLegalHoldSchema>): Promise<string>;
   assignHoldRequest(ctx: UserRequestContext, input: In<typeof assignHoldRequestSchema>): Promise<string>;
+  /** api.create_case_task(case, 'RETENTION_REVIEW', officer, purpose): returns the task id. */
+  routeRetentionReview(
+    ctx: UserRequestContext,
+    input: In<typeof routeRetentionReviewSchema>,
+  ): Promise<string>;
   reviewHoldRequest(ctx: UserRequestContext, input: In<typeof reviewHoldRequestSchema>): Promise<void>;
   refreshEligibility(ctx: UserRequestContext): Promise<number>;
   requestDisposition(ctx: UserRequestContext, input: In<typeof requestDispositionSchema>): Promise<string>;
@@ -124,6 +140,8 @@ export function createRecordsService(deps: RecordsDeps) {
   return {
     getRecord: (ctx: UserRequestContext, caseId: string) => query(ctx, () => gateway.getRecord(ctx, caseId)),
     listRetentionClasses: (ctx: UserRequestContext) => query(ctx, () => gateway.listRetentionClasses(ctx)),
+    listRetentionReviewers: (ctx: UserRequestContext, caseId: string) =>
+      query(ctx, () => gateway.listRetentionReviewers(ctx, caseId)),
     listHoldRequests: (ctx: UserRequestContext) => query(ctx, () => gateway.listHoldRequests(ctx)),
     getCertificate: (ctx: UserRequestContext, certificateId: string) =>
       query(ctx, () => gateway.getCertificate(ctx, certificateId)),
@@ -198,6 +216,21 @@ export function createRecordsService(deps: RecordsDeps) {
         ["CASE_TASK_ASSIGN"],
         (i) => gateway.assignHoldRequest(ctx, i),
         (i) => i.requestId,
+      ),
+
+    // ADR-016 D8: a case the shared pool cannot take is routed by a person to one officer. Who may create records
+    // tasks on the case (a case authority, or a records lifecycle administrator within the catalogue) and who may
+    // take it (eligible role, cleared, no conflict) are the database's rules.
+    routeRetentionReview: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "route_retention_review",
+        routeRetentionReviewSchema,
+        raw,
+        ["CASE_TASK_ASSIGN", "RECORDS_LIFECYCLE_ADMIN"],
+        (i) => gateway.routeRetentionReview(ctx, i),
+        (i) => i.caseId,
       ),
 
     reviewHoldRequest: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>

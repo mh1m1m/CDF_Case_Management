@@ -1,6 +1,6 @@
 # ADR-016: UX Target Architecture and Approved Access Decisions
 
-- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`. D4, D5 and D6 are implemented on the S2 branch (migrations 1840, 1830 and 1850), D6 up to the S5 packets. D2 and D3 are approved and not yet implemented (their phase is named in each decision). D8 (DEC-37, decided 2026-10-12) is implemented on the S2 branch (migration 1860) up to the S4 work item.
+- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`. D4, D5 and D6 are implemented on the S2 branch (migrations 1840, 1830 and 1850), D6 up to the S5 packets. D2 and D3 are approved and not yet implemented (their phase is named in each decision). D8 (DEC-37, decided 2026-10-12) is implemented on the S2 branch (migration 1860), with routing for cases the shared queue cannot take, up to the S4 work item.
 - **Decision owner:** Fady, 2026-10-11 12:11 UTC, in the UI/UX audit thread: "IMPLEMENT THE UX REDESIGN", with the decision package recorded here.
 - **Source:** CDF-UX-AUDIT v1.0, run 2026-10-10/11 on synthetic data (report `UIUX_AUDIT_2026-10-10.md` and its summary, held in the project files, not in this repository). Decision IDs `DEC-nn`, debt IDs `UX-nnn` and step IDs `S0`–`S6` are the audit's. Its decision register is O17 §17.7; its gates are O28 §28.10.
 - **Extends:** ADR-014 (purpose-bound authorization). **Amends:** ADR-013 and ADR-014 on case-history audience (D5). **Unchanged:** ADR-003 (PostgreSQL/RLS, command-only writes), ADR-004 (identity vault), ADR-005 (append-only audit), ADR-006 and ADR-015 (evidence and reporter attachments).
@@ -331,15 +331,25 @@ UX-002 is re-rated only after that.
 - **The pool.** `api.retention_review_queue()` returns the case to anyone who may classify it from the records catalogue: the catalogue scope (closed, not restricted, within clearance, no conflict) together with `ARCHIVE_RECORD_ADMINISTER` and `RETENTION_CLASS_ASSIGN`. That is the shared branch of `authz.can_manage_retention`. The rows carry lifecycle metadata only.
 - **My Work.** `api.my_work_items()` adds one `RETENTION_CLASSIFICATION` item per queued case in the Records area. The item links to the record's retention form, which re-checks the purpose.
 - **An existing task.** A `RETENTION_REVIEW` case task (ADR-014) is an individual assignment, so its holder sees the task instead of the queue item.
-- **Restricted cases.** They never enter the shared queue (ADR-014 §9). An officer reaches one only through a `RETENTION_REVIEW` task given by someone who can see the case. The open point is routing a restricted case's retention review without naming a person; it comes at S4 with the pool.
-- **Tests.** `tests/security/retention-review-queue.spec.ts` (RRQ-01 to RRQ-09) covers:
+- **Cases the pool cannot take.** A restricted case never enters the shared queue (ADR-014 §9), and a case above every records officer's clearance, or one every officer is conflicted on, has nobody in the pool. So that no archived case waits unseen (the security review's follow-up to D8), such a case goes to the person who may create records tasks on it (`case_mgmt.may_manage_tasks`; for a restricted case, its DEC-01 Restricted Case Authority):
+  - `authz.can_route_retention_review(case)`: the case is `ARCHIVED`, the caller may create records tasks on it, `records.retention_pool_can_take(case)` is false, and nobody holds a `RETENTION_REVIEW` task on it that they can still use;
+  - `api.my_work_items()` gives that person one `RETENTION_TO_ROUTE` item in the Cases area, linked to the record's routing form;
+  - `api.list_retention_reviewers(case)` lists the officers `api.create_case_task` would accept (eligible role, active, cleared, no conflict, no open task of this type on the case), names only; an empty list says that no officer can take the case yet, and the item stays until one can;
+  - the person chooses one officer, and `api.create_case_task(case, 'RETENTION_REVIEW', officer, purpose)` gives the task (audited `CASE_TASK_ASSIGNED`). A person routes; no rule chooses the officer, as part 3 requires;
+  - a cancelled or lapsed task brings the item back.
+- **Completing the review.** Classifying is the outcome of a retention review, so `api.assign_retention_class` also completes the caller's own open `RETENTION_REVIEW` task on the case (audited `CASE_TASK_COMPLETED`). The task leaves their work and its access ends with it; the record page then returns them to Records with a notice.
+- **Tests.** `tests/security/retention-review-queue.spec.ts` (RRQ-01 to RRQ-13) covers:
   - archiving creates exactly one item, the same for every officer;
   - archiving twice creates no second item;
   - nobody else gets it, and clearance, restricted cases and another officer's task are respected;
   - lifecycle metadata only, no case content;
   - a hold keeps the item and classification still works;
   - disposition stays blocked under the hold;
-  - classifying records the class and closes the item for everyone, audited.
+  - classifying records the class and closes the item for everyone, audited;
+  - a restricted case goes to its authority, who routes it to one eligible officer; the task stands for the item, opens no content, and completes with the class, audited;
+  - a case the pool can take is never routed;
+  - above every officer's clearance, the authorities are told no officer is eligible, and the task command refuses one;
+  - the reviewer list refuses everyone else, and a cancelled or lapsed task brings the item back.
 
 ## Delivery governance
 

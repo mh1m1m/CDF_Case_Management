@@ -63,6 +63,9 @@ describe("routes", () => {
         item({ category: "RETENTION_CLASSIFICATION", targetType: "RECORD", targetId: "c", caseId: "c" }),
       ),
     ).toBe("/records/c#retention");
+    expect(
+      itemHref(item({ category: "RETENTION_TO_ROUTE", targetType: "RECORD", targetId: "c", caseId: "c" })),
+    ).toBe("/records/c#route-retention");
   });
 });
 

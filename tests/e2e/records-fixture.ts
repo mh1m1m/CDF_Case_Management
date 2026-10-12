@@ -192,6 +192,27 @@ export async function archivedCase(label: string): Promise<{ caseId: string; cas
   return { caseId, caseNumber: row!.case_number };
 }
 
+/**
+ * A new case owned by the case manager and restricted by the GRC Director (as the seed's executive case is), then
+ * screened out and archived by the case manager. The shared Records queue never takes a restricted case, so the
+ * people who may create records tasks on it route its retention review (ADR-016 D8).
+ */
+export async function restrictedArchivedCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
+  const c = await screeningCase(label);
+  await as("caseManager", async (tx) => {
+    await tx`select api.assign_case(${c.caseId}, ${USERS.caseManager}, 'CASE_OWNER', 'Synthetic: owner for the records e2e.')`;
+  });
+  await as("grcDirector", async (tx) => {
+    await tx`select api.change_case_classification(${c.caseId}, 'CONFIDENTIAL', true,
+      'Synthetic: restricted for the records e2e.')`;
+  });
+  await as("caseManager", async (tx) => {
+    await tx`select api.transition_case(${c.caseId}, 'SCREEN_OUT', 'Synthetic: screened out for the records e2e.')`;
+    await tx`select api.transition_case(${c.caseId}, 'ARCHIVE_CASE', null)`;
+  });
+  return c;
+}
+
 /** An archived case under the test class, marked eligible for disposition by the records officer. */
 export async function eligibleCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
   const admin = postgres(process.env.CDF_ADMIN_DATABASE_URL ?? url("postgres", "CDF_ADMIN_DB_PASSWORD"), {

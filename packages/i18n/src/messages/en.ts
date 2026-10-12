@@ -1170,6 +1170,23 @@ export const en = {
     reviewClassificationOf: "Review retention classification: {number}",
     holdAllowsClassification:
       "A legal hold is active on this case. You can still classify it: the hold stops disposition, not classification.",
+    reviewedNotice:
+      "Retention class recorded. Your retention review task is complete, and its access to the case has ended.",
+    routeTitle: "Route the retention review",
+    routeIntro:
+      "The shared Records queue cannot take this archived case: it is restricted, or no records officer is cleared for its classification and free of conflict with it. Choose one officer to classify it. They receive a retention review task that shows lifecycle metadata only, never the case's content.",
+    routeReviewerLabel: "Records officer",
+    routeReviewerHint:
+      "Only officers cleared for this case and with no conflict of interest in it are listed.",
+    routePurposeLabel: "Purpose",
+    routePurposeHint:
+      "10 to 1000 characters. The officer sees it with the task. Do not include case content.",
+    routePurposeDefault: "Confirm the retention class of this archived case.",
+    routeSubmit: "Route to this officer",
+    routeDone:
+      "Retention review routed. The officer finds it in their work, and it ends when they record the class.",
+    routeNoReviewer:
+      "No records officer can take this case yet: none is cleared for its classification and free of conflict with it. It stays in your work until one can.",
     myWorkTitle: "My work",
     summary: {
       myRetentionTasks: "Retention tasks",
@@ -1444,6 +1461,7 @@ export const en = {
       MY_HOLD_REQUEST: "Your legal hold request",
       MY_HOLD_RELEASE_REQUEST: "Your request to release a legal hold",
       RETENTION_CLASSIFICATION: "Review retention classification",
+      RETENTION_TO_ROUTE: "Route a retention review",
     },
     task: "Task: {task}",
     caseRef: "Case",

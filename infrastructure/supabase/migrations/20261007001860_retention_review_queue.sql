@@ -12,16 +12,31 @@
 -- stays the task: its holder gets the task item instead of the queue item. Restricted cases never enter the
 -- shared queue (ADR-014 §9): only a RETENTION_REVIEW task given by someone who can see the case brings one to an
 -- officer.
+-- So that no archived case waits unseen, a case the shared pool cannot take (restricted, or no records officer is
+-- cleared for it and free of conflict) and on which nobody holds a usable RETENTION_REVIEW task goes to the case
+-- authority who may create records tasks on it (case_mgmt.may_manage_tasks: for a restricted case, its DEC-01
+-- Restricted Case Authority), who routes it to one eligible officer with api.create_case_task. Routing is a person
+-- choosing an officer, never a rule picking one (DEC-37).
 --
 --   * api.retention_review_queue(): the queue rows, lifecycle metadata only: case number, classification,
 --     archived date, current class and the legal-hold flag. No title, summary, people, evidence or findings,
 --     and the queue grants nothing: the case page, evidence and interviews stay refused to the officer.
+--   * records.retention_pool_can_take(case): whether any active user may classify the case from the catalogue.
+--   * authz.can_route_retention_review(case): the caller should route the case (the rule above).
+--   * api.list_retention_reviewers(case): the officers api.create_case_task would accept for a RETENTION_REVIEW
+--     task on the case (eligible role, active, cleared, no conflict); NOT_FOUND for a case the caller cannot see,
+--     FORBIDDEN for one they may not create records tasks on. Names only.
+--   * api.assign_retention_class(): as in 1710, and classifying also completes the caller's own open
+--     RETENTION_REVIEW task on the case (audited CASE_TASK_COMPLETED): the class is the review's outcome, so the
+--     task leaves their work and its access ends with it.
 --   * api.my_work_items(): one RETENTION_CLASSIFICATION item per queued case, except for the holder of a
---     RETENTION_REVIEW task on it (body otherwise as in 1840).
+--     RETENTION_REVIEW task on it; one RETENTION_TO_ROUTE item per case the caller should route (body otherwise
+--     as in 1840).
 --
 -- Retention classes and periods stay SOURCE_REQUIRED (ADR-013 D2). Who may archive is unchanged (WORKFLOW_ADVANCE
 -- on the case: Case Manager or Lead today) and stays an open part of DEC-37.
--- No table, policy or grant change beyond EXECUTE to authenticated.
+-- No table, policy or grant change beyond EXECUTE to authenticated (records.retention_pool_can_take: none).
+-- assign_retention_class keeps its signature and grant.
 -- =============================================================================
 
 create function api.retention_review_queue()
@@ -47,6 +62,101 @@ as $$
      and authz.has_permission('ARCHIVE_RECORD_ADMINISTER')
      and authz.in_records_catalogue_scope(c.id)
    order by arc.archived_at, c.case_number;
+$$;
+
+-- The shared pool's membership for any user, not only the caller: the predicate above, evaluated per user.
+create function records.retention_pool_can_take(p_case_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from iam.user_profile u
+     where u.status = 'ACTIVE'
+       and authz.user_has_permission(u.id, 'RETENTION_CLASS_ASSIGN')
+       and authz.user_has_permission(u.id, 'ARCHIVE_RECORD_ADMINISTER')
+       and authz.user_records_catalogue_scope(u.id, p_case_id));
+$$;
+
+create function authz.can_route_retention_review(p_case_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null
+     and exists (select 1 from case_mgmt.case_record c where c.id = p_case_id and c.records_state = 'ARCHIVED')
+     and case_mgmt.may_manage_tasks(p_case_id, 'RECORDS')
+     and not records.retention_pool_can_take(p_case_id)
+     -- A task its holder can still use already stands for the obligation; an expired or unusable one does not.
+     and not exists (select 1 from case_mgmt.case_task t
+                      where t.case_id = p_case_id and t.task_type = 'RETENTION_REVIEW'
+                        and t.status in ('OPEN', 'IN_PROGRESS') and t.expires_at > now()
+                        and authz.user_task_grants(t.assigned_user_id, p_case_id, 'RETENTION_TASK_EXECUTE'));
+$$;
+
+create function api.list_retention_reviewers(p_case_id uuid)
+returns table (user_id uuid, display_name text, display_name_ar text)
+language plpgsql stable security definer
+set search_path = ''
+as $$
+begin
+  if not authz.can_view_case_metadata(p_case_id) then perform api._fail('NOT_FOUND'); end if;
+  if not case_mgmt.may_manage_tasks(p_case_id, 'RECORDS') then perform api._fail('FORBIDDEN'); end if;
+  -- The assignee rule of case_mgmt.create_task_internal: an eligible role for the task type, the case gate, and no
+  -- open task of this type on the case already.
+  return query
+    select u.id, u.display_name, u.display_name_ar
+      from iam.user_profile u
+      join case_mgmt.case_task_type tt on tt.code = 'RETENTION_REVIEW'
+     where exists (select 1 from unnest(tt.eligible_roles) r where authz.user_has_role(u.id, r))
+       and authz.user_case_gate(u.id, p_case_id)
+       and not exists (select 1 from case_mgmt.case_task t
+                        where t.case_id = p_case_id and t.task_type = 'RETENTION_REVIEW' and t.assigned_user_id = u.id
+                          and t.status in ('OPEN', 'IN_PROGRESS'))
+     order by u.display_name, u.id;
+end;
+$$;
+
+create or replace function api.assign_retention_class(p_case_id uuid, p_retention_class text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_case case_mgmt.case_record;
+  v_task uuid;
+  v_schedule uuid;
+begin
+  if not authz.can_view_records(p_case_id) then perform api._fail('NOT_FOUND'); end if;
+  if not authz.can_manage_retention(p_case_id) then perform api._fail('FORBIDDEN'); end if;
+  select * into v_case from case_mgmt.case_record c where c.id = p_case_id for update;
+  if v_case.records_state not in ('ARCHIVED', 'RETENTION') then perform api._fail('CONFLICT', 'RECORDS_STATE'); end if;
+  if p_retention_class is null or p_retention_class = 'UNASSIGNED'
+     or not exists (select 1 from records.retention_class k where k.code = p_retention_class and k.record_type = 'CASE') then
+    perform api._fail('INVALID', 'retention_class');
+  end if;
+  if p_retention_class = v_case.retention_class and v_case.records_state = 'RETENTION' then
+    perform api._fail('CONFLICT', 'CLASS_UNCHANGED');
+  end if;
+
+  update case_mgmt.case_record c
+     set retention_class = p_retention_class, records_state = 'RETENTION',
+         updated_at = now(), updated_by = v_actor, row_version = c.row_version + 1
+   where c.id = p_case_id;
+  perform audit.record_event('RETENTION_CLASS_ASSIGNED', 'BUSINESS', 'SUCCESS', p_case_id, 'case_record', p_case_id::text, null,
+    jsonb_build_object('from', v_case.retention_class, 'to', p_retention_class));
+  v_schedule := records._compute_schedule(p_case_id, 'CLASS_CHANGED');
+
+  -- ADR-016 D8: the class is the outcome of the caller's retention review, so their own open task completes with it.
+  for v_task in select t.id from case_mgmt.case_task t
+                 where t.case_id = p_case_id and t.assigned_user_id = v_actor and t.task_type = 'RETENTION_REVIEW'
+                   and t.status in ('OPEN', 'IN_PROGRESS') and t.expires_at > now()
+                 order by t.id for update loop
+    perform case_mgmt.close_task_internal(v_task, 'COMPLETED', v_actor, 'RETENTION_CLASS_ASSIGNED');
+  end loop;
+  return v_schedule;
+end;
 $$;
 
 create or replace function api.my_work_items()
@@ -238,6 +348,16 @@ as $$
                           and t.status in ('OPEN', 'IN_PROGRESS')
                           and t.access_granted_at <= now() and t.expires_at > now()
                           and authz.user_has_role(me.id, t.assigned_role))
+
+    union all
+    -- An archived case the shared pool cannot take and nobody holds a usable retention task on: the case authority
+    -- who may create records tasks on it routes it to one officer, so the obligation is never silent.
+    select 'CASES', 'NEEDS_ACTION', 'RETENTION_TO_ROUTE', 'RECORD', c.id, c.id, null, null, arc.archived_at
+      from case_mgmt.case_record c
+      cross join lateral (select max(e.occurred_at) as archived_at
+                            from workflow.workflow_transition_event e
+                           where e.case_id = c.id and e.to_state = 'ARCHIVE') arc
+     where c.records_state = 'ARCHIVED' and authz.can_route_retention_review(c.id)
   )
   select i.area, i.view, i.category, i.target_type, i.target_id,
          case when i.case_id is not null and authz.can_view_case_metadata(i.case_id) then i.case_id end,
@@ -249,4 +369,7 @@ as $$
    order by (i.due_at is null), i.due_at, i.since_at, i.target_id;
 $$;
 
-grant execute on function api.retention_review_queue() to authenticated;
+revoke all on function api.retention_review_queue(), records.retention_pool_can_take(uuid),
+  authz.can_route_retention_review(uuid), api.list_retention_reviewers(uuid) from public;
+grant execute on function api.retention_review_queue(), authz.can_route_retention_review(uuid),
+  api.list_retention_reviewers(uuid) to authenticated;
