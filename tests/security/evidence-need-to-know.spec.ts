@@ -300,6 +300,22 @@ describe("DEC-09: the reporter's files after a case exists", () => {
       for (const user of ["grcDirector", "grcDeputy", "committee", "intake", "records"] as UserKey[])
         expect(await files(s, user, id), user).toEqual({ listed: 0, download: 0 });
 
+      // Only a TRIAGE grant reaches them: COMMITTEE, REVIEW and AUDIT grants see the case, not its reporter's files.
+      const grants = [
+        ["committeeChair", "COMMITTEE"],
+        ["committee", "REVIEW"],
+        ["dpo", "AUDIT"],
+      ] as const;
+      await s.as("caseManager");
+      for (const [user, scope] of grants)
+        await s.tx`select api.grant_case_access(${caseB}, ${USERS[user]}, ${scope}, ${REASON}, null)`;
+      for (const [user] of grants) {
+        await s.as(user);
+        const [cv] = await s.tx<{ ok: boolean }[]>`select authz.can_view_case(${caseB}) as ok`;
+        expect(cv!.ok, user).toBe(true);
+        expect(await files(s, user, id), user).toEqual({ listed: 0, download: 0 });
+      }
+
       // Hand-over ends the TRIAGE grant (DEC-03, S3); its end ends the files too.
       await s.as("caseManager");
       const [grant] = await s.tx<{ id: string }[]>`

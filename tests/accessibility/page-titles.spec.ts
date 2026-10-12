@@ -101,7 +101,10 @@ for (const locale of ["ar", "en"] as const) {
     await lead.getByTestId("case-tab-forms").click();
     await lead.waitForURL(/\/forms$/);
     titles.push(await pagePart(lead, names.app));
-    await lead.locator('[data-testid^="form-instance-"]').first().click();
+    // The first started form by its address: after the e2e suite every form on this case can sit in the closed
+    // "Completed" group (S2g), where its link is not visible until the group is opened.
+    const formHref = await lead.locator('[data-testid^="form-instance-"]').first().getAttribute("href");
+    await lead.goto(formHref!);
     await lead.waitForURL(/\/forms\/[0-9a-f-]{36}$/);
     titles.push(await pagePart(lead, names.app));
     await lead.goto(caseUrl);
