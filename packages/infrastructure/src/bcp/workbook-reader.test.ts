@@ -216,6 +216,54 @@ describe("workbook reader", () => {
     expect(code(new TextEncoder().encode("not a workbook"))).toBe("NOT_A_ZIP");
   });
 
+  it("reads each part once: a sheet naming a part already read is refused (AGENT-09 R1)", () => {
+    const rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    const pkg = 'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"';
+    const ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+    /** `targets.length` sheets, the i-th naming targets[i]; shared strings are related as rId0. */
+    const sheets = (targets: string[]) => ({
+      workbookRels:
+        `<Relationships ${pkg}><Relationship Id="rId0" Type="${rel}/sharedStrings" Target="sharedStrings.xml"/>` +
+        targets
+          .map((t, i) => `<Relationship Id="rId${i + 1}" Type="${rel}/worksheet" Target="${t}"/>`)
+          .join("") +
+        `</Relationships>`,
+      workbook:
+        `<workbook ${ns} xmlns:r="${rel}"><sheets>` +
+        targets.map((_, i) => `<sheet name="S${i}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("") +
+        `</sheets></workbook>`,
+      sharedStrings: SST(""),
+    });
+    const ROW = `<row r="1"><c r="A1" t="inlineStr"><is><t>Synthetic</t></is></c></row>`;
+    const other = { name: "xl/worksheets/sheet2.xml", data: SHEET(ROW), method: 8 as const };
+    expect(
+      code(minimalWorkbook(SHEET(ROW), [other], sheets(["worksheets/sheet1.xml", "worksheets/sheet2.xml"]))),
+    ).toBe("ACCEPTED");
+    expect(
+      code(minimalWorkbook(SHEET(ROW), [], sheets(["worksheets/sheet1.xml", "worksheets/sheet1.xml"]))),
+    ).toBe("SHARED_PART");
+    expect(
+      code(minimalWorkbook(SHEET(ROW), [], sheets(["worksheets/sheet1.xml", "/xl/worksheets/sheet1.xml"]))),
+    ).toBe("SHARED_PART");
+    expect(code(minimalWorkbook(SHEET(ROW), [], sheets(["worksheets/sheet1.xml", "workbook.xml"])))).toBe(
+      "SHARED_PART",
+    );
+    expect(code(minimalWorkbook(SHEET(ROW), [], sheets(["sharedStrings.xml"])))).toBe("SHARED_PART");
+    // The crafted file, scaled down: one large worksheet (a comment of incompressible-ish text) named by 40 sheets is
+    // refused at the second sheet, after one inflation, instead of being inflated and tokenized 40 times.
+    let x = 12345;
+    const pad = Array.from({ length: 2 * 1024 * 1024 }, () => {
+      x = (x * 1103515245 + 12345) >>> 0;
+      return (x >>> 16) & 1 ? "a" : "b";
+    }).join("");
+    const big = SHEET(ROW).replace("<sheetData>", `<!--${pad}--><sheetData>`);
+    const started = performance.now();
+    expect(code(minimalWorkbook(big, [], sheets(Array(40).fill("worksheets/sheet1.xml"))))).toBe(
+      "SHARED_PART",
+    );
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
   it("enforces row, cell, column and length limits", () => {
     const tight = {
       ...BCP_WORKBOOK_LIMITS,

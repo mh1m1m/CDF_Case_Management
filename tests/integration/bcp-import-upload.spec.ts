@@ -104,7 +104,7 @@ function control(from: string): Record<string, string> {
     CASE_ID: caseB,
     CASE_NUMBER: caseNumber,
     OFFLINE_FROM: from,
-    PREPARED_BY: EMAIL.lead!,
+    PREPARED_BY: EMAIL.investigatorB!,
   };
 }
 
@@ -126,7 +126,7 @@ describe("continuity workbook upload, end to end (ADR-034)", () => {
   it("imports a workbook file written from the template, after a different person approves it", async () => {
     await ownerScenario(async (s) => {
       const { from, at } = await window(s);
-      const by = { ORIGINAL_EVENT_AT: at, RECORDED_OFFLINE_BY: EMAIL.lead! };
+      const by = { ORIGINAL_EVENT_AT: at, RECORDED_OFFLINE_BY: EMAIL.investigatorB! };
       const bytes = workbookFile(control(from), {
         "05_SUBJECTS": [
           {
@@ -252,7 +252,7 @@ describe("continuity workbook upload, end to end (ADR-034)", () => {
           {
             ROW_ID: "BCP-UP-S2",
             ORIGINAL_EVENT_AT: at,
-            RECORDED_OFFLINE_BY: EMAIL.lead!,
+            RECORDED_OFFLINE_BY: EMAIL.investigatorB!,
             DISPLAY_LABEL: "Employee Psi (synthetic)",
             SUBJECT_CATEGORY: "EMPLOYEE",
           },

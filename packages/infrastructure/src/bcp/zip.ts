@@ -10,7 +10,7 @@ export interface ZipLimits {
   maxEntries: number;
   /** Largest declared uncompressed size of any one entry. */
   maxEntryBytes: number;
-  /** Largest sum of declared uncompressed sizes over all entries. */
+  /** Largest sum of declared uncompressed sizes over all entries, and of the bytes all reads inflate together. */
   maxTotalBytes: number;
   /** Highest uncompressed-to-compressed ratio of any entry (a zip-bomb signal). */
   maxRatio: number;
@@ -92,6 +92,8 @@ export function isSafeEntryName(name: string): boolean {
 export class ZipArchive {
   private readonly view: DataView;
   readonly entries: ReadonlyMap<string, ZipEntry>;
+  /** Bytes handed out by read() so far: an entry read twice counts twice (AGENT-09 R1). */
+  private inflated = 0;
 
   private constructor(
     private readonly bytes: Uint8Array,
@@ -194,10 +196,13 @@ export class ZipArchive {
     return entries;
   }
 
-  /** Inflates one entry, never past its declared size, and checks its length and CRC. */
+  /** Inflates one entry, never past its declared size, and checks its length and CRC. Refuses once the bytes read
+   *  from this archive, over all calls, would pass maxTotalBytes. */
   read(name: string): Uint8Array {
     const entry = this.entries.get(name);
     if (!entry) fail("CORRUPT");
+    if (this.inflated + entry.uncompressedSize > this.limits.maxTotalBytes) fail("TOTAL_TOO_LARGE");
+    this.inflated += entry.uncompressedSize;
     const at = entry.localHeaderOffset;
     if (this.u32(at) !== LOCAL) fail("CORRUPT");
     const flags = this.u16(at + 6);

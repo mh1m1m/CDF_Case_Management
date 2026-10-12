@@ -123,6 +123,18 @@ describe("ZIP container (untrusted upload)", () => {
     ).toBe("TOTAL_TOO_LARGE");
   });
 
+  it("counts every read against the total, so an entry read again and again is refused (AGENT-09 R1)", () => {
+    const part = new Uint8Array(60 * 1024).fill(65);
+    const zip = ZipArchive.open(rawZip([{ name: "sheet.xml", data: part, method: 8 }]), {
+      ...LIMITS,
+      maxRatio: 10_000,
+    });
+    expect(zip.read("sheet.xml").byteLength).toBe(part.byteLength);
+    expect(zip.read("sheet.xml").byteLength).toBe(part.byteLength);
+    // 3 × 60 KiB passes the 128 KiB total: refused before anything is inflated a third time.
+    expect(rejection(() => zip.read("sheet.xml"))).toBe("TOTAL_TOO_LARGE");
+  });
+
   it("refuses a zip bomb by its ratio, and never inflates past the declared size", () => {
     const zeros = new Uint8Array(60 * 1024);
     expect(

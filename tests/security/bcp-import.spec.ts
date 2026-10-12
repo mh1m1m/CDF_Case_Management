@@ -61,7 +61,7 @@ function control(t: Clock, caseIdValue: string, extra: Record<string, string | u
     CASE_ID: caseIdValue,
     CASE_NUMBER: t.number,
     OFFLINE_FROM: t.created,
-    PREPARED_BY: EMAIL.lead!,
+    PREPARED_BY: EMAIL.investigatorB!,
     ...extra,
   };
   return Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined));
@@ -81,7 +81,7 @@ function row(
   key: string,
   at: string,
   cells: Record<string, string>,
-  by: UserKey = "lead",
+  by: UserKey = "investigatorB",
 ) {
   return {
     sheet,
@@ -404,7 +404,7 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
         ["BCP-D1", "defence_response"],
       ]);
       for (const r of prov) {
-        expect(r.recorded_offline_by).toBe(USERS.lead);
+        expect(r.recorded_offline_by).toBe(USERS.investigatorB);
         expect(r.imported_by).toBe(USERS.caseManager);
         expect(r.markers).toEqual(["RECORDED_OFFLINE", "IMPORTED_LATER"]);
         expect(r.workbook_id).toBe(WORKBOOK);
@@ -455,7 +455,7 @@ describe("BCP import: stage, dry run, separate approval, transactional import (Q
       expect(imported!.actor).toBe(USERS.caseManager);
       expect(imported!.meta).toMatchObject({
         sheet: "18_EMPLOYEE_NOTICE",
-        recorded_offline_by: USERS.lead,
+        recorded_offline_by: USERS.investigatorB,
         markers: ["RECORDED_OFFLINE", "IMPORTED_LATER"],
       });
       // Audit metadata carries ids, codes and counts, never what the workbook says.
@@ -756,6 +756,53 @@ describe("BCP import: who may stage, see, approve and apply", () => {
     });
   });
 
+  it("names only active users who see the case as preparer or offline recorder; the preparer never approves", async () => {
+    // AGENT-09 R2 (provenance integrity) and R3 (separation of duties) on the 1960 early look.
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      await s.tx`update iam.user_profile set status = 'SUSPENDED' where id = ${USERS.triage}`;
+      const input = [subjectRow(3, "BCP-S1", t.now)];
+      // dpo and investigatorA cannot see the case; triage could, but is suspended.
+      const outsiders = ["dpo", "investigatorA", "triage"] as UserKey[];
+      await s.as("caseManager");
+      for (const outsider of outsiders) {
+        await s.expectError(
+          "CDF_INVALID:PREPARED_BY",
+          (tx) =>
+            tx`select api.stage_bcp_import(${tx.json(control(t, caseB, { PREPARED_BY: EMAIL[outsider] }) as never)}::jsonb,
+               ${SHA}, ${tx.json(input as never)}::jsonb)`,
+        );
+      }
+      const subject = { DISPLAY_LABEL: "Employee Tau (synthetic)", SUBJECT_CATEGORY: "EMPLOYEE" };
+      const batch = await stage(s, "caseManager", control(t, caseB, { PREPARED_BY: EMAIL.grcDirector! }), [
+        ...input,
+        ...outsiders.map((by, i) => row("05_SUBJECTS", 4 + i, `BCP-R${i}`, t.now, subject, by)),
+      ]);
+      const staged = await rows(s, batch);
+      expect(Object.fromEntries(Object.entries(staged).map(([k, r]) => [k, [r.state, r.detail]]))).toEqual({
+        "BCP-S1": ["NEW", null],
+        "BCP-R0": ["INVALID", "RECORDED_OFFLINE_BY"],
+        "BCP-R1": ["INVALID", "RECORDED_OFFLINE_BY"],
+        "BCP-R2": ["INVALID", "RECORDED_OFFLINE_BY"],
+      });
+      for (const key of ["BCP-R0", "BCP-R1", "BCP-R2"]) await resolve(s, staged[key]!.id, "SKIP");
+      expect(await submit(s, batch)).toBe("SUBMITTED");
+      // The preparer holds BCP_IMPORT_APPROVE and sees the case, yet is neither asked nor allowed to decide.
+      expect(await notified(s, "BCP_IMPORT_APPROVAL_REQUESTED", batch)).toEqual(["grcDeputy"]);
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.decide_bcp_import(${batch}, 'APPROVE', ${REASON}, ${SHA})`,
+      );
+      expect(await decide(s, "grcDeputy", batch)).toBe("APPROVED");
+      expect(await apply(s, "caseManager", batch)).toMatchObject({ imported: 1, skipped: 3 });
+      await s.asOwner();
+      const [p] = await s.tx<{ recorder: string }[]>`
+        select recorded_offline_by as recorder from exchange.bcp_provenance where batch_id = ${batch}`;
+      expect(p!.recorder).toBe(USERS.investigatorB);
+    });
+  });
+
   it("imports a corrective action only through its command, and shows its provenance to the action's owner", async () => {
     await ownerScenario(async (s) => {
       const t = await clock(s, caseB);
@@ -992,7 +1039,7 @@ describe("BCP import: validation of the control sheet and every cell (§45)", ()
       });
       const batch = await stage(s, "caseManager", control(t, caseB, { OFFLINE_FROM: t.dayBefore }), [
         base(3, "bcp-ok1", {
-          RECORDED_OFFLINE_BY: EMAIL.lead!.toUpperCase(),
+          RECORDED_OFFLINE_BY: EMAIL.investigatorB!.toUpperCase(),
           SUBJECT_CATEGORY: "CONTRACTOR",
         }),
         { ...base(4, "BCP-F1"), has_formula: true },
@@ -1043,7 +1090,7 @@ describe("BCP import: validation of the control sheet and every cell (§45)", ()
       ]);
       expect(list[0]!.cells).toMatchObject({
         ROW_ID: "BCP-OK1",
-        RECORDED_OFFLINE_BY: EMAIL.lead,
+        RECORDED_OFFLINE_BY: EMAIL.investigatorB,
         SUBJECT_CATEGORY: "CONTRACTOR",
       });
       expect(list[2]!.cells).not.toHaveProperty("DISPLAY_LABEL");

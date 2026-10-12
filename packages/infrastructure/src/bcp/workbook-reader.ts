@@ -250,6 +250,9 @@ function readOrThrow(bytes: Uint8Array, limits: WorkbookLimits): BcpWorkbook {
 
   const sheets: BcpWorkbookSheet[] = [];
   const names = new Set<string>();
+  // Each part is read once: a sheet naming a part already read (another sheet's, the workbook or the shared strings)
+  // is refused, so one large part cannot be inflated and parsed again for every sheet (AGENT-09 R1).
+  const read = new Set<string>([workbookPart, ...(sst ? [sst.target] : [])]);
   for (const e of tokenize(part(zip, workbookPart))) {
     if (e.type !== "open" || e.name !== "sheet") continue;
     const name = e.attrs.name;
@@ -259,6 +262,8 @@ function readOrThrow(bytes: Uint8Array, limits: WorkbookLimits): BcpWorkbook {
     if (names.has(name)) reject("MALFORMED");
     names.add(name);
     if (names.size > limits.maxSheets) reject("TOO_MANY_SHEETS");
+    if (read.has(rel.target)) reject("SHARED_PART");
+    read.add(rel.target);
     sheets.push({ name, rows: worksheet(part(zip, rel.target), strings, limits) });
   }
   if (sheets.length === 0) reject("NOT_A_WORKBOOK");

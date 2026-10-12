@@ -1884,7 +1884,7 @@ describe("IDOR: corrective actions (migration 1940)", () => {
 });
 
 describe("IDOR: continuity workbook imports (migration 1960)", () => {
-  // A submitted batch on case 0002 staged by the case manager and recorded offline by the lead investigator. None of
+  // A submitted batch on case 0002 staged by the case manager, prepared and recorded offline by investigator B. None of
   // these can see case 0002; the committee secretary and platform administrator hold other governance roles.
   const OUTSIDERS: UserKey[] = [
     "investigatorA",
@@ -1909,10 +1909,10 @@ describe("IDOR: continuity workbook imports (migration 1960)", () => {
         )
         select api.stage_bcp_import(
           jsonb_build_object('TEMPLATE_VERSION', 'BCP-1', 'WORKBOOK_ID', 'BCP-PROBE-2', 'CASE_ID', c.id::text,
-                             'CASE_NUMBER', c.case_number, 'OFFLINE_FROM', c.at, 'PREPARED_BY', 'lead@example.test'),
+                             'CASE_NUMBER', c.case_number, 'OFFLINE_FROM', c.at, 'PREPARED_BY', 'investigator.b@example.test'),
           ${SHA},
           jsonb_build_array(jsonb_build_object('sheet', '05_SUBJECTS', 'row_number', 3, 'has_formula', false, 'cells',
-            jsonb_build_object('ROW_ID', 'BCP-PS1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'lead@example.test',
+            jsonb_build_object('ROW_ID', 'BCP-PS1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'investigator.b@example.test',
                                'DISPLAY_LABEL', 'Employee Probe (synthetic)', 'SUBJECT_CATEGORY', 'EMPLOYEE')))) as id,
           c.case_number as number
         from c`;

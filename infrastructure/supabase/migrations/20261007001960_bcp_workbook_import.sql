@@ -21,9 +21,10 @@
 --     CONFLICT kept or skipped; unsupported and invalid rows are skipped explicitly; every resolution is audited.
 --   * The preview runs every row through its api.* command as the importer and rolls everything back; submission
 --     needs that preview's hash and a clean dry run. Referenced platform objects must belong to the workbook's case.
---   * A different person approves (BCP_IMPORT_APPROVE): never the importer or anyone who recorded a row offline, and
---     only someone who sees the case. The importer applies, in one transaction, through the same commands; any failing
---     row aborts the whole import.
+--   * The workbook's preparer and each row's offline recorder must be ACTIVE users who see the case.
+--   * A different person approves (BCP_IMPORT_APPROVE): never the importer, the preparer or anyone who recorded a row
+--     offline, and only someone who sees the case. The importer applies, in one transaction, through the same
+--     commands; any failing row aborts the whole import.
 --   * Provenance is written per imported object and never changed; offline times are never rewritten as import
 --     times. Re-importing a workbook is idempotent.
 -- Audit metadata carries ids, codes and counts, never cell text.
@@ -468,6 +469,18 @@ as $$
   select u.id from iam.user_profile u where lower(u.email) = lower(p_email);
 $$;
 
+-- The person a workbook names as its preparer or as a row's offline recorder: a registered user who is ACTIVE and can
+-- see the case now (AGENT-09 R2), so provenance never names someone outside the case. The importer can tell from the
+-- result whether a named person sees the case; BCP_IMPORT holders are the roles that see the full roster (DEC-08/10).
+create function exchange.bcp_case_user(p_email text, p_case_id uuid)
+returns uuid
+language sql stable
+set search_path = ''
+as $$
+  select u.id from iam.user_profile u
+  where lower(u.email) = lower(p_email) and authz.user_can_view_case(u.id, p_case_id);
+$$;
+
 -- What the approval and the import are bound to: the batch's control and every row with its state and resolution.
 create function exchange.bcp_batch_hash(p_batch_id uuid)
 returns text
@@ -504,8 +517,8 @@ begin
 end;
 $$;
 
--- Who may approve: holds BCP_IMPORT_APPROVE, can see the case, is not the importer and recorded no row offline.
--- Internal (it answers about other users).
+-- Who may approve: holds BCP_IMPORT_APPROVE, can see the case, and is neither the importer, the workbook's preparer
+-- nor anyone who recorded a row offline. Internal (it answers about other users).
 create function exchange.bcp_eligible_approvers(p_batch_id uuid)
 returns table (user_id uuid)
 language sql stable
@@ -513,7 +526,7 @@ set search_path = ''
 as $$
   select u.id
   from exchange.bcp_import_batch b
-  join iam.user_profile u on u.status = 'ACTIVE' and u.id <> b.imported_by
+  join iam.user_profile u on u.status = 'ACTIVE' and u.id <> b.imported_by and u.id <> b.prepared_by
   where b.id = p_batch_id
     and authz.user_has_permission(u.id, 'BCP_IMPORT_APPROVE')
     and authz.user_can_view_case(u.id, b.case_id)
@@ -662,7 +675,8 @@ $$;
 revoke all on function
   exchange.protect_bcp(), exchange.bcp_is_uuid(text), exchange.bcp_normalize(text, text),
   exchange.bcp_cell_ok(exchange.bcp_template_column, text),
-  exchange.bcp_error_code(text), exchange.bcp_user_by_email(text), exchange.bcp_batch_hash(uuid),
+  exchange.bcp_error_code(text), exchange.bcp_user_by_email(text), exchange.bcp_case_user(text, uuid),
+  exchange.bcp_batch_hash(uuid),
   exchange.lock_bcp_batch(uuid, boolean), exchange.bcp_eligible_approvers(uuid),
   exchange.bcp_execute_row(exchange.bcp_import_batch, exchange.bcp_import_row, jsonb),
   exchange.bcp_run(uuid, boolean), exchange.bcp_dry_run(uuid)
@@ -793,7 +807,7 @@ begin
   v_to := (v_ctl ->> 'OFFLINE_TO')::timestamptz;
   if v_from > now() then perform api._fail('INVALID', 'OFFLINE_FROM'); end if;
   if v_to is not null and (v_to < v_from or v_to > now()) then perform api._fail('INVALID', 'OFFLINE_TO'); end if;
-  v_prepared := exchange.bcp_user_by_email(v_ctl ->> 'PREPARED_BY');
+  v_prepared := exchange.bcp_case_user(v_ctl ->> 'PREPARED_BY', v_case.id);
   if v_prepared is null then perform api._fail('INVALID', 'PREPARED_BY'); end if;
   if p_rows is null or jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) not between 1 and 2000 then
     perform api._fail('INVALID', 'rows');
@@ -856,7 +870,7 @@ begin
       end if;
     end if;
     if v_detail is null then
-      v_recorder := exchange.bcp_user_by_email(v_cells ->> 'RECORDED_OFFLINE_BY');
+      v_recorder := exchange.bcp_case_user(v_cells ->> 'RECORDED_OFFLINE_BY', v_case.id);
       if v_recorder is null then v_detail := 'RECORDED_OFFLINE_BY'; v_event := null; end if;
     end if;
     v_hash := encode(sha256(convert_to(jsonb_build_object('sheet', v_sheet.sheet_code, 'cells', v_cells)::text, 'UTF8')), 'hex');
@@ -1033,7 +1047,7 @@ declare
   v_status text;
 begin
   b := exchange.lock_bcp_batch(p_batch_id, false);
-  if not authz.has_permission('BCP_IMPORT_APPROVE') or b.imported_by = v_actor
+  if not authz.has_permission('BCP_IMPORT_APPROVE') or b.imported_by = v_actor or b.prepared_by = v_actor
      or exists (select 1 from exchange.bcp_import_row r where r.batch_id = b.id and r.recorded_offline_by = v_actor) then
     perform api._fail('FORBIDDEN');
   end if;
