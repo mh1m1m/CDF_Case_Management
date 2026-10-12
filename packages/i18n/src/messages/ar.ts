@@ -1385,5 +1385,11 @@ export const ar: Messages = {
     EXPORT_APPROVAL_REQUESTED: "يوجد تصدير بانتظار موافقتك.",
     EXPORT_AUTHORITY_APPROVAL_REQUESTED: "يوجد تصدير لقضية مقيّدة تملكها بانتظار قرارك.",
     EXPORT_DECIDED: "سُجّل قرار بشأن طلب التصدير الخاص بك.",
+    CORRECTIVE_ACTION_ASSIGNED: "أُسند إليك إجراء تصحيحي.",
+    CORRECTIVE_ACTION_RETURNED: "إجراء تصحيحي تتولاه يحتاج إلى مزيد من العمل.",
+    CORRECTIVE_ACTION_CHANGED: "طرأ تغيير على إجراء تصحيحي تتولاه.",
+    CORRECTIVE_ACTION_SUBMITTED: "إجراء تصحيحي بانتظار التحقق.",
+    CORRECTIVE_ACTION_DUE: "تذكير: يقترب موعد استحقاق إجراء تصحيحي تتولاه.",
+    CORRECTIVE_ACTION_OVERDUE: "تجاوز إجراء تصحيحي موعد استحقاقه.",
   },
 };

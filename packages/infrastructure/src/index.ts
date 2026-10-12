@@ -29,6 +29,7 @@ export {
 export { PostgresNotificationOutbox } from "./notifications/outbox";
 export { StubEmailSender } from "./notifications/stub-email-sender";
 export { PostgresExportGateway } from "./db/export-gateway";
+export { PostgresCorrectiveActionGateway } from "./db/corrective-action-gateway";
 export {
   EXPORT_KEY_PATTERN,
   InMemoryExportStore,

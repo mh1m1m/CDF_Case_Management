@@ -1403,6 +1403,12 @@ export const en = {
     EXPORT_AUTHORITY_APPROVAL_REQUESTED:
       "An export of a restricted case you own is waiting for your decision.",
     EXPORT_DECIDED: "A decision was recorded on your export.",
+    CORRECTIVE_ACTION_ASSIGNED: "A corrective action has been assigned to you.",
+    CORRECTIVE_ACTION_RETURNED: "A corrective action you own needs more work.",
+    CORRECTIVE_ACTION_CHANGED: "A corrective action you own was changed.",
+    CORRECTIVE_ACTION_SUBMITTED: "A corrective action is waiting for verification.",
+    CORRECTIVE_ACTION_DUE: "Reminder: a corrective action you own is due soon.",
+    CORRECTIVE_ACTION_OVERDUE: "A corrective action is overdue.",
   },
 };
 

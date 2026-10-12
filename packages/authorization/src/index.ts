@@ -40,6 +40,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "FORM_REVIEW",
     "EXPORT_REQUEST",
     "EXPORT_APPROVE",
+    // Corrective actions (migration 1940, ADR-033): OWNER_DEFAULT, SOURCE_REQUIRED (Delegation of Authority).
+    "CORRECTIVE_ACTION_MANAGE",
   ],
   LEAD_INVESTIGATOR: [
     "CASE_ASSIGN",
@@ -111,6 +113,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "EXPORT_APPROVE",
     "EXPORT_SECOND_APPROVE",
     "EXPORT_POLICY_ADMIN",
+    // Corrective actions (migration 1940, ADR-033): OWNER_DEFAULT. CORRECTIVE_ACTION_WAIVE is held by no role.
+    "CORRECTIVE_ACTION_MANAGE",
+    "CORRECTIVE_ACTION_POLICY_ADMIN",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
   INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],
@@ -123,7 +128,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   // DB_ADMIN never receives application permissions (§21).
   COMPLIANCE: ["FORM_VIEW", "FORM_PREPARE", "FORM_REVIEW"],
   DECISION_AUTHORITY: ["FORM_VIEW", "FORM_APPROVE"],
-  IMPLEMENTATION_OWNER: ["FORM_VIEW", "FORM_PREPARE"],
+  // CORRECTIVE_ACTION_OWN reaches the owner's own actions only, never the case (migration 1940, ADR-033).
+  IMPLEMENTATION_OWNER: ["FORM_VIEW", "FORM_PREPARE", "CORRECTIVE_ACTION_OWN"],
   // Records authority is SOURCE_REQUIRED (Delegation of Authority); this is the prototype default (ADR-013 D9).
   // ADR-014: catalogue scope (post-closure, non-restricted) and tasks, never active-case discovery by role.
   RECORDS_OFFICER: [

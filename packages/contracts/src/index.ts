@@ -121,6 +121,11 @@ export const PERMISSIONS = [
   "EXPORT_APPROVE",
   "EXPORT_SECOND_APPROVE",
   "EXPORT_POLICY_ADMIN",
+  // Corrective actions (migration 1940, ADR-033): OWNER_DEFAULT, SOURCE_REQUIRED (Delegation of Authority).
+  "CORRECTIVE_ACTION_MANAGE",
+  "CORRECTIVE_ACTION_OWN",
+  "CORRECTIVE_ACTION_WAIVE",
+  "CORRECTIVE_ACTION_POLICY_ADMIN",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -1137,6 +1142,13 @@ export const NOTIFICATION_TEMPLATES = [
   "EXPORT_APPROVAL_REQUESTED",
   "EXPORT_AUTHORITY_APPROVAL_REQUESTED",
   "EXPORT_DECIDED",
+  // Corrective actions (migration 1940, ADR-033)
+  "CORRECTIVE_ACTION_ASSIGNED",
+  "CORRECTIVE_ACTION_RETURNED",
+  "CORRECTIVE_ACTION_CHANGED",
+  "CORRECTIVE_ACTION_SUBMITTED",
+  "CORRECTIVE_ACTION_DUE",
+  "CORRECTIVE_ACTION_OVERDUE",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
@@ -1238,4 +1250,49 @@ export interface OutgoingNotification {
   template: NotificationTemplate;
   deepLink: string;
   attempts: number;
+}
+
+// ---- Corrective actions (ADR-033, migration 1940, Q72) -----------------------------------------------------
+export const CORRECTIVE_ACTION_TYPES = ["CORRECTIVE_ACTION", "GOVERNANCE_REMEDIATION"] as const;
+export type CorrectiveActionType = (typeof CORRECTIVE_ACTION_TYPES)[number];
+export const CORRECTIVE_ACTION_STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "PENDING_VERIFICATION",
+  "COMPLETED",
+  "WAIVED",
+] as const;
+export type CorrectiveActionStatus = (typeof CORRECTIVE_ACTION_STATUSES)[number];
+export const VERIFICATION_DECISIONS = ["VERIFIED", "RETURNED"] as const;
+export type VerificationDecision = (typeof VERIFICATION_DECISIONS)[number];
+/** What completion must carry; SOURCE_REQUIRED, seeded REFERENCE_REQUIRED (the strictest). */
+export const COMPLETION_EVIDENCE_RULES = ["REFERENCE_REQUIRED", "NOTE_ONLY"] as const;
+export type CompletionEvidenceRule = (typeof COMPLETION_EVIDENCE_RULES)[number];
+export const CORRECTIVE_ACTION_POLICY_SOURCES = ["SOURCE_REQUIRED", "APPROVED"] as const;
+export type CorrectiveActionPolicySource = (typeof CORRECTIVE_ACTION_POLICY_SOURCES)[number];
+/** The case's execution state, derived from its approved items and their actions; never stored. */
+export const EXECUTION_STATES = [
+  "NOT_STARTED",
+  "IN_PROGRESS",
+  "FOLLOW_UP",
+  "PARTIALLY_EXECUTED",
+  "EXECUTED",
+  "OVERDUE",
+] as const;
+export type ExecutionState = (typeof EXECUTION_STATES)[number];
+
+/** An action as its owner or the case team reads it. The owner never reaches the case behind `caseId`. */
+export interface CorrectiveAction {
+  id: string;
+  caseId: string;
+  recommendationItemId: string;
+  actionType: CorrectiveActionType;
+  sequenceNo: number;
+  title: string;
+  description: string;
+  ownerId: string;
+  /** Calendar date in Riyadh, YYYY-MM-DD. */
+  dueDate: string;
+  status: CorrectiveActionStatus;
+  percentComplete: number;
 }

@@ -22,3 +22,9 @@ export { composeNotificationEmail, createNotificationService } from "./notificat
 export type { DispatchResult, NotificationDeps, NotificationService } from "./notifications";
 export { createExportService } from "./exports";
 export type { ExportDeps, ExportGateway, ExportService, GenerateResult } from "./exports";
+export { createCorrectiveActionService } from "./corrective-actions";
+export type {
+  CorrectiveActionDeps,
+  CorrectiveActionGateway,
+  CorrectiveActionService,
+} from "./corrective-actions";

@@ -653,8 +653,11 @@ describe("every state-changing command writes its audit event in the same transa
             s,
             s.tx`select api.add_recommendation_item(${ids.pkg!}, 'OTHER', null, null, 'Synthetic: walk recommendation.', null, null) as id`,
           );
-          return s.tx`select api.add_recommendation_item(${ids.pkg!}, 'CORRECTIVE_ACTION', null, null,
-            'Synthetic: walk corrective action.', null, null)`;
+          return (ids.correctiveItem = await one(
+            s,
+            s.tx`select api.add_recommendation_item(${ids.pkg!}, 'CORRECTIVE_ACTION', null, null,
+              'Synthetic: walk corrective action.', null, null) as id`,
+          ));
         },
       },
       {
@@ -732,6 +735,66 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.record_authority_decision(${ids.pkg!}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED',
             now() - interval '1 hour', 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON})`,
+      },
+      // Corrective actions (migration 1940): opened from the approved item, run by the case manager, reported by
+      // its owner (financeEmployee, then employeeB; both given IMPLEMENTATION_OWNER before the walk), verified,
+      // reopened and waived.
+      {
+        fn: "set_corrective_action_policy",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.set_corrective_action_policy('GOVERNANCE_REMEDIATION', null, null, null, 'REFERENCE_REQUIRED',
+            now(), 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "open_corrective_action",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.correctiveAction = await one(
+            s,
+            s.tx`select api.open_corrective_action(${ids.correctiveItem!}, 'Synthetic: walk action',
+              'Synthetic: walk corrective action text.', ${USERS.financeEmployee}, current_date + 30) as id`,
+          )),
+      },
+      {
+        fn: "assign_corrective_action_owner",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.assign_corrective_action_owner(${ids.correctiveAction!}, ${USERS.employeeB}, ${REASON})`,
+      },
+      {
+        fn: "change_corrective_action_due_date",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.change_corrective_action_due_date(${ids.correctiveAction!}, current_date + 45, ${REASON})`,
+      },
+      {
+        fn: "record_corrective_action_progress",
+        actor: "employeeB",
+        run: (s) =>
+          s.tx`select api.record_corrective_action_progress(${ids.correctiveAction!}, 50, ${REASON})`,
+      },
+      {
+        fn: "submit_corrective_action_completion",
+        actor: "employeeB",
+        run: (s) =>
+          s.tx`select api.submit_corrective_action_completion(${ids.correctiveAction!}, ${REASON}, 'SOP-DEMO-WALK')`,
+      },
+      {
+        fn: "verify_corrective_action",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.verify_corrective_action(${ids.correctiveAction!}, 'VERIFIED', null)`,
+      },
+      {
+        fn: "reopen_corrective_action",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.reopen_corrective_action(${ids.correctiveAction!}, ${REASON})`,
+      },
+      {
+        fn: "waive_corrective_action",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.waive_corrective_action(${ids.correctiveAction!}, 'MEMO-DEMO-WALK-2', ${REASON})`,
       },
       {
         fn: "close_meeting",
@@ -1474,6 +1537,13 @@ describe("every state-changing command writes its audit event in the same transa
                                          access_granted_at, expires_at)
         values (${caseA}, 'LEGAL_HOLD_RELEASE', ${USERS.legalB}, 'LEGAL_REVIEWER', 'Synthetic: lapsed audit walk task.',
                 array['CASE_VIEW_METADATA'], ${USERS.caseManager}, now() - interval '2 days', now() - interval '1 day')`;
+      // Corrective-action owners, and the waiver permission no role holds yet (SOURCE_REQUIRED; rolled back).
+      await s.tx`insert into iam.role_permission (role_code, permission_code)
+                 values ('GRC_DIRECTOR', 'CORRECTIVE_ACTION_WAIVE')`;
+      await s.as("platformAdmin");
+      for (const u of [USERS.financeEmployee, USERS.employeeB]) {
+        await s.tx`select api.grant_role(${u}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner for the walk')`;
+      }
       const missing: string[] = [];
       for (const step of steps) {
         const { events } = await audited(s, step);
@@ -1626,6 +1696,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_case_metadata",
       "authz.can_view_committee_proceeding",
       "authz.can_view_committee_registry",
+      "authz.can_view_corrective_action",
       "authz.can_view_evidence",
       "authz.can_view_export",
       "authz.can_view_form_instance",

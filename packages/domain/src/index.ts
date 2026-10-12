@@ -107,3 +107,4 @@ export type { FormDataCheck, FormDataIssue, FormDataIssueCode } from "./forms";
 export * from "./interviews";
 // ---- Proceedings and committees (ADR-017 to ADR-020) -------------------------------------------------
 export * from "./committee";
+export * from "./corrective-actions";

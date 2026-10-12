@@ -895,6 +895,58 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
   },
 ];
 
+// Corrective-action commands (migration 1940) take an approved recommendation item or an action; never a case.
+interface CorrectiveActionTargets {
+  item: string;
+  action: string;
+}
+
+const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
+  {
+    fn: "open_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.open_corrective_action(${t.item}, 'Probe corrective action', 'Probe corrective action text.',
+        ${self}, current_date + 30)`,
+  },
+  {
+    fn: "assign_corrective_action_owner",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.assign_corrective_action_owner(${t.action}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "change_corrective_action_due_date",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.change_corrective_action_due_date(${t.action}, current_date + 60, ${REASON})`,
+  },
+  {
+    fn: "record_corrective_action_progress",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_corrective_action_progress(${t.action}, 50, ${REASON})`,
+  },
+  {
+    fn: "submit_corrective_action_completion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_corrective_action_completion(${t.action}, ${REASON}, 'PROBE-REF')`,
+  },
+  {
+    fn: "verify_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.verify_corrective_action(${t.action}, 'VERIFIED', null)`,
+  },
+  {
+    fn: "reopen_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.reopen_corrective_action(${t.action}, ${REASON})`,
+  },
+  {
+    fn: "waive_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.waive_corrective_action(${t.action}, 'MEMO-PROBE-0001', ${REASON})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -910,6 +962,8 @@ const ADMIN_COMMANDS = [
   "set_notification_rule",
   // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case.
   "set_export_rule",
+  // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case.
+  "set_corrective_action_policy",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
@@ -1143,6 +1197,7 @@ describe("catalog guard", () => {
       ...GRIEVANCE_PROBES.map((p) => p.fn),
       ...NOTIFICATION_PROBES.map((p) => p.fn),
       ...EXPORT_PROBES.map((p) => p.fn),
+      ...CORRECTIVE_ACTION_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1717,6 +1772,59 @@ describe("IDOR: export requests (migration 1930)", () => {
         "restricted_export_approval",
       ]) {
         expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: corrective actions (migration 1940)", () => {
+  // An action on case 0002 owned by financeEmployee. None of these can see case 0002 or owns the action; employeeB
+  // holds IMPLEMENTATION_OWNER too, and the committee secretary prepared the package the action comes from.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "committeeSecretary",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "legal",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("platformAdmin");
+      for (const u of [USERS.financeEmployee, USERS.employeeB]) {
+        await s.tx`select api.grant_role(${u}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner probe')`;
+      }
+      const { ic } = await committeeIds();
+      const f = await draftPackage(s, ic, caseB);
+      await s.as("committeeSecretary");
+      await s.tx`select api.withdraw_recommendation_item(${f.sanction}, ${REASON})`;
+      await voteOnPackage(s, f);
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${f.pkg})`;
+      await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(),
+        'Chief Executive (synthetic)', 'MEMO-PROBE-0002', null, null)`;
+      await s.as("caseManager");
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.open_corrective_action(${f.corrective}, 'Synthetic: strengthen controls',
+          'Synthetic: add a second approver.', ${USERS.financeEmployee}, current_date + 30) as id`;
+      await s.as(actor);
+      const real: CorrectiveActionTargets = { item: f.corrective, action: a!.id };
+      const random: CorrectiveActionTargets = { item: randomUUID(), action: randomUUID() };
+      const mismatches: string[] = [];
+      for (const probe of CORRECTIVE_ACTION_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of ["corrective_action", "corrective_action_event"]) {
+        expect(await s.tx`select id from ${s.tx("decision." + table)}`, table).toEqual([]);
       }
     });
   });
