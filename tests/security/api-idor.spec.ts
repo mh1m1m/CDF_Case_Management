@@ -424,6 +424,10 @@ const GLOBAL_COMMANDS = [
   "expire_case_tasks",
   "my_case_tasks",
   "my_work_summary",
+  // S1 read models (migration 1820): the caller's own areas, work items and access basis.
+  "my_areas",
+  "my_work_items",
+  "my_access",
   "request_case_for_legal_hold",
   "search_records_catalogue",
 ];

@@ -11,6 +11,7 @@
     "@cdf/authorization": "workspace:*",
     "@cdf/contracts": "workspace:*",
     "@cdf/domain": "workspace:*",
+    "@cdf/i18n": "workspace:*",
     "@cdf/infrastructure": "workspace:*",
     "@cdf/workflow": "workspace:*",
     "postgres": "3.4.9"

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ROLES } from "@cdf/contracts";
-import { ROLE_PERMISSIONS, navigationFor, permissionsForRoles, withinClearance } from "./index";
+import { ROLES, type MyArea, type Role } from "@cdf/contracts";
+import {
+  ROLE_PERMISSIONS,
+  areaPermitted,
+  navigationFor,
+  permissionsForRoles,
+  shellAreas,
+  withinClearance,
+} from "./index";
 
 describe("role permission mirror", () => {
   it("covers every role", () => {
@@ -83,5 +90,39 @@ describe("role permission mirror", () => {
 
   it("compares clearance", () => {
     expect(withinClearance({ clearance: "CONFIDENTIAL" }, "SECRET")).toBe(false);
+  });
+});
+
+describe("shell areas (UX redesign S1, audit §20.4)", () => {
+  const area = (a: MyArea["area"]): MyArea => ({ area: a, actionableCount: 0, defaultView: "x" });
+  const actorOf = (...roles: Role[]) => ({ permissions: permissionsForRoles(roles) });
+
+  it("keeps the fixed order and drops duplicates", () => {
+    const got = shellAreas(actorOf("CASE_MANAGER"), [
+      area("RECORDS"),
+      area("CASES"),
+      area("MY_WORK"),
+      area("CASES"),
+    ]);
+    expect(got.map((a) => a.area)).toEqual(["MY_WORK", "CASES", "RECORDS"]);
+  });
+
+  it("never shows Oversight or Administration without their permission, whatever the database says", () => {
+    expect(shellAreas(actorOf("INVESTIGATOR"), [area("OVERSIGHT"), area("ADMINISTRATION")])).toEqual([]);
+    expect(areaPermitted(actorOf("PLATFORM_ADMIN"), "ADMINISTRATION")).toBe(true);
+    expect(areaPermitted(actorOf("PLATFORM_ADMIN"), "INTAKE")).toBe(false);
+  });
+
+  it("has no Committee or Reporting area before S5 and S6", () => {
+    for (const role of ROLES) {
+      expect(areaPermitted(actorOf(role), "COMMITTEE")).toBe(false);
+      expect(areaPermitted(actorOf(role), "REPORTING")).toBe(false);
+    }
+  });
+
+  it("lets an assignment alone open My Work and Cases (the database decides the relationship)", () => {
+    expect(areaPermitted({ permissions: [] }, "MY_WORK")).toBe(true);
+    expect(areaPermitted({ permissions: [] }, "CASES")).toBe(true);
+    expect(areaPermitted({ permissions: [] }, "RECORDS")).toBe(false);
   });
 });

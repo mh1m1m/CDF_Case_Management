@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
 import { CASE_TASK_TYPES, PERMISSIONS } from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES, FORM_DEFINITIONS, FORM_ENTITLEMENTS } from "@cdf/domain";
+import { messagesFor, type Messages } from "@cdf/i18n";
 import { STATES, TRANSITIONS } from "@cdf/workflow";
 import { admin } from "../support/db";
 
@@ -32,6 +33,20 @@ describe("mirrors", () => {
       from evidence.allowed_content_type order by content_type`;
     expect(rows).toEqual(
       [...ALLOWED_CONTENT_TYPES].sort((a, b) => a.contentType.localeCompare(b.contentType)),
+    );
+  });
+
+  it("role names in both languages match iam.role (UX redesign S1: user menu and My access)", async () => {
+    const rows = await admin<{ code: string; nameEn: string; nameAr: string }[]>`
+      select code, name_en as "nameEn", name_ar as "nameAr" from iam.role order by code`;
+    expect(rows).toEqual(
+      Object.keys(messagesFor("en").role)
+        .sort()
+        .map((code) => ({
+          code,
+          nameEn: messagesFor("en").role[code as keyof Messages["role"]],
+          nameAr: messagesFor("ar").role[code as keyof Messages["role"]],
+        })),
     );
   });
 
