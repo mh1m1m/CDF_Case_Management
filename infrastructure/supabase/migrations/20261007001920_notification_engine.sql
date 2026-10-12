@@ -56,7 +56,8 @@ insert into notify.template (code, object_type, is_mandatory, description) value
   ('GRIEVANCE_RECEIVED',               'GRIEVANCE',      false, 'A grievance awaits the Grievance Committee Secretary (Q92)'),
   ('GRIEVANCE_ADMISSIBILITY_DECIDED',  'GRIEVANCE',      true,  'The grievant''s grievance was admitted or found inadmissible (Q93)'),
   ('GRIEVANCE_OUTCOME_RECORDED',       'GRIEVANCE',      true,  'The Grievance Committee recorded its outcome (Q95)'),
-  ('GRIEVANCE_AUTHORITY_APPROVAL_NEEDED', 'GRIEVANCE',    true,  'A grievance on a restricted case waits for its Restricted Case Authority to name a secretary (G2b)');
+  ('GRIEVANCE_AUTHORITY_APPROVAL_NEEDED', 'GRIEVANCE',    true,  'A grievance on a restricted case waits for its Restricted Case Authority to name a secretary (G2b)'),
+  ('GRIEVANCE_HANDLING_APPROVED',      'GRIEVANCE',      true,  'The user was named to handle a grievance on a restricted case (G2b)');
 
 create table notify.rule (
   id             uuid primary key default gen_random_uuid(),
@@ -441,6 +442,23 @@ $$;
 create trigger grievance_notify after insert or update on grievance.grievance
   for each row execute function notify.on_grievance();
 
+-- G2b: the secretary a Restricted Case Authority names to handle a received grievance is told so. A recording approval
+-- is inserted unbound and needs no notice: its secretary records the grievance themselves.
+create function notify.on_grievance_handling_approval()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform notify.enqueue('GRIEVANCE_HANDLING_APPROVED', new.recorder_id, new.grievance_id, grievance.committee_id(),
+                         'grievance-handling:' || new.id);
+  return null;
+end;
+$$;
+create trigger restricted_grievance_approval_notify after insert on grievance.restricted_grievance_approval
+  for each row when (new.grievance_id is not null) execute function notify.on_grievance_handling_approval();
+
 create function notify.on_grievance_outcome()
 returns trigger
 language plpgsql
@@ -462,7 +480,7 @@ revoke all on function
   notify.delivers(text, text, uuid, uuid), notify.enqueue(text, uuid, uuid, uuid, text),
   notify.on_membership(), notify.meeting_committee(uuid), notify.on_meeting_participant(), notify.on_meeting(),
   notify.on_minutes(), notify.on_legal_review_request(), notify.on_defence_notice(), notify.on_grievance(),
-  notify.on_grievance_outcome()
+  notify.on_grievance_outcome(), notify.on_grievance_handling_approval()
 from public, anon, authenticated;
 
 -- -----------------------------------------------------------------------------

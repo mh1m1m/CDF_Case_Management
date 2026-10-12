@@ -1381,5 +1381,6 @@ export const ar: Messages = {
     GRIEVANCE_ADMISSIBILITY_DECIDED: "صدر قرار بشأن قبول تظلّمك.",
     GRIEVANCE_OUTCOME_RECORDED: "سجّلت اللجنة نتيجة تظلّمك.",
     GRIEVANCE_AUTHORITY_APPROVAL_NEEDED: "تظلّم على قضية مقيّدة يحتاج منك تسمية أمين للجنة.",
+    GRIEVANCE_HANDLING_APPROVED: "تمت تسميتك لمعالجة تظلّم.",
   },
 };

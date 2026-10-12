@@ -545,6 +545,11 @@ describe("AGENT-09 re-check of 1910 (G2b, G3b, approval checks)", () => {
       await s.expectError("CDF_INVALID:secretary_id", () => approve(USERS.grcDirector));
       await approve(USERS.grcDeputy);
       await s.expectError("CDF_CONFLICT:ALREADY_APPROVED", () => approve(USERS.grcDeputy));
+      await s.asOwner();
+      const named = await s.tx<{ recipient_id: string }[]>`
+        select distinct recipient_id from notify.outbox
+        where object_id = ${g!.id} and template_code = 'GRIEVANCE_HANDLING_APPROVED'`;
+      expect(named).toEqual([{ recipient_id: USERS.grcDeputy }]);
       await s.as("grcDeputy");
       expect(await visible(s, g!.id)).toBe(true);
       await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'INADMISSIBLE', null, ${REASON})`;
@@ -553,7 +558,7 @@ describe("AGENT-09 re-check of 1910 (G2b, G3b, approval checks)", () => {
     });
   });
 
-  it("the authority can name only a secretary cleared for the case (G2b)", async () => {
+  it("only the case owner holding the authority names a seated secretary cleared for the case (G2b)", async () => {
     await ownerScenario(async (s) => {
       await seat(s, gc, [
         ["committee", "CHAIR"],
@@ -568,13 +573,17 @@ describe("AGENT-09 re-check of 1910 (G2b, G3b, approval checks)", () => {
       await s.as("employee");
       const [g] = await s.tx<{ id: string }[]>`
         select api.file_grievance(${l!.id}, now() - interval '2 days', 'Synthetic: grievance grounds.') as id`;
+      const approve = (secretary: string) =>
+        s.tx`select api.approve_restricted_grievance_handling(${g!.id}, ${secretary}, ${REASON}) as id`;
       await s.as("grcDirector");
-      await s.expectError(
-        "CDF_INVALID:secretary_id",
-        (tx) =>
-          tx`select api.approve_restricted_grievance_handling(${g!.id}, ${USERS.committeeSecretary}, ${REASON})`,
-      );
-      await s.tx`select api.approve_restricted_grievance_handling(${g!.id}, ${USERS.grcDeputy}, ${REASON})`;
+      await s.expectError("CDF_INVALID:secretary_id", () => approve(USERS.committeeSecretary)); // not cleared
+      await s.expectError("CDF_INVALID:secretary_id", () => approve(USERS.grcSectorHead)); // cleared, holds no seat
+      // grcDeputy works the case and holds the authority, but does not own the case.
+      await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
+      await s.as("grcDeputy");
+      await s.expectError("CDF_FORBIDDEN", () => approve(USERS.grcDeputy));
+      await s.as("grcDirector");
+      await approve(USERS.grcDeputy);
     });
   });
 

@@ -1398,6 +1398,7 @@ export const en = {
     GRIEVANCE_OUTCOME_RECORDED: "The committee recorded the outcome of your grievance.",
     GRIEVANCE_AUTHORITY_APPROVAL_NEEDED:
       "A grievance on a restricted case needs you to name a committee secretary.",
+    GRIEVANCE_HANDLING_APPROVED: "You have been named to handle a grievance.",
   },
 };
 
