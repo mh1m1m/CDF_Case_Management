@@ -288,7 +288,7 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `notify.preference` | A user's mutes                          | Mandatory templates cannot be muted                         |
 | `notify.outbox`     | One row per recipient and channel       | Template, ids and deep link only (N18); facts immutable     |
 
-## Export builder (migration 1930, ADR-026)
+## Export builder (migration 1930, ADR-026, ADR-032)
 
 | Table                       | Purpose                                                    | Notes                                                                                         |
 | --------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |

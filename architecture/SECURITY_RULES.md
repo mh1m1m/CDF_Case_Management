@@ -300,7 +300,7 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Mandatory notifications (meeting invitations, minutes review, legal review assignment, defence notices, grievance decisions) cannot be muted. Rules are maintained only with `NOTIFICATION_ADMIN`.
 - Tests: `tests/security/notifications.spec.ts`, notification IDOR probes and the audit walk.
 
-## 20. Exports (migration 1930; ADR-026; Q99)
+## 20. Exports (migration 1930; ADR-026, ADR-032; Q99)
 
 - An export holds object ids only. Each item is rendered for the person looking at it with the same predicate as its table's RLS policy; an item they cannot see, from another case or missing is refused when added and listed as withheld afterwards (N16). Withheld items block submission, approval and generation.
 - The preview hash covers the rendered items, recipients, format, audience, purpose, justification and the case's current classification. Submission is bound to the requester's own preview; each approval and the generation recompute it, so any change answers `PREVIEW_CHANGED`. A rejection is always possible.
