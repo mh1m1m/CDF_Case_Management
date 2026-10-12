@@ -39,5 +39,6 @@
 | [ADR-035](ADR-035-form-status-catalogue-reference-data.md)      | The form and status catalogue as grounded reference data                        | Proposed |
 | [ADR-036](ADR-036-preliminary-closure-outcomes.md)              | Closure outcomes of the preliminary review                                      | Proposed |
 | [ADR-037](ADR-037-employee-notice-kinds.md)                     | Kinds of employee notice; the decision notice starts the grievance window       | Proposed |
+| [ADR-038](ADR-038-meeting-excuses-raised-conflicts.md)          | Excused attendance; conflicts raised by another meeting participant             | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.

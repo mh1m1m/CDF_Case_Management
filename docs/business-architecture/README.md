@@ -14,4 +14,4 @@
 | [FORM_CATALOGUE_RATIONALIZATION.md](FORM_CATALOGUE_RATIONALIZATION.md) | All 462 legacy forms and controls (sources A, C, D) classified into target modules; gap register P11-G1–G6 (migration 1970). |
 | [LINEAR_RECONCILIATION.md](LINEAR_RECONCILIATION.md)                   | Epics, reconciled existing issues, surfaced conflicts.                                                                       |
 
-Decisions: [ADR-017 … ADR-037](../../architecture/adr/README.md).
+Decisions: [ADR-017 … ADR-038](../../architecture/adr/README.md).

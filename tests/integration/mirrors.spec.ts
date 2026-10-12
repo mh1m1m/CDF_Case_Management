@@ -3,8 +3,11 @@
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
 import {
+  ATTENDANCE_STATUSES,
   CASE_TASK_TYPES,
+  CONFLICT_DECIDERS,
   EMPLOYEE_NOTICE_KINDS,
+  MEETING_CONFLICT_CONCERN_STATUSES,
   NOTIFICATION_TEMPLATES,
   PERMISSIONS,
   PRELIMINARY_OUTCOMES,
@@ -100,6 +103,25 @@ describe("mirrors", () => {
       where conname = 'defence_notice_kind_check' and conrelid = 'grievance.defence_notice'::regclass`;
     const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
     expect(fromCheck).toEqual([...EMPLOYEE_NOTICE_KINDS].sort());
+  });
+
+  it("meeting attendance, raised-conflict statuses and conflict deciders match their checks (1890, 2000)", async () => {
+    const checks: [string, string, readonly string[]][] = [
+      ["meeting_participant_attendance_check", "committee.meeting_participant", ATTENDANCE_STATUSES],
+      [
+        "meeting_conflict_concern_status_check",
+        "committee.meeting_conflict_concern",
+        MEETING_CONFLICT_CONCERN_STATUSES,
+      ],
+      ["rule_set_conflict_decider_check", "committee.rule_set", CONFLICT_DECIDERS],
+    ];
+    for (const [name, table, mirror] of checks) {
+      const [row] = await admin<{ def: string }[]>`
+        select pg_get_constraintdef(oid) as def from pg_constraint
+        where conname = ${name} and conrelid = ${table}::regclass`;
+      const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+      expect(fromCheck, name).toEqual([...mirror].sort());
+    }
   });
 
   it("notification templates match notify.template, and each has wording in both languages (ADR-025)", async () => {

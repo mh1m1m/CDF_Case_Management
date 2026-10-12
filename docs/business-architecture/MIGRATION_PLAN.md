@@ -1,6 +1,6 @@
 # Migration Plan
 
-> Git migrations are authoritative (§12). Numbers are allocated by the project coordinator, one at a time, above `main`'s highest. The numbers below are the allocated ones; they are never reused. 1870–1920 are in the rebase PR; 1930, 1940, 1960, 1970, 1980 and 1990 follow it in a separate PR, and the coordinator may move them above `main`'s highest when that PR opens (number-order rule).
+> Git migrations are authoritative (§12). Numbers are allocated by the project coordinator, one at a time, above `main`'s highest. The numbers below are the allocated ones; they are never reused. 1870–1920 are in the rebase PR; 1930, 1940, 1960, 1970, 1980, 1990 and 2000 follow it in a separate PR, and the coordinator may move them above `main`'s highest when that PR opens (number-order rule).
 
 ## 1. Rules
 
@@ -26,11 +26,12 @@
 | M10  | 1970       | Form and status catalogue (ADR-035): target classes and modules, status dimensions and values grounded in the schema, `config.legacy_status_map` and `config.legacy_form_map`, six reason codes from the owner's catalogue.                                                                                                           | M1                              | 11    | Reference data only.                                                           |
 | M11  | 1980       | Preliminary review closure outcomes (ADR-036): the recommendation's outcome check and `api.prepare_preliminary_recommendation` accept NOT_SERIOUS, NOT_SUBSTANTIATED, CHANNEL_ABUSE, NOT_FEASIBLE and NO_PERSONAL_JURISDICTION; the catalogue follows (gap P11-G1).                                                                   | M4, M10                         | 11    | Command change: AGENT-09 review.                                               |
 | M12  | 1990       | Kinds of employee notice (ADR-037): `grievance.defence_notice.kind` (RIGHTS, DEFENCE, DECISION), `api.issue_rights_notice`, `api.issue_decision_notice` (stores the Grievance Committee window it starts, Q94), `api.file_grievance_on_decision_notice`; two mandatory notification templates; the catalogue follows (gap P11-G5).    | M5, M6, M7, M10                 | 11    | Command change: AGENT-09 review.                                               |
+| M13  | 2000       | Excused attendance and raised conflicts (ADR-038): attendance EXCUSED with `committee.attendance_excuse`, `committee.meeting_conflict_concern`, `rule_set.conflict_decider`, `api.record_excused_absence`, `api.raise_meeting_conflict`, `api.decide_meeting_conflict`; no vote opens while a concern is open (gap P11-G6).           | M3, M10                         | 11    | Command change: AGENT-09 review.                                               |
 
 ```
 1810(main) ─▶ M1 ─▶ M2 ─▶ M3 ─┬─▶ M5 ─┬─▶ M6
                   └─▶ M4      ├─▶ M7  └─▶ M8
-                              └────────────▶ M9 ─▶ M10 ─▶ M11 ─▶ M12 (M10 may land earlier)
+                              └────────────▶ M9 ─▶ M10 ─▶ M11 ─▶ M12 ─▶ M13 (M10 may land earlier)
 ```
 
 ## 3. Compatibility

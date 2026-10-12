@@ -1016,8 +1016,21 @@ export const FIREWALL_INVITEE_ROLES: readonly MeetingInviteeRole[] = [
 ];
 export const COI_STATUSES = ["PENDING", "NO_CONFLICT", "CONFLICT_DECLARED", "NOT_REQUIRED"] as const;
 export type CoiStatus = (typeof COI_STATUSES)[number];
-export const ATTENDANCE_STATUSES = ["NOT_RECORDED", "PRESENT", "ABSENT", "EXCUSED_CONFLICT"] as const;
+/** EXCUSED (a justified absence with a reason) since migration 2000; only PRESENT counts for quorum and votes. */
+export const ATTENDANCE_STATUSES = [
+  "NOT_RECORDED",
+  "PRESENT",
+  "ABSENT",
+  "EXCUSED_CONFLICT",
+  "EXCUSED",
+] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+/** A conflict raised about a meeting participant by another member or the secretary (migration 2000, ADR-038). */
+export const MEETING_CONFLICT_CONCERN_STATUSES = ["OPEN", "UPHELD", "DISMISSED"] as const;
+export type MeetingConflictConcernStatus = (typeof MEETING_CONFLICT_CONCERN_STATUSES)[number];
+/** Who decides a raised conflict, per rule set (DEC-30; SOURCE_REQUIRED, CHAIR by default). */
+export const CONFLICT_DECIDERS = ["CHAIR", "SECRETARY"] as const;
+export type ConflictDecider = (typeof CONFLICT_DECIDERS)[number];
 export const VOTE_TARGET_TYPES = [
   "FINDING",
   "RECOMMENDATION_ITEM",

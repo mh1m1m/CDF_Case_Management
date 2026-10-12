@@ -650,6 +650,32 @@ describe("every state-changing command writes its audit event in the same transa
           return r;
         },
       },
+      // Excused attendance and a raised conflict (migration 2000), between vote items; the concern is dismissed so
+      // the package vote below can open.
+      {
+        fn: "record_excused_absence",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const [expert] = await s.tx<{ id: string }[]>`
+            select id from committee.meeting_participant where meeting_id = ${ids.meeting!} and user_id = ${USERS.lead}`;
+          return s.tx`select api.record_excused_absence(${expert!.id}, 'Synthetic: travelling.')`;
+        },
+      },
+      {
+        fn: "raise_meeting_conflict",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.concern = await one(
+            s,
+            s.tx`select api.raise_meeting_conflict(${ids.memberSeat!}, 'Synthetic: walk concern raised.') as id`,
+          )),
+      },
+      {
+        fn: "decide_meeting_conflict",
+        actor: "committeeChair",
+        run: (s) =>
+          s.tx`select api.decide_meeting_conflict(${ids.concern!}, 'DISMISSED', 'Synthetic: walk concern dismissed.')`,
+      },
       // Recommendation package (migration 1900): drafted, voted and adopted in the open meeting, reviewed by Legal,
       // sent to the authority and decided.
       {
@@ -1829,6 +1855,7 @@ describe("audit internals are not reachable", () => {
       "authz.in_records_catalogue_scope",
       "authz.is_committee_secretary",
       "authz.is_portal_subject",
+      "authz.meeting_concern_decider_seat",
       "authz.task_grants",
       "forms.canonical_json",
       "forms.content_hash",

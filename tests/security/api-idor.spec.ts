@@ -508,14 +508,15 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
   },
 ];
 
-// Committee meeting commands (migration 1890) take a committee proceeding, a meeting, a participant, a vote item or
-// minutes; never a case.
+// Committee meeting commands (migration 1890) take a committee proceeding, a meeting, a participant, a vote item,
+// minutes or a raised conflict (2000); never a case.
 interface MeetingTargets {
   committeeProceeding: string;
   meeting: string;
   participant: string;
   voteItem: string;
   minutes: string;
+  concern: string;
 }
 
 const MEETING_PROBES: Probe<MeetingTargets>[] = [
@@ -546,6 +547,21 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     fn: "record_attendance",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.record_attendance(${t.participant}, 'PRESENT')`,
+  },
+  {
+    fn: "record_excused_absence",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_excused_absence(${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "raise_meeting_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.raise_meeting_conflict(${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "decide_meeting_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_meeting_conflict(${t.concern}, 'UPHELD', ${REASON})`,
   },
   {
     fn: "close_meeting",
@@ -1599,6 +1615,12 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         select api.schedule_meeting(${cp!.id}, 'HEARING', 'TEAMS', null, 'https://meet.example.test/probe',
           now() + interval '2 days', now() + interval '2 days 1 hour', ${REASON}) as id`;
       await s.tx`select api.open_meeting(${m2!.id}, ${REASON})`;
+      // A justified absence and a raised conflict there (migration 2000), left open.
+      const m2Seats = await s.tx<{ id: string; user_id: string }[]>`
+        select id, user_id from committee.meeting_participant where meeting_id = ${m2!.id}`;
+      await s.tx`select api.record_excused_absence(${m2Seats.find((r) => r.user_id === USERS.committeeChair)!.id}, ${REASON})`;
+      const [k] = await s.tx<{ id: string }[]>`
+        select api.raise_meeting_conflict(${m2Seats.find((r) => r.user_id === USERS.legal)!.id}, ${REASON}) as id`;
       await s.tx`select api.close_meeting(${m2!.id}, ${REASON})`;
       const [mi] = await s.tx<
         { id: string }[]
@@ -1611,6 +1633,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         participant: p!.id,
         voteItem: v!.id,
         minutes: mi!.id,
+        concern: k!.id,
       };
       const random: MeetingTargets = {
         committeeProceeding: randomUUID(),
@@ -1618,6 +1641,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         participant: randomUUID(),
         voteItem: randomUUID(),
         minutes: randomUUID(),
+        concern: randomUUID(),
       };
       const mismatches: string[] = [];
       for (const probe of MEETING_PROBES) {
@@ -1634,6 +1658,8 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "vote_item",
         "minutes",
         "minutes_review",
+        "attendance_excuse",
+        "meeting_conflict_concern",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
       }
