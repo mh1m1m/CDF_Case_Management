@@ -91,11 +91,13 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "LEGAL_HOLD_REVIEW",
     "DISPOSITION_TASK_VIEW",
     "BREAK_GLASS_APPROVE",
+    "COMMITTEE_ADMIN",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
   INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],
   SOC_ANALYST: ["SECURITY_EVENT_VIEW"],
-  PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN"],
+  // COMMITTEE_ADMIN maintains committee seats and rules only (ADR-019, Q28); it opens no proceeding or case.
+  PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN", "COMMITTEE_ADMIN"],
   // Form entitlements (ADR-011) give these roles their first permissions; the rest come in later phases.
   // DB_ADMIN never receives application permissions (§21).
   COMPLIANCE: ["FORM_VIEW", "FORM_PREPARE", "FORM_REVIEW"],

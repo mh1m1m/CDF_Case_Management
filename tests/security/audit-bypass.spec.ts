@@ -408,6 +408,115 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "lead",
         run: (s) => s.tx`select api.open_interview(${ids.interview!})`,
       },
+      // Business architecture rebase (ADR-017 to ADR-019): a proceeding with a subject, allegation, finding and
+      // supporting material on case A; the committee registry; a referral that snapshots the committee.
+      {
+        fn: "open_proceeding",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.proceeding = await one(
+            s,
+            s.tx`select api.open_proceeding(${caseA}, 'INVESTIGATION', null, ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "update_proceeding_state",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.update_proceeding_state(${ids.proceeding!}, 'IN_PROGRESS', 'DOCUMENTS', null, ${REASON})`,
+      },
+      {
+        fn: "add_case_subject",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.subject = await one(
+            s,
+            s.tx`select api.add_case_subject(${caseA}, 'Employee Omicron (synthetic)', 'EMPLOYEE', null) as id`,
+          )),
+      },
+      {
+        fn: "add_allegation",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.allegation = await one(
+            s,
+            s.tx`select api.add_allegation(${caseA}, 'CONFLICT_OF_INTEREST', 'Synthetic: second allegation for the walk.',
+              ${ids.subject!}, 'POL-DEMO-01', null) as id`,
+          )),
+      },
+      {
+        fn: "link_allegation_subject",
+        actor: "caseManager",
+        run: async (s) => {
+          const [a] = await admin<{ id: string }[]>`
+            select id from case_mgmt.allegation where case_id = ${caseA} and subject_id is null order by created_at limit 1`;
+          return s.tx`select api.link_allegation_subject(${a!.id}, ${ids.subject!}, null, 'LAW-DEMO-01')`;
+        },
+      },
+      {
+        fn: "record_finding",
+        actor: "investigatorA",
+        run: async (s) =>
+          (ids.finding = await one(
+            s,
+            s.tx`select api.record_finding(${ids.allegation!}, null, ${ids.proceeding!}, 'SUBSTANTIATED',
+              'Synthetic: the walk finding rationale.') as id`,
+          )),
+      },
+      {
+        fn: "link_supporting_material",
+        actor: "investigatorA",
+        run: async (s) => {
+          const [r] = await s.tx<{ v: string; e: string }[]>`
+            select o_version_id as v, o_evidence_id as e from api.register_evidence_version(${caseA}, null,
+              'Audit walk support (synthetic)', null, 'DOCUMENT', 'Synthetic source', null,
+              'CONFIDENTIAL'::core.classification_level, 'support.pdf', 'application/pdf', 512, ${"4".repeat(64)})`;
+          await s.tx`select api.complete_evidence_version(${r!.v}, 'CLEAN', 'walk-scanner')`;
+          return s.tx`select api.link_supporting_material(${r!.e}, null, ${ids.finding!})`;
+        },
+      },
+      {
+        fn: "appoint_committee_member",
+        actor: "platformAdmin",
+        run: async (s) => {
+          const [ic] = await admin<{ id: string }[]>`select id from committee.committee where code = 'IC'`;
+          ids.committee = ic!.id;
+          await s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS.committeeChair}, 'CHAIR', now(), null, 'DEMO-APPT-01')`;
+          await s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS.committeeSecretary}, 'SECRETARY', now(), null, 'DEMO-APPT-02')`;
+          return (ids.membership = await one(
+            s,
+            s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS.committee}, 'MEMBER', now(), null, 'DEMO-APPT-03') as id`,
+          ));
+        },
+      },
+      {
+        fn: "set_committee_rule_set",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_committee_rule_set(${ids.committee!}, now(), 'FIXED_NUMBER', 2, true, 3, true, null, null,
+            'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "refer_case_to_committee",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.refer_case_to_committee(${caseA}, ${ids.committee!}, ${ids.proceeding!}, ${REASON})`,
+      },
+      {
+        fn: "end_committee_membership",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.end_committee_membership(${ids.membership!}, now() + interval '1 day', ${REASON})`,
+      },
+      {
+        fn: "close_proceeding",
+        actor: "caseManager",
+        run: async (s) => {
+          const [p] = await s.tx<{ id: string }[]>`
+            select api.open_proceeding(${caseA}, 'CORRECTIVE_ACTION', null, ${REASON}) as id`;
+          return s.tx`select api.close_proceeding(${p!.id}, 'CONCLUDED', 'CORRECTIVE_ACTION', ${REASON})`;
+        },
+      },
       // Forms engine (CDF-50): an investigation form through save, prepare and review (its final state), a
       // committee form through review and approval by three different people, a draft withdrawn, and the
       // audited open of an instance.
@@ -702,7 +811,7 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
     // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers
@@ -721,6 +830,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_manage_disposition",
       "authz.can_manage_retention",
       "authz.can_prepare_form",
+      "authz.can_record_findings",
       "authz.can_release_legal_hold",
       "authz.can_request_disposition",
       "authz.can_request_legal_hold",
@@ -732,9 +842,12 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_case",
       "authz.can_view_case_content",
       "authz.can_view_case_metadata",
+      "authz.can_view_committee_proceeding",
+      "authz.can_view_committee_registry",
       "authz.can_view_evidence",
       "authz.can_view_form_instance",
       "authz.can_view_interview",
+      "authz.can_view_proceeding",
       "authz.can_view_records",
       "authz.can_view_records_catalogue",
       "authz.can_view_report",
@@ -745,6 +858,7 @@ describe("audit internals are not reachable", () => {
       "authz.form_entitled",
       "authz.has_permission",
       "authz.in_records_catalogue_scope",
+      "authz.is_committee_secretary",
       "authz.task_grants",
       "forms.canonical_json",
       "forms.content_hash",

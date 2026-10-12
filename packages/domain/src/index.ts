@@ -105,3 +105,5 @@ export {
 export type { FormDataCheck, FormDataIssue, FormDataIssueCode } from "./forms";
 // ---- Interviews (EPIC 09, CDF-60; ADR-012) ---------------------------------------------------------
 export * from "./interviews";
+// ---- Proceedings and committees (ADR-017 to ADR-020) -------------------------------------------------
+export * from "./committee";

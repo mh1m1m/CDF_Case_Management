@@ -42,6 +42,10 @@ interface Targets {
   statementVersion: string;
   formInstance: string;
   attachment: string;
+  // Business architecture rebase (ADR-017)
+  allegation: string;
+  proceeding: string;
+  finding: string;
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
@@ -347,6 +351,57 @@ const PROBES: Probe[] = [
     outcome: "FALSE",
     call: (tx, t) => tx`select api.open_interview(${t.interview}) as v`,
   },
+  // Business architecture rebase (ADR-017, ADR-018): case structure and referral to a committee.
+  {
+    fn: "open_proceeding",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_proceeding(${t.case}, 'INVESTIGATION', null, ${REASON})`,
+  },
+  {
+    fn: "update_proceeding_state",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.update_proceeding_state(${t.proceeding}, 'IN_PROGRESS', null, null, ${REASON})`,
+  },
+  {
+    fn: "close_proceeding",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_proceeding(${t.proceeding}, 'CANCELLED', null, ${REASON})`,
+  },
+  {
+    fn: "add_case_subject",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.add_case_subject(${t.case}, 'Probe Subject (synthetic)', 'EMPLOYEE', null)`,
+  },
+  {
+    fn: "add_allegation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.add_allegation(${t.case}, 'FRAUD', 'Synthetic: probe allegation text.', null, null, null)`,
+  },
+  {
+    fn: "link_allegation_subject",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.link_allegation_subject(${t.allegation}, ${randomUUID()}, null, null)`,
+  },
+  {
+    fn: "record_finding",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_finding(${t.allegation}, null, ${t.proceeding}, 'INCONCLUSIVE', 'Synthetic: probe rationale.')`,
+  },
+  {
+    fn: "link_supporting_material",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.link_supporting_material(${t.evidence}, ${t.allegation}, null)`,
+  },
+  {
+    fn: "refer_case_to_committee",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.refer_case_to_committee(${t.case}, (select id from committee.committee where code = 'IC'), null, ${REASON})`,
+  },
   {
     fn: "withdraw_form",
     outcome: "NOT_FOUND",
@@ -414,7 +469,15 @@ const RECORDS_PROBES: Probe<RecordsTargets>[] = [
 ];
 
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
-const ADMIN_COMMANDS = ["grant_role", "revoke_role", "set_user_status"];
+// Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
+const ADMIN_COMMANDS = [
+  "grant_role",
+  "revoke_role",
+  "set_user_status",
+  "appoint_committee_member",
+  "end_committee_membership",
+  "set_committee_rule_set",
+];
 // The caller's own tasks and counts, the authorised catalogue search, the exact-number lookup (a case number,
 // never a UUID; PBA-T16 to T18) and task housekeeping take no object id (CDF-73).
 const GLOBAL_COMMANDS = [
@@ -554,6 +617,25 @@ async function purposeObjects(
   return { task: task!.id, holdRequest: req!.id, breakGlass };
 }
 
+/**
+ * Rebase objects on the target (ADR-017): an investigation proceeding, an allegation and a finding, made by
+ * someone who may edit the case. Created before the insider objects, whose conflict declaration ends access.
+ */
+async function domainObjects(
+  s: Scenario,
+  target: string,
+  editor: UserKey,
+): Promise<Pick<Targets, "allegation" | "proceeding" | "finding">> {
+  await s.as(editor);
+  const [p] = await s.tx<{ id: string }[]>`
+    select api.open_proceeding(${target}, 'INVESTIGATION', null, 'Synthetic: probe proceeding.') as id`;
+  const [a] = await s.tx<{ id: string }[]>`
+    select api.add_allegation(${target}, 'FRAUD', 'Synthetic: probe allegation text.', null, null, null) as id`;
+  const [f] = await s.tx<{ id: string }[]>`
+    select api.record_finding(${a!.id}, null, ${p!.id}, 'INCONCLUSIVE', 'Synthetic: probe finding rationale.') as id`;
+  return { allegation: a!.id, proceeding: p!.id, finding: f!.id };
+}
+
 async function outcomeOf<T>(s: Scenario, probe: Probe<T>, t: T, self: string): Promise<string> {
   let result: readonly Record<string, unknown>[] | undefined;
   let error: string | undefined;
@@ -587,6 +669,9 @@ const randomTargets = (): Targets => ({
   statementVersion: randomUUID(),
   formInstance: randomUUID(),
   attachment: randomUUID(),
+  allegation: randomUUID(),
+  proceeding: randomUUID(),
+  finding: randomUUID(),
 });
 
 describe("catalog guard", () => {
@@ -632,6 +717,7 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
         which === "B"
           ? await purposeObjects(s, target, "caseManager", "legal", true)
           : await purposeObjects(s, target, "grcDirector", "grcDirector", false);
+      const domain = await domainObjects(s, target, which === "B" ? "caseManager" : "grcDirector");
       const inside =
         which === "B"
           ? await insiderObjects(
@@ -645,7 +731,7 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
             )
           : await insiderObjects(s, target, "grcDirector", "grcDirector", "grcDirector", "SECRET");
       const attachment = await reporterAttachment(s, seeded.reportRef);
-      const real: Targets = { case: target, ...seeded, ...inside, ...purpose, attachment };
+      const real: Targets = { case: target, ...seeded, ...inside, ...purpose, ...domain, attachment };
       await s.as(actor);
       const self = USERS[actor];
       const mismatches: string[] = [];
@@ -929,6 +1015,7 @@ describe("non-object commands", () => {
     const seeded = await seedObjects("0002");
     await scenario(async (s) => {
       const purpose = await purposeObjects(s, caseB, "caseManager", "legal", true);
+      const domain = await domainObjects(s, caseB, "caseManager");
       const inside = await insiderObjects(
         s,
         caseB,
@@ -945,7 +1032,7 @@ describe("non-object commands", () => {
         const got = await outcomeOf(
           s,
           probe,
-          { case: caseB, ...seeded, ...inside, ...purpose, attachment },
+          { case: caseB, ...seeded, ...inside, ...purpose, ...domain, attachment },
           USERS.revoked,
         );
         if (!["EMPTY", "FALSE", "NOT_FOUND"].includes(got) && !got.startsWith("ERROR CDF_UNAUTHENTICATED"))

@@ -2,7 +2,7 @@
 // which are authoritative (ADR-006, ADR-007).
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
-import { CASE_TASK_TYPES, PERMISSIONS } from "@cdf/contracts";
+import { CASE_TASK_TYPES, PERMISSIONS, STATUS_CODES } from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES, FORM_DEFINITIONS, FORM_ENTITLEMENTS } from "@cdf/domain";
 import { messagesFor, type Messages } from "@cdf/i18n";
 import { STATES, TRANSITIONS } from "@cdf/workflow";
@@ -65,6 +65,16 @@ describe("mirrors", () => {
              requires_closed as "requiresClosed"
       from case_mgmt.case_task_type order by code collate "C"`;
     expect(rows).toEqual([...CASE_TASK_TYPES].map((t) => ({ ...t })));
+  });
+
+  it("proceeding reason and outcome codes match config.status_code (ADR-029)", async () => {
+    const rows = await admin<{ dimension: string; codes: string[] }[]>`
+      select dimension, array_agg(code order by code collate "C") as codes
+      from config.status_code where is_active group by dimension order by dimension collate "C"`;
+    const fromTs = Object.entries(STATUS_CODES)
+      .map(([dimension, codes]) => ({ dimension, codes: [...codes].sort() }))
+      .sort((a, b) => (a.dimension < b.dimension ? -1 : 1));
+    expect(rows).toEqual(fromTs);
   });
 
   it("permission codes match iam.permission", async () => {

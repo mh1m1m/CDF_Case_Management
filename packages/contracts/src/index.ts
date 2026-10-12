@@ -103,6 +103,8 @@ export const PERMISSIONS = [
   "RECORDS_LIFECYCLE_ADMIN",
   "BREAK_GLASS_REQUEST",
   "BREAK_GLASS_APPROVE",
+  // Committee registry (ADR-018, ADR-019): maintains seats and rules, never proceedings or case content.
+  "COMMITTEE_ADMIN",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -731,3 +733,132 @@ export interface PendingConflict {
   declaration: string | null;
   declaredAt: string;
 }
+
+// ---- Business architecture rebase: case structure and committees (ADR-017 to ADR-019) ----------------
+/** Intake path of a case (case_mgmt.case_record.source_type). */
+export const CASE_SOURCE_TYPES = [
+  "WHISTLEBLOWING",
+  "DIRECT_REFERRAL",
+  "DIRECT_GRIEVANCE",
+  "OTHER_AUTHORIZED_SOURCE",
+] as const;
+export type CaseSourceType = (typeof CASE_SOURCE_TYPES)[number];
+
+export const PROCEEDING_TYPES = [
+  "PRELIMINARY_REVIEW",
+  "INVESTIGATION",
+  "COMMITTEE_INVESTIGATION",
+  "LEGAL_REVIEW",
+  "AUTHORITY_DECISION",
+  "CORRECTIVE_ACTION",
+  "GRIEVANCE",
+  "REINVESTIGATION",
+] as const;
+export type ProceedingType = (typeof PROCEEDING_TYPES)[number];
+
+export const PROCEEDING_STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "AWAITING_REVIEW",
+  "AWAITING_APPROVAL",
+  "RETURNED",
+  "SUSPENDED",
+  "CONCLUDED",
+  "CANCELLED",
+] as const;
+export type ProceedingStatus = (typeof PROCEEDING_STATUSES)[number];
+
+export const SUBJECT_CATEGORIES = ["EMPLOYEE", "CONTRACTOR", "OTHER_AUTHORIZED"] as const;
+export type SubjectCategory = (typeof SUBJECT_CATEGORIES)[number];
+
+export const FINDING_RESULTS = [
+  "SUBSTANTIATED",
+  "PARTIALLY_SUBSTANTIATED",
+  "NOT_SUBSTANTIATED",
+  "INCONCLUSIVE",
+] as const;
+export type FindingResult = (typeof FINDING_RESULTS)[number];
+
+export const COMMITTEE_KINDS = ["INVESTIGATION", "GRIEVANCE"] as const;
+export type CommitteeKind = (typeof COMMITTEE_KINDS)[number];
+
+export const COMMITTEE_SEATS = [
+  "CHAIR",
+  "DEPUTY_CHAIR",
+  "SECRETARY",
+  "ALTERNATE_SECRETARY",
+  "MEMBER",
+  "ALTERNATE_MEMBER",
+] as const;
+export type CommitteeSeat = (typeof COMMITTEE_SEATS)[number];
+
+export const QUORUM_TYPES = ["MAJORITY_ELIGIBLE", "FIXED_NUMBER", "PERCENTAGE", "CUSTOM"] as const;
+export type QuorumType = (typeof QUORUM_TYPES)[number];
+
+export const ADMISSIBILITY_DECIDERS = ["SECRETARY", "CHAIR", "COMMITTEE"] as const;
+export type AdmissibilityDecider = (typeof ADMISSIBILITY_DECIDERS)[number];
+
+/** Mirror of config.status_code (ADR-029), asserted by tests/integration/mirrors.spec.ts. Labels live in i18n. */
+export const STATUS_CODES = {
+  WAITING_REASON: [
+    "ALTERNATE_INVESTIGATOR",
+    "AUTHORITY_DECISION",
+    "BUDGET_APPROVAL",
+    "BUSINESS_EXECUTION",
+    "COI_REVIEW",
+    "CONFIDENTIALITY_CLASSIFICATION",
+    "DIGITAL_FORENSICS",
+    "DOCUMENTS",
+    "DUPLICATION_CHECK",
+    "EMPLOYEE_DEFENCE",
+    "EMPLOYEE_NOTIFICATION",
+    "EXPERT_OPINION",
+    "EXTERNAL_INFO",
+    "GRIEVANCE_COMPLETION",
+    "INFO_FROM_SOURCE",
+    "LEGAL_OPINION",
+    "NON_COOPERATION",
+    "PARTY_ATTENDANCE",
+    "PARTY_DOCUMENTS",
+    "QUORUM",
+    "REGULATOR_REPORT",
+    "SCOPE_DEFINITION",
+    "STAKEHOLDER_NOTIFICATION",
+    "TIE_BREAK",
+    "WITNESS",
+  ],
+  SUSPENSION_REASON: [
+    "CONFLICT_OF_INTEREST",
+    "FULL",
+    "GENERAL",
+    "LAWYER_REQUEST",
+    "LEAVE_OR_ILLNESS",
+    "SOVEREIGN_AUTHORITY",
+    "SYSTEM_MANDATED",
+  ],
+  OUTCOME_CODE: [
+    "ADMINISTRATIVE_TRACK",
+    "CHANNEL_ABUSE",
+    "CORRECTIVE_ACTION",
+    "DECISION_RECORDED",
+    "DUPLICATE",
+    "EMERGENCY_CLOSURE",
+    "INCONCLUSIVE",
+    "INCIDENT_LOGGED",
+    "NON_PROCESSABLE",
+    "NOT_FEASIBLE",
+    "NOT_SERIOUS",
+    "NOT_SUBSTANTIATED",
+    "NO_ACTION",
+    "NO_PERSONAL_JURISDICTION",
+    "OUT_OF_SCOPE",
+    "PARTIALLY_SUBSTANTIATED",
+    "RECOMMENDATION_ADOPTED",
+    "REFERRED_TO_COMMITTEE",
+    "REGULATORY_ACTION",
+    "SUBSTANTIATED",
+    "TRANSFERRED",
+    "WITHDRAWN",
+  ],
+} as const satisfies Record<string, readonly string[]>;
+export type StatusCodeDimension = keyof typeof STATUS_CODES;
