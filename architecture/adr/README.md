@@ -34,5 +34,6 @@
 | [ADR-030](ADR-030-guided-workflow-ux.md)                        | Guided workflow UX and committee navigation                                     | Proposed |
 | [ADR-031](ADR-031-purpose-bound-packet-access.md)               | Purpose-bound packet access                                                     | Proposed |
 | [ADR-032](ADR-032-export-approval-binding.md)                   | Export approval rules, preview binding and generation                           | Proposed |
+| [ADR-033](ADR-033-corrective-action-tracking.md)                | Corrective-action tracking                                                      | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.

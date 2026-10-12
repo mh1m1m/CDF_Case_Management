@@ -310,3 +310,14 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Internal recipients must be able to see the case when added, submitted and generated, and are handed to the mail adapter by user id, never by address. External addresses never enter the audit ledger.
 - No item reads the report, the reporter's WB id or protected identity (N19); evidence is not exportable until UX S2 merges. Approved minutes export their narrative only.
 - Tests: `tests/security/export.spec.ts` (mutations of the controls killed; see the 1930 review notes), export IDOR probes and the audit walk.
+
+## 21. Corrective actions (migration 1940; ADR-033; Q72)
+
+- An action is opened only from a CORRECTIVE_ACTION or GOVERNANCE_REMEDIATION item that the committee adopted and the effective authority decision approved or modified; the item and the decision are fixed on it.
+- The owner holds `CORRECTIVE_ACTION_OWN` and passes the case gate (active, cleared, not conflicted) when named and while they keep the action. They see their own action and its history, never the case, item, package or decision (CDF-73 option D); losing the role, the clearance or the gate removes it.
+- `CORRECTIVE_ACTION_MANAGE` on a visible case opens, reassigns, reschedules, verifies, returns and reopens. Only the current owner reports progress and submits completion. Whoever owned or ever submitted an action never verifies it.
+- On a restricted case only its Restricted Case Authority (the case owner) names or changes the owner (DEC-61/62 precedent).
+- A waiver needs `CORRECTIVE_ACTION_WAIVE`, held by no role until the Delegation of Authority names one, and the authority's source document; it is final.
+- A case does not close while an approved actionable item has no action or an action that is not completed or waived.
+- Notifications carry ids only; verification requests and escalations go only to managers who can see the case. Reminders and escalation run from the server-only reminder job and only when a policy sets them; the seeded policy sets none.
+- Tests: `tests/security/corrective-actions.spec.ts` (mutations of the controls killed; see the 1940 review notes), corrective-action IDOR probes and the audit walk.

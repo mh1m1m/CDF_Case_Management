@@ -298,3 +298,11 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `exchange.export_recipient`           | Internal users cleared for the case, or external addresses                   | EMAIL only; external addresses synthetic `@example.test` (PRODUCTION_SUBSTITUTION_REQUIRED)                                                  |
 | `exchange.export_approval`            | One approval per stage, bound to the preview hash approved                   | Never the requester; stage 2 by a different person with EXPORT_SECOND_APPROVE                                                                |
 | `exchange.restricted_export_approval` | The Restricted Case Authority's decision on one export of a restricted case  | Case owner only; bound to the submitted hash; one per export (DEC-61/62 precedent)                                                           |
+
+## Corrective actions (migration 1940, ADR-033)
+
+| Table                               | Purpose                                                                      | Notes                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `decision.corrective_action_policy` | Effective-dated per action type: due period, reminder, escalation, evidence  | Seeded as empty SOURCE_REQUIRED placeholders; versions never edited                                |
+| `decision.corrective_action`        | One action from an approved CORRECTIVE_ACTION or GOVERNANCE_REMEDIATION item | Item and authority decision fixed; owner, due date, status; never deleted; WAIVED is final         |
+| `decision.corrective_action_event`  | Append-only history of each action                                           | Opening, owner and due-date changes, progress, completion, verification, return, reopening, waiver |
