@@ -289,6 +289,7 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Grievances are received by the Grievance Committee's seated, cleared secretary. A grievant sees their own grievance and outcome, never the internal admissibility assessment. Unknown and uncleared case numbers answer alike.
 - Admission opens the GRIEVANCE committee proceeding through the shared referral path: the case gate and the N9 firewall apply, so no Investigation Committee voter of the case votes on its grievance.
 - Outcomes are bound to a closed, approved vote of the grievance proceeding and used once.
+- A linked subject and a grievant count as conflicted on their case (`authz.has_conflict`): no case access, assignment, committee seat, meeting or packet for it. A GC chair who sat on the case's Investigation Committee does not decide admissibility. A linked grievance on a restricted case needs the Restricted Case Authority's approval naming the recorder (AGENT-09 G1–G3).
 - Tests: `tests/security/grievance-defence.spec.ts`, grievance IDOR probes and the audit walk.
 
 ## 19. Notifications (migration 1920; ADR-025)

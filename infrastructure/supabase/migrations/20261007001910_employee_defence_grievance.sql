@@ -200,6 +200,27 @@ create index grievance_outcome_recorded_by on grievance.grievance_outcome (recor
 comment on table grievance.grievance_outcome is
   'The Grievance Committee''s outcome (Q95–Q96), combinable, bound to an approved vote. Append-only.';
 
+-- AGENT-09 G2 (coordinator ruling extending DEC-61/DEC-62, SOURCE_REQUIRED): a linked grievance on a restricted case
+-- is recorded only by the Grievance Committee Secretary the case's Restricted Case Authority named. Used once.
+create table grievance.restricted_grievance_approval (
+  id           uuid primary key default gen_random_uuid(),
+  case_id      uuid not null references case_mgmt.case_record (id),
+  recorder_id  uuid not null references iam.user_profile (id),
+  approved_by  uuid not null references iam.user_profile (id),
+  reason       text not null check (length(reason) between 5 and 2000),
+  approved_at  timestamptz not null default now(),
+  grievance_id uuid unique references grievance.grievance (id),
+  used_at      timestamptz,
+  check ((grievance_id is null) = (used_at is null)),
+  check (recorder_id <> approved_by)
+);
+create unique index restricted_grievance_approval_open on grievance.restricted_grievance_approval (case_id, recorder_id)
+  where grievance_id is null;
+create index restricted_grievance_approval_recorder on grievance.restricted_grievance_approval (recorder_id);
+create index restricted_grievance_approval_approved_by on grievance.restricted_grievance_approval (approved_by);
+comment on table grievance.restricted_grievance_approval is
+  'The Restricted Case Authority''s approval for one linked grievance on a restricted case, naming the recorder (G2).';
+
 -- -----------------------------------------------------------------------------
 -- Integrity
 -- -----------------------------------------------------------------------------
@@ -212,7 +233,8 @@ begin
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
   end loop;
-  foreach t in array array['grievance.subject_portal_link', 'grievance.defence_notice', 'grievance.grievance'] loop
+  foreach t in array array['grievance.subject_portal_link', 'grievance.defence_notice', 'grievance.grievance',
+                           'grievance.restricted_grievance_approval'] loop
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
   end loop;
@@ -236,6 +258,11 @@ begin
           <> (to_jsonb(old) - array['status', 'acknowledged_at', 'closed_at']) then
       raise exception 'defence notice % is closed or its content is immutable', old.id using errcode = 'insufficient_privilege';
     end if;
+  elsif tg_table_name = 'restricted_grievance_approval' then
+    if old.grievance_id is not null
+       or (to_jsonb(new) - array['grievance_id', 'used_at']) <> (to_jsonb(old) - array['grievance_id', 'used_at']) then
+      raise exception 'approval % can only be used, once', old.id using errcode = 'insufficient_privilege';
+    end if;
   elsif tg_table_name = 'grievance' then
     if old.status in ('INADMISSIBLE', 'DECIDED', 'WITHDRAWN')
        or (to_jsonb(new) - array['status', 'committee_proceeding_id', 'updated_at', 'row_version'])
@@ -252,6 +279,8 @@ create trigger subject_portal_link_protect before update on grievance.subject_po
 create trigger defence_notice_protect before update on grievance.defence_notice
   for each row execute function grievance.protect_records();
 create trigger grievance_protect before update on grievance.grievance
+  for each row execute function grievance.protect_records();
+create trigger restricted_grievance_approval_protect before update on grievance.restricted_grievance_approval
   for each row execute function grievance.protect_records();
 
 -- -----------------------------------------------------------------------------
@@ -340,6 +369,26 @@ grant execute on function
   authz.can_handle_grievance(uuid), authz.can_view_grievance_assessment(uuid)
 to authenticated;
 
+-- AGENT-09 G1: a subject's linked portal account and a grievant are parties to the case. Treating them as conflicted
+-- here excludes them, through the gate every path already uses, from case access, assignment, committee snapshots,
+-- meetings, deliberation and packets. Their own notices and grievances stay reachable through the portal predicates.
+create or replace function authz.has_conflict(p_case_id uuid, p_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+           select 1 from case_mgmt.conflict_check k
+           where k.case_id = p_case_id and k.user_id = p_user_id and k.is_current
+             and k.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED'))
+      or exists (
+           select 1 from grievance.subject_portal_link l
+           where l.case_id = p_case_id and l.user_id = p_user_id and l.revoked_at is null)
+      or exists (
+           select 1 from grievance.grievance g
+           where g.case_id = p_case_id and g.grievant_user_id = p_user_id);
+$$;
+
 -- -----------------------------------------------------------------------------
 -- RLS
 -- -----------------------------------------------------------------------------
@@ -350,6 +399,7 @@ alter table grievance.defence_response enable row level security;
 alter table grievance.grievance enable row level security;
 alter table grievance.admissibility_assessment enable row level security;
 alter table grievance.grievance_outcome enable row level security;
+alter table grievance.restricted_grievance_approval enable row level security;
 
 create policy subject_portal_link_read on grievance.subject_portal_link for select to authenticated
   using (authz.can_view_case(case_id) or (user_id = authz.current_user_id() and revoked_at is null));
@@ -373,6 +423,9 @@ grant select on grievance.grievance to authenticated;
 create policy admissibility_assessment_read on grievance.admissibility_assessment for select to authenticated
   using (authz.can_view_grievance_assessment(grievance_id));
 grant select on grievance.admissibility_assessment to authenticated;
+create policy restricted_grievance_approval_read on grievance.restricted_grievance_approval for select to authenticated
+  using (authz.can_view_case(case_id));
+grant select on grievance.restricted_grievance_approval to authenticated;
 create policy grievance_outcome_read on grievance.grievance_outcome for select to authenticated
   using (authz.can_view_grievance(grievance_id));
 grant select on grievance.grievance_outcome to authenticated;
@@ -759,6 +812,8 @@ declare
   v_case_id uuid;
   v_number text;
   v_assignment uuid;
+  v_restricted boolean;
+  v_approval uuid;
   v_g grievance.grievance;
 begin
   if v_gc is null or not authz.is_committee_secretary(v_gc) then perform api._fail('FORBIDDEN'); end if;
@@ -767,10 +822,17 @@ begin
     if p_title is not null or p_classification is not null or p_case_owner_id is not null then
       perform api._fail('INVALID', 'standalone_fields');
     end if;
-    select c.id into v_case_id from case_mgmt.case_record c
+    select c.id, c.is_restricted into v_case_id, v_restricted from case_mgmt.case_record c
     where c.case_number = p_case_number and c.records_state = 'ACTIVE' and authz.user_case_gate(v_actor, c.id)
     for update;
     if v_case_id is null then perform api._fail('NOT_FOUND'); end if;
+    -- G2 (DEC-01, fail safe): a restricted case answers like an unknown one unless the caller works it or its
+    -- Restricted Case Authority approved this recorder.
+    if v_restricted and not authz.can_view_case(v_case_id) then
+      select a.id into v_approval from grievance.restricted_grievance_approval a
+      where a.case_id = v_case_id and a.recorder_id = v_actor and a.grievance_id is null for update;
+      if v_approval is null then perform api._fail('NOT_FOUND'); end if;
+    end if;
   elsif p_kind = 'STANDALONE' then
     if p_case_number is not null then perform api._fail('INVALID', 'case_number'); end if;
     if p_classification is null or p_classification > (select u.clearance from iam.user_profile u where u.id = v_actor) then
@@ -804,7 +866,52 @@ begin
   v_g := grievance.insert_grievance(v_case_id, p_kind, null, null, api._require_text(p_grievant_label, 'grievant_label', 2, 200),
                                     p_channel, p_original_submission_date, p_contested_decision_date, p_grounds,
                                     p_original_document_reference, v_actor);
+  if v_approval is not null then
+    update grievance.restricted_grievance_approval set grievance_id = v_g.id, used_at = now() where id = v_approval;
+  end if;
   return v_g.id;
+end;
+$$;
+
+-- G2: the restricted case's owner, holding the Restricted Case Authority role for its classification, names the
+-- Grievance Committee Secretary who may record one linked grievance on it. Audited; single use.
+create function api.approve_restricted_grievance_recording(p_case_id uuid, p_recorder_id uuid, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_case case_mgmt.case_record;
+  v_id uuid;
+  v_reason text;
+begin
+  if p_case_id is null or not authz.can_view_case(p_case_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v_case from case_mgmt.case_record c where c.id = p_case_id for update;
+  if not v_case.is_restricted then perform api._fail('CONFLICT', 'CASE_NOT_RESTRICTED'); end if;
+  if v_case.owner_id is distinct from v_actor
+     or not authz.is_restricted_case_authority(v_actor, v_case.classification) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  if v_case.records_state <> 'ACTIVE' then perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE'); end if;
+  if p_recorder_id is null or p_recorder_id = v_actor
+     or not coalesce(authz.user_committee_seat(p_recorder_id, grievance.committee_id(), now())
+                     in ('SECRETARY', 'ALTERNATE_SECRETARY'), false)
+     or not authz.user_case_gate(p_recorder_id, p_case_id) then
+    perform api._fail('INVALID', 'recorder_id');
+  end if;
+  if exists (select 1 from grievance.restricted_grievance_approval a
+             where a.case_id = p_case_id and a.recorder_id = p_recorder_id and a.grievance_id is null) then
+    perform api._fail('CONFLICT', 'APPROVAL_ALREADY_PENDING');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  insert into grievance.restricted_grievance_approval (case_id, recorder_id, approved_by, reason)
+  values (p_case_id, p_recorder_id, v_actor, v_reason)
+  returning id into v_id;
+  perform audit.record_event('RESTRICTED_GRIEVANCE_RECORDING_APPROVED', 'BUSINESS', 'SUCCESS', p_case_id,
+    'restricted_grievance_approval', v_id::text, v_reason,
+    jsonb_build_object('recorder_id', p_recorder_id, 'classification', v_case.classification));
+  return v_id;
 end;
 $$;
 
@@ -866,8 +973,10 @@ begin
       perform api._fail('NOT_FOUND');
     end if;
   end if;
+  -- G3 (N9): a chair who took part in the case's Investigation Committee does not decide its grievance.
   if not coalesce(authz.user_committee_seat(v_actor, grievance.committee_id(), now()) in ('CHAIR', 'DEPUTY_CHAIR'), false)
-     or not authz.user_case_gate(v_actor, v_g.case_id) then
+     or not authz.user_case_gate(v_actor, v_g.case_id)
+     or authz.participated_in_investigation_committee(v_actor, v_g.case_id) then
     perform api._fail('FORBIDDEN');
   end if;
   select * into v_g from grievance.grievance g where g.id = p_grievance_id for update;
@@ -961,6 +1070,7 @@ grant execute on function
   api.record_defence_response(uuid, text, timestamptz, text, text),
   api.file_grievance(uuid, timestamptz, text),
   api.record_grievance(text, text, text, text, core.classification_level, uuid, text, timestamptz, timestamptz, text, text),
+  api.approve_restricted_grievance_recording(uuid, uuid, text),
   api.assess_grievance_admissibility(uuid, text, text, text),
   api.decide_grievance_admissibility(uuid, text, text, text),
   api.record_grievance_outcome(uuid, text[], text, uuid, text)

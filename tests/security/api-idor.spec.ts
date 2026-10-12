@@ -418,6 +418,13 @@ const PROBES: Probe[] = [
     call: (tx, t) =>
       tx`select api.approve_restricted_committee_referral(${t.case}, (select id from committee.committee where code = 'IC'), ${REASON})`,
   },
+  // AGENT-09 G2 (migration 1910): the Restricted Case Authority's approval to record a linked grievance.
+  {
+    fn: "approve_restricted_grievance_recording",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.approve_restricted_grievance_recording(${t.case}, ${self}, ${REASON})`,
+  },
   // Preliminary review (migration 1880).
   {
     fn: "prepare_preliminary_recommendation",

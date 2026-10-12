@@ -5,7 +5,17 @@
 // its votes (N9).
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario } from "../support/db";
-import { IC_SEATS, REASON, committeeIds, refer, seat } from "../support/committee";
+import {
+  IC_SEATS,
+  REASON,
+  committeeIds,
+  openItem,
+  openWithPresent,
+  refer,
+  scheduleMeeting,
+  seat,
+  vote,
+} from "../support/committee";
 
 let caseB: string, caseExec: string, ic: string, gc: string;
 
@@ -343,6 +353,149 @@ describe("grievances (Q91–Q96, N9)", () => {
       const [after] = await s.tx<{ status: string; committee_proceeding_id: string | null }[]>`
         select status, committee_proceeding_id from grievance.grievance where id = ${g!.id}`;
       expect(after).toEqual({ status: "INADMISSIBLE", committee_proceeding_id: null });
+    });
+  });
+});
+
+describe("AGENT-09 review of 1910 (G1–G3, outcome vote binding)", () => {
+  /** employee files a grievance through Sigma's link; the GC secretary admits it. Returns ids. */
+  async function admitted(s: Scenario) {
+    const ids = await twoSubjects(s);
+    await s.as("employee");
+    const [g] = await s.tx<{ id: string }[]>`
+      select api.file_grievance(${ids.sigmaLink!}, now() - interval '1 day', 'Synthetic: grievance grounds.') as id`;
+    await s.as("committeeSecretary");
+    await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
+    const [row] = await s.tx<{ cp: string }[]>`
+      select committee_proceeding_id as cp from grievance.grievance where id = ${g!.id}`;
+    return { ...ids, grievance: g!.id, gcProceeding: row!.cp };
+  }
+
+  it("a linked subject or grievant never sits on, sees or works their own case (G1)", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      const [upsilon] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Upsilon (synthetic)', 'EMPLOYEE', null) as id`;
+      await s.tx`select api.link_subject_portal_account(${upsilon!.id}, ${USERS.investigatorA}, ${REASON})`;
+      await s.expectError(
+        "CDF_CONFLICT:ASSIGNEE_HAS_CONFLICT",
+        (tx) => tx`select api.assign_case(${caseB}, ${USERS.investigatorA}, 'INVESTIGATOR', ${REASON})`,
+      );
+      await seat(s, ic, [...IC_SEATS, ["investigatorA", "MEMBER"]]);
+      const icp = await refer(s, ic, caseB);
+      await seat(s, gc, GC_SEATS); // investigatorA also holds a GC member seat
+      const f = await admitted(s);
+      await s.asOwner();
+      const rows = await s.tx<{ cp: string; is_voting: boolean; case_gate_excluded: boolean }[]>`
+        select committee_proceeding_id as cp, is_voting, case_gate_excluded from committee.proceeding_member
+        where user_id = ${USERS.investigatorA} order by committee_proceeding_id = ${icp}`;
+      expect(rows.map((r) => [r.is_voting, r.case_gate_excluded])).toEqual([
+        [false, true],
+        [false, true],
+      ]);
+      for (const user of ["investigatorA", "employee"] as const) {
+        await s.as(user);
+        expect(await s.tx`select id from committee.committee_proceeding`, user).toEqual([]);
+        expect(await s.tx`select id from grievance.admissibility_assessment`, user).toEqual([]);
+        expect(await s.tx`select id from case_mgmt.case_record where id = ${caseB}`, user).toEqual([]);
+      }
+      // The grievant still follows their own grievance.
+      await s.as("employee");
+      expect((await s.tx<{ id: string }[]>`select id from grievance.grievance`).map((r) => r.id)).toEqual([
+        f.grievance,
+      ]);
+    });
+  });
+
+  it("a linked grievance on a restricted case needs its authority's approval naming the recorder (G2)", async () => {
+    await ownerScenario(async (s) => {
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'SECRET' where id = ${USERS.committeeSecretary}`;
+      await seat(s, gc, GC_SEATS);
+      const [exec] = await admin<
+        { n: string }[]
+      >`select case_number as n from case_mgmt.case_record where id = ${caseExec}`;
+      const record = () =>
+        s.tx`select api.record_grievance('LINKED', ${exec!.n}, 'Employee Psi (synthetic)', null, null, null, 'EMAIL',
+          now(), now() - interval '2 days', 'Synthetic: restricted grievance grounds.', 'EMAIL-DEMO-0009') as id`;
+      await s.as("committeeSecretary");
+      await s.expectError("CDF_NOT_FOUND", () => record());
+      const approve = (recorder: string) =>
+        s.tx`select api.approve_restricted_grievance_recording(${caseExec}, ${recorder}, ${REASON}) as id`;
+      await s.as("caseManager");
+      await s.expectError("CDF_NOT_FOUND", () => approve(USERS.committeeSecretary));
+      await s.as("grcDirector");
+      await s.expectError("CDF_INVALID:recorder_id", () => approve(USERS.legal));
+      await approve(USERS.committeeSecretary);
+      await s.expectError("CDF_CONFLICT:APPROVAL_ALREADY_PENDING", () => approve(USERS.committeeSecretary));
+      await s.as("committeeSecretary");
+      await record();
+      await s.expectError("CDF_NOT_FOUND", () => record());
+    });
+  });
+
+  it("a Grievance Committee chair who sat on the case's Investigation Committee cannot decide admissibility (G3)", async () => {
+    await scenario(async (s) => {
+      await seat(s, ic, [...IC_SEATS, ["committee", "MEMBER"]]);
+      await refer(s, ic, caseB);
+      await seat(s, gc, GC_SEATS); // committee chairs the GC
+      await s.as("platformAdmin");
+      await s.tx`select api.set_committee_rule_set(${gc}, now(), 'MAJORITY_ELIGIBLE', null, true, 3, true, 30, 'CHAIR',
+                   'NO_DECISION', 'SOURCE_REQUIRED', ${REASON})`;
+      const [num] = await admin<
+        { n: string }[]
+      >`select case_number as n from case_mgmt.case_record where id = ${caseB}`;
+      await s.as("committeeSecretary");
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.record_grievance('LINKED', ${num!.n}, 'Employee Sigma (synthetic)', null, null, null, 'EMAIL',
+          now(), now() - interval '2 days', 'Synthetic: grievance grounds.', 'EMAIL-DEMO-0010') as id`;
+      await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
+      await s.as("committee");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.decide_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`,
+      );
+    });
+  });
+
+  it("an outcome needs an approved vote of the grievance's own proceeding", async () => {
+    await scenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const icMeeting = await scheduleMeeting(s, ic, caseB);
+      await openWithPresent(s, icMeeting, ["committeeChair", "legal", "legalB", "lead"]);
+      const icItem = await openItem(s, icMeeting.meeting);
+      for (const u of ["committeeChair", "legal", "legalB", "lead"] as const)
+        await vote(s, u, icItem, "APPROVE");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${icItem}, null)`;
+
+      await seat(s, gc, GC_SEATS);
+      const f = await admitted(s);
+      await s.as("committeeSecretary");
+      const [m] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${f.gcProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`;
+      const parts = await s.tx<{ id: string; user_id: string }[]>`
+        select id, user_id from committee.meeting_participant where meeting_id = ${m!.id} and is_voting`;
+      const key = (id: string) => (id === USERS.committee ? "committee" : "investigatorA");
+      for (const p of parts) {
+        await s.as(key(p.user_id));
+        await s.tx`select api.declare_meeting_conflict(${p.id}, 'NO_CONFLICT', null)`;
+      }
+      await s.as("committeeSecretary");
+      await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+      for (const p of parts) await s.tx`select api.record_attendance(${p.id}, 'PRESENT')`;
+      const rejected = await openItem(s, m!.id, "Grievance outcome (synthetic)");
+      for (const p of parts) await vote(s, key(p.user_id), rejected, "REJECT");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${rejected}, null)`;
+      for (const item of [rejected, icItem]) {
+        await s.expectError(
+          "CDF_INVALID:vote_item_id",
+          (tx) => tx`select api.record_grievance_outcome(${f.grievance}, ${["UPHOLD"]}::text[], null, ${item},
+            'Synthetic: outcome summary for the grievance.')`,
+        );
+      }
     });
   });
 });

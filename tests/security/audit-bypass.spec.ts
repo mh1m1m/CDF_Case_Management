@@ -1262,6 +1262,24 @@ describe("every state-changing command writes its audit event in the same transa
         },
       },
       {
+        // G2: the restricted case's owner names the GC secretary (cleared to SECRET earlier in the walk), who then
+        // records a linked grievance on it.
+        fn: "approve_restricted_grievance_recording",
+        actor: "grcDirector",
+        run: async (s) => {
+          const exec = await caseId("0003");
+          const r =
+            await s.tx`select api.approve_restricted_grievance_recording(${exec}, ${USERS.committeeSecretary}, ${REASON})`;
+          const [c] = await admin<
+            { n: string }[]
+          >`select case_number as n from case_mgmt.case_record where id = ${exec}`;
+          await s.as("committeeSecretary");
+          await s.tx`select api.record_grievance('LINKED', ${c!.n}, 'Employee Psi (synthetic)', null, null, null, 'EMAIL',
+            now(), now() - interval '2 days', 'Synthetic: walk restricted grievance.', 'EMAIL-DEMO-WALK3')`;
+          return r;
+        },
+      },
+      {
         fn: "record_grievance_outcome",
         actor: "committeeSecretary",
         run: async (s) => {
