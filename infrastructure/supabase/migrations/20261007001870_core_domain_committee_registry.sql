@@ -70,7 +70,7 @@ where case_type <> 'WHISTLEBLOWING';
 -- Reason and outcome vocabularies (ADR-029). Codes only; user-facing labels come from packages/i18n.
 -- -----------------------------------------------------------------------------
 create table config.status_code (
-  dimension     text not null check (dimension in ('WAITING_REASON', 'SUSPENSION_REASON', 'OUTCOME_CODE')),
+  dimension     text not null check (dimension in ('WAITING_REASON', 'SUSPENSION_REASON', 'OUTCOME_CODE', 'RETURN_REASON')),
   code          text not null check (code ~ '^[A-Z][A-Z0-9_]{2,59}$'),
   source_status text not null check (source_status in ('OWNER_DEFAULT', 'SOURCE_REQUIRED', 'APPROVED')),
   is_active     boolean not null default true,
@@ -133,7 +133,18 @@ insert into config.status_code (dimension, code, source_status) values
   ('OUTCOME_CODE', 'REGULATORY_ACTION', 'OWNER_DEFAULT'),
   ('OUTCOME_CODE', 'SUBSTANTIATED', 'OWNER_DEFAULT'),
   ('OUTCOME_CODE', 'TRANSFERRED', 'OWNER_DEFAULT'),
-  ('OUTCOME_CODE', 'WITHDRAWN', 'OWNER_DEFAULT');
+  ('OUTCOME_CODE', 'WITHDRAWN', 'OWNER_DEFAULT'),
+  -- Structured reasons for returning a referral or a preliminary recommendation for completion (Q10, Q18).
+  ('RETURN_REASON', 'MISSING_INFORMATION', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'MISSING_DOCUMENTS', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'UNCLEAR_ALLEGATION', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'SUBJECT_NOT_IDENTIFIED', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'INSUFFICIENT_EVIDENCE', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'WRONG_CHANNEL', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'OUT_OF_SCOPE', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'APPROVAL_MISSING', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'RECOMMENDATION_INCOMPLETE', 'OWNER_DEFAULT'),
+  ('RETURN_REASON', 'OTHER', 'OWNER_DEFAULT');
 
 -- -----------------------------------------------------------------------------
 -- Case structure tables
@@ -1147,13 +1158,17 @@ $$;
 -- -----------------------------------------------------------------------------
 -- Referral to a committee (case team). Opens the proceeding and snapshots the committee.
 -- -----------------------------------------------------------------------------
-create function api.refer_case_to_committee(p_case_id uuid, p_committee_id uuid, p_parent_proceeding_id uuid, p_reason text)
+-- Internal: opens the proceeding and snapshots the committee. The caller has checked who may refer and holds the
+-- case row lock (api.refer_case_to_committee for the case team; referral acceptance for the committee secretary).
+create function committee.open_committee_proceeding(
+  p_case_id uuid, p_committee_id uuid, p_parent_proceeding_id uuid, p_actor uuid, p_reason text
+)
 returns uuid
-language plpgsql security definer
+language plpgsql
 set search_path = ''
 as $$
 declare
-  v_actor uuid := api._actor();
+  v_actor uuid := p_actor;
   v_c committee.committee;
   v_rule committee.rule_set;
   v_type text;
@@ -1163,7 +1178,6 @@ declare
   v_voting int;
   v_restricted int;
 begin
-  perform case_mgmt.lock_editable_case(p_case_id);
   select * into v_c from committee.committee c where c.id = p_committee_id and c.is_active;
   if v_c.id is null then perform api._fail('INVALID', 'committee_id'); end if;
   v_reason := api._require_text(p_reason, 'reason', 5, 2000);
@@ -1217,6 +1231,19 @@ begin
     jsonb_build_object('committee_id', v_c.id, 'committee_kind', v_c.kind, 'rule_set_id', v_rule.id,
                        'voting_members', v_voting, 'firewall_restricted_members', v_restricted));
   return v_cp;
+end;
+$$;
+
+create function api.refer_case_to_committee(p_case_id uuid, p_committee_id uuid, p_parent_proceeding_id uuid, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+begin
+  perform case_mgmt.lock_editable_case(p_case_id);
+  return committee.open_committee_proceeding(p_case_id, p_committee_id, p_parent_proceeding_id, v_actor, p_reason);
 end;
 $$;
 

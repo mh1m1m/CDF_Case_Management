@@ -860,5 +860,17 @@ export const STATUS_CODES = {
     "TRANSFERRED",
     "WITHDRAWN",
   ],
+  RETURN_REASON: [
+    "APPROVAL_MISSING",
+    "INSUFFICIENT_EVIDENCE",
+    "MISSING_DOCUMENTS",
+    "MISSING_INFORMATION",
+    "OTHER",
+    "OUT_OF_SCOPE",
+    "RECOMMENDATION_INCOMPLETE",
+    "SUBJECT_NOT_IDENTIFIED",
+    "UNCLEAR_ALLEGATION",
+    "WRONG_CHANNEL",
+  ],
 } as const satisfies Record<string, readonly string[]>;
 export type StatusCodeDimension = keyof typeof STATUS_CODES;
