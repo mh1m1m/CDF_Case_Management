@@ -228,10 +228,10 @@ describe("excluding a witness from a meeting (migration 2010, P11-G4, ADR-039)",
         { catalogue: string; target_event_state: string; gap_ref: string | null }[]
       >`
         select catalogue, target_event_state, gap_ref from config.legacy_status_map
-        where legacy_code = 'S112' order by catalogue`;
+        where legacy_code = 'S112' order by catalogue collate "C"`;
       expect(statuses).toEqual([
-        { catalogue: "CRM_STATUS_D_140", target_event_state: "IMPLEMENTED", gap_ref: null },
         { catalogue: "CRM_STATUS_DRIVE_150", target_event_state: "IMPLEMENTED", gap_ref: null },
+        { catalogue: "CRM_STATUS_D_140", target_event_state: "IMPLEMENTED", gap_ref: null },
       ]);
       const [form] = await s.tx<{ merge_target: string; gap_ref: string | null }[]>`
         select merge_target, gap_ref from config.legacy_form_map where legacy_id = 'T3-B2.4-241'`;
@@ -239,8 +239,8 @@ describe("excluding a witness from a meeting (migration 2010, P11-G4, ADR-039)",
       expect(form!.merge_target).toMatch(/^api\.exclude_meeting_witness /);
       const open = await s.tx<{ id: string }[]>`
         select legacy_id as id from config.legacy_form_map where gap_ref = 'P11-G4'
-        union all select legacy_code from config.legacy_status_map where gap_ref = 'P11-G4' order by 1`;
-      expect(open.map((r) => r.id)).toEqual(["S083", "S083", "T3-B2.3-112", "T3-B2.3-144"]);
+        union all select legacy_code from config.legacy_status_map where gap_ref = 'P11-G4'`;
+      expect(open.map((r) => r.id).sort()).toEqual(["S083", "S083", "T3-B2.3-112", "T3-B2.3-144"]);
       const [mod] = await s.tx<{ commands: string[]; delivered_in: string[] }[]>`
         select commands, delivered_in from config.target_module where code = 'MEETING_WITNESSES'`;
       expect(mod!.commands).toContain("api.exclude_meeting_witness");
