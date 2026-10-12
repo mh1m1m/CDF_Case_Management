@@ -26,3 +26,5 @@ export {
   scrubSentryEvent,
   scrubString,
 } from "./observability/scrub";
+export { PostgresNotificationOutbox } from "./notifications/outbox";
+export { StubEmailSender } from "./notifications/stub-email-sender";

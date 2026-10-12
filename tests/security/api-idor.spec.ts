@@ -808,6 +808,19 @@ const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
   },
 ];
 
+// Notification commands (migration 1920) take the caller's own notification; nobody else's is reachable.
+interface NotificationTargets {
+  notification: string;
+}
+
+const NOTIFICATION_PROBES: Probe<NotificationTargets>[] = [
+  {
+    fn: "mark_notification_read",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.mark_notification_read(${t.notification})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -819,6 +832,8 @@ const ADMIN_COMMANDS = [
   "set_committee_rule_set",
   // Recommendation authority rules (migration 1900): COMMITTEE_ADMIN only, no case.
   "set_action_authority_rule",
+  // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
+  "set_notification_rule",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
@@ -849,6 +864,8 @@ const GLOBAL_COMMANDS = [
   // (grievance-defence.spec.ts).
   "my_defence_notices",
   "record_grievance",
+  // Migration 1920: the caller's own notification preferences.
+  "set_notification_preference",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -1048,6 +1065,7 @@ describe("catalog guard", () => {
       ...MEETING_PROBES.map((p) => p.fn),
       ...DECISION_PROBES.map((p) => p.fn),
       ...GRIEVANCE_PROBES.map((p) => p.fn),
+      ...NOTIFICATION_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1542,6 +1560,38 @@ describe("IDOR: employee defence and grievance objects (migration 1910)", () => 
       ]) {
         expect(await s.tx`select id from ${s.tx("grievance." + table)}`, table).toEqual([]);
       }
+    });
+  });
+});
+
+describe("IDOR: notifications (migration 1920)", () => {
+  // legal's seat notification; every other user is an outsider to it.
+  const OUTSIDERS: UserKey[] = [
+    "committeeChair",
+    "committeeSecretary",
+    "platformAdmin",
+    "dpo",
+    "internalAudit",
+    "soc",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      const { ic } = await committeeIds();
+      await s.as("platformAdmin");
+      await s.tx`select api.appoint_committee_member(${ic}, ${USERS.legal}, 'MEMBER', now(), null, 'DEMO-APPT')`;
+      await s.as("legal");
+      const [n] = await s.tx<{ id: string }[]>`select id from notify.outbox limit 1`;
+      await s.as(actor);
+      const mismatches: string[] = [];
+      for (const probe of NOTIFICATION_PROBES) {
+        const onReal = await outcomeOf(s, probe, { notification: n!.id }, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, { notification: randomUUID() }, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select id from notify.outbox where recipient_id = ${USERS.legal}`).toEqual([]);
     });
   });
 });

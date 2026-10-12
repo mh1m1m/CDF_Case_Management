@@ -290,3 +290,11 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Admission opens the GRIEVANCE committee proceeding through the shared referral path: the case gate and the N9 firewall apply, so no Investigation Committee voter of the case votes on its grievance.
 - Outcomes are bound to a closed, approved vote of the grievance proceeding and used once.
 - Tests: `tests/security/grievance-defence.spec.ts`, grievance IDOR probes and the audit walk.
+
+## 19. Notifications (migration 1920; ADR-025)
+
+- A notification carries a template code, object type and id, and a deep link of ids only; never a case number, name, allegation, narrative or evidence (§39, N18). Outbox facts are immutable.
+- Recipients read only their own in-app notifications. Email rows are invisible to every application user.
+- Email delivery and reminders run only through `notify.*` functions granted to the BFF login role, never to `authenticated` or `anon`.
+- Mandatory notifications (meeting invitations, minutes review, legal review assignment, defence notices, grievance decisions) cannot be muted. Rules are maintained only with `NOTIFICATION_ADMIN`.
+- Tests: `tests/security/notifications.spec.ts`, notification IDOR probes and the audit walk.

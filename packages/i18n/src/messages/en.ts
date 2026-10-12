@@ -1382,6 +1382,21 @@ export const en = {
     status: { ACTIVE: "Active", SUSPENDED: "Suspended", REVOKED: "Revoked" },
     noRoles: "None",
   },
+  // Notification templates (ADR-025): fixed wording only, never case content (§39, N18).
+  notificationTemplate: {
+    COMMITTEE_SEAT_ASSIGNED: "You have been appointed to a committee seat.",
+    COMMITTEE_SEAT_ENDED: "Your committee seat is ending.",
+    MEETING_INVITATION: "You are invited to a meeting. Please declare any conflict of interest.",
+    MEETING_CANCELLED: "A meeting you take part in was cancelled.",
+    MINUTES_REVIEW_REQUESTED: "Meeting minutes await your review.",
+    MINUTES_REVIEW_REMINDER: "Reminder: minutes may be deemed approved unless you review them.",
+    LEGAL_REVIEW_ASSIGNED: "A legal review has been assigned to you.",
+    DEFENCE_NOTICE_ISSUED: "A notice awaits your response.",
+    DEFENCE_DUE_REMINDER: "Reminder: your response is due soon.",
+    GRIEVANCE_RECEIVED: "A new grievance awaits the committee secretary.",
+    GRIEVANCE_ADMISSIBILITY_DECIDED: "A decision was made on whether your grievance is admissible.",
+    GRIEVANCE_OUTCOME_RECORDED: "The committee recorded the outcome of your grievance.",
+  },
 };
 
 type Widen<T> = { [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };

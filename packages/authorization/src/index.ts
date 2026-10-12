@@ -109,7 +109,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   SOC_ANALYST: ["SECURITY_EVENT_VIEW"],
   // COMMITTEE_ADMIN maintains committee seats and rules only (ADR-019, Q28); it opens no proceeding or case.
   // SECTOR_ADMIN maintains sectors and positions only; it shows no referral or case (migration 1880).
-  PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN", "COMMITTEE_ADMIN", "SECTOR_ADMIN"],
+  // NOTIFICATION_ADMIN maintains notification rules only; notifications carry no content (migration 1920).
+  PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN", "COMMITTEE_ADMIN", "SECTOR_ADMIN", "NOTIFICATION_ADMIN"],
   // Form entitlements (ADR-011) give these roles their first permissions; the rest come in later phases.
   // DB_ADMIN never receives application permissions (§21).
   COMPLIANCE: ["FORM_VIEW", "FORM_PREPARE", "FORM_REVIEW"],

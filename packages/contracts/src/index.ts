@@ -114,6 +114,8 @@ export const PERMISSIONS = [
   "PRELIMINARY_APPROVE",
   // Legal review of recommendation packages (migration 1900, ADR-022): the assigned reviewer's opinion.
   "LEGAL_OPINION_GIVE",
+  // Notification rules (migration 1920, ADR-025): event rules and committee defaults, never recipients or content.
+  "NOTIFICATION_ADMIN",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -1109,3 +1111,33 @@ export const REINVESTIGATION_PATHS = [
   "OTHER",
 ] as const;
 export type ReinvestigationPath = (typeof REINVESTIGATION_PATHS)[number];
+
+// ---- Notifications (ADR-025, migration 1920) -------------------------------------------------------------
+export const NOTIFICATION_TEMPLATES = [
+  "COMMITTEE_SEAT_ASSIGNED",
+  "COMMITTEE_SEAT_ENDED",
+  "MEETING_INVITATION",
+  "MEETING_CANCELLED",
+  "MINUTES_REVIEW_REQUESTED",
+  "MINUTES_REVIEW_REMINDER",
+  "LEGAL_REVIEW_ASSIGNED",
+  "DEFENCE_NOTICE_ISSUED",
+  "DEFENCE_DUE_REMINDER",
+  "GRIEVANCE_RECEIVED",
+  "GRIEVANCE_ADMISSIBILITY_DECIDED",
+  "GRIEVANCE_OUTCOME_RECORDED",
+] as const;
+export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
+export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
+export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
+
+/** What the NotificationSender receives: recipient, template and link. Never case content (§39, N18). */
+export interface OutgoingNotification {
+  id: string;
+  recipientId: string;
+  template: NotificationTemplate;
+  deepLink: string;
+  attempts: number;
+}

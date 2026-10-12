@@ -1366,4 +1366,19 @@ export const ar: Messages = {
     status: { ACTIVE: "نشط", SUSPENDED: "موقوف", REVOKED: "ملغى" },
     noRoles: "لا يوجد",
   },
+  // Notification templates (ADR-025): fixed wording only, never case content (§39, N18).
+  notificationTemplate: {
+    COMMITTEE_SEAT_ASSIGNED: "تم تعيينك في مقعد بإحدى اللجان.",
+    COMMITTEE_SEAT_ENDED: "تنتهي عضويتك في إحدى اللجان.",
+    MEETING_INVITATION: "أنت مدعو إلى اجتماع. يُرجى الإفصاح عن أي تعارض مصالح.",
+    MEETING_CANCELLED: "أُلغي اجتماع تشارك فيه.",
+    MINUTES_REVIEW_REQUESTED: "محضر اجتماع بانتظار مراجعتك.",
+    MINUTES_REVIEW_REMINDER: "تذكير: قد يُعدّ المحضر معتمداً ما لم تراجعه.",
+    LEGAL_REVIEW_ASSIGNED: "أُسندت إليك مراجعة قانونية.",
+    DEFENCE_NOTICE_ISSUED: "يوجد إشعار بانتظار ردّك.",
+    DEFENCE_DUE_REMINDER: "تذكير: يقترب موعد تقديم ردّك.",
+    GRIEVANCE_RECEIVED: "تظلّم جديد بانتظار أمين اللجنة.",
+    GRIEVANCE_ADMISSIBILITY_DECIDED: "صدر قرار بشأن قبول تظلّمك.",
+    GRIEVANCE_OUTCOME_RECORDED: "سجّلت اللجنة نتيجة تظلّمك.",
+  },
 };

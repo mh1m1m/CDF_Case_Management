@@ -17,6 +17,8 @@ const APP_SCHEMAS = [
   "records",
   "committee",
   "decision",
+  "grievance",
+  "notify",
   "config",
   "api",
   "public_api",

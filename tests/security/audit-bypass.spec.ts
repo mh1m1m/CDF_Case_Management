@@ -1160,6 +1160,26 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "records",
         run: (s) => s.tx`select api.execute_disposition(${ids.disposition!})`,
       },
+      // Notifications (migration 1920): a rule, a preference and a read mark.
+      {
+        fn: "set_notification_rule",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_notification_rule('EVENT_RULE', 'MEETING_CANCELLED', null, 'EMAIL', true, now(), ${REASON})`,
+      },
+      {
+        fn: "set_notification_preference",
+        actor: "legal",
+        run: (s) => s.tx`select api.set_notification_preference('COMMITTEE_SEAT_ENDED', 'IN_APP', true)`,
+      },
+      {
+        fn: "mark_notification_read",
+        actor: "committeeChair",
+        run: async (s) => {
+          const n = await one(s, s.tx`select id from notify.outbox where read_at is null limit 1`);
+          return s.tx`select api.mark_notification_read(${n})`;
+        },
+      },
       // Employee defence and grievance (migration 1910): the walk subject is linked to employee's portal account,
       // answers one notice through the portal and one on paper, and files a grievance the Grievance Committee
       // admits and decides; a standalone grievance under a CHAIR rule is decided by the chair.
@@ -1434,7 +1454,7 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records', 'config', 'decision')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records', 'config', 'decision', 'grievance', 'notify')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
     // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers

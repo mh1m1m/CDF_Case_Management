@@ -277,3 +277,12 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `grievance.grievance`                | LINKED or STANDALONE grievance                      | Rule set, window and late flag stored (Q94)                  |
 | `grievance.admissibility_assessment` | Secretary assessment and the decider's decision     | Not visible to the grievant                                  |
 | `grievance.grievance_outcome`        | Combinable outcomes bound to an approved vote       | Reinvestigation path opens a REINVESTIGATION proceeding      |
+
+## Notifications (migration 1920, ADR-025)
+
+| Table               | Purpose                                 | Notes                                                       |
+| ------------------- | --------------------------------------- | ----------------------------------------------------------- |
+| `notify.template`   | Notification kinds                      | Reference data; wording in packages/i18n                    |
+| `notify.rule`       | Layered, effective-dated delivery rules | SYSTEM_MANDATORY from migrations only; closed, never edited |
+| `notify.preference` | A user's mutes                          | Mandatory templates cannot be muted                         |
+| `notify.outbox`     | One row per recipient and channel       | Template, ids and deep link only (N18); facts immutable     |
