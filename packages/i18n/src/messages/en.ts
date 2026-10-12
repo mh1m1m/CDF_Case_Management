@@ -1411,6 +1411,8 @@ export const en = {
     CORRECTIVE_ACTION_OVERDUE: "A corrective action is overdue.",
     BCP_IMPORT_APPROVAL_REQUESTED: "A continuity workbook import is waiting for your approval.",
     BCP_IMPORT_DECIDED: "A decision was recorded on your continuity workbook import.",
+    RIGHTS_NOTICE_ISSUED: "A notice of your rights awaits you.",
+    DECISION_NOTICE_ISSUED: "A decision notice awaits you. The period to file a grievance has started.",
   },
   bcpTemplate: {
     readme: {

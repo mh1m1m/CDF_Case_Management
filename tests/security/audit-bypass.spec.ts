@@ -754,9 +754,12 @@ describe("every state-changing command writes its audit event in the same transa
       {
         fn: "record_authority_decision",
         actor: "committeeSecretary",
-        run: (s) =>
-          s.tx`select api.record_authority_decision(${ids.pkg!}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED',
-            now() - interval '1 hour', 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON})`,
+        run: async (s) =>
+          (ids.decision = await one(
+            s,
+            s.tx`select api.record_authority_decision(${ids.pkg!}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED',
+              now() - interval '1 hour', 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON}) as id`,
+          )),
       },
       // Corrective actions (migration 1940): opened from the approved item, run by the case manager, reported by
       // its owner (financeEmployee, then employeeB; both given IMPLEMENTATION_OWNER before the walk), verified,
@@ -1309,6 +1312,37 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.record_defence_response(${ids.notice2!}, 'EMAIL', now(),
             'Synthetic: walk response received by email.', 'EMAIL-DEMO-WALK')`,
+      },
+      // Kinds of employee notice (migration 1990): a rights notice to the walk subject; a decision notice of the
+      // walk's authority decision (its corrective action applies to the whole case) to a second subject linked to
+      // the same employee, who grieves it from the portal.
+      {
+        fn: "issue_rights_notice",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.issue_rights_notice(${ids.subject!}, 'Synthetic: walk rights notice.', ${[ids.allegation!]}::uuid[])`,
+      },
+      {
+        fn: "issue_decision_notice",
+        actor: "caseManager",
+        run: async (s) => {
+          ids.subject2 = await one(
+            s,
+            s.tx`select api.add_case_subject(${caseA}, 'Employee Omicron Two (synthetic)', 'EMPLOYEE', null) as id`,
+          );
+          await s.tx`select api.link_subject_portal_account(${ids.subject2}, ${USERS.employee}, ${REASON})`;
+          return (ids.decisionNotice = await one(
+            s,
+            s.tx`select api.issue_decision_notice(${ids.subject2}, ${ids.decision!}, 'Synthetic: walk decision notice.') as id`,
+          ));
+        },
+      },
+      {
+        fn: "file_grievance_on_decision_notice",
+        actor: "employee",
+        run: (s) =>
+          s.tx`select api.file_grievance_on_decision_notice(${ids.decisionNotice!},
+            'Synthetic: walk grievance on the decision notice.')`,
       },
       {
         fn: "file_grievance",

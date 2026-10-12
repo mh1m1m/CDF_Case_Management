@@ -1101,6 +1101,10 @@ export const SUBMISSION_CHANNELS = [
 export type SubmissionChannel = (typeof SUBMISSION_CHANNELS)[number];
 export const DEFENCE_NOTICE_STATUSES = ["ISSUED", "ACKNOWLEDGED", "RESPONDED", "WITHDRAWN"] as const;
 export type DefenceNoticeStatus = (typeof DEFENCE_NOTICE_STATUSES)[number];
+// Kinds of employee notice (migration 1990, ADR-037): only a DEFENCE notice has a due date and takes a response; a
+// DECISION notice starts the grievance window (Q94).
+export const EMPLOYEE_NOTICE_KINDS = ["RIGHTS", "DEFENCE", "DECISION"] as const;
+export type EmployeeNoticeKind = (typeof EMPLOYEE_NOTICE_KINDS)[number];
 export const GRIEVANCE_KINDS = ["LINKED", "STANDALONE"] as const;
 export type GrievanceKind = (typeof GRIEVANCE_KINDS)[number];
 export const GRIEVANCE_STATUSES = [
@@ -1167,6 +1171,9 @@ export const NOTIFICATION_TEMPLATES = [
   // Continuity workbook import (migration 1960, ADR-034)
   "BCP_IMPORT_APPROVAL_REQUESTED",
   "BCP_IMPORT_DECIDED",
+  // Kinds of employee notice (migration 1990, ADR-037)
+  "RIGHTS_NOTICE_ISSUED",
+  "DECISION_NOTICE_ISSUED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;

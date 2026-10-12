@@ -789,6 +789,25 @@ const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
     call: (tx, t) =>
       tx`select api.record_defence_response(${t.notice}, 'EMAIL', now(), 'Probe response text.', 'EMAIL-PROBE-0001')`,
   },
+  // Kinds of employee notice (migration 1990, ADR-037): a rights or decision notice to a subject, and the subject's
+  // grievance on a decision notice.
+  {
+    fn: "issue_rights_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.issue_rights_notice(${t.subject}, 'Probe notice text.', null)`,
+  },
+  {
+    fn: "issue_decision_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.issue_decision_notice(${t.subject}, ${randomUUID()}, 'Probe notice text.')`,
+  },
+  {
+    fn: "file_grievance_on_decision_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.file_grievance_on_decision_notice(${t.notice}, 'Probe grievance grounds.')`,
+  },
   // AGENT-09 G2b (migration 1910): the Restricted Case Authority names a secretary to handle a received grievance.
   {
     fn: "approve_restricted_grievance_handling",
