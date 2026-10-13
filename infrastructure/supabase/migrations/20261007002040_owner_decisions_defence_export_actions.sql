@@ -44,6 +44,10 @@
 --     escalation after a repeated rejection to an effective-dated target, owner default the Investigation Committee
 --     Chair, offered in the available actions, resubmission never capped (DEC-F09); NOT_FEASIBLE and
 --     NO_PERSONAL_JURISDICTION INACTIVE in the catalogue and refused for new recommendations (DEC-F10).
+--   * Purpose reads and notices (item 13). The admissibility decider a grievance awaits (CHAIR or COMMITTEE) reads
+--     it and is told (DEC-F17); read models for a referral, a grievance, an export request, a corrective action and a
+--     continuity import, with referral and grievance queues, each with command-checked capabilities and no audit;
+--     content-free referral and preliminary-review notices to whoever must act next.
 --
 -- Replaced functions (create or replace: same signature, owner and grants; no check weakened), and why:
 --   * grievance.insert_notice, grievance.protect_records, api.my_defence_notices: window basis, delivery, suspension.
@@ -62,10 +66,14 @@
 --   * exchange.lock_bcp_batch, exchange.protect_bcp: the operator registry (DEC-F30) and the purge (DEC-F31).
 --   * authz.can_view_referral, api.referral_available_actions: the escalation target and ESCALATE (DEC-F09).
 --   * api.object_to_referral_rejection: no objection once an escalation is decided (DEC-F09).
+--   * authz.can_view_referral, authz.can_view_preliminary_recommendation: wrap their user-id forms, same result (item
+--     13, R1).
+--   * notify.deep_link: the REFERRAL and PRELIMINARY_REVIEW paths (item 13).
 -- Checks widened by drop and re-add under the same name: defence_notice_decision_window, grievance_check4,
 -- grievance_admissibility_decider_check, admissibility_assessment_decided_by_role_check,
 -- corrective_action_event_event_type_check, export_request_purpose_check (the catalogue FK carries the list),
--- referral_status_check, referral_event_event_type_check, status_dimension_value_state_check (adds INACTIVE).
+-- referral_status_check, referral_event_event_type_check, status_dimension_value_state_check (adds INACTIVE),
+-- template_object_type_check and outbox_object_type_check (add REFERRAL and PRELIMINARY_REVIEW, item 13).
 --
 -- decision.package_tainted(uuid) (item 6, DEC-AMB-003) is migration 2030's (section 3); the temporary stub that stood in
 -- for it before the merge was dropped at the merge.
@@ -4008,3 +4016,1025 @@ $$;
 create trigger preliminary_recommendation_outcome_enabled before insert or update on case_mgmt.preliminary_recommendation
   for each row execute function case_mgmt.require_enabled_preliminary_outcome();
 revoke all on function case_mgmt.require_enabled_preliminary_outcome() from public, anon, authenticated;
+
+-- =============================================================================
+-- Item 13. Purpose read models, the admissibility decider's read path, and content-free referral, preliminary-review
+-- and grievance-decision notices (Phase 12 asks (a)-(c), coordinator 2026-10-13; requirements §19, §21, §22, §39,
+-- §40, §82, §87; DEC-02, DEC-F09, DEC-F17, DEC-F24, DEC-F28, DEC-F30; AGENT-09 pack 3 R1-R4; ADR-025, ADR-039,
+-- ADR-040). The pattern is migration 2030 section 4 (api.meeting_view).
+--
+-- (a) The admissibility decider (DEC-F17). A grievance awaiting a CHAIR or COMMITTEE decision was reachable by its
+--     decider only through the decide command (which accepts a chair who cannot see it). The decider now reads it:
+--       grievance.is_pending_decider(grievance, user): the grievance is AWAITING_ADMISSIBILITY_DECISION and the user
+--       holds, now, a Grievance Committee seat the snapshot names (CHAIR: the chair or deputy chair, as the command
+--       accepts; COMMITTEE: the chair, deputy chair or a member), passes the case gate, took no part in the case's
+--       Investigation Committee (G3), and, on a restricted case, already works it (fail closed: no restricted-case
+--       widening without its Restricted Case Authority). A SECRETARY decision is applied at once by the secretary, who
+--       reads as handler; an EXTERNAL decision is recorded by reference only, so the external body gets no read.
+--     authz.is_grievance_decider(grievance) is that rule for the caller. Additive SELECT policies on the grievance, its
+--     admissibility assessments, contested items, completion requests and supplements use it; nothing is narrowed.
+--     The read ends with the decision (the grievance leaves AWAITING_ADMISSIBILITY_DECISION); an admitted grievance is
+--     then seen through its committee proceeding, as in 1910. GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED tells each
+--     decider, ids only.
+-- (b) Purpose read models. Each is SECURITY DEFINER with search_path '' and writes no audit event (as
+--     api.meeting_view). NOT_FOUND unless the caller passes the object's read predicate; each part under the predicate
+--     of the table it comes from; the case named only under authz.can_view_case_metadata; a capabilities object of
+--     booleans, each from the checks of the command it stands for, in the command's order. A capability never widens
+--     a command: the command still decides.
+--       api.referral_view, api.referral_queue   authz.can_view_referral (referral_read, referral_event_read). An
+--                                                escalation shows the target's committee and seat only, never its
+--                                                reason, author or source (R4).
+--       api.grievance_view, api.grievance_queue authz.can_view_grievance or authz.is_grievance_decider; assessments
+--                                                and the pending decider under authz.can_view_grievance_assessment or
+--                                                the decider (never the grievant); withdrawal and outcome under
+--                                                authz.can_view_grievance.
+--       api.export_request_view                 authz.can_view_export. Never the storage key or the document: the
+--                                                current hash and the withheld count only. The requester is never
+--                                                offered an approval (DEC-F24).
+--       api.corrective_action_view              authz.can_view_corrective_action. The card and its history; the
+--                                                recommendation item and authority decision only to whoever sees the
+--                                                case; a pool by code and name only (R3). Unit and pool members act as
+--                                                decision.acts_for_action says (R2).
+--       api.bcp_import_batch_view               authz.can_view_bcp_import. Row metadata, never the cells or the
+--                                                workbook control.
+-- (c) Content-free notices (ADR-025, 1920 conventions; ids and a deep link only; all mandatory, as they ask the
+--     recipient to act):
+--       REFERRAL_SUBMITTED_TO_HEAD       submitted or resubmitted: the sector's approvers (head, or active delegate)
+--       REFERRAL_RETURNED                returned by the sector or for completion: the preparer
+--       REFERRAL_SUBMITTED_TO_SECRETARY  approved by the sector, or objected to: the Investigation Committee secretaries
+--       REFERRAL_ESCALATED               escalated (DEC-F09): the holder of the recorded target seat
+--       PRELIMINARY_REVIEW_REQUESTED     awaiting review: PRELIMINARY_REVIEW holders who see the case
+--       PRELIMINARY_APPROVAL_REQUESTED   awaiting approval: PRELIMINARY_APPROVE holders who may see the recommendation
+--       PRELIMINARY_RETURNED             returned: the preparer
+--     Never the actor, nor anyone the command asked for refuses for separation of duties. Each recipient may open the
+--     object, asked by user id and never by switching the request identity (R1), and passes authz.user_case_gate
+--     where a case exists.
+--
+-- Replaced (create or replace: same signature, owner and grants, same result for every caller):
+--   * authz.can_view_referral and authz.can_view_preliminary_recommendation wrap user-id forms
+--     (intake.user_can_view_referral, case_mgmt.user_can_view_preliminary_recommendation), each the previous body with
+--     the caller replaced by the argument, so the notice engine asks about a recipient without changing the request
+--     identity (R1). Nothing is widened or narrowed.
+--   * notify.deep_link: the REFERRAL and PRELIMINARY_REVIEW paths.
+-- Checks widened under the same name: template_object_type_check, outbox_object_type_check (REFERRAL,
+-- PRELIMINARY_REVIEW).
+-- Not changed (coordinator-owned, read through only): decision.acts_for_action, api.set_corrective_action_owner_kind,
+-- notify.emit_due_reminders, the corrective_action_pool and referral_escalation_target read policies.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 13.1 Visibility rules asked by user id (R1)
+-- -----------------------------------------------------------------------------
+-- A referral, for a given user: the 1880 rule as replaced in item 12 (preparer; the sector's approvers once
+-- submitted; the committee secretaries once it reached them; the case team once accepted; the escalation target's
+-- holder), within the user's clearance. Internal: no application role may execute it.
+create function intake.user_can_view_referral(p_referral_id uuid, p_user_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select p_user_id is not null and exists (
+    select 1
+    from intake.referral r
+    join iam.user_profile u on u.id = p_user_id and u.status = 'ACTIVE'
+    where r.id = p_referral_id
+      and r.classification <= u.clearance
+      and (r.prepared_by = u.id
+           or (r.submitted_at is not null and authz.user_referral_approval_basis(u.id, r.sector_id, now()) is not null)
+           or (r.reached_secretary_at is not null
+               and coalesce(authz.user_committee_seat(u.id, r.committee_id, now())
+                            in ('SECRETARY', 'ALTERNATE_SECRETARY'), false))
+           or (r.case_id is not null and authz.user_can_view_case(u.id, r.case_id))
+           or (r.escalation_target_id is not null
+               and authz.holds_referral_escalation_target(u.id, r.escalation_target_id)))
+  );
+$$;
+
+-- The rule above for the caller: the commands, the policies, the views and the notices share it.
+create or replace function authz.can_view_referral(p_referral_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select intake.user_can_view_referral(p_referral_id, authz.current_user_id());
+$$;
+
+-- A preliminary recommendation, for a given user: the 1880 rule (the case team; a PRELIMINARY_APPROVE holder,
+-- purpose-bound, on a non-restricted, non-disposed case within the gate, while it awaits approval or for what they
+-- approved). Internal.
+create function case_mgmt.user_can_view_preliminary_recommendation(p_recommendation_id uuid, p_user_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select p_user_id is not null and exists (
+    select 1
+    from case_mgmt.preliminary_recommendation r
+    join case_mgmt.case_record c on c.id = r.case_id
+    where r.id = p_recommendation_id
+      and (authz.user_can_view_case(p_user_id, r.case_id)
+           or (authz.user_has_permission(p_user_id, 'PRELIMINARY_APPROVE')
+               and not c.is_restricted and c.records_state <> 'DISPOSED'
+               and authz.user_case_gate(p_user_id, r.case_id)
+               and (r.status = 'AWAITING_APPROVAL' or r.approved_by = p_user_id)))
+  );
+$$;
+
+create or replace function authz.can_view_preliminary_recommendation(p_recommendation_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select case_mgmt.user_can_view_preliminary_recommendation(p_recommendation_id, authz.current_user_id());
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 13.2 The admissibility decider's read path (DEC-F17)
+-- -----------------------------------------------------------------------------
+-- Whether a user is, now, a decider the grievance awaits (see the banner). Internal.
+create function grievance.is_pending_decider(p_grievance_id uuid, p_user_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select p_user_id is not null and exists (
+    select 1
+    from grievance.grievance g
+    join case_mgmt.case_record c on c.id = g.case_id
+    where g.id = p_grievance_id
+      and g.status = 'AWAITING_ADMISSIBILITY_DECISION'
+      and coalesce(authz.user_committee_seat(p_user_id, grievance.committee_id(), now())
+                     = any (case grievance.pending_decider(g)
+                              when 'CHAIR' then array['CHAIR', 'DEPUTY_CHAIR']
+                              when 'COMMITTEE' then array['CHAIR', 'DEPUTY_CHAIR', 'MEMBER']
+                            end), false)
+      and authz.user_case_gate(p_user_id, g.case_id)
+      and not authz.participated_in_investigation_committee(p_user_id, g.case_id)
+      and (not c.is_restricted or authz.user_can_view_case(p_user_id, g.case_id))
+  );
+$$;
+
+-- The caller is a decider the grievance awaits. Used by the policies below.
+create function authz.is_grievance_decider(p_grievance_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select grievance.is_pending_decider(p_grievance_id, authz.current_user_id());
+$$;
+revoke all on function authz.is_grievance_decider(uuid) from public, anon;
+grant execute on function authz.is_grievance_decider(uuid) to authenticated;
+
+-- Additive: the decider reads what the decision rests on. The 1910 and 2040 policies stand unchanged.
+create policy grievance_decider_read on grievance.grievance for select to authenticated
+  using (authz.is_grievance_decider(id));
+create policy admissibility_assessment_decider_read on grievance.admissibility_assessment for select to authenticated
+  using (authz.is_grievance_decider(grievance_id));
+create policy contested_item_decider_read on grievance.contested_item for select to authenticated
+  using (authz.is_grievance_decider(grievance_id));
+create policy completion_request_decider_read on grievance.completion_request for select to authenticated
+  using (authz.is_grievance_decider(grievance_id));
+create policy grievance_supplement_decider_read on grievance.grievance_supplement for select to authenticated
+  using (authz.is_grievance_decider(grievance_id));
+
+-- -----------------------------------------------------------------------------
+-- 13.3 Notification object types, deep links and templates (ADR-025)
+-- -----------------------------------------------------------------------------
+alter table notify.template drop constraint template_object_type_check;
+alter table notify.template add constraint template_object_type_check check (object_type in (
+  'COMMITTEE', 'MEETING', 'MINUTES', 'LEGAL_REVIEW', 'DEFENCE_NOTICE', 'GRIEVANCE', 'EXPORT', 'CORRECTIVE_ACTION',
+  'BCP_IMPORT', 'REFERRAL', 'PRELIMINARY_REVIEW'));
+alter table notify.outbox drop constraint outbox_object_type_check;
+alter table notify.outbox add constraint outbox_object_type_check check (object_type in (
+  'COMMITTEE', 'MEETING', 'MINUTES', 'LEGAL_REVIEW', 'DEFENCE_NOTICE', 'GRIEVANCE', 'EXPORT', 'CORRECTIVE_ACTION',
+  'BCP_IMPORT', 'REFERRAL', 'PRELIMINARY_REVIEW'));
+
+-- Replaced from 1960: two more paths, ids only.
+create or replace function notify.deep_link(p_object_type text, p_object_id uuid)
+returns text
+language sql immutable
+set search_path = ''
+as $$
+  select case p_object_type
+           when 'COMMITTEE' then '/committees/' || p_object_id
+           when 'MEETING' then '/meetings/' || p_object_id
+           when 'MINUTES' then '/minutes/' || p_object_id
+           when 'LEGAL_REVIEW' then '/legal-reviews/' || p_object_id
+           when 'DEFENCE_NOTICE' then '/my-defence/' || p_object_id
+           when 'GRIEVANCE' then '/grievances/' || p_object_id
+           when 'EXPORT' then '/exports/' || p_object_id
+           when 'CORRECTIVE_ACTION' then '/actions/' || p_object_id
+           when 'BCP_IMPORT' then '/continuity/imports/' || p_object_id
+           when 'REFERRAL' then '/referrals/' || p_object_id
+           when 'PRELIMINARY_REVIEW' then '/preliminary-reviews/' || p_object_id
+         end;
+$$;
+
+insert into notify.template (code, object_type, is_mandatory, description) values
+  ('GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED', 'GRIEVANCE', true,
+   'A grievance awaits the user''s admissibility decision (DEC-F17)'),
+  ('REFERRAL_SUBMITTED_TO_HEAD',      'REFERRAL', true, 'A referral from the user''s sector awaits their approval (Q2-Q4)'),
+  ('REFERRAL_RETURNED',               'REFERRAL', true, 'A referral the user prepared was returned to them (Q3, Q6)'),
+  ('REFERRAL_SUBMITTED_TO_SECRETARY', 'REFERRAL', true, 'A referral awaits the committee secretary''s decision (Q5-Q8)'),
+  ('REFERRAL_ESCALATED',              'REFERRAL', true, 'A repeatedly rejected referral was escalated to the user (DEC-F09)'),
+  ('PRELIMINARY_REVIEW_REQUESTED',    'PRELIMINARY_REVIEW', true, 'A preliminary review recommendation awaits the user''s review (Q15)'),
+  ('PRELIMINARY_APPROVAL_REQUESTED',  'PRELIMINARY_REVIEW', true, 'A preliminary review recommendation awaits the user''s approval (Q16)'),
+  ('PRELIMINARY_RETURNED',            'PRELIMINARY_REVIEW', true, 'A preliminary review recommendation the user prepared was returned (Q17)');
+insert into notify.rule (layer, template_code, channel, enabled, effective_from, reason)
+select 'SYSTEM_MANDATORY', t.code, c.channel, true, '2026-01-01T00:00:00Z', 'Synthetic default: mandatory notice (ADR-025)'
+from notify.template t cross join (values ('IN_APP'), ('EMAIL')) c (channel)
+where t.code in ('GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED', 'REFERRAL_SUBMITTED_TO_HEAD', 'REFERRAL_RETURNED',
+                 'REFERRAL_SUBMITTED_TO_SECRETARY', 'REFERRAL_ESCALATED', 'PRELIMINARY_REVIEW_REQUESTED',
+                 'PRELIMINARY_APPROVAL_REQUESTED', 'PRELIMINARY_RETURNED');
+
+-- -----------------------------------------------------------------------------
+-- 13.4 Notices
+-- -----------------------------------------------------------------------------
+-- DEC-F17: a grievance that starts to await a CHAIR or COMMITTEE decision, to each decider. Candidates are the
+-- Grievance Committee's current seat holders; grievance.is_pending_decider picks among them.
+create function notify.on_grievance_awaiting_decision()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_gc uuid := grievance.committee_id();
+  v_user uuid;
+begin
+  for v_user in select distinct m.user_id from committee.membership m
+                where m.committee_id = v_gc
+                  and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())
+                  and grievance.is_pending_decider(new.id, m.user_id)
+                order by m.user_id loop
+    perform notify.enqueue('GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED', v_user, new.id, v_gc,
+                           'grievance-decision:' || new.id);
+  end loop;
+  return null;
+end;
+$$;
+create trigger grievance_decision_notify after update of status on grievance.grievance
+  for each row when (new.status = 'AWAITING_ADMISSIBILITY_DECISION' and old.status is distinct from new.status)
+  execute function notify.on_grievance_awaiting_decision();
+
+-- A referral step, to whoever must act next (1880 commands, DEC-F09). The referral row already holds the step.
+create function notify.on_referral_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_r intake.referral;
+  v_t intake.referral_escalation_target;
+  v_user uuid;
+begin
+  select * into v_r from intake.referral r where r.id = new.referral_id;
+  if new.event_type in ('SUBMITTED', 'RESUBMITTED') then
+    -- api.sector_decide_referral: an approval basis now (the head, or a delegate, who is always a member), never the
+    -- preparer.
+    for v_user in select distinct m.user_id from iam.sector_membership m
+                  where m.sector_id = v_r.sector_id
+                    and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())
+                    and m.user_id <> v_r.prepared_by and m.user_id is distinct from new.actor_id
+                    and authz.user_referral_approval_basis(m.user_id, v_r.sector_id, now()) is not null
+                    and intake.user_can_view_referral(v_r.id, m.user_id)
+                    and (v_r.case_id is null or authz.user_case_gate(m.user_id, v_r.case_id))
+                  order by m.user_id loop
+      perform notify.enqueue('REFERRAL_SUBMITTED_TO_HEAD', v_user, v_r.id, null, 'referral-head:' || new.id);
+    end loop;
+  elsif new.event_type in ('SECTOR_RETURNED', 'RETURNED_FOR_COMPLETION') then
+    -- api.update_referral and api.submit_referral: the preparer.
+    if v_r.prepared_by is distinct from new.actor_id and intake.user_can_view_referral(v_r.id, v_r.prepared_by)
+       and (v_r.case_id is null or authz.user_case_gate(v_r.prepared_by, v_r.case_id)) then
+      perform notify.enqueue('REFERRAL_RETURNED', v_r.prepared_by, v_r.id, null, 'referral-returned:' || new.id);
+    end if;
+  elsif new.event_type in ('SECTOR_APPROVED', 'OBJECTED') then
+    -- api.secretary_decide_referral: the committee's secretary or alternate, never the preparer or the sector
+    -- approver.
+    for v_user in select distinct m.user_id from committee.membership m
+                  where m.committee_id = v_r.committee_id and m.seat in ('SECRETARY', 'ALTERNATE_SECRETARY')
+                    and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())
+                    and m.user_id <> v_r.prepared_by and m.user_id is distinct from v_r.sector_approved_by
+                    and m.user_id is distinct from new.actor_id
+                    and intake.user_can_view_referral(v_r.id, m.user_id)
+                    and (v_r.case_id is null or authz.user_case_gate(m.user_id, v_r.case_id))
+                  order by m.user_id loop
+      perform notify.enqueue('REFERRAL_SUBMITTED_TO_SECRETARY', v_user, v_r.id, v_r.committee_id,
+                             'referral-secretary:' || new.id);
+    end loop;
+  elsif new.event_type = 'ESCALATED' then
+    -- api.decide_referral_escalation: the holder of the target recorded on the referral, never someone excluded.
+    select * into v_t from intake.referral_escalation_target t where t.id = v_r.escalation_target_id;
+    for v_user in select distinct m.user_id from committee.membership m
+                  where m.committee_id = v_t.committee_id and m.seat = v_t.seat
+                    and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())
+                    and authz.holds_referral_escalation_target(m.user_id, v_t.id)
+                    and not intake.referral_escalation_excluded(v_r, m.user_id)
+                    and intake.user_can_view_referral(v_r.id, m.user_id)
+                    and (v_r.case_id is null or authz.user_case_gate(m.user_id, v_r.case_id))
+                  order by m.user_id loop
+      perform notify.enqueue('REFERRAL_ESCALATED', v_user, v_r.id, v_t.committee_id, 'referral-escalated:' || new.id);
+    end loop;
+  end if;
+  return null;
+end;
+$$;
+create trigger referral_event_notify after insert on intake.referral_event
+  for each row when (new.event_type in ('SUBMITTED', 'RESUBMITTED', 'SECTOR_RETURNED', 'RETURNED_FOR_COMPLETION',
+                                        'SECTOR_APPROVED', 'OBJECTED', 'ESCALATED'))
+  execute function notify.on_referral_event();
+
+-- A preliminary recommendation that awaits review or approval, or was returned (1880 commands).
+create function notify.on_preliminary_recommendation()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid;
+begin
+  if new.status = 'AWAITING_REVIEW' then
+    -- api.review_preliminary_recommendation: PRELIMINARY_REVIEW and the case itself, never the preparer.
+    for v_user in select u.id from iam.user_profile u
+                  where u.status = 'ACTIVE' and u.id <> new.prepared_by
+                    and authz.user_has_permission(u.id, 'PRELIMINARY_REVIEW')
+                    and authz.user_case_gate(u.id, new.case_id)
+                    and authz.user_can_view_case(u.id, new.case_id)
+                  order by u.id loop
+      perform notify.enqueue('PRELIMINARY_REVIEW_REQUESTED', v_user, new.id, null, 'preliminary-review:' || new.id);
+    end loop;
+  elsif new.status = 'AWAITING_APPROVAL' then
+    -- api.approve_preliminary_recommendation: PRELIMINARY_APPROVE and the recommendation's read rule, never the
+    -- preparer or the reviewer.
+    for v_user in select u.id from iam.user_profile u
+                  where u.status = 'ACTIVE' and u.id <> new.prepared_by and u.id is distinct from new.reviewed_by
+                    and authz.user_has_permission(u.id, 'PRELIMINARY_APPROVE')
+                    and authz.user_case_gate(u.id, new.case_id)
+                    and case_mgmt.user_can_view_preliminary_recommendation(new.id, u.id)
+                  order by u.id loop
+      perform notify.enqueue('PRELIMINARY_APPROVAL_REQUESTED', v_user, new.id, null, 'preliminary-approval:' || new.id);
+    end loop;
+  elsif new.status = 'RETURNED' then
+    -- The preparer prepares the next version.
+    if authz.user_case_gate(new.prepared_by, new.case_id)
+       and case_mgmt.user_can_view_preliminary_recommendation(new.id, new.prepared_by) then
+      perform notify.enqueue('PRELIMINARY_RETURNED', new.prepared_by, new.id, null, 'preliminary-returned:' || new.id);
+    end if;
+  end if;
+  return null;
+end;
+$$;
+create trigger preliminary_recommendation_notify after insert on case_mgmt.preliminary_recommendation
+  for each row execute function notify.on_preliminary_recommendation();
+create trigger preliminary_recommendation_status_notify after update of status on case_mgmt.preliminary_recommendation
+  for each row when (old.status is distinct from new.status)
+  execute function notify.on_preliminary_recommendation();
+
+-- -----------------------------------------------------------------------------
+-- 13.5 Referral: view and queue (authz.can_view_referral)
+-- -----------------------------------------------------------------------------
+-- The caller's capabilities on a referral they may see, each from its command's checks in order (1880; 2040 item 12
+-- for the objection, the escalation and its decision). Internal: runs inside the definer reads only.
+create function intake.caller_referral_capabilities(p_r intake.referral)
+returns jsonb
+language plpgsql stable
+set search_path = ''
+as $$
+declare
+  v_me uuid := authz.current_user_id();
+  v_preparer boolean := coalesce(p_r.prepared_by = v_me, false);
+  v_basis boolean := authz.user_referral_approval_basis(v_me, p_r.sector_id, now()) is not null;
+  v_secretary boolean := coalesce(authz.user_committee_seat(v_me, p_r.committee_id, now())
+                                  in ('SECRETARY', 'ALTERNATE_SECRETARY'), false)
+                         and not v_preparer and p_r.sector_approved_by is distinct from v_me;
+  v_last_rejected timestamptz := (select max(e.occurred_at) from intake.referral_event e
+                                  where e.referral_id = p_r.id and e.event_type = 'REJECTED');
+begin
+  return jsonb_build_object(
+    -- api.update_referral.
+    'may_update', v_preparer and p_r.status in ('DRAFT', 'RETURNED_FOR_COMPLETION', 'REJECTED'),
+    -- api.submit_referral: the preparer, still a member of the sector.
+    'may_submit', v_preparer and p_r.status in ('DRAFT', 'RETURNED_FOR_COMPLETION')
+                  and authz.user_sector_position(v_me, p_r.sector_id, now()) is not null,
+    -- api.sector_decide_referral (APPROVE or RETURN): an approval basis, never the preparer.
+    'may_sector_decide', v_basis and p_r.status = 'SUBMITTED_TO_HEAD' and not v_preparer,
+    -- api.secretary_decide_referral: ACCEPT and REJECT after the sector or an objection, RETURN_FOR_COMPLETION only
+    -- from the sector.
+    'may_accept', v_secretary and p_r.status in ('SUBMITTED_TO_SECRETARY', 'OBJECTED'),
+    'may_return_for_completion', v_secretary and p_r.status = 'SUBMITTED_TO_SECRETARY',
+    'may_reject', v_secretary and p_r.status in ('SUBMITTED_TO_SECRETARY', 'OBJECTED'),
+    -- api.resubmit_referral.
+    'may_resubmit', (v_preparer or v_basis) and p_r.status = 'REJECTED',
+    -- api.object_to_referral_rejection (2040): for the text rejected, once, and not after a decided escalation.
+    'may_object', v_basis and not v_preparer and p_r.status = 'REJECTED'
+                  and not exists (select 1 from intake.referral_event u
+                                  where u.referral_id = p_r.id and u.event_type = 'UPDATED' and u.occurred_at > v_last_rejected)
+                  and (select e.from_status from intake.referral_event e
+                       where e.referral_id = p_r.id and e.event_type = 'REJECTED'
+                       order by e.occurred_at desc, e.id desc limit 1) is distinct from 'OBJECTED'
+                  and not exists (select 1 from intake.referral_event u
+                                  where u.referral_id = p_r.id and u.event_type = 'ESCALATED' and u.occurred_at > v_last_rejected),
+    -- api.escalate_referral_rejection (DEC-F09).
+    'may_escalate', v_basis and not v_preparer and intake.referral_escalation_block(p_r) is null,
+    -- api.decide_referral_escalation (ACCEPT or UPHOLD).
+    'may_decide_escalation', coalesce(authz.holds_referral_escalation_target(v_me, p_r.escalation_target_id), false)
+                             and p_r.status = 'ESCALATED' and not intake.referral_escalation_excluded(p_r, v_me),
+    -- api.withdraw_referral.
+    'may_withdraw', v_preparer and p_r.status in ('DRAFT', 'SUBMITTED_TO_HEAD', 'RETURNED_FOR_COMPLETION', 'REJECTED'),
+    -- api.comment_on_referral: anyone who sees it.
+    'may_comment', true);
+end;
+$$;
+
+create function api.referral_view(p_referral_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_r intake.referral;
+  v_metadata boolean;
+begin
+  if p_referral_id is null or not authz.can_view_referral(p_referral_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v_r from intake.referral r where r.id = p_referral_id;
+  v_metadata := v_r.case_id is not null and authz.can_view_case_metadata(v_r.case_id);
+  return jsonb_build_object(
+    'referral_id', v_r.id, 'referral_number', v_r.referral_number, 'status', v_r.status,
+    'sector', (select jsonb_build_object('sector_id', s.id, 'code', s.code, 'name_en', s.name_en, 'name_ar', s.name_ar)
+               from iam.sector s where s.id = v_r.sector_id),
+    'committee_id', v_r.committee_id, 'title', v_r.title, 'summary', v_r.summary,
+    'allegation_category', v_r.allegation_category, 'classification', v_r.classification,
+    'prepared_by', v_r.prepared_by, 'created_at', v_r.created_at, 'submitted_at', v_r.submitted_at,
+    'sector_approved_by', v_r.sector_approved_by, 'sector_approved_at', v_r.sector_approved_at,
+    'sector_approval_basis', v_r.sector_approval_basis, 'delegation_id', v_r.delegation_id,
+    'reached_secretary_at', v_r.reached_secretary_at, 'decided_by', v_r.decided_by, 'decided_at', v_r.decided_at,
+    'updated_at', v_r.updated_at, 'row_version', v_r.row_version,
+    -- R4: where the escalation went, as the committee and seat only (never the target's reason, author or source).
+    'escalation', (select jsonb_build_object('escalated_at', v_r.escalated_at, 'committee_id', t.committee_id,
+                                             'committee_code', c.code, 'seat', t.seat)
+                   from intake.referral_escalation_target t join committee.committee c on c.id = t.committee_id
+                   where t.id = v_r.escalation_target_id),
+    -- referral_event_read: every step, as the referral.
+    'events', coalesce((select jsonb_agg(jsonb_build_object(
+                                 'event_id', e.id, 'event_type', e.event_type, 'from_status', e.from_status,
+                                 'to_status', e.to_status, 'actor_id', e.actor_id, 'reason_codes', to_jsonb(e.reason_codes),
+                                 'comment', e.comment, 'occurred_at', e.occurred_at) order by e.occurred_at, e.id)
+                        from intake.referral_event e where e.referral_id = v_r.id), '[]'::jsonb),
+    'case', jsonb_build_object(
+      'case_id', case when v_metadata then v_r.case_id end,
+      'case_number', case when v_metadata then (select c.case_number from case_mgmt.case_record c where c.id = v_r.case_id) end),
+    'capabilities', intake.caller_referral_capabilities(v_r));
+end;
+$$;
+comment on function api.referral_view(uuid) is
+  'Purpose read model of one referral (migration 2040 item 13): NOT_FOUND unless authz.can_view_referral; the '
+  'escalation as committee and seat only (R4); the case under its metadata predicate; capabilities from the commands.';
+
+-- The referrals that await the caller: the sector's decision, the secretary's, the escalation target's, or the
+-- preparer's completion. Each row's awaiting value is the matching capability of api.referral_view.
+create function api.referral_queue()
+returns table (referral_id uuid, referral_number text, title text, status text, sector_id uuid,
+               classification core.classification_level, submitted_at timestamptz, awaiting text,
+               escalation_committee_id uuid, escalation_committee_code text, escalation_seat text)
+language sql stable security definer
+set search_path = ''
+as $$
+  select q.id, q.referral_number, q.title, q.status, q.sector_id, q.classification, q.submitted_at, q.awaiting,
+         t.committee_id, c.code, t.seat
+  from (select r.id, r.referral_number, r.title, r.status, r.sector_id, r.classification, r.submitted_at,
+               r.escalation_target_id,
+               case when (x.k ->> 'may_sector_decide')::boolean then 'SECTOR_DECISION'
+                    when (x.k ->> 'may_accept')::boolean then 'SECRETARY_DECISION'
+                    when (x.k ->> 'may_decide_escalation')::boolean then 'ESCALATION_DECISION'
+                    when r.status = 'RETURNED_FOR_COMPLETION' and (x.k ->> 'may_submit')::boolean then 'COMPLETION'
+               end as awaiting
+        from intake.referral r
+        cross join lateral (select intake.caller_referral_capabilities(r) as k) x
+        where authz.can_view_referral(r.id)) q
+  -- R4: the escalation target's committee and seat, on the target holder's own row only.
+  left join intake.referral_escalation_target t on t.id = q.escalation_target_id and q.awaiting = 'ESCALATION_DECISION'
+  left join committee.committee c on c.id = t.committee_id
+  where q.awaiting is not null
+  order by q.submitted_at nulls last, q.id;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 13.6 Grievance: view and queue (authz.can_view_grievance, or the decider)
+-- -----------------------------------------------------------------------------
+-- The caller's capabilities on a grievance, each from its command's checks in order (1910; 2040 items 2, 3, 5).
+-- Internal: runs inside the definer reads only.
+create function grievance.caller_capabilities(p_g grievance.grievance)
+returns jsonb
+language plpgsql stable
+set search_path = ''
+as $$
+declare
+  v_me uuid := authz.current_user_id();
+  v_view boolean := authz.can_view_grievance(p_g.id);
+  v_handle boolean := authz.can_handle_grievance(p_g.id);
+  v_part boolean := coalesce(authz.participated_in_investigation_committee(v_me, p_g.case_id), false);
+  v_grievant boolean := v_view and coalesce(p_g.grievant_user_id = v_me, false);
+  v_open_request boolean := exists (
+    select 1 from grievance.completion_request r
+    where r.grievance_id = p_g.id
+      and not exists (select 1 from grievance.grievance_supplement x where x.completion_request_id = r.id));
+  v_pending text;
+  v_chair boolean;
+  v_reconsider boolean;
+begin
+  if p_g.status = 'AWAITING_ADMISSIBILITY_DECISION' then v_pending := grievance.pending_decider(p_g); end if;
+  v_chair := coalesce(authz.user_committee_seat(v_me, grievance.committee_id(), now()) in ('CHAIR', 'DEPUTY_CHAIR')
+                      and authz.user_case_gate(v_me, p_g.case_id), false);
+  -- One reconsideration of a decided grievance that is not itself one (api.file_grievance_reconsideration,
+  -- api.record_grievance_reconsideration), within grievance.guard_grievance_scope: no reconsideration on the same
+  -- decision yet and, for a known subject, no open grievance on it.
+  v_reconsider := p_g.reconsideration_of is null and p_g.status = 'DECIDED'
+    and not exists (select 1 from grievance.grievance x where x.reconsideration_of = p_g.id)
+    and (p_g.grievant_subject_id is null or (
+      not exists (select 1 from grievance.grievance x
+                  where x.grievant_subject_id = p_g.grievant_subject_id and x.reconsideration_of is not null
+                    and (x.contested_authority_decision_id = p_g.contested_authority_decision_id
+                         or ((x.contested_authority_decision_id is null or p_g.contested_authority_decision_id is null)
+                             and x.contested_decision_date = p_g.contested_decision_date)))
+      and not exists (select 1 from grievance.grievance x
+                      where x.grievant_subject_id = p_g.grievant_subject_id
+                        and x.status in ('RECEIVED', 'AWAITING_ADMISSIBILITY_DECISION', 'ADMITTED')
+                        and (x.contested_authority_decision_id is null or p_g.contested_authority_decision_id is null
+                             or x.contested_authority_decision_id = p_g.contested_authority_decision_id))));
+  return jsonb_build_object(
+    -- api.assess_grievance_admissibility: the handling secretary (G3b), received, no completion pending.
+    'may_assess', v_handle and not v_part and p_g.status = 'RECEIVED' and not v_open_request,
+    -- api.request_grievance_completion: as above, with a configured completion period.
+    'may_request_completion', v_handle and not v_part and p_g.status = 'RECEIVED' and not v_open_request
+                              and exists (select 1 from committee.rule_set r
+                                          where r.id = p_g.rule_set_id and r.grievance_completion_days is not null),
+    -- api.complete_grievance: the grievant, answering the open request.
+    'may_complete', v_grievant and p_g.status = 'RECEIVED' and v_open_request,
+    -- api.decide_grievance_admissibility: reached (a viewer, or the chair for a CHAIR or COMMITTEE decision); EXTERNAL
+    -- recorded by the handling secretary, otherwise the chair or deputy; neither took part (G3, G3b).
+    'may_decide', coalesce(p_g.status = 'AWAITING_ADMISSIBILITY_DECISION'
+                           and (v_view or (v_chair and v_pending in ('CHAIR', 'COMMITTEE')))
+                           and case when v_pending = 'EXTERNAL' then v_handle and not v_part
+                                    else v_chair and not v_part end, false),
+    -- api.withdraw_grievance: the grievant, before the outcome.
+    'may_withdraw', v_grievant and p_g.status in ('RECEIVED', 'AWAITING_ADMISSIBILITY_DECISION', 'ADMITTED'),
+    -- api.record_grievance_outcome: the handling secretary, on an admitted grievance with an unused approved vote.
+    'may_record_outcome', v_handle and p_g.status = 'ADMITTED'
+                          and exists (select 1 from committee.vote_item vi
+                                      join committee.meeting m on m.id = vi.meeting_id
+                                      where m.committee_proceeding_id = p_g.committee_proceeding_id
+                                        and vi.status = 'CLOSED' and vi.result = 'APPROVED'
+                                        and not exists (select 1 from grievance.grievance_outcome o
+                                                        where o.vote_item_id = vi.id)),
+    -- api.file_grievance_reconsideration: the grievant through their own portal link.
+    'may_file_reconsideration', v_grievant and p_g.grievant_subject_id is not null
+                                and authz.is_portal_subject(p_g.grievant_subject_id) and v_reconsider,
+    -- api.record_grievance_reconsideration: the handling secretary.
+    'may_record_reconsideration', v_handle and v_reconsider);
+end;
+$$;
+
+create function api.grievance_view(p_grievance_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_g grievance.grievance;
+  v_view boolean;
+  v_internal boolean;
+  v_metadata boolean;
+begin
+  select * into v_g from grievance.grievance g where g.id = p_grievance_id;
+  if v_g.id is null then perform api._fail('NOT_FOUND'); end if;
+  v_view := authz.can_view_grievance(v_g.id);
+  if not v_view and not authz.is_grievance_decider(v_g.id) then perform api._fail('NOT_FOUND'); end if;
+  -- admissibility_assessment_read and admissibility_assessment_decider_read: never the grievant.
+  v_internal := authz.can_view_grievance_assessment(v_g.id) or authz.is_grievance_decider(v_g.id);
+  v_metadata := authz.can_view_case_metadata(v_g.case_id);
+  return jsonb_build_object(
+    'grievance_id', v_g.id, 'kind', v_g.kind, 'status', v_g.status, 'channel', v_g.channel,
+    'grievant', jsonb_build_object('subject_id', v_g.grievant_subject_id, 'user_id', v_g.grievant_user_id,
+                                   'label', v_g.grievant_label),
+    'original_submission_date', v_g.original_submission_date, 'contested_decision_date', v_g.contested_decision_date,
+    'grounds', v_g.grounds, 'original_document_reference', v_g.original_document_reference,
+    'rule_set_id', v_g.rule_set_id, 'window_days', v_g.window_days, 'is_late', v_g.is_late,
+    'admissibility_decider', v_g.admissibility_decider, 'non_admission_decider', v_g.non_admission_decider,
+    'committee_proceeding_id', v_g.committee_proceeding_id, 'decision_notice_id', v_g.decision_notice_id,
+    'contested_authority_decision_id', v_g.contested_authority_decision_id,
+    'reconsideration_of', v_g.reconsideration_of, 'new_evidence_description', v_g.new_evidence_description,
+    'new_evidence_reference', v_g.new_evidence_reference, 'recorded_by', v_g.recorded_by,
+    'recorded_at', v_g.recorded_at, 'updated_at', v_g.updated_at, 'row_version', v_g.row_version,
+    'pending_decider', case when v_internal and v_g.status = 'AWAITING_ADMISSIBILITY_DECISION'
+                            then grievance.pending_decider(v_g) end,
+    -- contested_item_read and contested_item_decider_read.
+    'contested_items', coalesce((select jsonb_agg(c.item_id order by c.item_id)
+                                 from grievance.contested_item c where c.grievance_id = v_g.id), '[]'::jsonb),
+    -- completion_request_read and grievance_supplement_read (and their decider policies).
+    'completion_requests', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'completion_request_id', r.id, 'sequence_no', r.sequence_no, 'reason', r.reason,
+               'completion_days', r.completion_days, 'due_at', r.due_at, 'requested_by', r.requested_by,
+               'requested_at', r.requested_at,
+               'supplement', (select jsonb_build_object('supplement_id', x.id, 'supplement_text', x.supplement_text,
+                                                        'is_late', x.is_late, 'submitted_by', x.submitted_by,
+                                                        'submitted_at', x.submitted_at)
+                              from grievance.grievance_supplement x where x.completion_request_id = r.id))
+             order by r.sequence_no)
+      from grievance.completion_request r where r.grievance_id = v_g.id), '[]'::jsonb),
+    'assessments', case when v_internal then coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'assessment_id', a.id, 'stage', a.stage, 'assessment', a.assessment,
+               'proposed_action', a.proposed_action, 'decision_reference', a.decision_reference,
+               'decided_by_role', a.decided_by_role, 'reason', a.reason, 'recorded_by', a.recorded_by,
+               'recorded_at', a.recorded_at, 'new_evidence_confirmed', a.new_evidence_confirmed)
+             order by a.recorded_at, a.id)
+      from grievance.admissibility_assessment a where a.grievance_id = v_g.id), '[]'::jsonb) end,
+    -- grievance_withdrawal_read.
+    'withdrawal', case when v_view then (
+      select jsonb_build_object('previous_status', w.previous_status, 'reason', w.reason,
+                                'withdrawn_by', w.withdrawn_by, 'withdrawn_at', w.withdrawn_at)
+      from grievance.grievance_withdrawal w where w.grievance_id = v_g.id) end,
+    -- grievance_outcome_read and outcome_substitution_read.
+    'outcome', case when v_view then (
+      select jsonb_build_object(
+               'outcome_id', o.id, 'outcomes', to_jsonb(o.outcomes), 'reinvestigation_path', o.reinvestigation_path,
+               'reinvestigation_proceeding_id', o.reinvestigation_proceeding_id, 'vote_item_id', o.vote_item_id,
+               'summary', o.summary, 'recorded_by', o.recorded_by, 'recorded_at', o.recorded_at,
+               'substitutions', coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                          'item_id', x.item_id, 'original_sanction_code', x.original_sanction_code,
+                          'substitute_sanction_code', x.substitute_sanction_code,
+                          'original_severity_rank', x.original_severity_rank,
+                          'substitute_severity_rank', x.substitute_severity_rank,
+                          'within_type_change', x.within_type_change, 'recorded_at', x.recorded_at)
+                        order by x.recorded_at, x.id)
+                 from grievance.outcome_substitution x where x.grievance_id = v_g.id), '[]'::jsonb))
+      from grievance.grievance_outcome o where o.grievance_id = v_g.id) end,
+    'case', jsonb_build_object(
+      'case_id', case when v_metadata then v_g.case_id end,
+      'case_number', case when v_metadata then (select c.case_number from case_mgmt.case_record c where c.id = v_g.case_id) end),
+    'capabilities', grievance.caller_capabilities(v_g));
+end;
+$$;
+comment on function api.grievance_view(uuid) is
+  'Purpose read model of one grievance (migration 2040 item 13): NOT_FOUND unless authz.can_view_grievance or the '
+  'decider it awaits; assessments never to the grievant; capabilities from the commands.';
+
+-- The grievances that await the caller: an admissibility decision, an assessment, or the outcome. Each row's awaiting
+-- value is the matching capability of api.grievance_view.
+create function api.grievance_queue()
+returns table (grievance_id uuid, kind text, status text, channel text, original_submission_date timestamptz,
+               is_late boolean, reconsideration_of uuid, awaiting text, case_id uuid, case_number text)
+language sql stable security definer
+set search_path = ''
+as $$
+  select q.id, q.kind, q.status, q.channel, q.original_submission_date, q.is_late, q.reconsideration_of, q.awaiting,
+         case when authz.can_view_case_metadata(q.case_id) then q.case_id end,
+         case when authz.can_view_case_metadata(q.case_id)
+              then (select c.case_number from case_mgmt.case_record c where c.id = q.case_id) end
+  from (select g.id, g.kind, g.status, g.channel, g.original_submission_date, g.is_late, g.reconsideration_of,
+               g.case_id,
+               case when (x.k ->> 'may_decide')::boolean then 'ADMISSIBILITY_DECISION'
+                    when (x.k ->> 'may_assess')::boolean then 'ASSESSMENT'
+                    when (x.k ->> 'may_record_outcome')::boolean then 'OUTCOME'
+               end as awaiting
+        from grievance.grievance g
+        cross join lateral (select grievance.caller_capabilities(g) as k) x
+        where authz.can_view_grievance(g.id) or authz.is_grievance_decider(g.id)) q
+  where q.awaiting is not null
+  order by q.original_submission_date, q.id;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- 13.7 Export request view (authz.can_view_export)
+-- -----------------------------------------------------------------------------
+create function api.export_request_view(p_request_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid := authz.current_user_id();
+  v exchange.export_request;
+  v_case case_mgmt.case_record;
+  v_doc jsonb;
+  v_hash text;
+  v_withheld int;
+  v_refused boolean;
+  v_own boolean;
+  v_stage int;
+  v_required int;
+  v_authority boolean;
+  v_approver boolean;
+  v_rca boolean;
+  v_metadata boolean;
+begin
+  if p_request_id is null or not authz.can_view_export(p_request_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v from exchange.export_request q where q.id = p_request_id;
+  select * into v_case from case_mgmt.case_record c where c.id = v.case_id;
+  -- The document as the caller may see it, for its hash and withheld count only; none of it is returned.
+  v_doc := exchange.build_document(v.id);
+  v_hash := exchange.document_hash(v_doc);
+  v_withheld := exchange.withheld_count(v_doc);
+  v_refused := exists (select 1 from exchange.matched_rules(v.id) m where m.action = 'REFUSE');
+  -- exchange.lock_request(own): the requester, still holding EXPORT_REQUEST.
+  v_own := v.requested_by = v_me and authz.has_permission('EXPORT_REQUEST');
+  v_stage := 1 + (select count(*)::int from exchange.export_approval a where a.request_id = v.id);
+  v_required := greatest(v.approvals_required, exchange.approvals_required(v.id));
+  v_authority := exchange.authority_approval_required(v.id);
+  -- api.decide_export's checks up to the decision, then exchange.guard_export_approval: never the requester
+  -- (DEC-F24), an earlier approver or a rule author (X1); the stage's permission and pool; a stage still to give.
+  v_approver := v.status = 'SUBMITTED'
+                and v.requested_by <> v_me
+                and not exists (select 1 from exchange.export_approval a where a.request_id = v.id and a.approver_id = v_me)
+                and not exchange.authored_rule_in_force(v.id, v_me)
+                and authz.has_permission(case v_stage when 1 then 'EXPORT_APPROVE' else 'EXPORT_SECOND_APPROVE' end)
+                and v_stage <= v_required
+                and (not exchange.pool_in_use(v_stage) or exchange.in_pool(v_me, v_stage));
+  -- api.decide_restricted_export: the restricted case's owner as its authority, once, while required.
+  v_rca := v_case.is_restricted and v_case.owner_id = v_me
+           and authz.is_restricted_case_authority(v_me, v_case.classification)
+           and v.status = 'SUBMITTED' and v_authority
+           and not exists (select 1 from exchange.restricted_export_approval a where a.request_id = v.id);
+  v_metadata := authz.can_view_case_metadata(v.case_id);
+  return jsonb_build_object(
+    'export_request_id', v.id, 'status', v.status, 'format', v.format, 'audience', v.audience, 'purpose', v.purpose,
+    'external_party', v.external_party, 'justification', v.justification,
+    'classification_at_submit', v.classification_at_submit, 'approvals_required', v.approvals_required,
+    'authority_approval_required', v.authority_approval_required, 'matched_rules', to_jsonb(v.matched_rules),
+    'preview_hash', v.preview_hash, 'previewed_at', v.previewed_at, 'submitted_hash', v.submitted_hash,
+    'requested_by', v.requested_by, 'created_at', v.created_at, 'submitted_at', v.submitted_at,
+    'decided_at', v.decided_at, 'generated_at', v.generated_at, 'sent_at', v.sent_at, 'cancelled_at', v.cancelled_at,
+    'updated_at', v.updated_at, 'row_version', v.row_version,
+    'current', jsonb_build_object(
+      'hash', v_hash, 'withheld', v_withheld, 'refused_by_rule', v_refused,
+      'approvals_required', v_required, 'authority_approval_required', v_authority,
+      'next_stage', case when v.status = 'SUBMITTED' and v_stage <= v_required then v_stage end),
+    -- export_item_read: what is in it, and whether the caller may see each item.
+    'items', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'item_id', i.id, 'position', i.position, 'object_type', i.object_type, 'object_id', i.object_id,
+               'added_by', i.added_by, 'added_at', i.added_at,
+               'included', (select (e ->> 'included')::boolean from jsonb_array_elements(v_doc -> 'items') e
+                            where (e ->> 'position')::int = i.position))
+             order by i.position)
+      from exchange.export_item i where i.request_id = v.id), '[]'::jsonb),
+    -- export_recipient_read.
+    'recipients', coalesce((
+      select jsonb_agg(jsonb_build_object('recipient_id', r.id, 'kind', r.kind, 'user_id', r.user_id, 'email', r.email,
+                                          'added_by', r.added_by, 'added_at', r.added_at) order by r.added_at, r.id)
+      from exchange.export_recipient r where r.request_id = v.id), '[]'::jsonb),
+    -- export_approval_read.
+    'approvals', coalesce((
+      select jsonb_agg(jsonb_build_object('approval_id', a.id, 'stage', a.stage, 'approver_id', a.approver_id,
+                                          'decision', a.decision, 'reason', a.reason, 'decided_at', a.decided_at)
+                       order by a.stage)
+      from exchange.export_approval a where a.request_id = v.id), '[]'::jsonb),
+    -- restricted_export_approval_read.
+    'authority_decision', (select jsonb_build_object('decided_by', a.decided_by, 'decision', a.decision,
+                                                     'reason', a.reason, 'decided_at', a.decided_at)
+                           from exchange.restricted_export_approval a where a.request_id = v.id),
+    'case', jsonb_build_object(
+      'case_id', case when v_metadata then v.case_id end,
+      'case_number', case when v_metadata then v_case.case_number end),
+    'capabilities', jsonb_build_object(
+      -- api.add_export_item (at most 50 items).
+      'may_add_item', coalesce(v_own and v.status = 'DRAFT'
+                               and (select coalesce(max(i.position), 0) from exchange.export_item i
+                                    where i.request_id = v.id) < 50, false),
+      -- api.add_export_recipient (EMAIL only, at most 20).
+      'may_add_recipient', coalesce(v_own and v.status = 'DRAFT' and v.format = 'EMAIL'
+                                    and (select count(*) from exchange.export_recipient r where r.request_id = v.id) < 20,
+                                    false),
+      -- api.preview_export: anyone who sees the export.
+      'may_preview', true,
+      -- api.submit_export: items, recipients for EMAIL, nothing withheld, the preview still current, eligible
+      -- recipients, no refusing rule.
+      'may_submit', coalesce(v_own and v.status = 'DRAFT'
+                             and exists (select 1 from exchange.export_item i where i.request_id = v.id)
+                             and (v.format <> 'EMAIL'
+                                  or exists (select 1 from exchange.export_recipient r where r.request_id = v.id))
+                             and v_withheld = 0 and v.preview_hash = v_hash and exchange.recipients_eligible(v.id)
+                             and not v_refused, false),
+      -- api.decide_export: APPROVE also needs every item, exactly as submitted, and no refusing rule; REJECT does not.
+      'may_approve', coalesce(v_approver and v_withheld = 0 and v_hash = v.submitted_hash and not v_refused, false),
+      'may_reject', coalesce(v_approver, false),
+      -- api.decide_restricted_export: likewise.
+      'may_authority_approve', coalesce(v_rca and v_withheld = 0 and v_hash = v.submitted_hash and not v_refused, false),
+      'may_authority_reject', coalesce(v_rca, false),
+      -- api.generate_export: everything rechecked as it stands now.
+      'may_generate', coalesce(v_own and v.status = 'APPROVED' and v_withheld = 0 and v_hash = v.submitted_hash
+                               and not v_refused
+                               and exchange.approvals_required(v.id)
+                                   <= (select count(*) from exchange.export_approval a
+                                       where a.request_id = v.id and a.decision = 'APPROVED')
+                               and (not v_authority or exchange.authority_approved(v.id))
+                               and exchange.recipients_eligible(v.id), false),
+      -- api.record_export_sent.
+      'may_record_sent', coalesce(v_own and v.format = 'EMAIL' and v.status = 'GENERATED', false),
+      -- api.cancel_export.
+      'may_cancel', coalesce(v_own and v.status in ('DRAFT', 'SUBMITTED', 'APPROVED'), false)));
+end;
+$$;
+comment on function api.export_request_view(uuid) is
+  'Purpose read model of one export request (migration 2040 item 13): NOT_FOUND unless authz.can_view_export; never '
+  'the storage key or the document; the requester is never offered an approval (DEC-F24).';
+
+-- -----------------------------------------------------------------------------
+-- 13.8 Corrective action view (authz.can_view_corrective_action)
+-- -----------------------------------------------------------------------------
+create function api.corrective_action_view(p_action_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid := authz.current_user_id();
+  v decision.corrective_action;
+  v_case case_mgmt.case_record;
+  v_policy decision.corrective_action_policy;
+  v_team boolean;
+  v_manager boolean;
+  v_acts boolean;
+  v_naming boolean;
+  v_open boolean;
+  v_metadata boolean;
+begin
+  if p_action_id is null or not authz.can_view_corrective_action(p_action_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v from decision.corrective_action a where a.id = p_action_id;
+  select * into v_case from case_mgmt.case_record c where c.id = v.case_id;
+  v_policy := decision.current_corrective_policy(v.action_type);
+  v_team := authz.can_view_case(v.case_id);
+  -- decision.require_manager: CORRECTIVE_ACTION_MANAGE and the case itself.
+  v_manager := authz.has_permission('CORRECTIVE_ACTION_MANAGE') and v_team;
+  -- decision.require_owner (2040): whoever acts for the action (decision.acts_for_action, R2 included), with
+  -- CORRECTIVE_ACTION_OWN and their own case gate.
+  v_acts := coalesce(decision.acts_for_action(v, v_me), false) and authz.has_permission('CORRECTIVE_ACTION_OWN')
+            and authz.user_case_gate(v_me, v.case_id);
+  -- decision.require_owner_naming: an active case and, on a restricted one, its owner as its authority.
+  v_naming := v_case.records_state = 'ACTIVE'
+              and (not v_case.is_restricted
+                   or (v_case.owner_id = v_me and authz.is_restricted_case_authority(v_me, v_case.classification)));
+  v_open := v.status in ('OPEN', 'IN_PROGRESS');
+  v_metadata := authz.can_view_case_metadata(v.case_id);
+  return jsonb_build_object(
+    'action_id', v.id, 'action_type', v.action_type, 'sequence_no', v.sequence_no, 'title', v.title,
+    'description', v.description, 'status', v.status, 'due_date', v.due_date, 'percent_complete', v.percent_complete,
+    'created_by', v.created_by, 'created_at', v.created_at, 'completion_submitted_at', v.completion_submitted_at,
+    'completed_at', v.completed_at, 'verified_by', v.verified_by, 'waived_at', v.waived_at,
+    'updated_at', v.updated_at, 'row_version', v.row_version,
+    'owner', jsonb_build_object(
+      'kind', v.owner_kind, 'accountable_user_id', v.owner_id,
+      'sector', (select jsonb_build_object('sector_id', s.id, 'code', s.code, 'name_en', s.name_en, 'name_ar', s.name_ar)
+                 from iam.sector s where s.id = v.owner_sector_id),
+      -- R3: a pool by code and name only, under the action's own visibility.
+      'pool', (select jsonb_build_object('code', p.code, 'name', p.name)
+               from decision.corrective_action_pool p where p.id = v.owner_pool_id),
+      'external_party_label', v.external_party_label),
+    -- The decision the action executes, to whoever sees the case only: an owner sees the card, never the case.
+    'origin', case when v_team then jsonb_build_object('recommendation_item_id', v.recommendation_item_id,
+                                                       'authority_decision_id', v.authority_decision_id) end,
+    -- corrective_action_policy_read: the evidence the policy in force asks for.
+    'policy', jsonb_build_object('completion_evidence', v_policy.completion_evidence,
+                                 'allowed_evidence_types', to_jsonb(v_policy.allowed_evidence_types)),
+    -- corrective_action_event_read: the action's history, as the action.
+    'events', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'event_id', e.id, 'event_type', e.event_type, 'actor_id', e.actor_id, 'note', e.note,
+               'evidence_reference', e.evidence_reference, 'evidence_type', e.evidence_type,
+               'percent_complete', e.percent_complete, 'owner_id', e.owner_id, 'due_date', e.due_date,
+               'source_document_reference', e.source_document_reference, 'created_at', e.created_at)
+             order by e.created_at, e.id)
+      from decision.corrective_action_event e where e.action_id = v.id), '[]'::jsonb),
+    'case', jsonb_build_object(
+      'case_id', case when v_metadata then v.case_id end,
+      'case_number', case when v_metadata then v_case.case_number end),
+    'capabilities', jsonb_build_object(
+      -- api.record_corrective_action_progress and api.submit_corrective_action_completion.
+      'may_record_progress', coalesce(v_acts and v_open, false),
+      'may_submit_completion', coalesce(v_acts and v_open, false),
+      -- api.verify_corrective_action: never its owner or whoever submitted the completion.
+      'may_verify', coalesce(v_manager and v.status = 'PENDING_VERIFICATION' and v.owner_id is distinct from v_me
+                             and not exists (select 1 from decision.corrective_action_event e
+                                             where e.action_id = v.id and e.event_type = 'COMPLETION_SUBMITTED'
+                                               and e.actor_id = v_me), false),
+      -- api.reopen_corrective_action.
+      'may_reopen', coalesce(v_manager and v.status = 'COMPLETED' and v_case.records_state = 'ACTIVE', false),
+      -- api.waive_corrective_action.
+      'may_waive', coalesce(authz.has_permission('CORRECTIVE_ACTION_WAIVE') and v_team
+                            and v.status not in ('COMPLETED', 'WAIVED') and v_case.records_state = 'ACTIVE', false),
+      -- api.change_corrective_action_due_date.
+      'may_change_due_date', coalesce(v_manager and v.status in ('OPEN', 'IN_PROGRESS', 'PENDING_VERIFICATION'), false),
+      -- api.assign_corrective_action_owner.
+      'may_assign_owner', coalesce(v_manager and v_open and v_naming, false),
+      -- api.set_corrective_action_owner_kind: USER or EXTERNAL_PARTY ...
+      'may_set_owner_kind', coalesce(v_manager and v_open and v_naming, false),
+      -- ... and ORG_UNIT or SHARED_POOL, never on a restricted case (R2: RESTRICTED_CASE_OWNER_KIND).
+      'may_set_shared_owner_kind', coalesce(v_manager and v_open and v_naming and not v_case.is_restricted, false)));
+end;
+$$;
+comment on function api.corrective_action_view(uuid) is
+  'Purpose read model of one corrective action (migration 2040 item 13): NOT_FOUND unless '
+  'authz.can_view_corrective_action; the card and its history, its origin only to the case team; a pool by code and '
+  'name (R3); capabilities from the commands (R2 included).';
+
+-- -----------------------------------------------------------------------------
+-- 13.9 Continuity import view (authz.can_view_bcp_import)
+-- -----------------------------------------------------------------------------
+create function api.bcp_import_batch_view(p_batch_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid := authz.current_user_id();
+  b exchange.bcp_import_batch;
+  v_hash text;
+  v_own boolean;
+  v_resolvable boolean;
+  v_approver boolean;
+  v_metadata boolean;
+begin
+  if p_batch_id is null or not authz.can_view_bcp_import(p_batch_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into b from exchange.bcp_import_batch x where x.id = p_batch_id;
+  v_hash := exchange.bcp_batch_hash(b.id);
+  -- exchange.lock_bcp_batch(own) as replaced in item 10: the importer, holding BCP_IMPORT, an authorized operator.
+  v_own := b.imported_by = v_me and authz.has_permission('BCP_IMPORT') and exchange.is_continuity_operator(v_me);
+  v_resolvable := v_own and b.status = 'STAGED';
+  -- api.decide_bcp_import: BCP_IMPORT_APPROVE, never the importer, the workbook's preparer or an offline recorder.
+  v_approver := authz.has_permission('BCP_IMPORT_APPROVE') and b.imported_by <> v_me
+                and b.prepared_by is distinct from v_me
+                and not exists (select 1 from exchange.bcp_import_row r
+                                where r.batch_id = b.id and r.recorded_offline_by = v_me);
+  v_metadata := authz.can_view_case_metadata(b.case_id);
+  return jsonb_build_object(
+    'batch_id', b.id, 'template_version', b.template_version, 'workbook_id', b.workbook_id,
+    'file_sha256', b.file_sha256, 'offline_from', b.offline_from, 'offline_to', b.offline_to,
+    'prepared_by', b.prepared_by, 'status', b.status, 'preview_hash', b.preview_hash, 'previewed_at', b.previewed_at,
+    'preview_clean', b.preview_clean, 'submitted_hash', b.submitted_hash, 'imported_by', b.imported_by,
+    'decided_by', b.decided_by, 'decision_reason', b.decision_reason, 'created_at', b.created_at,
+    'submitted_at', b.submitted_at, 'decided_at', b.decided_at, 'applied_at', b.applied_at,
+    'cancelled_at', b.cancelled_at, 'updated_at', b.updated_at, 'row_version', b.row_version,
+    'current_hash', v_hash,
+    'counts', (select jsonb_build_object(
+                        'rows', count(*),
+                        'unresolved', count(*) filter (where r.resolution is null and r.state <> 'ALREADY_IMPORTED'),
+                        'by_state', coalesce((select jsonb_object_agg(s.state, s.n)
+                                              from (select r2.state, count(*) as n from exchange.bcp_import_row r2
+                                                    where r2.batch_id = b.id group by r2.state) s), '{}'::jsonb))
+               from exchange.bcp_import_row r where r.batch_id = b.id),
+    -- bcp_import_row_read: row metadata, never the cells.
+    'rows', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'row_id', r.id, 'sheet_code', r.sheet_code, 'row_number', r.row_number, 'row_key', r.row_key,
+               'state', r.state, 'detail', r.detail, 'resolution', r.resolution,
+               'resolution_reason', r.resolution_reason, 'resolved_by', r.resolved_by, 'resolved_at', r.resolved_at,
+               'outcome', r.outcome, 'original_event_at', r.original_event_at,
+               'recorded_offline_by', r.recorded_offline_by, 'purged_at', r.purged_at,
+               -- api.resolve_bcp_row: SKIP is open to every row that is not already imported.
+               'may_resolve', v_resolvable and r.state <> 'ALREADY_IMPORTED')
+             order by s.position, r.row_number)
+      from exchange.bcp_import_row r
+      join exchange.bcp_template_sheet s on s.template_version = r.template_version and s.sheet_code = r.sheet_code
+      where r.batch_id = b.id), '[]'::jsonb),
+    'case', jsonb_build_object(
+      'case_id', case when v_metadata then b.case_id end,
+      'case_number', case when v_metadata then (select c.case_number from case_mgmt.case_record c where c.id = b.case_id) end),
+    'capabilities', jsonb_build_object(
+      'may_resolve_rows', coalesce(v_resolvable and exists (select 1 from exchange.bcp_import_row r
+                                                            where r.batch_id = b.id and r.state <> 'ALREADY_IMPORTED'),
+                                   false),
+      -- api.preview_bcp_import.
+      'may_preview', coalesce(v_own, false),
+      -- api.submit_bcp_import: every row resolved and the batch unchanged since a clean preview. The dry run it
+      -- repeats writes, so it cannot run in a read: the stored preview result stands in for it.
+      'may_submit', coalesce(v_resolvable
+                             and not exists (select 1 from exchange.bcp_import_row r
+                                             where r.batch_id = b.id and r.resolution is null
+                                               and r.state <> 'ALREADY_IMPORTED')
+                             and b.preview_hash = v_hash and b.preview_clean, false),
+      -- api.decide_bcp_import (APPROVE or REJECT), on the batch as submitted.
+      'may_decide', coalesce(v_approver and b.status = 'SUBMITTED' and v_hash = b.submitted_hash, false),
+      -- api.apply_bcp_import.
+      'may_apply', coalesce(v_own and b.status = 'APPROVED' and v_hash = b.submitted_hash, false),
+      -- api.cancel_bcp_import.
+      'may_cancel', coalesce(v_own and b.status in ('STAGED', 'SUBMITTED', 'APPROVED'), false)));
+end;
+$$;
+comment on function api.bcp_import_batch_view(uuid) is
+  'Purpose read model of one continuity import batch (migration 2040 item 13): NOT_FOUND unless '
+  'authz.can_view_bcp_import; row metadata, never the cells or the control; capabilities from the commands.';
+
+revoke all on function
+  intake.user_can_view_referral(uuid, uuid), case_mgmt.user_can_view_preliminary_recommendation(uuid, uuid),
+  grievance.is_pending_decider(uuid, uuid), intake.caller_referral_capabilities(intake.referral),
+  grievance.caller_capabilities(grievance.grievance), notify.on_grievance_awaiting_decision(),
+  notify.on_referral_event(), notify.on_preliminary_recommendation()
+from public, anon, authenticated;
+grant execute on function
+  api.referral_view(uuid), api.referral_queue(), api.grievance_view(uuid), api.grievance_queue(),
+  api.export_request_view(uuid), api.corrective_action_view(uuid), api.bcp_import_batch_view(uuid)
+to authenticated;

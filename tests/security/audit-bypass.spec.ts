@@ -96,6 +96,14 @@ const NOT_STATE_CHANGING = new Set([
   "sanction_executability",
   // Migration 2040 (DEC-F24, T-AMB-112): the export policy administrator's configuration warnings (ids and counts).
   "export_approval_config_warnings",
+  // Migration 2040 item 13: purpose read models and the caller's queues, reads like meeting_view.
+  "referral_view",
+  "referral_queue",
+  "grievance_view",
+  "grievance_queue",
+  "export_request_view",
+  "corrective_action_view",
+  "bcp_import_batch_view",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -2472,6 +2480,8 @@ describe("audit internals are not reachable", () => {
       "authz.is_evidence_team",
       // Migration 2040 (DEC-F24): whether the caller administers export policy (and approves no export).
       "authz.is_export_policy_admin",
+      // Migration 2040 item 13 (DEC-F17): whether the caller is the admissibility decider a grievance awaits.
+      "authz.is_grievance_decider",
       "authz.is_portal_subject",
       "authz.is_reporter_correspondent",
       "authz.meeting_concern_decider_seat",

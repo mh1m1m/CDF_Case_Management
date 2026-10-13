@@ -1373,6 +1373,15 @@ export const NOTIFICATION_TEMPLATES = [
   // Meeting conflicts and votes (migration 2030 section 4, DEC-F04, DEC-F01)
   "MEETING_CONFLICT_DECISION_REQUESTED",
   "MEETING_VOTE_OPENED",
+  // The admissibility decider, referral and preliminary review steps (migration 2040 item 13, DEC-F17, DEC-F09)
+  "GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED",
+  "REFERRAL_SUBMITTED_TO_HEAD",
+  "REFERRAL_RETURNED",
+  "REFERRAL_SUBMITTED_TO_SECRETARY",
+  "REFERRAL_ESCALATED",
+  "PRELIMINARY_REVIEW_REQUESTED",
+  "PRELIMINARY_APPROVAL_REQUESTED",
+  "PRELIMINARY_RETURNED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;

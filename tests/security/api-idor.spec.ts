@@ -556,6 +556,12 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
     outcome: "EMPTY",
     call: (tx, t) => tx`select * from api.referral_available_actions(${t.referral})`,
   },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_referral.
+  {
+    fn: "referral_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.referral_view(${t.referral})`,
+  },
   {
     fn: "revoke_referral_delegation",
     outcome: "NOT_FOUND",
@@ -945,6 +951,12 @@ interface GrievanceTargets {
 }
 
 const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_grievance or the decider it awaits.
+  {
+    fn: "grievance_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.grievance_view(${t.grievance})`,
+  },
   {
     fn: "link_subject_portal_account",
     outcome: "NOT_FOUND",
@@ -1157,6 +1169,12 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.cancel_export(${t.request}, ${REASON})`,
   },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_export.
+  {
+    fn: "export_request_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.export_request_view(${t.request})`,
+  },
 ];
 
 // Corrective-action commands (migration 1940) take an approved recommendation item or an action; never a case.
@@ -1216,6 +1234,12 @@ const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
     call: (tx, t) =>
       tx`select api.set_corrective_action_owner_kind(${t.action}, 'EXTERNAL_PARTY', null, null, 'Probe party', ${REASON})`,
   },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_corrective_action.
+  {
+    fn: "corrective_action_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.corrective_action_view(${t.action})`,
+  },
 ];
 
 // Continuity workbook import (migration 1960): staging names a case in the workbook's control sheet; every other
@@ -1267,6 +1291,12 @@ const BCP_PROBES: Probe<BcpTargets>[] = [
     fn: "cancel_bcp_import",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.cancel_bcp_import(${t.batch}, ${REASON})`,
+  },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_bcp_import.
+  {
+    fn: "bcp_import_batch_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.bcp_import_batch_view(${t.batch})`,
   },
 ];
 
@@ -1352,6 +1382,10 @@ const GLOBAL_COMMANDS = [
   "record_grievance",
   // Migration 1920: the caller's own notification preferences.
   "set_notification_preference",
+  // Migration 2040 item 13: the referrals and grievances awaiting the caller, each row under its object's read rule
+  // (purpose-read-models-2040.spec.ts).
+  "referral_queue",
+  "grievance_queue",
 ];
 
 let caseA: string, caseB: string, caseExec: string;

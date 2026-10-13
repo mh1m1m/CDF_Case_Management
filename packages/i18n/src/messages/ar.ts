@@ -1555,6 +1555,14 @@ export const ar: Messages = {
     DECISION_NOTICE_ISSUED: "يوجد إشعار بقرار بانتظارك، وقد بدأت مهلة تقديم التظلّم.",
     MEETING_CONFLICT_DECISION_REQUESTED: "تعارض مصالح أُثير في اجتماع بانتظار قرارك.",
     MEETING_VOTE_OPENED: "تم فتح تصويت في اجتماع تحضره.",
+    GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED: "تظلّم بانتظار قرارك بشأن قبوله.",
+    REFERRAL_SUBMITTED_TO_HEAD: "إحالة من قطاعك بانتظار اعتمادك.",
+    REFERRAL_RETURNED: "أُعيدت إليك إحالة أعددتها.",
+    REFERRAL_SUBMITTED_TO_SECRETARY: "إحالة بانتظار قرار أمين اللجنة.",
+    REFERRAL_ESCALATED: "صُعّدت إليك إحالة مرفوضة لاتخاذ قرار بشأنها.",
+    PRELIMINARY_REVIEW_REQUESTED: "توصية مراجعة أولية بانتظار مراجعتك.",
+    PRELIMINARY_APPROVAL_REQUESTED: "توصية مراجعة أولية بانتظار اعتمادك.",
+    PRELIMINARY_RETURNED: "أُعيدت توصية مراجعة أولية أعددتها.",
   },
   bcpTemplate: {
     readme: {

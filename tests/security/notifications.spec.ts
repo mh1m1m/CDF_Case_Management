@@ -274,8 +274,11 @@ describe("server-only email delivery and reminders", () => {
         "recipient_id",
         "template_code",
       ]);
-      // Only mandatory templates email by default.
-      expect(new Set(batch.map((b) => b.template_code))).toEqual(new Set(["MEETING_INVITATION"]));
+      // Only mandatory templates email by default. The meeting fixture's preliminary review also asks
+      // its approver to approve (migration 2040 item 13), and that request is mandatory too.
+      expect(new Set(batch.map((b) => b.template_code))).toEqual(
+        new Set(["MEETING_INVITATION", "PRELIMINARY_APPROVAL_REQUESTED"]),
+      );
       const [first, second] = batch;
       expect(
         (await s.tx<{ s: string }[]>`select notify.record_email_delivery(${first!.id}, true) as s`)[0]!.s,
@@ -328,6 +331,9 @@ const VISIBLE: Record<string, string> = {
   EXPORT: "select count(*)::int as n from exchange.export_request where id = $1",
   CORRECTIVE_ACTION: "select count(*)::int as n from decision.corrective_action where id = $1",
   BCP_IMPORT: "select count(*)::int as n from exchange.bcp_import_batch where id = $1",
+  // Migration 2040 item 13: referral and preliminary-review notices.
+  REFERRAL: "select count(*)::int as n from intake.referral where id = $1",
+  PRELIMINARY_REVIEW: "select count(*)::int as n from case_mgmt.preliminary_recommendation where id = $1",
 };
 
 async function outbox(s: OwnerScenario) {
