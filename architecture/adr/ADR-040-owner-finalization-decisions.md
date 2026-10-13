@@ -179,7 +179,35 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
    - **Restrictions on RE_VOTE.** It is refused while a review is open, while the package is with the authority, or once it is decided.
    - **The governing test** is `T-AMB-028: a conflict found after a vote or decision taints the item; the database refuses every downstream step until the committee resolves it by RE_VOTE or CONFIRM; CONFIRM needs documented reasoning and a result the conflicted participation could not have changed`, in `tests/security/recommendations-authority.spec.ts`.
 
-### 4. Notices, grievances, sanctions, corrective actions, export, continuity and catalogue (2040)
+### 4. Purpose read models, meeting notices and demo seats (2030, section 4)
+
+The UX thread's Phase 12 asks (coordinator, 2026-10-13): the web BFF does not read case tables, or call the full-case read, for purpose views (DEC-02: COMMITTEE, REVIEW and TRIAGE access is never full-case).
+
+1. **`api.meeting_view(meeting)`.**
+   - The full view is gated by `authz.can_view_meeting`. Each part follows the predicate of the table it comes from, evaluated for the caller:
+     - logistics, but never the emergency reason;
+     - the caller's own participant row;
+     - the roster (`authz.can_view_meeting_roster`);
+     - deliberation (`authz.can_view_meeting_deliberation`): vote items, status, result and the tally after close, never an individual choice or note;
+     - concerns (`authz.can_view_meeting_concern`, never the subject);
+     - acting roles, without the reason;
+     - pointers to the minutes.
+   - The case appears as `case_id` and `case_number` only, under `authz.can_view_case_metadata`. Nothing else from the case record is read.
+   - **Concern-only view.** A caller who cannot see the meeting but can see one of its concerns gets the meeting id and status, the case under the same predicate, and those concerns with `may_decide` and `may_reverse`. Two kinds of caller reach it: the independent conflict authority (DEC-F04) and a reverser seated after the referral (DEC-AMB-010). This widens nothing, because the concern rows already carry the meeting id and are readable by exactly those users.
+   - Everyone else gets NOT_FOUND, including an excluded witness (DEC-F07).
+2. **`api.minutes_view(minutes)`.** Gated by the minutes read rule. Reviews and objection rulings show only under deliberation.
+3. **Capabilities.** Each view carries a `capabilities` object of booleans. Each flag uses the checks of the command it stands for, in the same order. The tests compare every flag with the command's real outcome. A flag never widens a command; the command still decides.
+4. **Reads.** Both are SECURITY DEFINER with `search_path = ''` and are granted to `authenticated` only. They write no audit event, like `api.vote_item_status`.
+5. **Two content-free notifications.** Both carry ids only and deep link to `/meetings/<id>`.
+   - `MEETING_CONFLICT_DECISION_REQUESTED` goes to whoever DEC-F04 names as decider, never the raiser or the subject. Each candidate is evaluated as that candidate: `notify.decides_concern` sets the request claims to the candidate for one predicate call and restores them. A test pins that the caller's identity is intact afterwards.
+   - `MEETING_VOTE_OPENED` goes to present, cleared voters with no vote.
+   - Every recipient passes `authz.user_case_gate` and has no meeting conflict.
+6. **Synthetic committee seats (seed 30).**
+   - Seven demo-only users (`@example.test`, named "(demo)") hold IC and GC seats, appointed through the audited command. A separate DEMO committee pair is impossible because `committee.kind` is unique (ADR-018).
+   - The security tests start unseated: `unseatDemoSeats`, called from `seat()` and `refer()`, ends the demo seats inside each test's transaction.
+   - An insert-only top-up runs the same idempotent seed on hosted DEV.
+
+### 5. Notices, grievances, sanctions, corrective actions, export, continuity and catalogue (2040)
 
 To be completed with migration 2040: DEC-F09, F14–F18, F21–F36; and DEC-AMB-001, 004, 009 and 011; the CDF-207 guard; CON-009.
 
