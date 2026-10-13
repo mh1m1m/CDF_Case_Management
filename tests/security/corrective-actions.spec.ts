@@ -894,3 +894,269 @@ describe("integrity", () => {
     });
   });
 });
+
+describe("owner decisions DEC-F26, DEC-F27 and DEC-F28 (migration 2040)", () => {
+  const OPS_SECTOR = "b0000000-0000-4000-8000-000000000001";
+  const FIN_SECTOR = "b0000000-0000-4000-8000-000000000002"; // financeEmployee is a member
+  /** The 2040 policy command (12 arguments): `extra` are the cadence, overdue threshold, evidence types and steps. */
+  const setPolicy2040 = (
+    s: Scenario,
+    evidence: string,
+    reminder: number | null,
+    extra: { repeat?: number | null; overdue?: number | null; types?: string[] | null; steps?: unknown },
+  ) =>
+    s.tx`select api.set_corrective_action_policy('CORRECTIVE_ACTION', 30, ${reminder}::int, null::int, ${evidence},
+      now(), 'APPROVED', ${REASON}, ${extra.repeat ?? null}::int, ${extra.overdue ?? null}::int,
+      ${extra.types ?? null}::text[], ${extra.steps === undefined ? null : s.tx.json(extra.steps as never)}::jsonb) as id`;
+  const backdate = async (s: OwnerScenario, id: string, days: number) => {
+    await s.asOwner();
+    await s.tx`update decision.corrective_action set due_date = (now() at time zone 'Asia/Riyadh')::date - ${days}::int
+               where id = ${id}`;
+  };
+
+  it("DEC-F26: cadence, overdue threshold and escalation steps are off until configured; every recipient passes the case gate", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("grcDirector");
+      await s.expectError("CDF_INVALID:reminder_repeat_days", () =>
+        setPolicy2040(s, "NOTE_ONLY", null, { repeat: 2 }),
+      );
+      await s.expectError("CDF_INVALID:overdue_after_days", () =>
+        setPolicy2040(s, "NOTE_ONLY", 7, { overdue: 366 }),
+      );
+      for (const steps of [
+        [{ after_days_overdue: 2, recipient_kind: "ROLE" }],
+        [{ after_days_overdue: 2, recipient_kind: "ROLE", role_code: "NO_SUCH_ROLE" }],
+        [{ after_days_overdue: 2, recipient_kind: "OWNER", role_code: "INVESTIGATOR" }],
+        [{ after_days_overdue: 400, recipient_kind: "OWNER" }],
+        [{ after_days_overdue: 2, recipient_kind: "EVERYONE" }],
+        { after_days_overdue: 2, recipient_kind: "OWNER" },
+      ]) {
+        await s.expectError("CDF_INVALID:escalation_steps", () =>
+          setPolicy2040(s, "NOTE_ONLY", 7, { steps }),
+        );
+      }
+      await s.as("caseManager");
+      await s.expectError("CDF_FORBIDDEN", () => setPolicy2040(s, "NOTE_ONLY", 7, { repeat: 2 }));
+      await s.as("grcDirector");
+      const [p] = await setPolicy2040(s, "NOTE_ONLY", 7, {
+        repeat: 2,
+        overdue: 1,
+        steps: [
+          { after_days_overdue: 2, recipient_kind: "ROLE", role_code: "INVESTIGATOR" },
+          { after_days_overdue: 5, recipient_kind: "CASE_MANAGERS" },
+        ],
+      });
+      // A version's steps are written with it and never change.
+      await s.asOwner();
+      await s.expectError(
+        "decision.corrective_action_escalation_step is append-only",
+        (tx) => tx`update decision.corrective_action_escalation_step set after_days_overdue = 0`,
+      );
+      expect(
+        await s.tx`select step_no, after_days_overdue, recipient_kind, role_code
+                   from decision.corrective_action_escalation_step where policy_id = ${(p as { id: string }).id}
+                   order by step_no`,
+      ).toEqual([
+        { step_no: 1, after_days_overdue: 2, recipient_kind: "ROLE", role_code: "INVESTIGATOR" },
+        { step_no: 2, after_days_overdue: 5, recipient_kind: "CASE_MANAGERS", role_code: null },
+      ]);
+
+      await implementationOwners(s, "financeEmployee", "employeeB");
+      const f = await decidedPackage(s, "APPROVE_AS_RECOMMENDED");
+      const soon = await open(s, "caseManager", f.corrective, "financeEmployee", 5);
+      const step1 = await open(s, "caseManager", f.corrective, "employeeB", 0);
+      const step2 = await open(s, "caseManager", f.corrective, "employeeB", 0);
+      await backdate(s, step1, 3);
+      await backdate(s, step2, 6);
+      const since = await mark(s);
+      expect(await emitReminders(s)).toBeGreaterThan(0);
+      expect(await emitReminders(s)).toBe(0);
+      expect(await notified(s, "CORRECTIVE_ACTION_DUE", soon)).toEqual(["financeEmployee"]);
+      // Overdue past the threshold: the owner. Step 1 (2 days): the INVESTIGATOR role holders who can see the case,
+      // so Investigator Beta (case 0002) and never Investigator Alpha. Step 2 (5 days): the case's action managers.
+      expect(await notified(s, "CORRECTIVE_ACTION_OVERDUE", step1)).toEqual(["employeeB", "investigatorB"]);
+      expect(await notified(s, "CORRECTIVE_ACTION_OVERDUE", step2)).toEqual([
+        "caseManager",
+        "employeeB",
+        "grcDeputy",
+        "grcDirector",
+        "investigatorB",
+      ]);
+      await recipientsSeeActions(s, since);
+      // The due-soon reminder repeats every 2 days until the due date (the first one is backdated to show it).
+      await s.asOwner();
+      await s.tx`alter table notify.outbox disable trigger user`;
+      await s.tx`update notify.outbox set created_at = created_at - interval '3 days' where object_id = ${soon}`;
+      await s.tx`alter table notify.outbox enable trigger user`;
+      expect(await emitReminders(s)).toBe(1);
+      expect(await emitReminders(s)).toBe(0);
+      expect(await inApp(s, "CORRECTIVE_ACTION_DUE", soon)).toBe(2);
+      // A role holder who loses the case gate is not told: Investigator Beta declares a conflict.
+      const quiet = await open(s, "caseManager", f.corrective, "employeeB", 0);
+      await backdate(s, quiet, 3);
+      await conflicted(s, "investigatorB");
+      await emitReminders(s);
+      expect(await notified(s, "CORRECTIVE_ACTION_OVERDUE", quiet)).toEqual(["employeeB"]);
+    });
+  });
+
+  it("DEC-F27: completion evidence names a catalogue type, one the policy allows when it lists them", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("grcDirector");
+      for (const types of [[], ["DOCUMENT", "DOCUMENT"], ["NO_SUCH_TYPE"]]) {
+        await s.expectError("CDF_INVALID:allowed_evidence_types", () =>
+          setPolicy2040(s, "REFERENCE_REQUIRED", null, { types }),
+        );
+      }
+      await implementationOwners(s, "financeEmployee");
+      const f = await decidedPackage(s, "APPROVE_AS_RECOMMENDED");
+      // No list (as seeded): a type is optional, but must be a catalogue type and needs a reference.
+      const free = await open(s, "caseManager", f.corrective, "financeEmployee");
+      await s.as("financeEmployee");
+      await s.expectError(
+        "CDF_INVALID:evidence_type",
+        (tx) =>
+          tx`select api.submit_corrective_action_completion(${free}, 'Synthetic: done.', ${EVIDENCE}, 'NO_SUCH_TYPE')`,
+      );
+      await s.tx`select api.submit_corrective_action_completion(${free}, 'Synthetic: done.', ${EVIDENCE}, 'TRAINING_EVIDENCE')`;
+      // A list: a reference needs one of the listed types.
+      await s.as("grcDirector");
+      await setPolicy2040(s, "REFERENCE_REQUIRED", null, { types: ["DOCUMENT", "REVISED_PROCEDURE"] });
+      const listed = await open(s, "caseManager", f.corrective, "financeEmployee");
+      await s.as("financeEmployee");
+      for (const type of [null, "TRAINING_EVIDENCE"]) {
+        await s.expectError(
+          "CDF_INVALID:evidence_type",
+          (tx) =>
+            tx`select api.submit_corrective_action_completion(${listed}, 'Synthetic: done.', ${EVIDENCE}, ${type})`,
+        );
+      }
+      await s.expectError("CDF_INVALID:evidence_type", () => submit(s, listed));
+      await s.expectError(
+        "CDF_INVALID:evidence_reference",
+        (tx) =>
+          tx`select api.submit_corrective_action_completion(${listed}, 'Synthetic: done.', null, 'DOCUMENT')`,
+      );
+      await s.tx`select api.submit_corrective_action_completion(${listed}, 'Synthetic: done.', ${EVIDENCE}, 'REVISED_PROCEDURE')`;
+      await s.asOwner();
+      expect(
+        await s.tx`select action_id, evidence_type from decision.corrective_action_event
+                   where event_type = 'COMPLETION_SUBMITTED' and action_id in (${free}, ${listed})
+                   order by evidence_type collate "C"`,
+      ).toEqual([
+        { action_id: listed, evidence_type: "REVISED_PROCEDURE" },
+        { action_id: free, evidence_type: "TRAINING_EVIDENCE" },
+      ]);
+      const [audit] = await s.tx<{ type: string }[]>`
+        select metadata->>'evidence_type' as type from audit.audit_event
+        where action = 'CORRECTIVE_ACTION_COMPLETION_SUBMITTED' and object_id = ${listed}`;
+      expect(audit!.type).toBe("REVISED_PROCEDURE");
+      await s.expectError(
+        "decision.corrective_evidence_type is append-only",
+        (tx) => tx`delete from decision.corrective_evidence_type where code = 'DOCUMENT'`,
+      );
+    });
+  });
+
+  it("DEC-F28: a unit, a pool or an external party may own an action; an accountable user stays and every person acting passes the case gate", async () => {
+    await ownerScenario(async (s) => {
+      await implementationOwners(s, "financeEmployee", "employeeB", "employee");
+      // Pools: the policy administrator only; members need CORRECTIVE_ACTION_OWN.
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.create_corrective_action_pool('POOL_DEMO', 'Synthetic pool', ${REASON})`,
+      );
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_INVALID:code",
+        (tx) => tx`select api.create_corrective_action_pool('pool', 'Synthetic pool', ${REASON})`,
+      );
+      const [pool] = await s.tx<{ id: string }[]>`
+        select api.create_corrective_action_pool('POOL_DEMO', 'Synthetic pool', ${REASON}) as id`;
+      await s.expectError(
+        "CDF_INVALID:user_id",
+        (tx) =>
+          tx`select api.set_corrective_action_pool_member(${pool!.id}, ${USERS.committee}, true, ${REASON})`,
+      );
+      await s.tx`select api.set_corrective_action_pool_member(${pool!.id}, ${USERS.employee}, true, ${REASON})`;
+      await s.tx`select api.set_corrective_action_pool_member(${pool!.id}, ${USERS.financeEmployee}, true, ${REASON})`;
+      await s.expectError(
+        "CDF_CONFLICT:ALREADY_MEMBER",
+        (tx) =>
+          tx`select api.set_corrective_action_pool_member(${pool!.id}, ${USERS.employee}, true, ${REASON})`,
+      );
+
+      const f = await decidedPackage(s, "APPROVE_AS_RECOMMENDED");
+      const id = await open(s, "caseManager", f.corrective, "employeeB");
+      const kind = (k: string, sector: string | null, p: string | null, label: string | null) =>
+        s.tx`select api.set_corrective_action_owner_kind(${id}, ${k}, ${sector}::uuid, ${p}::uuid, ${label}, ${REASON})`;
+      const sees = async (u: UserKey) => {
+        await s.as(u);
+        return (await s.tx`select id from decision.corrective_action where id = ${id}`).length === 1;
+      };
+      // Only a manager changes the kind, with a matching shape.
+      await s.as("employeeB");
+      await s.expectError("CDF_FORBIDDEN", () => kind("SHARED_POOL", null, pool!.id, null));
+      await s.as("caseManager");
+      await s.expectError("CDF_INVALID:owner_kind", () => kind("TEAM", null, null, null));
+      await s.expectError("CDF_INVALID:pool_id", () => kind("SHARED_POOL", null, null, null));
+      await s.expectError("CDF_INVALID:sector_id", () => kind("ORG_UNIT", null, null, null));
+      await s.expectError("CDF_INVALID:sector_id", () => kind("SHARED_POOL", OPS_SECTOR, pool!.id, null));
+      await s.expectError("CDF_INVALID:external_party_label", () => kind("EXTERNAL_PARTY", null, null, null));
+      expect(await sees("employee")).toBe(false);
+
+      // A shared pool: its eligible member acts; the accountable owner stays.
+      await s.as("caseManager");
+      await kind("SHARED_POOL", null, pool!.id, null);
+      for (const u of ["employee", "financeEmployee", "employeeB"] as const)
+        expect(await sees(u), u).toBe(true);
+      await s.as("employee");
+      await progress(s, id, 20);
+      // A member without the case gate neither sees nor acts.
+      await s.asOwner();
+      await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
+                 values (${caseB}, ${USERS.employee}, 'CONFLICT_DECLARED', 'Synthetic declared conflict')`;
+      expect(await sees("employee")).toBe(false);
+      await s.expectError("CDF_NOT_FOUND", () => progress(s, id, 30));
+      // A removed member loses it.
+      await s.as("grcDirector");
+      await s.tx`select api.set_corrective_action_pool_member(${pool!.id}, ${USERS.financeEmployee}, false, ${REASON})`;
+      expect(await sees("financeEmployee")).toBe(false);
+
+      // An organisational unit: its current members with the role act (Finance: financeEmployee).
+      await s.as("caseManager");
+      await kind("ORG_UNIT", FIN_SECTOR, null, null);
+      expect(await sees("financeEmployee")).toBe(true);
+      await s.as("financeEmployee");
+      await progress(s, id, 40);
+      // An external party: only the accountable owner acts for it inside the platform.
+      await s.as("caseManager");
+      await kind("EXTERNAL_PARTY", null, null, "Synthetic external contractor");
+      expect(await sees("financeEmployee")).toBe(false);
+      await s.as("employeeB");
+      await progress(s, id, 60);
+      await s.asOwner();
+      const [row] = await s.tx<Record<string, unknown>[]>`
+        select owner_kind, owner_id, owner_sector_id, owner_pool_id, external_party_label
+        from decision.corrective_action where id = ${id}`;
+      expect(row).toEqual({
+        owner_kind: "EXTERNAL_PARTY",
+        owner_id: USERS.employeeB,
+        owner_sector_id: null,
+        owner_pool_id: null,
+        external_party_label: "Synthetic external contractor",
+      });
+      const kinds = await s.tx<{ kind: string; accountable: string }[]>`
+        select metadata->>'owner_kind' as kind, metadata->>'accountable_owner_id' as accountable from audit.audit_event
+        where action = 'CORRECTIVE_ACTION_OWNER_KIND_CHANGED' and object_id = ${id} order by seq`;
+      expect(kinds).toEqual(
+        ["SHARED_POOL", "ORG_UNIT", "EXTERNAL_PARTY"].map((k) => ({ kind: k, accountable: USERS.employeeB })),
+      );
+      await s.expectError(
+        "pool membership",
+        (tx) => tx`update decision.corrective_action_pool_member set reason = 'Synthetic: rewritten reason.'`,
+      );
+    });
+  });
+});

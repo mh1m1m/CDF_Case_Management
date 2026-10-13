@@ -1188,7 +1188,7 @@ declare
 begin
   select * into v_n from grievance.defence_notice n where n.id = p_notice_id;
   if v_n.id is null or not authz.can_view_case(v_n.case_id) then perform api._fail('NOT_FOUND'); end if;
-  perform grievance.lock_notice_subject(v_n.subject_id);
+  perform grievance.lock_notice_subject(v_n.subject_id);  -- can_manage_defence (FORBIDDEN) and an active case
   select * into v_n from grievance.defence_notice n where n.id = p_notice_id for update;
   if v_n.kind <> 'DEFENCE' then perform api._fail('CONFLICT', 'NOT_A_DEFENCE_NOTICE'); end if;
   if v_n.status not in ('ISSUED', 'ACKNOWLEDGED') then perform api._fail('CONFLICT', 'NOTICE_NOT_OPEN'); end if;
