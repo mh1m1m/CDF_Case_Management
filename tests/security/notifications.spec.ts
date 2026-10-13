@@ -12,7 +12,15 @@ import {
   type Scenario,
   type UserKey,
 } from "../support/db";
-import { IC_SEATS, REASON, committeeIds, openWithPresent, scheduleMeeting, seat } from "../support/committee";
+import {
+  IC_SEATS,
+  REASON,
+  committeeIds,
+  openWithPresent,
+  preliminaryReferral,
+  scheduleMeeting,
+  seat,
+} from "../support/committee";
 
 let caseB: string, caseR: string, ic: string, gc: string;
 
@@ -359,6 +367,7 @@ describe("AGENT-09 review of 1920", () => {
         ["legal", "MEMBER"],
         ["committeeSecretary", "ALTERNATE_SECRETARY"],
       ]);
+      await preliminaryReferral(s, caseR); // AMB-018 (migration 2030)
       await s.as("grcDirector");
       await s.tx`select api.approve_restricted_committee_referral(${caseR}, ${ic}, ${REASON})`;
       const [cp] = await s.tx<{ id: string }[]>`

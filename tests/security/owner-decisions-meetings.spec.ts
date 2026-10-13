@@ -24,6 +24,7 @@ import {
   committeeIds,
   openItem,
   openWithPresent,
+  preliminaryReferral,
   refer,
   scheduleMeeting,
   seat,
@@ -474,6 +475,7 @@ describe("the proceeding snapshot and seats (AMB-038, AMB-039, migration 2030)",
       await s.tx`update iam.user_profile set clearance = 'SECRET'
                  where id in (${USERS.committeeSecretary}, ${USERS.committeeChair}, ${USERS.legal}, ${USERS.committee})`;
       await seat(s, ic, IC_SEATS);
+      await preliminaryReferral(s, exec);
       await s.as("grcDirector");
       await s.tx`select api.approve_restricted_committee_referral(${exec}, ${ic}, ${REASON})`;
       const [cp] = await s.tx<

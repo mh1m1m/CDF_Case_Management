@@ -15,6 +15,7 @@ import {
   type Scenario,
   type UserKey,
 } from "../support/db";
+import { preliminaryReferral } from "../support/committee";
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 
 let caseA: string, caseB: string;
@@ -85,6 +86,9 @@ const NOT_STATE_CHANGING = new Set([
   // api.create_case_task, audited as CASE_TASK_ASSIGNED.
   "retention_review_queue",
   "list_retention_reviewers",
+  // Migration 2030: which item types have an authority rule (administrators), and the flags on a package's items.
+  "authority_rule_coverage",
+  "recommendation_item_flags",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -733,6 +737,21 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.set_action_authority_rule('CORRECTIVE_ACTION', 'DELEGATED_EXECUTIVE', now(), 'SOURCE_REQUIRED', ${REASON})`,
       },
+      // Migration 2030: a sanction catalogue version (DEC-F11) and a legal-review rule (DEC-F12), both from tomorrow.
+      {
+        fn: "set_sanction_catalogue_entry",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_sanction_catalogue_entry('WARNING', null, null, null, 'SOURCE_REQUIRED',
+            array['EMPLOYEE']::text[], null, now() + interval '1 day', 'SOURCE_REQUIRED', null, ${REASON})`,
+      },
+      {
+        fn: "set_legal_review_rule",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_legal_review_rule('INVESTIGATION', 'ITEM_TYPE', 'GOVERNANCE_REMEDIATION', 'REQUIRED',
+            now() + interval '1 day', 'SOURCE_REQUIRED', ${REASON})`,
+      },
       {
         fn: "create_recommendation_package",
         actor: "committeeSecretary",
@@ -797,6 +816,18 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) => s.tx`select api.record_package_adoption(${ids.pkg!})`,
       },
       {
+        // AMB-115 (migration 2030): a request sent to the wrong reviewer is cancelled before the real one.
+        fn: "cancel_legal_review_request",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const r = await one(
+            s,
+            s.tx`select api.request_legal_review(${ids.pkg!}, ${USERS.legalB}, ${REASON}, null, null) as id`,
+          );
+          return s.tx`select api.cancel_legal_review_request(${r}, ${REASON})`;
+        },
+      },
+      {
         fn: "request_legal_review",
         actor: "committeeSecretary",
         run: async (s) => {
@@ -822,6 +853,14 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) => s.tx`select api.give_legal_opinion(${ids.legalRequest!}, 'CONCURS', null)`,
       },
       {
+        // AMB-117 (migration 2030): a superseding opinion in the same round, before submission.
+        fn: "give_superseding_legal_opinion",
+        actor: "legalB",
+        run: (s) =>
+          s.tx`select api.give_superseding_legal_opinion(${ids.legalRequest!}, 'CONCURS_WITH_COMMENTS',
+            'Synthetic: the walk opinion, with a comment.')`,
+      },
+      {
         fn: "submit_to_authority",
         actor: "committeeSecretary",
         run: (s) => s.tx`select api.submit_to_authority(${ids.pkg!})`,
@@ -833,7 +872,7 @@ describe("every state-changing command writes its audit event in the same transa
           (ids.decision = await one(
             s,
             s.tx`select api.record_authority_decision(${ids.pkg!}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED',
-              now() - interval '1 hour', 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON}) as id`,
+              now(), 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON}) as id`,
           )),
       },
       // Corrective actions (migration 1940): opened from the approved item, run by the case manager, reported by
@@ -998,6 +1037,8 @@ describe("every state-changing command writes its audit event in the same transa
           await s.as("committeeSecretary");
           await s.tx`select api.close_vote_item(${vi}, null)`;
           await s.tx`select api.record_package_adoption(${pkg})`;
+          ids.restrictedPkg = pkg;
+          ids.restrictedMeeting = m;
           await s.as("grcDirector");
           return s.tx`select api.approve_restricted_legal_review(${pkg}, ${USERS.legalB}, ${REASON})`;
         },
@@ -1221,6 +1262,33 @@ describe("every state-changing command writes its audit event in the same transa
           await s.tx`select api.review_minutes(${minutes}, 'REQUEST_CHANGES', 'Synthetic: please correct item two.')`;
           await s.as("committeeChair");
           return s.tx`select api.overrule_minutes_objection(${minutes}, 'Synthetic: the minutes record item two correctly.')`;
+        },
+      },
+      {
+        // AMB-108 (migration 2030): before submission the secretary returns the adopted package to the committee.
+        fn: "return_package_to_committee",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.return_package_to_committee(${ids.restrictedPkg!}, ${REASON})`,
+      },
+      {
+        // DEC-AMB-003 (owner, 2026-10-13): a member who voted declares a conflict after the vote; the rule in force needs
+        // two present, so the result could change without them and the committee takes the vote again.
+        fn: "resolve_conflict_taint",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const p = await one(
+            s,
+            s.tx`select id from committee.meeting_participant
+                 where meeting_id = ${ids.restrictedMeeting!} and user_id = ${USERS.committee}`,
+          );
+          const item = await one(
+            s,
+            s.tx`select id from decision.recommendation_item where package_id = ${ids.restrictedPkg!}`,
+          );
+          await s.as("committee");
+          await s.tx`select api.declare_meeting_conflict(${p}, 'CONFLICT_DECLARED', 'Synthetic: walk conflict after the vote.')`;
+          await s.as("committeeSecretary");
+          return s.tx`select api.resolve_conflict_taint(${item}, 'RE_VOTE', 'Synthetic: the vote is taken again.')`;
         },
       },
       {
@@ -1943,6 +2011,10 @@ describe("every state-changing command writes its audit event in the same transa
       for (const u of [USERS.financeEmployee, USERS.employeeB]) {
         await s.tx`select api.grant_role(${u}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner for the walk')`;
       }
+      // AMB-018 (migration 2030): cases 0001 and 0003 reach the Investigation Committee after their preliminary
+      // review referred them.
+      await preliminaryReferral(s, caseA);
+      await preliminaryReferral(s, await caseId("0003"));
       const missing: string[] = [];
       for (const step of steps) {
         const { events } = await audited(s, step);
@@ -2135,6 +2207,9 @@ describe("audit internals are not reachable", () => {
       "authz.is_reporter_correspondent",
       "authz.meeting_concern_decider_seat",
       "authz.task_grants",
+      // Migration 2030: the rows of decision.sanction_catalogue_entry (codes and governed fields; a basis only once
+      // APPROVED), for any signed-in caller.
+      "decision.sanction_catalogue_rows",
       "forms.canonical_json",
       "forms.content_hash",
       "forms.terminal_status",

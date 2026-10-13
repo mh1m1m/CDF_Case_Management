@@ -112,7 +112,62 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
 
 ### 3. Recommendation packages, legal review and authority decisions (2030, section 3)
 
-To be completed with section 3 of the migration: DEC-F11, F12, F13, F19, F20; CON-017, CON-018; and DEC-AMB-003 (conflict taint, re-vote or reasoned confirmation).
+1. **Sanction catalogue versions (DEC-F11; AMB-036, AMB-101, AMB-102).**
+   - `decision.sanction_catalogue_version` stores each sanction code's governed fields, effective-dated: legal basis, internal policy basis, authority, legal-review requirement, subject categories and exclusivity group.
+   - Every seeded row is SOURCE_REQUIRED. Nothing is invented.
+   - `decision.sanction_catalogue_entry` shows a basis only once the row is APPROVED. An APPROVED row needs both a legal basis and a source reference.
+   - CONTRACTOR is in no seeded version. A contractor subject therefore gets `SANCTION_NOT_APPLICABLE_TO_SUBJECT` until a sourced version adds the category.
+   - Adoption writes `decision.item_adoption`, recording the version in force at that moment. Packets carry the version id, so a later catalogue change never alters an adopted item.
+   - `api.set_sanction_catalogue_entry` needs COMMITTEE_ADMIN. It is append-only and forward-dated only (`LATER_VERSION_EXISTS`).
+2. **Legal-review rules (DEC-F12, CON-017; AMB-113, AMB-123).**
+   - `decision.legal_review_rule` replaces the fixed type list. A rule applies per committee kind, effective-dated, and triggers either by item type or by the item's new `requires_legal_justification` flag.
+   - A catalogue version may also require review.
+   - The owner minimums, LEGAL_ACTION and the legal-justification flag, cannot be set to NOT_REQUIRED (`OWNER_MINIMUM_RULE`).
+   - A secretary's deliberate request keeps the SECRETARY_ELECTED basis.
+   - A GRIEVANCE rule row is seeded but not enforced, because the grievance path has no package. See open questions.
+3. **Authority rules (DEC-F13, CON-018; AMB-127, AMB-132, AMB-135).**
+   - A rule may name joint authorities (`decision.action_authority_rule_joint`, through the `text[]` overload of `api.set_action_authority_rule`).
+   - Submission fails closed (`AUTHORITY_RULE_MISSING`) while an adopted item type has no rule.
+   - Submission snapshots the rule, its authorities and its source status per item (`authority_submission`, `authority_requirement`).
+   - `api.authority_rule_coverage` lists types with no rule. It also shows that FINAL_DISCIPLINARY_AUTHORITY is still SOURCE_REQUIRED while the CEO rule is an owner default.
+4. **Authority decisions (AMB-125, AMB-126, AMB-129 to AMB-131, AMB-133).**
+   - There is one decision per authority type over its own items (`authority_decision_scope`). The package becomes DECIDED only when every required authority has decided every item it must.
+   - Joint authorities that disagree return the package.
+   - A decision records:
+     - a delegation reference;
+     - whether the source is signed (unsigned needs the secretary's attestation and is flagged UNSIGNED_SOURCE; no attribute is flagged SIGNATURE_NOT_RECORDED);
+     - a primary source document and further ones;
+     - structured conditions (free text only is flagged).
+   - `decided_at` may not fall on an Asia/Riyadh day before adoption.
+   - `decision.authority_decision_overview` is a read-model with flags only. The export is unchanged and belongs to 2040.
+5. **Returns, cancellation, superseding opinions (AMB-108, AMB-115, AMB-117).**
+   - The secretary returns an adopted, unsubmitted package. After submission only the authority returns it.
+   - An open request can be cancelled; the replaced reviewer's packet ends at once.
+   - The reviewer may give a superseding opinion in the same round before submission. Both opinions are kept and both travel to the authority. A superseding CONFLICTS returns the package.
+6. **Purpose access ends (AMB-119, AMB-229).** The legal reviewer's packet ends when an authority decision on the package is recorded. A task linked to a legal-hold request ends when the request is decided. Both apply after the grace `PURPOSE_ACCESS_GRACE_DAYS`, default 0.
+7. **Restricted legal review scope (DEC-F20, AMB-120).** An approval names its round, findings and minutes. A packet item outside that scope is refused on every path, by a trigger. More material needs a new approval. DEC-F19 is as built and confirmed by test.
+8. **Guards (AMB-026, AMB-018, AMB-100, AMB-030).**
+   - A sanction on an allegation its subject has no defence notice on is not adopted (`DEFENCE_NOTICE_REQUIRED`). The rule-set option `sanction_requires_defence_notice` can switch this off.
+   - A non-direct case reaches the Investigation Committee only after an approved REFERRED_TO_COMMITTEE preliminary review. This is a trigger on `committee_proceeding`, so every path is covered.
+   - Dependencies and exclusivity groups are flagged.
+   - AMB-030 is as built.
+9. **Conflict taint: DEC-AMB-003 (owner, 2026-10-13), option B (AMB-051).**
+   - **When an item is tainted.** An item whose current result came from a closed vote is TAINTED_BY_CONFLICT if someone now conflicted had a counted vote on it (substantive, abstention or casting). "Conflicted" means a declared or upheld meeting conflict in the proceeding, or a declared or confirmed case conflict.
+   - **What the database refuses while it is tainted.** Triggers and command checks refuse, on every path:
+     - adoption;
+     - a legal-review request or opinion;
+     - submission;
+     - a DECIDED status;
+     - every authority decision except RETURN_TO_COMMITTEE;
+     - once decided, opening a corrective action and issuing a decision notice.
+   - **Who resolves it.** The secretary running an open meeting of the proceeding records the committee's resolution with `api.resolve_conflict_taint(item, resolution, reason)`:
+     - The reason must be 10–2000 characters. It stays in the row; the audit gets codes only.
+     - The resolution is stored in `decision.conflict_taint_resolution`, once per taint. The table is append-only and readable wherever the item is.
+   - **RE_VOTE.** The package goes back to DRAFT. The next round opens a new vote on the same target, so the tainted result never counts.
+   - **CONFIRM.** Allowed only when the recount without every vote of the conflicted participants gives the same result under the snapshot's DEC-F01 rule and quorum. Otherwise it is refused with `RESULT_MAY_CHANGE`.
+   - **Who may not resolve it.** A conflicted participant, or anyone who raised a concern about one, gets FORBIDDEN.
+   - **Restrictions on RE_VOTE.** It is refused while a review is open, while the package is with the authority, or once it is decided.
+   - **The governing test** is `T-AMB-028: a conflict found after a vote or decision taints the item; the database refuses every downstream step until the committee resolves it by RE_VOTE or CONFIRM; CONFIRM needs documented reasoning and a result the conflicted participation could not have changed`, in `tests/security/recommendations-authority.spec.ts`.
 
 ### 4. Notices, grievances, sanctions, corrective actions, export, continuity and catalogue (2040)
 

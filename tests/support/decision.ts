@@ -1,4 +1,4 @@
-// Recommendation package fixtures for the rebase security tests (migration 1900). Every call runs through the api.*
+// Recommendation package fixtures for the rebase security tests (migrations 1900 and 2030). Every call runs through the api.*
 // commands as the acting user; nothing is inserted directly.
 import { USERS, type Scenario, type UserKey } from "./db";
 import { REASON, openWithPresent, scheduleMeeting, seat, type MeetingFixture } from "./committee";
@@ -41,8 +41,29 @@ export interface PackageFixture extends CaseFacts {
   corrective: string;
 }
 
+/** DEC-F13 (migration 2030): submission fails closed while an adopted item type has no authority rule, and only the
+ *  disciplinary rule is seeded. A fixture item of another type goes to the authority the disciplinary rule names (a
+ *  synthetic SOURCE_REQUIRED rule set by the platform administrator), unless a rule for the type is already in force. */
+export async function authorityRuleFor(s: Scenario, itemType: string): Promise<void> {
+  await s.as("platformAdmin");
+  const [r] = await s.tx<{ sanction: string; present: boolean }[]>`
+    select (select authority_type from decision.action_authority_rule
+            where item_type = 'DISCIPLINARY_SANCTION' and effective_from <= now()
+              and (effective_to is null or effective_to > now())
+            order by effective_from desc limit 1) as sanction,
+           exists (select 1 from decision.action_authority_rule
+                   where item_type = ${itemType} and effective_from <= now()
+                     and (effective_to is null or effective_to > now())) as present`;
+  if (!r!.present) {
+    await s.tx`select api.set_action_authority_rule(${itemType}, ${r!.sanction}::text, now(), 'SOURCE_REQUIRED',
+      'Synthetic: test fixture rule.')`;
+  }
+}
+
 /** Seats the committee, refers the case, opens a meeting with the voters present and drafts a package holding a
- *  catalogue sanction on the subject and a case-wide corrective action. */
+ *  catalogue sanction on the subject and a case-wide corrective action. The subject has a defence notice on the
+ *  allegation (AMB-026, migration 2030: the rule snapshot requires one before a sanction is adopted), and the
+ *  corrective action has an authority rule (DEC-F13). */
 export async function draftPackage(
   s: Scenario,
   committeeId: string,
@@ -50,7 +71,11 @@ export async function draftPackage(
   granularity: "PACKAGE" | "ITEM" = "PACKAGE",
 ): Promise<PackageFixture> {
   await seat(s, committeeId, DECISION_SEATS);
+  await authorityRuleFor(s, "CORRECTIVE_ACTION");
   const facts = await caseFacts(s, caseId);
+  await s.as("caseManager");
+  await s.tx`select api.issue_defence_notice(${facts.subject}, 'Synthetic: you are invited to respond.',
+    ${[facts.allegation]}::uuid[], now() + interval '10 days')`;
   const meeting = await scheduleMeeting(s, committeeId, caseId);
   await openWithPresent(s, meeting, DECISION_VOTERS);
   await s.as("committeeSecretary");
@@ -66,12 +91,13 @@ export async function draftPackage(
 }
 
 /** Submits the package, opens its votes and has every voter cast the choice for each vote item (by item id, or
- *  'PACKAGE'), then closes the items and records adoption. Returns the package status. */
-export async function voteOnPackage(
+ *  'PACKAGE', and voter), then closes the items. Adoption is left to the caller. */
+export async function closePackageVotes(
   s: Scenario,
   f: PackageFixture,
-  choiceFor: (target: string) => string = () => "APPROVE",
-): Promise<string> {
+  choiceFor: (target: string, voter: UserKey) => string = () => "APPROVE",
+  voters: UserKey[] = DECISION_VOTERS,
+): Promise<void> {
   await s.as("committeeSecretary");
   await s.tx`select api.submit_package_for_vote(${f.pkg})`;
   await s.tx`select api.open_package_vote(${f.meeting.meeting}, ${f.pkg})`;
@@ -80,13 +106,23 @@ export async function voteOnPackage(
     join decision.recommendation_package p on p.id = vi.package_id and vi.package_round = p.round_no
     where p.id = ${f.pkg} order by vi.sequence_no`;
   for (const item of items) {
-    for (const user of DECISION_VOTERS) {
+    for (const user of voters) {
       await s.as(user);
-      await s.tx`select api.cast_vote(${item.id}, ${choiceFor(item.recommendation_item_id ?? "PACKAGE")}, null)`;
+      await s.tx`select api.cast_vote(${item.id}, ${choiceFor(item.recommendation_item_id ?? "PACKAGE", user)}, null)`;
     }
     await s.as("committeeSecretary");
     await s.tx`select api.close_vote_item(${item.id}, null)`;
   }
+}
+
+/** closePackageVotes, then records adoption. Returns the package status. */
+export async function voteOnPackage(
+  s: Scenario,
+  f: PackageFixture,
+  choiceFor: (target: string, voter: UserKey) => string = () => "APPROVE",
+  voters: UserKey[] = DECISION_VOTERS,
+): Promise<string> {
+  await closePackageVotes(s, f, choiceFor, voters);
   const [r] = await s.tx<{ status: string }[]>`select api.record_package_adoption(${f.pkg}) as status`;
   return r!.status;
 }
