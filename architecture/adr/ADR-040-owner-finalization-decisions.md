@@ -302,7 +302,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
       - Deep links go to `/referrals/<id>` and `/preliminary-reviews/<id>`.
     - **Rules asked by user id.** `authz.can_view_referral` and `authz.can_view_preliminary_recommendation` wrap user-id forms (`intake.user_can_view_referral`, `case_mgmt.user_can_view_preliminary_recommendation`), so a notice checks its recipient without changing the request identity. The rule is the same for every caller.
     - **Coordinator rulings (2026-10-13), recorded with item 17.**
-      - **Alternates.** Only a seat holder the snapshot names decides admissibility. An alternate member decides, and reads as a decider, only if the snapshot seats them.
+      - **Alternates.** The admissibility decider is whoever holds a CHAIR, DEPUTY_CHAIR or MEMBER seat on the Grievance Committee in the registry when the decision is due, as the grievance's decider rule names (CHAIR or COMMITTEE). No proceeding exists yet at this stage, so no snapshot applies. Alternates never decide admissibility or read as deciders.
       - **Restricted case.** The decider must already be able to view the case. If no seated decider can, nobody is asked and the handling secretary keeps the grievance. Whether the Restricted Case Authority names a decider is SOURCE_REQUIRED (below).
       - **Rejection.** A secretary's REJECTED on a referral sends no notice. The referral queue carries the status, and a notice is UX follow-on work.
       - **Import submit.** `may_submit` on an import batch is a hint taken from the stored preview, and `api.submit_bcp_import` decides.
