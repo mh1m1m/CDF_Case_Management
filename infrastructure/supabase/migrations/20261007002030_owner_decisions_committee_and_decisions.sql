@@ -1044,27 +1044,37 @@ $$;
 -- -----------------------------------------------------------------------------
 -- 2.6 Predicates (narrowed)
 -- -----------------------------------------------------------------------------
--- Running the meeting: the committee's current secretary, or its alternate secretary only while recorded as acting for
--- this meeting (AMB-042/050/066, CON-007); cleared for the case and not conflicted in the meeting, as in 1890.
+-- Running the meeting, for a given user: the committee's current secretary, or its alternate secretary only while
+-- recorded as acting for this meeting (AMB-042/050/066, CON-007); cleared for the case and not conflicted in the
+-- meeting, as in 1890. Taking the user as an argument lets the notice engine ask about a candidate without changing
+-- the request identity (AGENT-09 pack 3, R1). Internal: no application role may execute it.
+create function committee.manages_meeting(p_meeting_id uuid, p_user_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select p_user_id is not null and exists (
+    select 1 from committee.meeting m
+    join committee.committee_proceeding cp on cp.id = m.committee_proceeding_id
+    where m.id = p_meeting_id
+      and coalesce(authz.user_committee_seat(p_user_id, cp.committee_id, now()) in ('SECRETARY', 'ALTERNATE_SECRETARY'),
+                   false)
+      and (authz.user_committee_seat(p_user_id, cp.committee_id, now()) = 'SECRETARY'
+           or exists (select 1 from committee.meeting_acting_role a
+                      where a.meeting_id = m.id and a.acting_role = 'ACTING_SECRETARY' and a.user_id = p_user_id))
+      and authz.user_case_gate(p_user_id, m.case_id)
+      and not exists (select 1 from committee.meeting_participant mp
+                      where mp.meeting_id = m.id and mp.user_id = p_user_id and mp.coi_status = 'CONFLICT_DECLARED')
+  );
+$$;
+
+-- Running the meeting, for the current user: the rule above. One rule serves the commands, the views and the notices.
 create or replace function authz.can_manage_meeting(p_meeting_id uuid)
 returns boolean
 language sql stable security definer
 set search_path = ''
 as $$
-  select authz.current_user_id() is not null and exists (
-    select 1 from committee.meeting m
-    join committee.committee_proceeding cp on cp.id = m.committee_proceeding_id
-    where m.id = p_meeting_id
-      and authz.is_committee_secretary(cp.committee_id)
-      and (authz.user_committee_seat(authz.current_user_id(), cp.committee_id, now()) = 'SECRETARY'
-           or exists (select 1 from committee.meeting_acting_role a
-                      where a.meeting_id = m.id and a.acting_role = 'ACTING_SECRETARY'
-                        and a.user_id = authz.current_user_id()))
-      and authz.user_case_gate(authz.current_user_id(), m.case_id)
-      and not exists (select 1 from committee.meeting_participant mp
-                      where mp.meeting_id = m.id and mp.user_id = authz.current_user_id()
-                        and mp.coi_status = 'CONFLICT_DECLARED')
-  );
+  select committee.manages_meeting(p_meeting_id, authz.current_user_id());
 $$;
 
 -- A committee proceeding, as in 1870, except that a snapshotted member sees it only while still seated on the
@@ -1103,14 +1113,16 @@ as $$
   );
 $$;
 
--- DEC-F04 (CON-006): the seat the current user decides a raised conflict as, or null. Under the CHAIR rule: the chair;
+-- DEC-F04 (CON-006): the seat a given user decides a raised conflict as, or null. Under the CHAIR rule: the chair;
 -- when no chair of the meeting is eligible (the raiser or the subject, conflicted, recorded absent or excused, no longer
 -- seated, not cleared for the case, or none), the deputy chair if eligible; when neither is, the committee's
 -- independent conflict authority in force (holding no seat on the committee and not in the meeting). Never the raiser,
 -- never the subject, always cleared for the case. The SECRETARY rule (2000) is unchanged. Null when nobody qualifies.
-create or replace function authz.meeting_concern_decider_seat(p_concern_id uuid)
+-- Taking the user as an argument lets the notice engine ask about a candidate without changing the request identity
+-- (AGENT-09 pack 3, R1). Internal: no application role may execute it.
+create function committee.concern_decider_seat_for(p_concern_id uuid, p_user_id uuid)
 returns text
-language sql stable security definer
+language sql stable
 set search_path = ''
 as $$
   with k as (
@@ -1132,15 +1144,15 @@ as $$
   )
   select case
            when k.decider = 'SECRETARY' then
-             case when authz.can_manage_meeting(k.meeting_id) then 'SECRETARY' end
+             case when committee.manages_meeting(k.meeting_id, p_user_id) then 'SECRETARY' end
            when exists (select 1 from eligible e where e.seat = 'CHAIR') then
-             case when exists (select 1 from eligible e where e.seat = 'CHAIR' and e.user_id = authz.current_user_id())
+             case when exists (select 1 from eligible e where e.seat = 'CHAIR' and e.user_id = p_user_id)
                   then 'CHAIR' end
            when exists (select 1 from eligible e where e.seat = 'DEPUTY_CHAIR') then
-             case when exists (select 1 from eligible e where e.seat = 'DEPUTY_CHAIR' and e.user_id = authz.current_user_id())
+             case when exists (select 1 from eligible e where e.seat = 'DEPUTY_CHAIR' and e.user_id = p_user_id)
                   then 'DEPUTY_CHAIR' end
            when exists (select 1 from committee.conflict_authority a
-                        where a.committee_id = k.committee_id and a.user_id = authz.current_user_id()
+                        where a.committee_id = k.committee_id and a.user_id = p_user_id
                           and a.effective_from <= now() and (a.effective_to is null or a.effective_to > now())
                           and authz.user_committee_seat(a.user_id, k.committee_id, now()) is null
                           and not exists (select 1 from committee.meeting_participant mp
@@ -1148,10 +1160,19 @@ as $$
              'CONFLICT_AUTHORITY'
          end
   from k
-  where authz.current_user_id() is not null
-    and authz.current_user_id() <> k.raised_by
-    and authz.current_user_id() is distinct from k.subject_user
-    and authz.user_case_gate(authz.current_user_id(), k.case_id);
+  where p_user_id is not null
+    and p_user_id <> k.raised_by
+    and p_user_id is distinct from k.subject_user
+    and authz.user_case_gate(p_user_id, k.case_id);
+$$;
+
+-- The seat the current user decides a raised conflict as: the rule above, for the commands, the views and the notices.
+create or replace function authz.meeting_concern_decider_seat(p_concern_id uuid)
+returns text
+language sql stable security definer
+set search_path = ''
+as $$
+  select committee.concern_decider_seat_for(p_concern_id, authz.current_user_id());
 $$;
 
 -- -----------------------------------------------------------------------------
@@ -5526,26 +5547,10 @@ select 'SYSTEM_MANDATORY', t.code, c.channel, true, '2026-01-01T00:00:00Z', 'Syn
 from notify.template t cross join (values ('IN_APP'), ('EMAIL')) c (channel)
 where t.code in ('MEETING_CONFLICT_DECISION_REQUESTED', 'MEETING_VOTE_OPENED');
 
--- Whether a user decides a raised conflict now: authz.meeting_concern_decider_seat, evaluated as that user. The
--- caller's claims are restored before returning (an error rolls the change back with the statement). Internal.
-create function notify.decides_concern(p_concern_id uuid, p_user_id uuid)
-returns boolean
-language plpgsql
-set search_path = ''
-as $$
-declare
-  v_claims text := current_setting('request.jwt.claims', true);
-  v_seat text;
-begin
-  perform set_config('request.jwt.claims', jsonb_build_object('sub', p_user_id, 'role', 'authenticated')::text, true);
-  v_seat := authz.meeting_concern_decider_seat(p_concern_id);
-  perform set_config('request.jwt.claims', coalesce(v_claims, ''), true);
-  return v_seat is not null;
-end;
-$$;
-
 -- DEC-F04: the decider of a raised conflict. Candidates are the meeting's users, the committee's current seat holders
--- and its conflict authorities in force; the decision predicate picks among them. Never the raiser or the subject.
+-- and its conflict authorities in force; the decision rule the command uses (committee.concern_decider_seat_for) picks
+-- among them, asked about each candidate by user id. The request identity is never changed. Never the raiser or the
+-- subject.
 create function notify.on_meeting_conflict_concern()
 returns trigger
 language plpgsql
@@ -5573,7 +5578,7 @@ begin
                   and authz.user_case_gate(k.user_id, v_m.case_id)
                   and not authz.has_meeting_conflict(k.user_id, v_m.committee_proceeding_id)
                 order by k.user_id loop
-    if notify.decides_concern(new.id, v_user) then
+    if committee.concern_decider_seat_for(new.id, v_user) is not null then
       perform notify.enqueue('MEETING_CONFLICT_DECISION_REQUESTED', v_user, v_m.id, notify.meeting_committee(v_m.id),
                              'meeting-concern:' || new.id);
     end if;
@@ -5613,6 +5618,4 @@ $$;
 create trigger vote_item_notify after insert on committee.vote_item
   for each row execute function notify.on_vote_item();
 
-revoke all on function
-  notify.decides_concern(uuid, uuid), notify.on_meeting_conflict_concern(), notify.on_vote_item()
-from public, anon, authenticated;
+revoke all on function notify.on_meeting_conflict_concern(), notify.on_vote_item() from public, anon, authenticated;

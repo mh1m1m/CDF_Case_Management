@@ -91,6 +91,30 @@ describe("RLS coverage", () => {
     expect(rows.map((r) => r.fn)).toEqual([]);
   });
 
+  it("no function rewrites the request identity (AGENT-09 pack 3, R1)", async () => {
+    // A predicate is asked about another user through a user-id form (committee.concern_decider_seat_for), never by
+    // setting request.jwt.claims to that user: everything read under the switched claims (the actor, audit, permissions)
+    // would see them.
+    const patterns = [
+      String.raw`set_config\s*\(\s*'request\.jwt\.claim`,
+      String.raw`set\s+(local\s+|session\s+)?"?request\.jwt\.claim`,
+    ];
+    const rows = await admin<{ fn: string }[]>`
+      select p.oid::regprocedure::text as fn
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = any(${APP_SCHEMAS}) and p.prosrc ~* any(${patterns}::text[])`;
+    expect(rows.map((r) => r.fn)).toEqual([]);
+  });
+
+  it("the user-id forms of the meeting rules are internal", async () => {
+    const rows = await admin<{ role: string; fn: string; ok: boolean }[]>`
+      select r as role, f as fn, has_function_privilege(r, f, 'EXECUTE') as ok
+      from unnest(${APP_ROLES}::text[]) r
+      cross join unnest(array['committee.manages_meeting(uuid,uuid)', 'committee.concern_decider_seat_for(uuid,uuid)',
+                              'committee.concern_reverser_seat(uuid,uuid)']) f`;
+    expect(rows.filter((r) => r.ok)).toEqual([]);
+  });
+
   it("no application function is executable by PUBLIC", async () => {
     const rows = await admin<{ fn: string }[]>`
       select p.oid::regprocedure::text as fn

@@ -966,7 +966,7 @@ describe("meeting notifications: ids only, to exactly who may act (ADR-025, DEC-
       const f = await ready(s);
       await s.as("legal");
       const k = await raise(s.tx, f.participant.legalB!);
-      // Finding the decider evaluates the rule as each candidate; the raiser's own context is restored.
+      // Finding the decider asks the command's rule about each candidate by user id; the raiser's context is untouched.
       expect(await s.tx`select authz.current_user_id() as id`).toEqual([{ id: USERS.legal }]);
       expect(await recipients(s, "MEETING_CONFLICT_DECISION_REQUESTED", `meeting-concern:${k}`)).toEqual([
         "committeeChair",

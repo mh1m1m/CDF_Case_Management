@@ -199,7 +199,10 @@ The UX thread's Phase 12 asks (coordinator, 2026-10-13): the web BFF does not re
 3. **Capabilities.** Each view carries a `capabilities` object of booleans. Each flag uses the checks of the command it stands for, in the same order. The tests compare every flag with the command's real outcome. A flag never widens a command; the command still decides.
 4. **Reads.** Both are SECURITY DEFINER with `search_path = ''` and are granted to `authenticated` only. They write no audit event, like `api.vote_item_status`.
 5. **Two content-free notifications.** Both carry ids only and deep link to `/meetings/<id>`.
-   - `MEETING_CONFLICT_DECISION_REQUESTED` goes to whoever DEC-F04 names as decider, never the raiser or the subject. Each candidate is evaluated as that candidate: `notify.decides_concern` sets the request claims to the candidate for one predicate call and restores them. A test pins that the caller's identity is intact afterwards.
+   - `MEETING_CONFLICT_DECISION_REQUESTED` goes to whoever DEC-F04 names as decider, never the raiser or the subject.
+     - Each candidate is checked by user id against the same rule the command uses (`committee.concern_decider_seat_for`).
+     - `authz.meeting_concern_decider_seat` is that rule for the current user, and `authz.can_manage_meeting` likewise wraps `committee.manages_meeting`.
+     - The request identity is never changed (AGENT-09 pack 3, R1). A test pins that no function body sets `request.jwt.claims`.
    - `MEETING_VOTE_OPENED` goes to present, cleared voters with no vote.
    - Every recipient passes `authz.user_case_gate` and has no meeting conflict.
 6. **Synthetic committee seats (seed 30).**
