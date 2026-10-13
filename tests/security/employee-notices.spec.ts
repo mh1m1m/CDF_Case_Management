@@ -68,6 +68,7 @@ const decisionNotice = (s: Scenario, subject: string, decision: string) =>
 
 interface MyNotice {
   notice_id: string;
+  sequence_no: number;
   kind: string;
   due_at: string | null;
   grievance_window_ends_at: string | null;
@@ -138,7 +139,8 @@ describe("kinds of employee notice (migration 1990, P11-G5, ADR-037)", () => {
 
       // The subject sees their own notices with their kind; the other subject sees none of them.
       await s.as("employee");
-      const mine = await myNotices(s);
+      // Notices issued in one transaction share issued_at, so the list is put in sequence order here.
+      const mine = (await myNotices(s)).sort((a, b) => a.sequence_no - b.sequence_no);
       expect(mine.map((n) => [n.kind, n.due_at === null, n.items.length])).toEqual([
         ["RIGHTS", true, 0],
         ["RIGHTS", true, 1],
