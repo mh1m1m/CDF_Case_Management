@@ -823,6 +823,12 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.give_superseding_legal_opinion(${t.request}, 'CONCURS', null)`,
   },
+  // DEC-AMB-003 (owner, 2026-10-13): the committee's resolution of a tainted item.
+  {
+    fn: "resolve_conflict_taint",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resolve_conflict_taint(${t.item}, 'CONFIRM', 'Probe resolution reason.')`,
+  },
 ];
 
 // Employee defence and grievance commands (migration 1910) take a subject, a portal link, a defence notice or a

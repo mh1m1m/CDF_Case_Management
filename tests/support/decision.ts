@@ -91,12 +91,13 @@ export async function draftPackage(
 }
 
 /** Submits the package, opens its votes and has every voter cast the choice for each vote item (by item id, or
- *  'PACKAGE'), then closes the items and records adoption. Returns the package status. */
-export async function voteOnPackage(
+ *  'PACKAGE', and voter), then closes the items. Adoption is left to the caller. */
+export async function closePackageVotes(
   s: Scenario,
   f: PackageFixture,
-  choiceFor: (target: string) => string = () => "APPROVE",
-): Promise<string> {
+  choiceFor: (target: string, voter: UserKey) => string = () => "APPROVE",
+  voters: UserKey[] = DECISION_VOTERS,
+): Promise<void> {
   await s.as("committeeSecretary");
   await s.tx`select api.submit_package_for_vote(${f.pkg})`;
   await s.tx`select api.open_package_vote(${f.meeting.meeting}, ${f.pkg})`;
@@ -105,13 +106,23 @@ export async function voteOnPackage(
     join decision.recommendation_package p on p.id = vi.package_id and vi.package_round = p.round_no
     where p.id = ${f.pkg} order by vi.sequence_no`;
   for (const item of items) {
-    for (const user of DECISION_VOTERS) {
+    for (const user of voters) {
       await s.as(user);
-      await s.tx`select api.cast_vote(${item.id}, ${choiceFor(item.recommendation_item_id ?? "PACKAGE")}, null)`;
+      await s.tx`select api.cast_vote(${item.id}, ${choiceFor(item.recommendation_item_id ?? "PACKAGE", user)}, null)`;
     }
     await s.as("committeeSecretary");
     await s.tx`select api.close_vote_item(${item.id}, null)`;
   }
+}
+
+/** closePackageVotes, then records adoption. Returns the package status. */
+export async function voteOnPackage(
+  s: Scenario,
+  f: PackageFixture,
+  choiceFor: (target: string, voter: UserKey) => string = () => "APPROVE",
+  voters: UserKey[] = DECISION_VOTERS,
+): Promise<string> {
+  await closePackageVotes(s, f, choiceFor, voters);
   const [r] = await s.tx<{ status: string }[]>`select api.record_package_adoption(${f.pkg}) as status`;
   return r!.status;
 }

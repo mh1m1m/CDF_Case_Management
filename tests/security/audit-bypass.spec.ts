@@ -1038,6 +1038,7 @@ describe("every state-changing command writes its audit event in the same transa
           await s.tx`select api.close_vote_item(${vi}, null)`;
           await s.tx`select api.record_package_adoption(${pkg})`;
           ids.restrictedPkg = pkg;
+          ids.restrictedMeeting = m;
           await s.as("grcDirector");
           return s.tx`select api.approve_restricted_legal_review(${pkg}, ${USERS.legalB}, ${REASON})`;
         },
@@ -1047,6 +1048,27 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "return_package_to_committee",
         actor: "committeeSecretary",
         run: (s) => s.tx`select api.return_package_to_committee(${ids.restrictedPkg!}, ${REASON})`,
+      },
+      {
+        // DEC-AMB-003 (owner, 2026-10-13): a member who voted declares a conflict after the vote; the rule in force needs
+        // two present, so the result could change without them and the committee takes the vote again.
+        fn: "resolve_conflict_taint",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const p = await one(
+            s,
+            s.tx`select id from committee.meeting_participant
+                 where meeting_id = ${ids.restrictedMeeting!} and user_id = ${USERS.committee}`,
+          );
+          const item = await one(
+            s,
+            s.tx`select id from decision.recommendation_item where package_id = ${ids.restrictedPkg!}`,
+          );
+          await s.as("committee");
+          await s.tx`select api.declare_meeting_conflict(${p}, 'CONFLICT_DECLARED', 'Synthetic: walk conflict after the vote.')`;
+          await s.as("committeeSecretary");
+          return s.tx`select api.resolve_conflict_taint(${item}, 'RE_VOTE', 'Synthetic: the vote is taken again.')`;
+        },
       },
       {
         fn: "close_proceeding",
