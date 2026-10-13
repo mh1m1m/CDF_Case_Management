@@ -2,7 +2,10 @@
 import { useEffect, useEffectEvent, useId, useRef } from "react";
 import { buttonClass } from "./components";
 
-/** What a consequential command does, said before it runs (UX-031, O08 §08.12). All text comes from @cdf/i18n. */
+/**
+ * What a consequential command does, said before it runs (UX-031, O08 §08.12; the ADR-030 consequence preview: what
+ * changes, whether it can be undone, who is affected and who is told). All text comes from @cdf/i18n.
+ */
 export interface CDFConfirmation {
   /** Dialog heading: the act as a question or a verb phrase ("Archive this case?"). */
   title: string;
@@ -12,12 +15,22 @@ export interface CDFConfirmation {
   undo: string;
   /** Who is affected. */
   affected: string;
+  /**
+   * Who is told, and how (ADR-030 consequence preview), for example "The committee members get a meeting
+   * invitation". A notification carries no content (§39), so neither does this line.
+   */
+  notified?: string;
+  /**
+   * Facts the database computed for this act, such as how many people lose access and in which roles. Counts and
+   * role names only: never a person's name or an id (DEC-AMB-012 preview rule).
+   */
+  facts?: { term: string; value: string }[];
   /** The confirm button: repeats the trigger's verb ("Archive case"). */
   confirmLabel: string;
   /** The dismiss button ("Cancel", "Keep interview"). Default focus. */
   cancelLabel: string;
-  /** Row labels for the three statements. */
-  labels: { whatHappens: string; undo: string; affected: string };
+  /** Row labels for the statements. `notified` is needed only with `notified`. */
+  labels: { whatHappens: string; undo: string; affected: string; notified?: string };
   /** The confirm button's weight: "danger" (default) for an act that closes, removes or ends something. */
   tone?: "primary" | "danger";
 }
@@ -99,6 +112,18 @@ export function CDFConfirmDialog({
           <dt className="font-semibold">{c.labels.affected}</dt>
           <dd data-testid="confirm-affected">{c.affected}</dd>
         </div>
+        {c.notified ? (
+          <div>
+            <dt className="font-semibold">{c.labels.notified}</dt>
+            <dd data-testid="confirm-notified">{c.notified}</dd>
+          </div>
+        ) : null}
+        {c.facts?.map((f) => (
+          <div key={f.term} data-testid="confirm-fact">
+            <dt className="font-semibold">{f.term}</dt>
+            <dd>{f.value}</dd>
+          </div>
+        ))}
       </dl>
       <div className="mt-6 flex flex-wrap justify-end gap-3">
         <button

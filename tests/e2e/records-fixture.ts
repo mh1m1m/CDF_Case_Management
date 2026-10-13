@@ -242,6 +242,19 @@ export async function eligibleCase(label: string): Promise<{ caseId: string; cas
   return c;
 }
 
+/** A new SCREENING case with a Committee Formation form the case manager started and left as an empty draft. */
+export async function draftFormCase(
+  label: string,
+): Promise<{ caseId: string; caseNumber: string; instanceId: string }> {
+  const c = await screeningCase(label);
+  const instanceId = await as("caseManager", async (tx) => {
+    const [f] = await tx<{ id: string }[]>`
+      select api.start_form(${c.caseId}, 'WB-FRM-13', 'CONFIDENTIAL'::core.classification_level) as id`;
+    return f!.id;
+  });
+  return { ...c, instanceId };
+}
+
 /**
  * One form kept open for the committee chair after their case grant was narrowed (S3, ADR-016 D2, path (a)): a
  * new SCREENING case with a Committee Formation form the case manager prepared, a COMMITTEE grant for the chair

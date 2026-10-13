@@ -9,6 +9,7 @@ export const ar: Messages = {
     language: "اللغة",
     switchToArabic: "العربية",
     switchToEnglish: "English",
+    leaveWarning: "لديك تغييرات لم تُحفظ. هل تغادر هذه الصفحة وتفقدها؟",
     theme: "المظهر",
     themeLight: "فاتح",
     themeDark: "داكن",
@@ -94,6 +95,7 @@ export const ar: Messages = {
     whatHappens: "ماذا سيحدث",
     canUndo: "هل يمكن التراجع عنه؟",
     whoAffected: "من يتأثر",
+    whoNotified: "من يُبلَّغ",
     cancel: "إلغاء",
     acts: {
       closeAtScreening: {

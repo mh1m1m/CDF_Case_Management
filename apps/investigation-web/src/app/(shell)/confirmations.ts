@@ -46,6 +46,7 @@ export function confirmation(t: Translator, act: ConfirmAct): CDFConfirmation {
       whatHappens: t("confirm.whatHappens"),
       undo: t("confirm.canUndo"),
       affected: t("confirm.whoAffected"),
+      notified: t("confirm.whoNotified"),
     },
   };
 }

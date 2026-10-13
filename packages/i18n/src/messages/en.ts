@@ -7,6 +7,7 @@ export const en = {
     language: "Language",
     switchToArabic: "العربية",
     switchToEnglish: "English",
+    leaveWarning: "You have changes that are not saved. Leave this page and lose them?",
     theme: "Theme",
     themeLight: "Light",
     themeDark: "Dark",
@@ -98,6 +99,7 @@ export const en = {
     whatHappens: "What happens",
     canUndo: "Can it be undone?",
     whoAffected: "Who is affected",
+    whoNotified: "Who is told",
     cancel: "Cancel",
     acts: {
       closeAtScreening: {

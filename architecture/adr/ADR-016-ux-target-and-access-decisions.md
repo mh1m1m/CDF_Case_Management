@@ -433,6 +433,19 @@ write only what 1920 already grants.
   not shown per committee. Where the platform-wide rule sends nothing the page offers no box, so a caller cannot mute
   such a notice in advance; they can once it is on.
 
+Shared pieces the Phase 12 screens build on (no migration, no new command):
+
+- **Consequence preview.** The confirmation dialog (ADR-030) can also say who is told and list facts the command
+  will record. The page passes only what the caller may already read; the database still decides.
+- **Workflow guide.** A step path, what happens now, who acts next and whether the caller can act. The action form
+  renders only when the server says the caller can act; the command re-checks.
+- **Purpose banner.** Says why a purpose-bound view shows what it shows and what it leaves out (D2). It explains
+  access; it does not grant it.
+- **Configured value.** Shows a rule value with its source; a SOURCE_REQUIRED or unset value is marked as such, never
+  presented as decided.
+- **Unsaved changes (AMB-243).** A long form (draft case form, interview statement) asks before the user leaves by a
+  link or closes the page with changes not saved. An untouched or saved form never asks.
+
 ## Delivery governance
 
 - **Unit path.** Every unit of work follows Requirement → Decision → Linear → Branch → PR → Test → Hosted validation. Delivery goes through the redesign epics and coherent capabilities, not one ticket per debt item.
