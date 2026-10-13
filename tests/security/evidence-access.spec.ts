@@ -407,9 +407,15 @@ describe("ambiguity register: no API deletes an evidence object (CDF-205, ADR-01
         await s.tx
           .savepoint(async (sp) => {
             const deleted = await sp`delete from storage.objects returning id`.catch((e: Error) => e.message);
-            // Either the role has no privilege or RLS (with no policy) hides every row: nothing is deleted.
+            // Either the role has no privilege, RLS (with no policy) hides every row, or (Supabase CLI stack) the
+            // storage schema's own delete guard refuses the statement: nothing is deleted.
             expect(typeof deleted === "string" ? deleted : deleted.length, user).toSatisfy(
-              (v: unknown) => v === 0 || (typeof v === "string" && v.startsWith("permission denied")),
+              (v: unknown) =>
+                v === 0 ||
+                (typeof v === "string" &&
+                  (v.startsWith("permission denied") ||
+                    v ===
+                      "Direct deletion from storage tables is not allowed. Use the Storage API instead.")),
             );
             throw new Error("rollback");
           })
