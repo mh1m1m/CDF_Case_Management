@@ -3357,3 +3357,128 @@ revoke all on function
   exchange.purge_expired_bcp_staging()
 from public, anon, authenticated;
 grant execute on function exchange.purge_expired_bcp_staging() to cdf_bff;
+
+-- =============================================================================
+-- Item 11. Catalogue: the conflicting legacy status codes (DEC-F32, CON-013), S099 (DEC-F33) and the retirement of
+-- WB-FRM forms (DEC-F34)
+-- =============================================================================
+-- DEC-F32: a register of the ten codes that mean different things in the two status catalogues (1970 keeps both
+-- readings in config.legacy_status_map, marked code_conflict). No catalogue is chosen because it came first: the
+-- 100-Q&A and the approved business architecture decide where they resolve the meaning; otherwise the code stays
+-- SOURCE_REQUIRED, and a record that names only the bare code cannot be read as either. DEC-F33 resolves S099: the
+-- bare code is the owner catalogue's «تجميد قانوني», a LEGAL_HOLD (it blocks disposition and destruction, and does not by
+-- itself hide the case or stop operational steps); the Drive list's S099 is read only with its catalogue named.
+create table config.status_code_conflict (
+  code                text primary key check (code ~ '^S[0-9]{3}$'),
+  drive_catalogue     text not null default 'CRM_STATUS_DRIVE_150' check (drive_catalogue = 'CRM_STATUS_DRIVE_150'),
+  owner_catalogue     text not null default 'CRM_STATUS_D_140' check (owner_catalogue = 'CRM_STATUS_D_140'),
+  status              text not null check (status in ('SOURCE_REQUIRED', 'RESOLVED')),
+  resolved_catalogue  text check (resolved_catalogue in ('CRM_STATUS_DRIVE_150', 'CRM_STATUS_D_140')),
+  resolved_meaning    text check (resolved_meaning ~ '^[A-Z][A-Z0-9_]{1,59}$'),
+  decision_reference  text check (decision_reference ~ '^DEC-[A-Z0-9-]{1,20}$'),
+  notes               text not null check (length(notes) between 5 and 1000),
+  foreign key (drive_catalogue, code) references config.legacy_status_map (catalogue, legacy_code),
+  foreign key (owner_catalogue, code) references config.legacy_status_map (catalogue, legacy_code),
+  check ((status = 'RESOLVED') = (resolved_catalogue is not null and resolved_meaning is not null
+                                  and decision_reference is not null))
+);
+comment on table config.status_code_conflict is
+  'DEC-F32 (migration 2040): legacy status codes with competing definitions in the two status catalogues, and how '
+  'each is resolved. SOURCE_REQUIRED codes are never read from the bare code.';
+insert into config.status_code_conflict (code, status, resolved_catalogue, resolved_meaning, decision_reference, notes)
+values
+  ('S021', 'SOURCE_REQUIRED', null, null, null, 'Drive: a hearing session (event). Owner: awaiting the employee''s hearing (wait reason).'),
+  ('S022', 'SOURCE_REQUIRED', null, null, null, 'Drive: awaiting the parties. Owner: awaiting the subject''s statement.'),
+  ('S023', 'SOURCE_REQUIRED', null, null, null, 'Drive: awaiting party documents (wait). Owner: suspended for non-cooperation.'),
+  ('S025', 'SOURCE_REQUIRED', null, null, null, 'Drive: investigation resumed (event). Owner: awaiting a first investigator.'),
+  ('S026', 'SOURCE_REQUIRED', null, null, null, 'Drive: awaiting external information (wait). Owner: suspended for lack of resources.'),
+  ('S027', 'SOURCE_REQUIRED', null, null, null, 'Drive: awaiting a regulator''s report (wait). Owner: suspended for an investigator change.'),
+  ('S028', 'SOURCE_REQUIRED', null, null, null, 'Drive: investigation results under review. Owner: awaiting a committee (retired, Q21).'),
+  ('S030', 'SOURCE_REQUIRED', null, null, null, 'Drive: the committee''s recommendation (adopted package). Owner: awaiting a hearing.'),
+  ('S099', 'RESOLVED', 'CRM_STATUS_D_140', 'LEGAL_HOLD', 'DEC-F33',
+   'Owner «تجميد قانوني» is a legal hold (DEC-F33). The Drive reading (impact assessment) is the owner''s S100.'),
+  ('S100', 'SOURCE_REQUIRED', null, null, null, 'Drive: closure quality assessment. Owner: post-implementation impact assessment.');
+
+-- DEC-F34: no WB-FRM form is retired until all five criteria hold for it. The criteria are reference data; each
+-- assessment is recorded (append-only, the latest per criterion counts); none is recorded today, so no form is
+-- retirable and every form stays enabled. A form is never retired because the new UX is better.
+create table config.form_retirement_criterion (
+  code               text primary key check (code ~ '^[A-Z][A-Z_]{2,59}$'),
+  position           int not null unique check (position between 1 and 5),
+  description_en     text not null,
+  description_ar     text not null,
+  decision_reference text not null default 'DEC-F34'
+);
+comment on table config.form_retirement_criterion is
+  'DEC-F34 (migration 2040): the five conditions under which a legacy WB-FRM form may be retired.';
+insert into config.form_retirement_criterion (code, position, description_en, description_ar) values
+  ('REPLACEMENT_DOMAIN_OBJECT', 1, 'A replacement structured domain object exists.', 'يوجد كيان بيانات منظم بديل.'),
+  ('HISTORICAL_MAPPING', 2, 'A historical mapping exists.', 'يوجد ربط تاريخي للنموذج.'),
+  ('GENERATED_EQUIVALENT', 3, 'A generated or document equivalent exists where needed.',
+   'يوجد مكافئ مولَّد أو مستندي عند الحاجة.'),
+  ('MIGRATION_REPORTING_COMPATIBILITY', 4, 'Migration and reporting compatibility is documented.',
+   'توافق الترحيل والتقارير موثق.'),
+  ('NO_ACTIVE_WORKFLOW_DEPENDENCY', 5, 'No active workflow depends on the old artifact.',
+   'لا يعتمد أي مسار عمل نشط على النموذج القديم.');
+
+create table config.form_retirement_check (
+  id                 uuid primary key default gen_random_uuid(),
+  form_code          text not null references forms.form_definition (code),
+  criterion_code     text not null references config.form_retirement_criterion (code),
+  met                boolean not null,
+  evidence_reference text check (length(evidence_reference) between 3 and 300),
+  assessed_by        uuid references iam.user_profile (id),
+  assessed_at        timestamptz not null default now(),
+  check (not met or evidence_reference is not null)
+);
+create index form_retirement_check_form on config.form_retirement_check (form_code, criterion_code, assessed_at);
+create index form_retirement_check_criterion on config.form_retirement_check (criterion_code);
+create index form_retirement_check_assessed_by on config.form_retirement_check (assessed_by);
+comment on table config.form_retirement_check is
+  'DEC-F34 (migration 2040): assessments of a form against a retirement criterion. Append-only; the latest counts.';
+
+do $$
+declare t text;
+begin
+  foreach t in array array['status_code_conflict', 'form_retirement_criterion', 'form_retirement_check'] loop
+    execute format('create trigger no_update before update on config.%I for each row execute function committee.reject_mutation()', t);
+    execute format('create trigger no_delete before delete on config.%I for each row execute function committee.reject_mutation()', t);
+    execute format('create trigger no_truncate before truncate on config.%I for each statement execute function committee.reject_mutation()', t);
+    execute format('alter table config.%I enable row level security', t);
+    execute format('create policy %I on config.%I for select to authenticated using (authz.current_user_id() is not null)',
+                   t || '_read', t);
+    execute format('grant select on config.%I to authenticated', t);
+  end loop;
+end;
+$$;
+
+-- The criteria a form does not meet now (the latest assessment of each), in order. Empty means retirable.
+create function config.form_retirement_unmet(p_form_code text)
+returns text[]
+language sql stable
+set search_path = ''
+as $$
+  select coalesce(array_agg(c.code order by c.position), '{}')
+  from config.form_retirement_criterion c
+  where not coalesce((select k.met from config.form_retirement_check k
+                      where k.form_code = p_form_code and k.criterion_code = c.code
+                      order by k.assessed_at desc, k.id desc limit 1), false);
+$$;
+
+-- Whatever path disables a form (retires it from new use): every criterion must be met.
+create function config.guard_form_retirement()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if old.is_enabled and not new.is_enabled and cardinality(config.form_retirement_unmet(old.code)) > 0 then
+    perform api._fail('CONFLICT', 'FORM_RETIREMENT_CRITERIA_UNMET');
+  end if;
+  return new;
+end;
+$$;
+create trigger form_definition_retirement before update on forms.form_definition
+  for each row execute function config.guard_form_retirement();
+revoke all on function config.form_retirement_unmet(text), config.guard_form_retirement()
+from public, anon, authenticated;
