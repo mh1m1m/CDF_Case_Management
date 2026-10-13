@@ -2497,6 +2497,229 @@ begin
 end;
 $$;
 
+-- -----------------------------------------------------------------------------
+-- 2.14 An upheld conflict holds for the proceeding, and its reversal (DEC-F38, DEC-AMB-010, AMB-055)
+-- -----------------------------------------------------------------------------
+-- DEC-F38 is as built: a conflict declared or upheld in one meeting of a proceeding bars a "no conflict" declaration
+-- in its later meetings (1890, PRIOR_CONFLICT_DECLARED) and hides its recommendation work (1900). DEC-AMB-010 (owner, 2026-10-13, option B): the next eligible decider in the DEC-F04 hierarchy
+-- may reverse an upheld determination, with a reason and audit. The reversal is prospective: the member may declare
+-- again in later meetings and is no longer treated as conflicted for the proceeding's later work; the meeting in which
+-- the conflict was upheld keeps the member conflicted (no retroactive validation of participation).
+create table committee.meeting_conflict_reversal (
+  id          uuid primary key default gen_random_uuid(),
+  concern_id  uuid not null unique references committee.meeting_conflict_concern (id),
+  reversed_by uuid not null references iam.user_profile (id),
+  reversed_as text not null check (reversed_as in ('CHAIR', 'DEPUTY_CHAIR', 'CONFLICT_AUTHORITY')),
+  reason      text not null check (length(reason) between 10 and 2000),
+  reversed_at timestamptz not null default clock_timestamp()
+);
+create index meeting_conflict_reversal_by on committee.meeting_conflict_reversal (reversed_by);
+comment on table committee.meeting_conflict_reversal is
+  'DEC-AMB-010 (migration 2030): the reversal of an upheld meeting conflict by the next eligible decider in the '
+  'DEC-F04 hierarchy. Prospective only. Append-only; read as the concern is read (never by its subject).';
+create trigger no_update before update on committee.meeting_conflict_reversal
+  for each row execute function committee.reject_mutation();
+create trigger no_delete before delete on committee.meeting_conflict_reversal
+  for each row execute function committee.reject_mutation();
+create trigger no_truncate before truncate on committee.meeting_conflict_reversal
+  for each statement execute function committee.reject_mutation();
+
+-- Whether a participant's declared conflict still counts for the proceeding: always, unless it came only from an
+-- upheld concern that has since been reversed (DEC-AMB-010). A conflict the participant declared themself, or that the
+-- secretary recorded for them, always counts.
+create function committee.conflict_counts(p_participant_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select exists (
+    select 1 from committee.meeting_participant mp
+    where mp.id = p_participant_id and mp.coi_status = 'CONFLICT_DECLARED'
+      and not (exists (select 1 from committee.meeting_conflict_concern c
+                       join committee.meeting_conflict_reversal r on r.concern_id = c.id
+                       where c.participant_id = mp.id and c.status = 'UPHELD')
+               and not exists (select 1 from committee.meeting_conflict mc
+                               where mc.participant_id = mp.id and mc.status = 'CONFLICT_DECLARED'
+                                 and mc.source <> 'DECISION')));
+$$;
+
+-- The seat the user reverses an upheld concern as, or null: the first level after the original decider's (SECRETARY,
+-- CHAIR, DEPUTY_CHAIR, CONFLICT_AUTHORITY) at which someone is eligible now, and only if the user is that someone.
+-- Eligible: holds the seat on the committee now (or is its authority in force, holding no seat), active, cleared for
+-- the case, not conflicted in the proceeding, and neither the raiser, the subject nor the original decider. When no
+-- level after the original decider has anyone, nobody reverses (fail closed).
+create function committee.concern_reverser_seat(p_concern_id uuid, p_user_id uuid)
+returns text
+language sql stable
+set search_path = ''
+as $$
+  with k as (
+    select c.id, c.raised_by, c.decided_by, t.user_id as subject_user, m.case_id, m.committee_proceeding_id, cp.committee_id,
+           array_position(array['SECRETARY', 'CHAIR', 'DEPUTY_CHAIR', 'CONFLICT_AUTHORITY'], c.decided_as) as decided_ord
+    from committee.meeting_conflict_concern c
+    join committee.meeting_participant t on t.id = c.participant_id
+    join committee.meeting m on m.id = c.meeting_id
+    join committee.committee_proceeding cp on cp.id = m.committee_proceeding_id
+    where c.id = p_concern_id and c.status = 'UPHELD'
+  ), candidate as (
+    select s.seat as level, array_position(array['SECRETARY', 'CHAIR', 'DEPUTY_CHAIR', 'CONFLICT_AUTHORITY'], s.seat) as ord,
+           s.user_id
+    from k join committee.membership s on s.committee_id = k.committee_id
+    where s.seat in ('CHAIR', 'DEPUTY_CHAIR') and s.effective_from <= now() and (s.effective_to is null or s.effective_to > now())
+    union all
+    select 'CONFLICT_AUTHORITY', 4, a.user_id
+    from k join committee.conflict_authority a on a.committee_id = k.committee_id
+    where a.effective_from <= now() and (a.effective_to is null or a.effective_to > now())
+      and authz.user_committee_seat(a.user_id, k.committee_id, now()) is null
+  ), eligible as (
+    select c.level, c.ord, c.user_id
+    from candidate c cross join k
+    where c.ord > k.decided_ord
+      and c.user_id <> k.raised_by and c.user_id is distinct from k.subject_user and c.user_id <> k.decided_by
+      and exists (select 1 from iam.user_profile u where u.id = c.user_id and u.status = 'ACTIVE')
+      and authz.user_case_gate(c.user_id, k.case_id)
+      and not authz.has_meeting_conflict(c.user_id, k.committee_proceeding_id)
+  )
+  select e.level from eligible e
+  where e.user_id = p_user_id and e.ord = (select min(e2.ord) from eligible e2)
+  limit 1;
+$$;
+
+-- As in 1900, except that a conflict that came only from an upheld concern, since reversed, no longer counts for the
+-- proceeding's later work (DEC-AMB-010).
+create or replace function authz.has_meeting_conflict(p_user_id uuid, p_committee_proceeding_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from committee.meeting_participant mp
+    join committee.meeting m on m.id = mp.meeting_id
+    where m.committee_proceeding_id = p_committee_proceeding_id and mp.user_id = p_user_id
+      and mp.coi_status = 'CONFLICT_DECLARED' and committee.conflict_counts(mp.id)
+  );
+$$;
+
+-- As in 1890, except that the earlier-meeting check skips a conflict that no longer counts (DEC-AMB-010).
+create or replace function api.declare_meeting_conflict(p_participant_id uuid, p_status text, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_p committee.meeting_participant;
+  v_m committee.meeting;
+  v_source text;
+  v_reason text;
+begin
+  select * into v_p from committee.meeting_participant mp where mp.id = p_participant_id;
+  if v_p.id is null or not authz.can_view_meeting(v_p.meeting_id) then perform api._fail('NOT_FOUND'); end if;
+  v_m := committee.lock_visible_meeting(v_p.meeting_id);
+  select * into v_p from committee.meeting_participant mp where mp.id = p_participant_id for update;
+  if v_p.user_id = v_actor then
+    v_source := 'SELF';
+  elsif v_p.user_id is null and authz.can_manage_meeting(v_m.id) then
+    v_source := 'SECRETARY';
+  else
+    perform api._fail('FORBIDDEN');
+  end if;
+  if v_m.status not in ('SCHEDULED', 'OPEN') then perform api._fail('CONFLICT', 'MEETING_NOT_ACTIVE'); end if;
+  if not v_p.requires_coi then perform api._fail('CONFLICT', 'COI_NOT_REQUIRED'); end if;
+  if p_status is null or p_status not in ('NO_CONFLICT', 'CONFLICT_DECLARED') then perform api._fail('INVALID', 'status'); end if;
+  if v_p.coi_status = 'CONFLICT_DECLARED' or (v_p.coi_status = 'NO_CONFLICT' and p_status = 'NO_CONFLICT') then
+    perform api._fail('CONFLICT', 'COI_ALREADY_DECLARED');
+  end if;
+  if p_status = 'NO_CONFLICT' and v_p.participant_kind = 'MEMBER' and exists (
+       select 1 from committee.meeting_participant prior
+       join committee.meeting pm on pm.id = prior.meeting_id
+       where pm.committee_proceeding_id = v_m.committee_proceeding_id and pm.id <> v_m.id
+         and prior.proceeding_member_id = v_p.proceeding_member_id and prior.coi_status = 'CONFLICT_DECLARED'
+         and committee.conflict_counts(prior.id)) then
+    perform api._fail('CONFLICT', 'PRIOR_CONFLICT_DECLARED');
+  end if;
+  v_reason := case when p_status = 'CONFLICT_DECLARED' or p_reason is not null
+                   then api._require_text(p_reason, 'reason', 5, 2000) end;
+
+  insert into committee.meeting_conflict (meeting_id, participant_id, status, declared_by, source, reason)
+  values (v_m.id, v_p.id, p_status, v_actor, v_source, v_reason);
+  update committee.meeting_participant
+     set coi_status = p_status, coi_declared_at = now(),
+         attendance = case when p_status = 'CONFLICT_DECLARED' and attendance <> 'NOT_RECORDED' then 'EXCUSED_CONFLICT'
+                           else attendance end
+   where id = v_p.id;
+  -- The reason stays in the declaration row (declarer and secretary only); the ledger gets the fact.
+  perform audit.record_event('COI_DECLARED', 'BUSINESS', 'SUCCESS', v_m.case_id, 'meeting_participant', v_p.id::text, null,
+    jsonb_build_object('meeting_id', v_m.id, 'status', p_status, 'source', v_source, 'participant_kind', v_p.participant_kind));
+end;
+$$;
+
+-- A concern, as in 2000, and also for whoever may reverse it now or has reversed it. Never its subject.
+create or replace function authz.can_view_meeting_concern(p_concern_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and exists (
+    select 1 from committee.meeting_conflict_concern c
+    join committee.meeting_participant t on t.id = c.participant_id
+    where c.id = p_concern_id
+      and t.user_id is distinct from authz.current_user_id()
+      and ((c.raised_by = authz.current_user_id() and authz.can_view_meeting(c.meeting_id))
+           or authz.can_manage_meeting(c.meeting_id)
+           or authz.meeting_concern_decider_seat(c.id) is not null
+           or committee.concern_reverser_seat(c.id, authz.current_user_id()) is not null
+           or exists (select 1 from committee.meeting_conflict_reversal r
+                      where r.concern_id = c.id and r.reversed_by = authz.current_user_id()
+                        and authz.user_case_gate(r.reversed_by, (select m.case_id from committee.meeting m
+                                                                 where m.id = c.meeting_id))))
+  );
+$$;
+
+alter table committee.meeting_conflict_reversal enable row level security;
+create policy meeting_conflict_reversal_read on committee.meeting_conflict_reversal for select to authenticated
+  using (authz.can_view_meeting_concern(concern_id));
+grant select on committee.meeting_conflict_reversal to authenticated;
+
+create function api.reverse_meeting_conflict_determination(p_concern_id uuid, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_c committee.meeting_conflict_concern;
+  v_case uuid;
+  v_seat text;
+  v_reason text;
+  v_id uuid;
+begin
+  select * into v_c from committee.meeting_conflict_concern c where c.id = p_concern_id;
+  if v_c.id is null or not authz.can_view_meeting_concern(v_c.id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v_c from committee.meeting_conflict_concern c where c.id = p_concern_id for update;
+  select m.case_id into v_case from committee.meeting m where m.id = v_c.meeting_id;
+  if v_c.status <> 'UPHELD' then perform api._fail('CONFLICT', 'NOT_UPHELD'); end if;
+  if exists (select 1 from committee.meeting_conflict_reversal r where r.concern_id = v_c.id) then
+    perform api._fail('CONFLICT', 'ALREADY_REVERSED');
+  end if;
+  v_seat := committee.concern_reverser_seat(v_c.id, v_actor);
+  if v_seat is null then perform api._fail('FORBIDDEN'); end if;
+  if not exists (select 1 from case_mgmt.case_record c where c.id = v_case and c.records_state = 'ACTIVE') then
+    perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 10, 2000);
+  insert into committee.meeting_conflict_reversal (concern_id, reversed_by, reversed_as, reason)
+  values (v_c.id, v_actor, v_seat, v_reason)
+  returning id into v_id;
+  -- The reason stays in the reversal row; the ledger gets ids and seat codes.
+  perform audit.record_event('MEETING_CONFLICT_REVERSED', 'BUSINESS', 'SUCCESS', v_case, 'meeting_conflict_concern',
+    v_c.id::text, null,
+    jsonb_build_object('meeting_id', v_c.meeting_id, 'participant_id', v_c.participant_id, 'reversal_id', v_id,
+                       'reversed_as', v_seat, 'decided_as', v_c.decided_as));
+  return v_id;
+end;
+$$;
+
 grant execute on function
   api.activate_acting_chair(uuid, text),
   api.activate_acting_secretary(uuid, text),
@@ -2511,5 +2734,6 @@ grant execute on function
   api.revise_vote(uuid, text, text),
   api.recuse_for_conflict(uuid, text),
   api.record_vote_note(uuid, text, boolean),
-  api.overrule_minutes_objection(uuid, text)
+  api.overrule_minutes_objection(uuid, text),
+  api.reverse_meeting_conflict_determination(uuid, text)
 to authenticated;

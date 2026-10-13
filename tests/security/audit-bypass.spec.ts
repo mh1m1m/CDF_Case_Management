@@ -1137,6 +1137,23 @@ describe("every state-changing command writes its audit event in the same transa
         },
       },
       {
+        // DEC-AMB-010: a concern about the absent member, upheld by the deputy chair (the chair is absent) and
+        // reversed by the next decider, the committee's independent authority.
+        fn: "reverse_meeting_conflict_determination",
+        actor: "complianceManager",
+        run: async (s) => {
+          await s.as("committeeSecretary");
+          const concern = await one(
+            s,
+            s.tx`select api.raise_meeting_conflict(${ids.m2Member!}, 'Synthetic: walk concern to be upheld.') as id`,
+          );
+          await s.as("investigatorB");
+          await s.tx`select api.decide_meeting_conflict(${concern}, 'UPHELD', 'Synthetic: walk concern upheld.')`;
+          await s.as("complianceManager");
+          return s.tx`select api.reverse_meeting_conflict_determination(${concern}, 'Synthetic: walk determination reversed.')`;
+        },
+      },
+      {
         fn: "activate_alternate_member",
         actor: "committeeSecretary",
         run: (s) =>

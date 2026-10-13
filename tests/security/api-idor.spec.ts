@@ -724,6 +724,11 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     call: (tx, t) => tx`select api.record_vote_note(${t.voteItem}, 'Synthetic: probe note.', false)`,
   },
   {
+    fn: "reverse_meeting_conflict_determination",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.reverse_meeting_conflict_determination(${t.concern}, ${REASON})`,
+  },
+  {
     fn: "overrule_minutes_objection",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.overrule_minutes_objection(${t.minutes}, ${REASON})`,
@@ -1811,6 +1816,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "minutes_objection_ruling",
         "confidentiality_ack",
         "meeting_accommodation",
+        "meeting_conflict_reversal",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
       }
