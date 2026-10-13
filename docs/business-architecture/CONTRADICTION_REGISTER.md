@@ -1,6 +1,6 @@
 # Contradiction Register
 
-> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204). Generated from one data set with its companion files, so counts agree across them.
+> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)). Generated from one data set with its companion files, so counts agree across them.
 
 23 contradictions found while resolving the register (§30). Precedence is the appendix's §1: the 100 Q&A, then later owner decisions, then the business architecture, ADRs, governance documents, security decisions, implementation and catalogues. None needs a new owner question: each is resolved by a higher source, and the action names who changes what.
 
@@ -162,7 +162,7 @@
 - **Source B:** ADR-034 §2: BCP-1 imports four sheets; committee, grievance and evidence workbooks are later increments
 - **Conflict:** Continuity is partial.
 - **Authoritative resolution:** Q100 is the target; BCP-1 is a first increment, not a contradiction of intent.
-- **Action:** DEC-AMB-008 was decided on 2026-10-13 (option B; text in OWNER_DECISIONS_FROM_AMBIGUITIES.md). The committee workbook with paper ballots is migration 2120 (ADR-048); the grievance-scoped workbook still needs a number from the coordinator.
+- **Action:** DEC-AMB-008 was decided on 2026-10-13 (option B; text in OWNER_DECISIONS_FROM_AMBIGUITIES.md). The committee workbook with paper ballots is migration 2120 (ADR-048). The grievance-scoped workbook is migration 2140 (ADR-050), after 2130, built in the PR-C tail or a follow-on PR at the rebase thread's call.
 
 ## CON-021
 
