@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   USERS,
+  admin,
+  caseId,
   ownerScenario,
   reportId,
   scenario,
@@ -262,5 +264,103 @@ describe("ordinary cases are unchanged until grant scope lands (S3)", () => {
       expect(f.grants).toEqual([{ userId: USERS.triage }]);
       expect(f.events.map((e) => e.action)).not.toContain("CASE_HANDED_OVER");
     });
+  });
+});
+
+describe("lifting a restriction is not decided, so nobody can (CDF-206, AMB-234, DEC-AMB-012)", () => {
+  const LEVEL = "Synthetic: reclassification within the restricted case.";
+
+  it("T-AMB-145: a staffed Case Manager cannot lift the restriction, by false or by null", async () => {
+    await ownerScenario(async (s) => {
+      await accepted(s);
+      const caseId = await createRestricted(s, USERS.grcDirector);
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseId}, ${USERS.caseManager}, 'CASE', ${REASON})`;
+      await s.as("caseManager");
+      expect(
+        (await s.tx<{ p: boolean }[]>`select authz.has_permission('RESTRICTED_CASE_GRANT') as p`)[0]!.p,
+      ).toBe(false);
+      await s.expectError(
+        "CDF_CONFLICT:RESTRICTION_LIFT_NOT_DECIDED",
+        (tx) =>
+          tx`select api.change_case_classification(${caseId}, 'CONFIDENTIAL'::core.classification_level, false, ${LEVEL})`,
+      );
+      // Null means "keep": the level changes, the restriction stays.
+      await s.tx`select api.change_case_classification(${caseId}, 'RESTRICTED'::core.classification_level, null, ${LEVEL})`;
+      const f = await facts(s, caseId);
+      expect(f.case).toMatchObject({ isRestricted: true, classification: "RESTRICTED" });
+      expect(f.events.filter((e) => e.action === "CLASSIFICATION_CHANGED").map((e) => e.metadata)).toEqual([
+        expect.objectContaining({ restricted_from: true, restricted_to: true }),
+      ]);
+      // CASE_VIEW_ALL still does not reach it.
+      expect(await canView(s, "grcDeputy", caseId)).toBe(false);
+    });
+  });
+
+  it("T-AMB-145: the restricted-case authority who owns the case cannot lift it either", async () => {
+    await ownerScenario(async (s) => {
+      const exec = await caseId("0003"); // seed restricted SECRET case, owned by the GRC Director
+      await s.as("grcDirector");
+      expect(
+        (await s.tx<{ p: boolean }[]>`select authz.has_permission('RESTRICTED_CASE_GRANT') as p`)[0]!.p,
+      ).toBe(true);
+      await s.expectError(
+        "CDF_CONFLICT:RESTRICTION_LIFT_NOT_DECIDED",
+        (tx) =>
+          tx`select api.change_case_classification(${exec}, 'SECRET'::core.classification_level, false, ${LEVEL})`,
+      );
+      await s.tx`select api.change_case_classification(${exec}, 'SECRET'::core.classification_level, null, ${LEVEL})`;
+      await s.asOwner();
+      const [c] = await s.tx<
+        { is_restricted: boolean }[]
+      >`select is_restricted from case_mgmt.case_record where id = ${exec}`;
+      expect(c!.is_restricted).toBe(true);
+      expect(await canView(s, "caseManager", exec)).toBe(false);
+    });
+  });
+
+  it("restricting still needs RESTRICTED_CASE_GRANT, and a non-restricted case keeps its status on null", async () => {
+    await ownerScenario(async (s) => {
+      const open = await caseId("0004");
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) =>
+          tx`select api.change_case_classification(${open}, 'CONFIDENTIAL'::core.classification_level, true, ${LEVEL})`,
+      );
+      await s.tx`select api.change_case_classification(${open}, 'CONFIDENTIAL'::core.classification_level, null, ${LEVEL})`;
+      await s.asOwner();
+      expect(
+        (
+          await s.tx<
+            { r: boolean }[]
+          >`select is_restricted as r from case_mgmt.case_record where id = ${open}`
+        )[0]!.r,
+      ).toBe(false);
+      await s.as("grcDirector");
+      await s.tx`select api.change_case_classification(${open}, 'CONFIDENTIAL'::core.classification_level, true, ${LEVEL})`;
+      await s.asOwner();
+      expect(
+        (
+          await s.tx<
+            { r: boolean }[]
+          >`select is_restricted as r from case_mgmt.case_record where id = ${open}`
+        )[0]!.r,
+      ).toBe(true);
+      expect(await canView(s, "caseManager", open)).toBe(false);
+    });
+  });
+
+  it("T-AMB-145: no other function writes is_restricted, and no application role may update it directly", async () => {
+    const writers = await admin<{ fn: string }[]>`
+      select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where p.prokind = 'f' and n.nspname not in ('pg_catalog', 'information_schema')
+        and pg_get_functiondef(p.oid) ~ 'is_restricted\\s*=' order by 1`;
+    expect(writers.map((w) => w.fn)).toEqual(["api.change_case_classification"]);
+    const updaters = await admin<{ grantee: string }[]>`
+      select grantee from information_schema.column_privileges
+      where table_schema = 'case_mgmt' and table_name = 'case_record' and column_name = 'is_restricted'
+        and privilege_type = 'UPDATE' and grantee in ('anon', 'authenticated', 'service_role', 'cdf_bff', 'cdf_portal')`;
+    expect(updaters).toEqual([]);
   });
 });
