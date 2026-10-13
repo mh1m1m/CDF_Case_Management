@@ -37,14 +37,57 @@ export async function updateDetailsAction(
     priority: form.has("priority") ? sent.priority : (r.priority ?? undefined),
     expectedVersion: r.rowVersion,
   });
-  if (result.ok) revalidatePath(`/cases/${caseId}`);
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
   return toActionState(result, form);
 }
 
 export async function assignAction(caseId: string, _: ActionState, form: FormData): Promise<ActionState> {
   const { actor, ctx } = await requireActor();
   const result = await investigationService().assignCase(ctx, actor, { ...formObject(form), caseId });
-  if (result.ok) revalidatePath(`/cases/${caseId}`);
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
+  return toActionState(result, form);
+}
+
+// The conversation with the reporter (DEC-06). The database decides who may write and who may delegate.
+export async function reporterReplyAction(
+  caseId: string,
+  reportId: string,
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await investigationService().replyToReporter(ctx, actor, { ...formObject(form), reportId });
+  if (result.ok) revalidatePath(`/cases/${caseId}/reporter`);
+  return toActionState(result, form);
+}
+
+export async function delegateReporterAction(
+  caseId: string,
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await investigationService().delegateReporterCommunication(ctx, actor, {
+    ...formObject(form),
+    caseId,
+  });
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
+  return toActionState(result, form);
+}
+
+export async function endReporterDelegationAction(
+  caseId: string,
+  delegationId: string,
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await investigationService().endReporterCommunication(ctx, actor, {
+    ...formObject(form),
+    caseId,
+    delegationId,
+  });
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
   return toActionState(result, form);
 }
 
@@ -64,7 +107,7 @@ export async function declareConflictAction(
   });
   // A declared conflict removes access immediately, so leave the case.
   if (result.ok && hasConflict) redirect("/cases");
-  if (result.ok) revalidatePath(`/cases/${caseId}`);
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
   return toActionState(result, form);
 }
 
@@ -85,7 +128,7 @@ export async function decideConflictAction(
     conflictId,
   });
   // The decided declaration leaves the panel, so the confirmation is shown on the page instead.
-  if (result.ok) redirect(`/cases/${caseId}?decided=conflict`);
+  if (result.ok) redirect(`/cases/${caseId}/people?decided=conflict`);
   return toActionState(result, form);
 }
 
@@ -101,7 +144,26 @@ export async function transitionAction(
     caseId,
     transitionCode,
   });
-  if (result.ok) revalidatePath(`/cases/${caseId}`);
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
+  return toActionState(result, form);
+}
+
+/** DEC-09: limit an item to the case leads, or open it to the team again. The database decides who may. */
+export async function setEvidenceRestrictionAction(
+  caseId: string,
+  evidenceId: string,
+  restriction: "TEAM" | "LEADS",
+  _: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const { actor, ctx } = await requireActor();
+  const result = await evidenceService().setRestriction(ctx, actor, {
+    ...formObject(form),
+    caseId,
+    evidenceId,
+    restriction,
+  });
+  if (result.ok) revalidatePath(`/cases/${caseId}`, "layout");
   return toActionState(result, form);
 }
 
@@ -125,7 +187,7 @@ export async function uploadEvidenceAction(
   delete (metadata as Record<string, unknown>).file;
   const result = await evidenceService().upload(ctx, actor, metadata, { name: file.name, bytes });
   if (result.ok) {
-    revalidatePath(`/cases/${caseId}`);
+    revalidatePath(`/cases/${caseId}`, "layout");
     return { status: "ok", message: result.value.sha256 };
   }
   return toActionState(result, form);

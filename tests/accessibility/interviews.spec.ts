@@ -1,5 +1,6 @@
 // WCAG 2.2 AA checks (§43) on the interview screens (CDF-60), in Arabic (RTL) and English (LTR):
-// the list with its planning form, an approved interview, and a planned one with every recording form open.
+// the list with its planning form, an approved interview, and a planned one at its first step (UX-033 stepper),
+// each also at 320 px without horizontal scrolling (WCAG 1.4.10).
 import { expect, test } from "@playwright/test";
 import { audit } from "./axe";
 import { signIn } from "../e2e/support";
@@ -31,10 +32,21 @@ for (const locale of ["ar", "en"] as const) {
 
     // INT-001 (approved, read-only) and INT-002 (planned, forms open; the lead is on its panel).
     for (const n of [1, 2]) {
+      await page.setViewportSize({ width: 1280, height: 900 });
       await page.goto(list);
       await page.getByTestId(`interview-${n}`).click();
       await expect(page.getByTestId("interview-status")).toBeVisible();
+      await expect(page.getByTestId("interview-steps")).toBeVisible();
       await audit(page);
+      if (n === 2) {
+        // The planned interview's cancellation sits behind a disclosure; audit it open.
+        await page.getByTestId("cancel-interview").locator("summary").click();
+        await expect(page.getByTestId("interview-action-CANCEL")).toBeVisible();
+        await audit(page);
+      }
+      await page.setViewportSize({ width: 320, height: 800 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+      expect(overflow, `horizontal overflow on INT-00${n} at 320px`).toBe(false);
     }
     await page.context().close();
   });

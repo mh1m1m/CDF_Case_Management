@@ -97,6 +97,69 @@ export function transitionBlockers(
   return out;
 }
 
+/**
+ * The interview's steps in order (UX-033). The page shows them as a stepper with one current step: the first
+ * one not yet done. A step is done by what is on record, so a step done out of order (rights before the
+ * invitation) still shows as done. Nothing here grants anything; each step's command re-checks in the database.
+ */
+export const INTERVIEW_STEPS = [
+  "SCHEDULE",
+  "INVITE",
+  "RIGHTS",
+  "CONDUCT",
+  "STATEMENT",
+  "PREPARE",
+  "REVIEW",
+  "APPROVE",
+] as const;
+export type InterviewStep = (typeof INTERVIEW_STEPS)[number];
+export type InterviewStepState = "done" | "current" | "upcoming" | "skipped";
+
+/** Facts the steps need; a subset of InterviewDetail. */
+export interface InterviewStepFacts extends InterviewFacts {
+  scheduledStart: string | null;
+  conductedStartedAt: string | null;
+}
+
+const PREPARED_OR_LATER: readonly InterviewStatus[] = ["PREPARED", "REVIEWED", "APPROVED"];
+
+function stepDone(i: InterviewStepFacts, step: InterviewStep): boolean {
+  switch (step) {
+    case "SCHEDULE":
+      return i.status !== "PLANNED" && i.scheduledStart !== null;
+    case "INVITE":
+      return i.notices.some((n) => n.noticeType === "INVITATION");
+    case "RIGHTS":
+      return i.rightsAcknowledgedAt !== null;
+    case "CONDUCT":
+      return i.conductedStartedAt !== null;
+    case "STATEMENT":
+      return (
+        PREPARED_OR_LATER.includes(i.status) ||
+        !!i.statements.find((s) => s.id === i.currentStatementVersionId)?.acknowledgement
+      );
+    case "PREPARE":
+      return PREPARED_OR_LATER.includes(i.status);
+    case "REVIEW":
+      return i.status === "REVIEWED" || i.status === "APPROVED";
+    case "APPROVE":
+      return i.status === "APPROVED";
+  }
+}
+
+/** Each step with its state. A cancelled interview has no current step: what was not done is "skipped". */
+export function interviewSteps(i: InterviewStepFacts): { step: InterviewStep; state: InterviewStepState }[] {
+  const cancelled = i.status === "CANCELLED";
+  let currentFound = false;
+  return INTERVIEW_STEPS.map((step) => {
+    if (stepDone(i, step)) return { step, state: "done" as const };
+    if (cancelled) return { step, state: "skipped" as const };
+    if (currentFound) return { step, state: "upcoming" as const };
+    currentFound = true;
+    return { step, state: "current" as const };
+  });
+}
+
 /** Display number within a case: INT-001. The UUID remains the identifier (§87). */
 export function interviewDisplayNumber(sequenceNo: number): string {
   return `INT-${String(sequenceNo).padStart(3, "0")}`;

@@ -6,11 +6,13 @@ import type {
   FormEventInfo,
   FormInstanceCapabilities,
   FormInstanceDetail,
-  FormInstanceSummary,
+  FormInstanceListItem,
   FormInstanceVersionInfo,
   FormReviewOutcome,
   FormSectionDefinition,
+  FormInstanceSummary,
   FormStatus,
+  Role,
 } from "@cdf/contracts";
 import type { FormsGateway, SavedFormVersion, UserRequestContext } from "@cdf/application";
 import { withUserContext, type Sql, type Tx } from "./security-context";
@@ -43,6 +45,17 @@ type DetailRow = SummaryRow &
     withdrawnByName: string | null;
     withdrawnAt: Date | null;
   };
+type ListRow = SummaryRow &
+  FormInstanceCapabilities & {
+    finalStatus: FormStatus;
+    preparedByName: string | null;
+    preparedAt: Date | null;
+    nextRoles: Role[];
+    returnedAt: Date | null;
+    returnedByName: string | null;
+    returnedReason: string | null;
+    returnedToMe: boolean;
+  };
 type VersionRow = Omit<FormInstanceVersionInfo, "savedAt"> & { savedAt: Date };
 type EventRow = Omit<FormEventInfo, "occurredAt"> & { occurredAt: Date };
 
@@ -66,21 +79,86 @@ export class PostgresFormsGateway implements FormsGateway {
     );
   }
 
-  listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceSummary[]> {
+  listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceListItem[]> {
     return this.run(ctx, async (tx) => {
-      const rows = await tx<SummaryRow[]>`
+      // Capabilities are the instance page's own expressions (the commands re-check). The return is derived from
+      // the form's events: a draft's latest RETURNED event, sent back to whoever prepared the returned version
+      // (RETURN clears prepared_by, so that comes from the last PREPARED event). The list carries the reason only
+      // to that person; everyone else reads it on the form itself, which records FORM_VIEWED.
+      const rows = await tx<ListRow[]>`
         select i.id, i.case_id as "caseId", c.case_number as "caseNumber", i.form_code as "formCode", d.name_ar as "formNameAr",
                d.name_en as "formNameEn", i.instance_no as "instanceNo", i.status, i.classification, cv.version_no as "currentVersionNo",
                cv.content_hash as "contentHash", i.created_by as "createdBy", u.display_name as "createdByName",
-               i.created_at as "createdAt", i.updated_at as "updatedAt"
+               i.created_at as "createdAt", i.updated_at as "updatedAt",
+               forms.terminal_status(d.review_required, d.approval_required) as "finalStatus",
+               up.display_name as "preparedByName", i.prepared_at as "preparedAt",
+               (authz.can_prepare_form(i.case_id, i.form_code) and i.status = 'DRAFT') as "canSave",
+               (authz.can_prepare_form(i.case_id, i.form_code) and i.status = 'DRAFT' and i.current_version_id is not null) as "canPrepare",
+               (authz.can_review_form(i.id) and i.status = 'PREPARED' and i.prepared_by is distinct from authz.current_user_id()) as "canReview",
+               (authz.can_approve_form(i.id) and i.status = 'REVIEWED'
+                  and authz.current_user_id() is distinct from i.prepared_by and authz.current_user_id() is distinct from i.reviewed_by) as "canApprove",
+               (authz.can_prepare_form(i.case_id, i.form_code) and i.status <> 'WITHDRAWN'
+                  and i.status <> forms.terminal_status(d.review_required, d.approval_required)) as "canWithdraw",
+               array(select e.role_code from forms.form_entitlement e
+                      where e.form_code = i.form_code
+                        and i.status <> forms.terminal_status(d.review_required, d.approval_required)
+                        and e.action = case i.status when 'DRAFT' then 'PREPARE' when 'PREPARED' then 'REVIEW'
+                                                     when 'REVIEWED' then 'APPROVE' end
+                      order by e.role_code) as "nextRoles",
+               ret.occurred_at as "returnedAt", ur.display_name as "returnedByName",
+               case when prep.actor_id = authz.current_user_id() then ret.reason end as "returnedReason",
+               coalesce(ret.occurred_at is not null and prep.actor_id = authz.current_user_id(), false) as "returnedToMe"
         from forms.form_instance i
         join case_mgmt.case_record c on c.id = i.case_id
         join forms.form_definition d on d.code = i.form_code
         left join forms.form_instance_version cv on cv.id = i.current_version_id
         left join iam.user_profile u on u.id = i.created_by
+        left join iam.user_profile up on up.id = i.prepared_by
+        left join lateral (select e.occurred_at, e.actor_id, e.reason from forms.form_event e
+                            where i.status = 'DRAFT' and e.instance_id = i.id and e.event_type = 'RETURNED'
+                            order by e.seq desc limit 1) ret on true
+        left join iam.user_profile ur on ur.id = ret.actor_id
+        left join lateral (select e.actor_id from forms.form_event e
+                            where e.instance_id = i.id and e.event_type = 'PREPARED'
+                            order by e.seq desc limit 1) prep on true
         where i.case_id = ${caseId}
         order by d.sequence_no, i.instance_no`;
-      return rows.map((r) => ({ ...r, createdAt: iso(r.createdAt)!, updatedAt: iso(r.updatedAt)! }));
+      return rows.map((r) => ({
+        id: r.id,
+        caseId: r.caseId,
+        caseNumber: r.caseNumber,
+        formCode: r.formCode,
+        formNameAr: r.formNameAr,
+        formNameEn: r.formNameEn,
+        instanceNo: r.instanceNo,
+        status: r.status,
+        classification: r.classification,
+        currentVersionNo: r.currentVersionNo,
+        contentHash: r.contentHash,
+        createdBy: r.createdBy,
+        createdByName: r.createdByName,
+        createdAt: iso(r.createdAt)!,
+        updatedAt: iso(r.updatedAt)!,
+        finalStatus: r.finalStatus,
+        preparedByName: r.preparedByName,
+        preparedAt: iso(r.preparedAt),
+        capabilities: {
+          canSave: r.canSave,
+          canPrepare: r.canPrepare,
+          canReview: r.canReview,
+          canApprove: r.canApprove,
+          canWithdraw: r.canWithdraw,
+        },
+        nextRoles: r.nextRoles,
+        returned: r.returnedAt
+          ? {
+              at: iso(r.returnedAt)!,
+              byName: r.returnedByName,
+              reason: r.returnedReason,
+              toMe: r.returnedToMe,
+            }
+          : null,
+      }));
     });
   }
 

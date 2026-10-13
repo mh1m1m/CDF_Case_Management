@@ -99,9 +99,12 @@ describe("storage policy", () => {
       "api.open_evidence_version(uuid)",
       "api.register_evidence_version(uuid,uuid,text,text,text,text,date,core.classification_level,text,text,bigint,text)",
       "api.reject_evidence_version(uuid,text,text,text)",
+      "api.set_evidence_restriction(uuid,text,text)",
       "authz.can_download_evidence(uuid)",
       "authz.can_upload_evidence(uuid)",
       "authz.can_view_evidence(uuid)",
+      "authz.is_evidence_lead(uuid)",
+      "authz.is_evidence_team(uuid)",
     ]);
     expect(fns.every((f) => f.auth && !f.anon)).toBe(true);
   });

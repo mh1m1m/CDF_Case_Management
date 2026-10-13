@@ -1,7 +1,8 @@
 // CDF-72 · ADR-015, Drive field 19, §22–§27, §40, threats T02/T05/T10/T21: reporter attachments on the public
 // portal. Credentials never reveal whether a Report ID exists, limits hold per report and per client, nothing is
 // overwritten or deleted, nothing is downloadable before a clean scan, visibility follows the report (intake
-// rules before a case, authz.can_view_case after), and every command writes its audit event.
+// rules before a case; after it the investigation team and triage while its grant lasts, DEC-09), and every
+// command writes its audit event.
 import { createHash, randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
@@ -356,11 +357,17 @@ describe("download gate: clean scan first, then report visibility", () => {
     });
   });
 
-  it("after a case: visibility is the case's (authz.can_view_case); the intake team loses access", async () => {
+  it("after a case: the investigation team (DEC-09); the intake team and case-only viewers lose access", async () => {
     await scenario(async (s) => {
       const id = await availableAttachment(s, CASE_B_REF);
       expect(await open(s, "investigatorB", id)).toHaveLength(1);
-      for (const user of ["investigatorA", "intake", "platformAdmin", "committee"] as UserKey[]) {
+      for (const user of [
+        "investigatorA",
+        "intake",
+        "platformAdmin",
+        "committee",
+        "grcDirector",
+      ] as UserKey[]) {
         expect(await open(s, user, id), user).toEqual([]);
         await s.as(user);
         expect(await s.tx`select id from intake.report_attachment where id = ${id}`, user).toEqual([]);

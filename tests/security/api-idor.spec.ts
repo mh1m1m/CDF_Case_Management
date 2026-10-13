@@ -50,6 +50,8 @@ interface Targets {
   finding: string;
   // Preliminary review (migration 1880)
   recommendation: string;
+  // Reporter conversation (DEC-06, migration 1840)
+  reporterDelegation: string;
 }
 
 type Outcome = "NOT_FOUND" | "EMPTY" | "FALSE";
@@ -85,6 +87,23 @@ const PROBES: Probe[] = [
     outcome: "EMPTY",
     call: (tx, t) => tx`select * from api.available_transitions(${t.case})`,
   },
+  // S2 read models (migration 1830): no rows without the caller's own case access, as for a missing case.
+  {
+    fn: "case_access_roster",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.case_access_roster(${t.case})`,
+  },
+  // S2h (migration 1860): the officers a retention review may be routed to, refused as for a missing case.
+  {
+    fn: "list_retention_reviewers",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select * from api.list_retention_reviewers(${t.case})`,
+  },
+  {
+    fn: "case_history",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.case_history(${t.case}, 500)`,
+  },
   {
     fn: "change_case_classification",
     outcome: "NOT_FOUND",
@@ -118,6 +137,17 @@ const PROBES: Probe[] = [
     fn: "decide_identity_reveal",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.decide_identity_reveal(${t.revealRequest}, true, ${REASON})`,
+  },
+  // DEC-06 (migration 1840): delegating the reporter conversation, to oneself or anyone, and ending a delegation.
+  {
+    fn: "delegate_reporter_communication",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.delegate_reporter_communication(${t.case}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "end_reporter_communication",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.end_reporter_communication(${t.reporterDelegation}, ${REASON})`,
   },
   {
     fn: "declare_conflict",
@@ -174,6 +204,12 @@ const PROBES: Probe[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) =>
       tx`select api.reject_evidence_version(${t.version}, 'MALWARE_DETECTED', 'INFECTED', 'probe')`,
+  },
+  {
+    // DEC-09 (migration 1850): an item outside the caller's need-to-know is not found.
+    fn: "set_evidence_restriction",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.set_evidence_restriction(${t.evidence}, 'LEADS', ${REASON})`,
   },
   {
     fn: "reply_to_reporter",
@@ -1078,6 +1114,8 @@ const GLOBAL_COMMANDS = [
   "my_areas",
   "my_work_items",
   "my_access",
+  // S2h (migration 1860): the shared retention queue, rows the caller may classify (ADR-016 D8).
+  "retention_review_queue",
   "request_case_for_legal_hold",
   "search_records_catalogue",
   // Migration 1880: the caller's purpose-bound approval queue.
@@ -1236,6 +1274,18 @@ async function domainObjects(
   return { allegation: a!.id, proceeding: p!.id, finding: f!.id, recommendation: r!.id };
 }
 
+/**
+ * A REPORTER_COMMUNICATE delegation (DEC-06) on case B: the case manager lets the assigned investigator write to
+ * the reporter. The executive case has no investigator to delegate to, so its probe gets a random id.
+ */
+async function reporterDelegation(s: Scenario, which: "B" | "EXEC", target: string): Promise<string> {
+  if (which === "EXEC") return randomUUID();
+  await s.as("caseManager");
+  const [d] = await s.tx<{ id: string }[]>`
+    select api.delegate_reporter_communication(${target}, ${USERS.investigatorB}, ${REASON}) as id`;
+  return d!.id;
+}
+
 async function outcomeOf<T>(s: Scenario, probe: Probe<T>, t: T, self: string): Promise<string> {
   let result: readonly Record<string, unknown>[] | undefined;
   let error: string | undefined;
@@ -1273,6 +1323,7 @@ const randomTargets = (): Targets => ({
   proceeding: randomUUID(),
   finding: randomUUID(),
   recommendation: randomUUID(),
+  reporterDelegation: randomUUID(),
 });
 
 describe("catalog guard", () => {
@@ -1331,6 +1382,8 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
         which === "B"
           ? await domainObjects(s, target, "caseManager", "investigatorB")
           : await domainObjects(s, target, "grcDirector", "grcDirector");
+      // Before the insider objects too: the investigator's conflict declaration removes its case access.
+      const delegation = await reporterDelegation(s, which, target);
       const inside =
         which === "B"
           ? await insiderObjects(
@@ -1344,7 +1397,15 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
             )
           : await insiderObjects(s, target, "grcDirector", "grcDirector", "grcDirector", "SECRET");
       const attachment = await reporterAttachment(s, seeded.reportRef);
-      const real: Targets = { case: target, ...seeded, ...inside, ...purpose, ...domain, attachment };
+      const real: Targets = {
+        case: target,
+        ...seeded,
+        ...inside,
+        ...purpose,
+        ...domain,
+        attachment,
+        reporterDelegation: delegation,
+      };
       await s.as(actor);
       const self = USERS[actor];
       const mismatches: string[] = [];
@@ -2104,6 +2165,7 @@ describe("non-object commands", () => {
     await scenario(async (s) => {
       const purpose = await purposeObjects(s, caseB, "caseManager", "legal", true);
       const domain = await domainObjects(s, caseB, "caseManager", "investigatorB");
+      const delegation = await reporterDelegation(s, "B", caseB);
       const inside = await insiderObjects(
         s,
         caseB,
@@ -2120,7 +2182,15 @@ describe("non-object commands", () => {
         const got = await outcomeOf(
           s,
           probe,
-          { case: caseB, ...seeded, ...inside, ...purpose, ...domain, attachment },
+          {
+            case: caseB,
+            ...seeded,
+            ...inside,
+            ...purpose,
+            ...domain,
+            attachment,
+            reporterDelegation: delegation,
+          },
           USERS.revoked,
         );
         if (!["EMPTY", "FALSE", "NOT_FOUND"].includes(got) && !got.startsWith("ERROR CDF_UNAUTHENTICATED"))

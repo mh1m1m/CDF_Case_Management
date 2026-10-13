@@ -65,6 +65,14 @@ export const requestLegalHoldSchema = z.object({ caseId: uuid, reasonCode, justi
 
 export const assignHoldRequestSchema = z.object({ requestId: uuid, reviewerId: uuid });
 
+/** Routes an archived case's retention review to one officer as a RETENTION_REVIEW task (ADR-016 D8). The purpose
+ * is bounded like api.create_case_task's (10–1000 characters). */
+export const routeRetentionReviewSchema = z.object({
+  caseId: uuid,
+  reviewerId: uuid,
+  purpose: text(10, 1000),
+});
+
 export const reviewHoldRequestSchema = z.object({
   requestId: uuid,
   apply: decision("APPLY", "REJECT"),

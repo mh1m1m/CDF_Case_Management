@@ -30,6 +30,7 @@ import {
   requestDispositionAction,
   requestHoldReleaseAction,
   requestLegalHoldAction,
+  routeRetentionReviewAction,
 } from "../actions";
 import { LegalHoldBadge, RecordsStateBadge } from "../badges";
 import { confirmation } from "../../confirmations";
@@ -43,8 +44,15 @@ export async function generateMetadata(): Promise<Metadata> {
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
-export default async function RecordPage({ params }: { params: Promise<{ caseId: string }> }) {
+export default async function RecordPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ caseId: string }>;
+  searchParams: Promise<{ routed?: string }>;
+}) {
   const { caseId } = await params;
+  const routed = (await searchParams).routed === "1";
   if (!UUID.test(caseId)) notFound();
   const { actor, ctx } = await requireActor();
   const nav = navigationFor(actor);
@@ -54,11 +62,12 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
   if (!r) notFound();
   const cap = r.capabilities;
   const canAssignRequests = can(actor, "CASE_TASK_ASSIGN");
-  const [classes, directory] = await Promise.all([
+  const [classes, directory, reviewers] = await Promise.all([
     cap.manageRetention ? recordsService().listRetentionClasses(ctx) : Promise.resolve([]),
     canAssignRequests && r.holdRequests.some((q) => q.status === "SUBMITTED")
       ? investigationService().directory(ctx)
       : Promise.resolve([]),
+    cap.routeRetention ? recordsService().listRetentionReviewers(ctx, caseId) : Promise.resolve([]),
   ]);
   const disposed = r.recordsState === "DISPOSED";
   const retentionOpen = r.recordsState === "ARCHIVED" || r.recordsState === "RETENTION";
@@ -84,6 +93,14 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
           </Link>
         }
       />
+
+      {routed ? (
+        <div className="mb-4">
+          <CDFAlert tone="success" testId="retention-routed">
+            {t("records.routeDone")}
+          </CDFAlert>
+        </div>
+      ) : null}
 
       <CDFCard title={t("records.metadataTitle")} testId="record-card">
         <p className="mb-3 text-sm text-cdf-text-secondary">{t("records.metadataNote")}</p>
@@ -135,41 +152,118 @@ export default async function RecordPage({ params }: { params: Promise<{ caseId:
       </CDFCard>
 
       {cap.manageRetention && retentionOpen ? (
-        <CDFCard title={t("records.retentionTitle")} testId="retention-card">
-          <CDFCommandForm
-            action={assignRetentionClassAction.bind(null, r.caseId)}
-            locale={t.locale}
-            submitLabel={t("records.assignClass")}
-            variant="secondary"
-            testId="retention-form"
-            successMessage={t("records.classAssigned")}
-          >
-            <CDFField
-              id="retentionClass"
-              label={t("records.retentionClassLabel")}
-              hint={t("records.retentionClassHint")}
-              requiredLabel={t("common.required")}
+        // The target of the Records queue's "Review retention classification" (ADR-016 D8).
+        <div id="retention" tabIndex={-1}>
+          <CDFCard title={t("records.retentionTitle")} testId="retention-card">
+            {r.legalHoldStatus === "ACTIVE" ? (
+              <div className="mb-3">
+                <CDFAlert tone="info" testId="retention-hold-note">
+                  {t("records.holdAllowsClassification")}
+                </CDFAlert>
+              </div>
+            ) : null}
+            <CDFCommandForm
+              action={assignRetentionClassAction.bind(null, r.caseId)}
+              locale={t.locale}
+              submitLabel={t("records.assignClass")}
+              variant="secondary"
+              testId="retention-form"
+              successMessage={t("records.classAssigned")}
             >
-              <select
+              <CDFField
                 id="retentionClass"
-                name="retentionClass"
-                className={inputClass}
-                defaultValue={r.retentionClass === "UNASSIGNED" ? "" : r.retentionClass}
-                aria-describedby="retentionClass-hint"
-                required
+                label={t("records.retentionClassLabel")}
+                hint={t("records.retentionClassHint")}
+                requiredLabel={t("common.required")}
               >
-                <option value="" disabled>
-                  —
-                </option>
-                {classes.map((k) => (
-                  <option key={k.code} value={k.code}>
-                    {className(k.code)}
+                <select
+                  id="retentionClass"
+                  name="retentionClass"
+                  className={inputClass}
+                  defaultValue={r.retentionClass === "UNASSIGNED" ? "" : r.retentionClass}
+                  aria-describedby="retentionClass-hint"
+                  required
+                >
+                  <option value="" disabled>
+                    —
                   </option>
-                ))}
-              </select>
-            </CDFField>
-          </CDFCommandForm>
-        </CDFCard>
+                  {classes.map((k) => (
+                    <option key={k.code} value={k.code}>
+                      {className(k.code)}
+                    </option>
+                  ))}
+                </select>
+              </CDFField>
+            </CDFCommandForm>
+          </CDFCard>
+        </div>
+      ) : null}
+
+      {cap.routeRetention ? (
+        // The target of the "Route a retention review" item (ADR-016 D8): a case the shared queue cannot take.
+        <div id="route-retention" tabIndex={-1}>
+          <CDFCard title={t("records.routeTitle")} testId="route-retention-card">
+            <p className="mb-3 text-sm text-cdf-text-secondary">{t("records.routeIntro")}</p>
+            {reviewers.length === 0 ? (
+              <CDFAlert tone="warning" testId="route-no-reviewer">
+                {t("records.routeNoReviewer")}
+              </CDFAlert>
+            ) : (
+              <CDFCommandForm
+                action={routeRetentionReviewAction.bind(null, r.caseId)}
+                locale={t.locale}
+                submitLabel={t("records.routeSubmit")}
+                testId="route-retention-form"
+                fieldLabels={{
+                  reviewerId: t("records.routeReviewerLabel"),
+                  purpose: t("records.routePurposeLabel"),
+                }}
+              >
+                <CDFField
+                  id="route-reviewer"
+                  label={t("records.routeReviewerLabel")}
+                  hint={t("records.routeReviewerHint")}
+                  requiredLabel={t("common.required")}
+                >
+                  <select
+                    id="route-reviewer"
+                    name="reviewerId"
+                    className={inputClass}
+                    aria-describedby="route-reviewer-hint"
+                    required
+                    defaultValue=""
+                  >
+                    <option value="" disabled>
+                      —
+                    </option>
+                    {reviewers.map((u) => (
+                      <option key={u.userId} value={u.userId}>
+                        {t.locale === "ar" && u.displayNameAr ? u.displayNameAr : u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </CDFField>
+                <CDFField
+                  id="route-purpose"
+                  label={t("records.routePurposeLabel")}
+                  hint={t("records.routePurposeHint")}
+                  requiredLabel={t("common.required")}
+                >
+                  <textarea
+                    id="route-purpose"
+                    name="purpose"
+                    className={textareaClass}
+                    aria-describedby="route-purpose-hint"
+                    defaultValue={t("records.routePurposeDefault")}
+                    required
+                    minLength={10}
+                    maxLength={1000}
+                  />
+                </CDFField>
+              </CDFCommandForm>
+            )}
+          </CDFCard>
+        </div>
       ) : null}
 
       <CDFCard title={t("records.holdsTitle")} testId="holds-card">

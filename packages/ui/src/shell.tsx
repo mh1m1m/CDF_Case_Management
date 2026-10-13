@@ -5,6 +5,8 @@
 // Text comes from the caller (@cdf/i18n); layout uses logical properties, so Arabic mirrors.
 import type { ReactNode } from "react";
 
+const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
+
 export interface CDFNavItem {
   key: string;
   href: string;
@@ -236,25 +238,34 @@ export interface CDFViewTab {
   countLabel?: string;
 }
 
-/** Views of one list as links (each view is a URL, so it survives reload and language switch). */
+/**
+ * Views of one list, or the sections of one object, as links (each is a URL, so it survives reload and language
+ * switch). `wrap` lets the links flow onto a second row instead of scrolling sideways (UX-109).
+ */
 export function CDFViewTabs({
   label,
   items,
   current,
+  testId = "view-tabs",
+  itemTestIdPrefix = "view-",
+  wrap = false,
 }: {
   label: string;
   items: CDFViewTab[];
   current: string;
+  testId?: string;
+  itemTestIdPrefix?: string;
+  wrap?: boolean;
 }) {
   return (
-    <nav aria-label={label} className="mb-4 border-b border-cdf-border" data-testid="view-tabs">
-      <ul className="relative -mb-px flex gap-1 overflow-x-auto">
+    <nav aria-label={label} className="mb-4 border-b border-cdf-border" data-testid={testId}>
+      <ul className={cx("relative -mb-px flex gap-1", wrap ? "flex-wrap" : "overflow-x-auto")}>
         {items.map((v) => (
           <li key={v.key} className="shrink-0">
             <a
               href={v.href}
               aria-current={v.key === current ? "page" : undefined}
-              data-testid={`view-${v.key}`}
+              data-testid={`${itemTestIdPrefix}${v.key}`}
               className="flex min-h-11 items-center gap-2 border-b-4 border-transparent px-3 py-2 font-semibold whitespace-nowrap hover:bg-cdf-hover aria-[current=page]:border-cdf-primary"
             >
               {v.label}

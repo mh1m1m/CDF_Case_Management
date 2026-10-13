@@ -45,6 +45,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED.
     "BCP_IMPORT",
     "BCP_IMPORT_APPROVE",
+    "REPORTER_CONVERSATION_HOLD",
   ],
   LEAD_INVESTIGATOR: [
     "CASE_ASSIGN",
@@ -123,6 +124,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED.
     "BCP_IMPORT",
     "BCP_IMPORT_APPROVE",
+    "REPORTER_CONVERSATION_OVERSEE",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
   INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],

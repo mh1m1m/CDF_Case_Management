@@ -3,12 +3,12 @@
 // pre-checks the permission, re-validates with the shared schema and lets the api.* command decide; ids come
 // from the route or the form and are never trusted for authorization.
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type { CommandResult } from "@cdf/application";
 import { investigationService, recordsService, requireActor } from "@/server/container";
 import { formObject, toActionState, withEcho, type ActionState } from "@/server/actions-helpers";
 
 type RecordCommand =
-  | "assignRetentionClass"
   | "placeLegalHold"
   | "requestHoldRelease"
   | "decideHoldRelease"
@@ -38,7 +38,15 @@ async function onRecord(
 }
 
 export async function assignRetentionClassAction(caseId: string, _: ActionState, form: FormData) {
-  return onRecord("assignRetentionClass", caseId, { caseId }, form);
+  const { actor, ctx } = await requireActor();
+  const result = await recordsService().assignRetentionClass(ctx, actor, { ...formObject(form), caseId });
+  // A routed retention task completes with the class and its access ends (ADR-016 D8), so leave the record.
+  if (result.ok && !result.value.recordVisible) redirect("/records?reviewed=1");
+  if (result.ok) {
+    revalidatePath(`/records/${caseId}`);
+    revalidatePath("/records/legal-holds");
+  }
+  return toActionState(result, form);
 }
 export async function placeLegalHoldAction(caseId: string, _: ActionState, form: FormData) {
   return onRecord("placeLegalHold", caseId, { caseId }, form);
@@ -77,6 +85,13 @@ export async function reviewHoldRequestAction(
   form: FormData,
 ) {
   return onRecord("reviewHoldRequest", caseId, { requestId }, form);
+}
+export async function routeRetentionReviewAction(caseId: string, _: ActionState, form: FormData) {
+  const { actor, ctx } = await requireActor();
+  const result = await recordsService().routeRetentionReview(ctx, actor, { ...formObject(form), caseId });
+  // Routing ends the routing form (the task now stands for the obligation), so say so on the record itself.
+  if (result.ok) redirect(`/records/${caseId}?routed=1`);
+  return toActionState(result, form);
 }
 export async function requestDispositionAction(caseId: string, _: ActionState, form: FormData) {
   return onRecord("requestDisposition", caseId, { caseId }, form);

@@ -130,6 +130,9 @@ export const PERMISSIONS = [
   // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED ("authorized continuity users").
   "BCP_IMPORT",
   "BCP_IMPORT_APPROVE",
+  // Reporter conversation (ADR-016 D4, DEC-06)
+  "REPORTER_CONVERSATION_HOLD",
+  "REPORTER_CONVERSATION_OVERSEE",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -329,6 +332,8 @@ export interface RecordCapabilities {
   applyLegalHold: boolean;
   releaseLegalHold: boolean;
   requestLegalHold: boolean;
+  /** The shared Records pool cannot take this archived case and nobody holds a usable retention task on it. */
+  routeRetention: boolean;
 }
 
 export interface DispositionRequestInfo {
@@ -396,6 +401,10 @@ export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 export const EVIDENCE_STATUSES = ["PENDING", "AVAILABLE", "REJECTED"] as const;
 export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
 
+/** Who on the case team sees an item (DEC-09): the team, or only the case manager, owner and lead investigator. */
+export const EVIDENCE_RESTRICTIONS = ["TEAM", "LEADS"] as const;
+export type EvidenceRestriction = (typeof EVIDENCE_RESTRICTIONS)[number];
+
 export const EVIDENCE_VERSION_STATUSES = ["QUARANTINED", "AVAILABLE", "REJECTED"] as const;
 export type EvidenceVersionStatus = (typeof EVIDENCE_VERSION_STATUSES)[number];
 
@@ -448,6 +457,7 @@ export interface EvidenceItem {
   collectedAt: string | null;
   classification: Classification;
   status: EvidenceStatus;
+  restriction: EvidenceRestriction;
   createdBy: string;
   createdByName: string | null;
   createdAt: string;
@@ -518,7 +528,11 @@ export interface ReportDetail extends IntakeReportItem {
   categoryOther: string | null;
   willingToCooperate: boolean | null;
   language: "ar" | "en";
+  /** Empty unless the caller may read the conversation (DEC-06: once a case exists it belongs to the case). */
   messages: ReportMessage[];
+  conversation: ConversationAccess;
+  /** Whether the caller may see the reporter's files (DEC-09: once a case exists, its investigation team). */
+  filesVisible: boolean;
 }
 
 /** A person who may be named as a restricted case's accountable authority (DEC-01). Names only. */
@@ -558,16 +572,79 @@ export interface CaseDetail extends CaseListItem {
   createdAt: string;
   openedAt: string | null;
   rowVersion: number;
+  /** When the case entered its current state (`workflow_instance.entered_state_at`). */
+  enteredStateAt: string | null;
+  owner: { userId: string; displayName: string; displayNameAr: string | null } | null;
+  /** Status only (ADR-016 D5, DEC-10): who asked for a hold and why stay with legal, records and GRC. */
+  legalHoldStatus: "NONE" | "ACTIVE";
+  /** The case's own route through the workflow, oldest first (`workflow_transition_event`), for path-aware progress. */
+  path: CasePathStep[];
   allegations: { id: string; category: string; description: string; status: string }[];
   assignments: CaseAssignment[];
   transitions: TransitionOption[];
   myConflictStatus: string | null;
+  /** The caller's part in the reporter conversation, from the database (DEC-06): it decides the Reporter tab. */
+  reporterConversation: ConversationAccess;
+  /** The caller's evidence need-to-know, from the database (DEC-09): it decides the Evidence tab. */
+  evidenceAccess: EvidenceAccess;
+  /** What the caller may do on this case, from the database's own rules (UX-116). Commands check again. */
+  can: CaseCapabilities;
+}
+
+/**
+ * Case capabilities read from `authz.*` (UX-116), so no page re-implements a rule. `edit`: details and allegations
+ * (`can_edit_case`); `assign`: the team, grants and delegations (`can_assign_case`); `uploadEvidence`
+ * (`can_upload_evidence`); the three interview rules (`can_conduct/review/approve_interviews`); `classifications`:
+ * the levels a new item on this case may carry, from the case's level up to the caller's clearance.
+ */
+export interface CaseCapabilities {
+  edit: boolean;
+  assign: boolean;
+  uploadEvidence: boolean;
+  conductInterviews: boolean;
+  reviewInterviews: boolean;
+  approveInterviews: boolean;
+  classifications: Classification[];
+}
+
+/**
+ * LEADS: the register, LEADS items and the restriction control (case manager, owner, lead investigator);
+ * TEAM: the register; REPORTER_FILES: the reporter's files only (triage while its grant lasts); NONE: no tab.
+ */
+export type EvidenceAccess = "LEADS" | "TEAM" | "REPORTER_FILES" | "NONE";
+
+/** NONE: no thread; READ: read only (oversight); SEND: may also write to the reporter. */
+export type ConversationAccess = "NONE" | "READ" | "SEND";
+
+/** The Reporter tab (ADR-016 D4, DEC-06): the conversation of each report behind the case, and who may write. */
+export interface CaseReporterView {
+  conversations: { reportId: string; canSend: boolean; messages: ReportMessage[] }[];
+  /** Active REPORTER_COMMUNICATE delegations: all of them for those who manage the team, else only the caller's. */
+  delegations: ReporterDelegation[];
+  /** The caller manages the team (authz.can_assign_case) and so may delegate and end delegations. */
+  canDelegate: boolean;
+}
+
+export interface ReporterDelegation {
+  id: string;
+  userId: string;
+  displayName: string;
+  displayNameAr: string | null;
+  delegatedAt: string;
+}
+
+export interface CasePathStep {
+  transitionCode: string;
+  fromState: string;
+  toState: string;
+  occurredAt: string;
 }
 
 export interface CaseAssignment {
   id: string;
   userId: string;
   displayName: string;
+  displayNameAr?: string | null;
   assignmentRole: AssignmentRole;
   assignedAt: string;
 }
@@ -578,17 +655,63 @@ export interface TransitionOption {
   nameEn: string;
   nameAr: string;
   reasonRequired: boolean;
+  /** False for steps of a later phase: shown as "later in this case", never hidden (UX-006). */
+  enabled: boolean;
   allowed: boolean;
   blockingReasons: string[];
+  /** Roles that may take this step, never people (audit §22.4.4). Reference data, readable by every user. */
+  eligibleRoles: string[];
 }
 
+/**
+ * One event of a case's history, read through api.case_history (ADR-016 D5, DEC-08/DEC-10). The database decides
+ * which events reach the caller and blanks the actor, subject or reason where the audience may not know them.
+ */
 export interface AuditTimelineEntry {
   seq: number;
   occurredAt: string;
   action: string;
   actorId: string | null;
   actorName: string | null;
+  actorNameAr: string | null;
+  /** The person a team, access or conflict event is about. */
+  subjectName: string | null;
+  subjectNameAr: string | null;
   reason: string | null;
+  detail: CaseHistoryDetail | null;
+}
+
+/** The fixed keys api.case_history returns per action; never the event's raw metadata. */
+export interface CaseHistoryDetail {
+  transition?: string;
+  /** A workflow state, or a classification level within the caller's clearance (otherwise null). */
+  from?: string | null;
+  to?: string | null;
+  role?: string;
+  scope?: string;
+  fields?: string[];
+  restricted?: boolean;
+  /** EVIDENCE_RESTRICTION_CHANGED (DEC-09): the item's number within the case and its new restriction. */
+  item?: number;
+  restriction?: EvidenceRestriction;
+}
+
+export const ROSTER_STATUSES = ["ACTIVE", "SCHEDULED", "EXPIRED", "ENDED", "REVOKED"] as const;
+export type RosterStatus = (typeof ROSTER_STATUSES)[number];
+
+/** One row of a case's access roster (api.case_access_roster; DEC-08). Never oversight grants or break-glass. */
+export interface CaseAccessRosterEntry {
+  userId: string;
+  displayName: string;
+  displayNameAr: string | null;
+  relationship: "ASSIGNMENT" | "GRANT";
+  /** The assignment role, or the grant's purpose (TRIAGE, CASE, COMMITTEE, REVIEW). */
+  code: string;
+  sinceAt: string;
+  untilAt: string | null;
+  endedAt: string | null;
+  status: RosterStatus;
+  isSelf: boolean;
 }
 
 export interface UserDirectoryEntry {
@@ -683,6 +806,8 @@ export const WORK_CATEGORIES = [
   "HOLD_RELEASE_TO_DECIDE",
   "MY_HOLD_REQUEST",
   "MY_HOLD_RELEASE_REQUEST",
+  "RETENTION_CLASSIFICATION",
+  "RETENTION_TO_ROUTE",
   ...CASE_TASK_TYPES.map((t) => `TASK_${t.code}` as const),
 ] as const;
 export type WorkCategory = (typeof WORK_CATEGORIES)[number];
@@ -695,7 +820,9 @@ export type WorkTargetType =
   | "INTERVIEW"
   | "CASE_TASK"
   | "HOLD_REQUEST"
-  | "HOLD_RELEASE";
+  | "HOLD_RELEASE"
+  /** A case's records page (lifecycle metadata only). */
+  | "RECORD";
 
 /**
  * One item of the caller's work. Ids, codes and dates only: never a title, name or narrative (DEC-22 decides
@@ -713,6 +840,26 @@ export interface WorkItem {
   /** TASK, SCHEDULE, or WORKFLOW_SLA_PROVISIONAL until an approved SLA source exists (DEC-43). */
   dueSource: "TASK" | "SCHEDULE" | "WORKFLOW_SLA_PROVISIONAL" | null;
   sinceAt: string | null;
+}
+
+/**
+ * One archived case waiting for its retention class in the shared Records queue (`api.retention_review_queue()`;
+ * ADR-016 D8, DEC-37). Lifecycle metadata only, and only for cases the caller may classify; never a named assignee.
+ */
+export interface RetentionQueueEntry {
+  caseId: string;
+  caseNumber: string;
+  classification: Classification;
+  archivedAt: string | null;
+  retentionClass: string;
+  legalHoldStatus: "NONE" | "ACTIVE";
+}
+
+/** A records officer a case's retention review may be routed to (eligible role, cleared, no conflict). Names only. */
+export interface RetentionReviewer {
+  userId: string;
+  displayName: string;
+  displayNameAr: string;
 }
 
 export const ACCESS_BASES = ["CLEARANCE", "ROLE", "ASSIGNMENT", "GRANT", "TASK", "BREAK_GLASS"] as const;

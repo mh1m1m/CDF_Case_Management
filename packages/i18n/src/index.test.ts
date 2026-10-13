@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ar } from "./messages/ar";
 import { en } from "./messages/en";
-import { directionOf, translate } from "./index";
+import { directionOf, formatDays, formatList, isolate, translate } from "./index";
 
 function keys(o: object, prefix = ""): string[] {
   return Object.entries(o).flatMap(([k, v]) =>
@@ -27,5 +27,20 @@ describe("i18n catalogs", () => {
     expect(translate("en", "common.errorGeneric", { ref: "abc" })).toBe(
       "Something went wrong. Reference: abc",
     );
+  });
+  it("isolates values inside sentences and lists them in the locale's words", () => {
+    expect(isolate("12 Oct 2026")).toBe("\u206812 Oct 2026\u2069");
+    expect(formatList("en", ["Case Manager", "Compliance", "GRC Director"], "disjunction")).toBe(
+      "Case Manager, Compliance, or GRC Director",
+    );
+    expect(formatList("ar", ["مدير القضية", "الامتثال"], "disjunction")).toBe("مدير القضية أو الامتثال");
+    expect(formatList("en", ["A", "B"])).toBe("A and B");
+  });
+  it("counts days with each locale's plural forms and Latin digits", () => {
+    expect(formatDays("en", 1)).toBe("1 day");
+    expect(formatDays("en", 3)).toBe("3 days");
+    expect(formatDays("ar", 2)).toBe("يومان");
+    expect(formatDays("ar", 3)).toBe("3 أيام");
+    expect(formatDays("ar", 11)).toBe("11 يومًا");
   });
 });
