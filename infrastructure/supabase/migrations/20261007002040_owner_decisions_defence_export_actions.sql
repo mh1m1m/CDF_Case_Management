@@ -3323,10 +3323,13 @@ grant execute on function api.authorize_continuity_operator(uuid, text, text),
 -- are cleared that many days after it finished; the row keeps its identity, sheet, row number and key, state,
 -- resolution, outcome, recorder, event time and payload hash, and the batch, provenance and audit trail are kept.
 -- PRODUCTION_SUBSTITUTION_REQUIRED: the CDF secure-deletion and disposition rules for staging storage.
+-- Configuring the value starts physical disposal of staged cells, so it is set only with the owner's recorded decision
+-- on destruction, named in source_reference (AGENT-09 pack 3, note on point 6; the owner owes that record).
 insert into config.setting (key, value, status, source_reference, description) values
   ('BCP_STAGING_RETENTION_DAYS', null, 'SOURCE_REQUIRED', null,
    'DEC-F31: days the staged cells of a finished continuity workbook are kept before they are cleared. Not invented: '
-   'nothing is purged until it is configured.');
+   'nothing is purged until it is configured. Configuring it starts physical disposal of staged cells: set it only '
+   'with the owner''s recorded decision on destruction, cited in source_reference.');
 alter table exchange.bcp_import_row add column purged_at timestamptz;
 
 -- Replaces 1960 (DEC-F31): a row of a finished batch may change exactly once more, to clear its cells for the
