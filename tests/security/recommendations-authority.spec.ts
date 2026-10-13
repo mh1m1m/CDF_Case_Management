@@ -1815,7 +1815,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
       });
     });
 
-    it("T-AMB-028: CONFIRM is recorded once per taint, read like the item, audited with codes only and append-only", async () => {
+    it("T-AMB-028: CONFIRM is recorded once per taint, read only by the meeting secretary and a conflict manager, audited with codes only and append-only", async () => {
       await ownerScenario(async (s) => {
         const f = await draftPackage(s, ic, caseB);
         expect(await voteOnPackage(s, f)).toBe("ADOPTED");
@@ -1836,24 +1836,48 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           package_round: 1,
           reason: FIRM,
         });
-        // Read like the item: the case team sees it, an outsider does not; the ledger has codes, not the reason.
+        // Read by whoever runs the proceeding's meetings and by a conflict manager on the case (AGENT-09 R1). A
+        // non-conflicted member and the legal reviewer read the package but not the resolution: it names who was
+        // conflicted and its recount would reveal a vote under a secret ballot. An outsider reads nothing.
         await s.as("caseManager");
         expect(await s.tx`select id from decision.conflict_taint_resolution`).toHaveLength(1);
         await s.as("committee");
         expect(await s.tx`select id from decision.conflict_taint_resolution`).toEqual([]);
+        // The package goes on.
+        const { request } = await toAuthority(s, f);
+        for (const u of ["committeeChair", "legal"] as const) {
+          await s.as(u);
+          expect(await s.tx`select id from decision.recommendation_package where id = ${f.pkg}`).toHaveLength(
+            1,
+          );
+          expect(await s.tx`select id from decision.conflict_taint_resolution`).toEqual([]);
+        }
+        await s.as("legalB");
+        expect(await s.tx`select id from decision.legal_review_request where id = ${request}`).toHaveLength(
+          1,
+        );
+        expect(await s.tx`select id from decision.conflict_taint_resolution`).toEqual([]);
+        await s.as("committeeSecretary");
+        expect(await s.tx`select id from decision.conflict_taint_resolution`).toHaveLength(1);
+        // The ledger has ids, codes and a count: no reason, no conflicted member, no result.
         await s.as("dpo");
         const events = await s.tx<{ metadata: Record<string, unknown>; reason: string | null }[]>`
           select metadata, reason from audit.audit_event where action = 'CONFLICT_TAINT_RESOLVED'`;
         expect(events).toHaveLength(1);
-        expect(events[0]!.metadata).toMatchObject({
-          resolution: "CONFIRM",
-          conflicted: 1,
-          recount_result: "APPROVED",
-        });
+        expect(events[0]!.metadata).toMatchObject({ resolution: "CONFIRM", conflicted: 1 });
+        expect(Object.keys(events[0]!.metadata).sort()).toEqual([
+          "conflicted",
+          "item_id",
+          "meeting_id",
+          "package_id",
+          "package_status",
+          "resolution",
+          "round_no",
+          "vote_item_id",
+        ]);
         expect(JSON.stringify(events)).not.toContain(FIRM);
         expect(JSON.stringify(events)).not.toContain(USERS.lead);
-        // The package goes on.
-        await toAuthority(s, f);
+        expect(JSON.stringify(events)).not.toMatch(/original_result|recount_result/);
         // Append-only, even for the table owner.
         await s.asOwner();
         await s.expectError(

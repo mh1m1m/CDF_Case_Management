@@ -3144,7 +3144,8 @@ create index conflict_taint_resolution_meeting on decision.conflict_taint_resolu
 create index conflict_taint_resolution_resolved_by on decision.conflict_taint_resolution (resolved_by);
 comment on table decision.conflict_taint_resolution is
   'DEC-AMB-003 (owner, 2026-10-13; migration 2030): RE_VOTE or CONFIRM of a vote on which a now-conflicted '
-  'participant voted. CONFIRM only when the recount without their votes gives the same result.';
+  'participant voted. CONFIRM only when the recount without their votes gives the same result. Read only by whoever '
+  'runs a meeting of the proceeding and by conflict managers who can view the case (AGENT-09 R1).';
 
 -- DEC-AMB-003: every vote on an item as its tally saw it, frozen when the item leaves OPEN (decision.freeze_vote_tally).
 -- A vote counted when api.close_vote_item counted it: its participant had no conflict, was present and was a counting
@@ -3784,9 +3785,16 @@ create policy legal_opinion_revision_read on decision.legal_opinion_revision for
              and exists (select 1 from decision.packet k
                          where k.legal_review_request_id = legal_opinion_revision.request_id and authz.can_view_packet(k.id))));
 grant select on decision.legal_opinion_revision to authenticated;
--- DEC-AMB-003: read like the item it resolves.
+-- DEC-AMB-003 (AGENT-09 early look, R1): a resolution names the conflicted members, including case-level conflicts
+-- that only conflict managers read, and its recount would reveal a member's vote under a secret ballot. So it is read
+-- only by whoever runs a meeting of the proceeding (who records the resolution) and by conflict managers who can view
+-- the case. Every other viewer of the package sees only the TAINTED_BY_CONFLICT flag (api.recommendation_item_flags),
+-- which names nobody.
 create policy conflict_taint_resolution_read on decision.conflict_taint_resolution for select to authenticated
-  using (authz.can_view_recommendation_package(package_id));
+  using (exists (select 1 from committee.meeting rm
+                 join committee.meeting m on m.committee_proceeding_id = rm.committee_proceeding_id
+                 where rm.id = conflict_taint_resolution.meeting_id and authz.can_manage_meeting(m.id))
+         or (authz.has_permission('CONFLICT_MANAGE') and authz.can_view_case(case_id)));
 grant select on decision.conflict_taint_resolution to authenticated;
 
 -- -----------------------------------------------------------------------------
@@ -4753,12 +4761,12 @@ begin
        set status = v_status, adopted_at = null, updated_at = now(), row_version = row_version + 1
      where id = v_p.id;
   end if;
-  -- The reason and who was conflicted stay in the row; the ledger gets codes and counts.
+  -- The reason, who was conflicted and the recount stay in the row; the ledger gets ids, codes and a count, never a
+  -- result (AGENT-09 R1: with COI_DECLARED events beside it, a recount would reveal a vote under a secret ballot).
   perform audit.record_event('CONFLICT_TAINT_RESOLVED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'conflict_taint_resolution',
     v_id::text, null,
     jsonb_build_object('item_id', v_i.id, 'package_id', v_p.id, 'round_no', v_p.round_no, 'vote_item_id', v_vi.id,
                        'meeting_id', v_meeting, 'resolution', p_resolution, 'conflicted', cardinality(v_conflicted),
-                       'original_result', v_vi.result, 'recount_result', coalesce(v_recount, 'NOT_RECOUNTABLE'),
                        'package_status', v_status));
   return v_id;
 end;
