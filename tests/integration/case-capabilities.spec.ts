@@ -60,8 +60,6 @@ describe("case capabilities come from the database (UX-116)", () => {
       },
       // Manages the team by role, but neither edits nor works the evidence or interviews without an assignment.
       grcDirector: { ...NONE, assign: true, classifications: ["CONFIDENTIAL", "SECRET"] },
-      triage: NONE,
-      committeeChair: NONE,
     };
     for (const [user, can] of Object.entries(expected) as [UserKey, Partial<CaseCapabilities>][]) {
       const c = await service.getCase(ctxFor(user), caseA);
@@ -71,7 +69,9 @@ describe("case capabilities come from the database (UX-116)", () => {
   });
 
   it("gives nothing to someone who cannot see the case", async () => {
-    expect(await service.getCase(ctxFor("investigatorB"), caseA)).toBeNull();
+    // S3 (ADR-016 D2, D3): triage's grant ended at hand-over, and a committee role opens no case by itself.
+    for (const user of ["investigatorB", "triage", "committeeChair", "committeeSecretary"] as const)
+      expect(await service.getCase(ctxFor(user), caseA), user).toBeNull();
   });
 });
 

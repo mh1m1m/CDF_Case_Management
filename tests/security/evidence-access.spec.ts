@@ -71,7 +71,7 @@ describe("evidence visibility", () => {
         ["lead", 1],
         ["caseManager", 1],
         ["grcDirector", 0], // sees the case (CASE_VIEW_ALL), is not the team: evidence through a packet only (S5)
-        ["triage", 0], // TRIAGE grant: the reporter's files only (DEC-09)
+        ["triage", 0], // its TRIAGE grant ended at hand-over (S3, DEC-03); before it, the reporter's files only
         ["investigatorB", 0],
         ["committee", 0],
         ["platformAdmin", 0],
@@ -130,8 +130,12 @@ describe("evidence visibility", () => {
 describe("evidence upload gate", () => {
   it("requires the permission and a working assignment or edit rights on an active, visible case", async () => {
     await scenario(async (s) => {
-      await s.as("triage"); // sees case A through a grant; no EVIDENCE_UPLOAD
+      await s.as("caseManager");
+      await s.tx`select api.grant_case_access(${caseA}, ${USERS.dpo}, 'AUDIT', 'Synthetic: audit scope', null)`;
+      await s.as("dpo"); // sees case A through an AUDIT grant; no EVIDENCE_UPLOAD
       await s.expectError("CDF_FORBIDDEN", (tx) => register(tx, caseA));
+      await s.as("triage"); // its TRIAGE grant ended when case A was handed over (S3, DEC-03)
+      await s.expectError("CDF_NOT_FOUND", (tx) => register(tx, caseA));
       await s.as("grcDirector"); // has EVIDENCE_UPLOAD and sees the case, but is neither assigned nor an editor
       await s.expectError("CDF_FORBIDDEN", (tx) => register(tx, caseA));
       await s.as("investigatorB"); // cannot see case A at all
@@ -229,7 +233,7 @@ describe("evidence download gate", () => {
   it("returns nothing and records a SECURITY event for viewers without the permission and for outsiders", async () => {
     await scenario(async (s) => {
       const reg = await storedOnCaseA(s);
-      await s.as("triage");
+      await s.as("grcDirector"); // sees the case, is not the investigation team (DEC-09)
       expect(await openCount(s.tx, reg.versionId)).toBe(0);
       await s.as("investigatorB");
       expect(await openCount(s.tx, reg.versionId)).toBe(0);
@@ -241,7 +245,7 @@ describe("evidence download gate", () => {
         select outcome, metadata as meta from audit.audit_event
         where action = 'EVIDENCE_ACCESS_DENIED' and object_id = ${reg.versionId} order by seq`;
       expect(events.map((e) => [e.outcome, e.meta.target_exists, e.meta.case_visible])).toEqual([
-        ["DENIED", true, true], // triage: visible case, no permission
+        ["DENIED", true, true], // GRC director: visible case, not the team
         ["DENIED", true, false], // investigator B: invisible case
       ]);
     });

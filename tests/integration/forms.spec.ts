@@ -65,10 +65,11 @@ describe("forms slice", () => {
     const canStart = (list: { code: string; canStart: boolean }[]) =>
       Object.fromEntries(list.map((d) => [d.code, d.canStart]));
     expect(canStart(mine)).toMatchObject({ "WB-FRM-11": true, "WB-FRM-12": true, "WB-FRM-13": false });
-    const secretary = await forms.listDefinitions(ctxFor("committeeSecretary"), caseA);
-    expect(canStart(secretary)).toMatchObject({ "WB-FRM-11": false, "WB-FRM-13": true });
-    // The chair reviews and approves; the GRC director approves; neither prepares anything.
-    for (const user of ["committeeChair", "grcDirector"] as const) {
+    const manager = await forms.listDefinitions(ctxFor("caseManager"), caseA);
+    expect(canStart(manager)).toMatchObject({ "WB-FRM-11": true, "WB-FRM-13": true });
+    // The GRC director reviews and approves and prepares nothing. Since S3 (ADR-016 D2) the committee roles have no
+    // access to case A at all, so they start nothing on it either.
+    for (const user of ["grcDirector", "committeeSecretary", "committeeChair"] as const) {
       const list = await forms.listDefinitions(ctxFor(user), caseA);
       expect(
         list.some((d) => d.canStart),
@@ -210,18 +211,20 @@ describe("forms slice", () => {
   });
 
   it("reports missing required fields at prepare time and demands a reason to return a form", async () => {
-    const secretary = await actor("committeeSecretary");
-    const ctx = ctxFor("committeeSecretary");
-    const instanceId = await startOnCaseA("committeeSecretary", "WB-FRM-13");
-    const partial = await forms.saveDraft(ctx, secretary, {
+    // The case manager prepares and the GRC director reviews: since S3 the committee roles reach a case's forms
+    // only through form-scoped legacy access (tests/security/grant-scope.spec.ts).
+    const preparer = await actor("caseManager");
+    const ctx = ctxFor("caseManager");
+    const instanceId = await startOnCaseA("caseManager", "WB-FRM-13");
+    const partial = await forms.saveDraft(ctx, preparer, {
       instanceId,
       formCode: "WB-FRM-13",
       data: { chair: "Committee Chair Xi" },
     });
     expect(failure(partial)).toBe("ok");
-    const early = await forms.prepare(ctx, secretary, { instanceId, formCode: "WB-FRM-13" });
+    const early = await forms.prepare(ctx, preparer, { instanceId, formCode: "WB-FRM-13" });
     expect(failure(early)).toBe("INVALID:formation_reference");
-    const full = await forms.saveDraft(ctx, secretary, {
+    const full = await forms.saveDraft(ctx, preparer, {
       instanceId,
       formCode: "WB-FRM-13",
       data: {
@@ -235,17 +238,17 @@ describe("forms slice", () => {
       },
     });
     expect(failure(full)).toBe("ok");
-    expect(failure(await forms.prepare(ctx, secretary, { instanceId, formCode: "WB-FRM-13" }))).toBe("ok");
+    expect(failure(await forms.prepare(ctx, preparer, { instanceId, formCode: "WB-FRM-13" }))).toBe("ok");
 
-    const chair = await actor("committeeChair");
-    const asChair = ctxFor("committeeChair");
-    const noReason = await forms.review(asChair, chair, {
+    const reviewer = await actor("grcDirector");
+    const asReviewer = ctxFor("grcDirector");
+    const noReason = await forms.review(asReviewer, reviewer, {
       instanceId,
       formCode: "WB-FRM-13",
       outcome: "RETURNED",
     });
     expect(issuePaths(noReason)).toEqual(["reason"]);
-    const returned = await forms.review(asChair, chair, {
+    const returned = await forms.review(asReviewer, reviewer, {
       instanceId,
       formCode: "WB-FRM-13",
       outcome: "RETURNED",
@@ -259,12 +262,12 @@ describe("forms slice", () => {
       reason: "Synthetic: confirm member independence",
     });
 
-    // The Forms tab (S2g, UX-086): the return is listed with its reason, as the preparer's to revise; the chair
+    // The Forms tab (S2g, UX-086): the return is listed with its reason, as the preparer's to revise; the reviewer
     // sees that it was returned, with nothing to do and no reason (that is read on the form, where the view is
     // audited), and the next step names the roles that prepare this form.
     const returnedRow = async (user: UserKey) =>
       (await forms.listInstances(ctxFor(user), caseA)).find((i) => i.id === instanceId);
-    const asPreparer = await returnedRow("committeeSecretary");
+    const asPreparer = await returnedRow("caseManager");
     expect(asPreparer).toMatchObject({
       status: "DRAFT",
       finalStatus: "APPROVED",
@@ -272,15 +275,15 @@ describe("forms slice", () => {
       returned: { reason: "Synthetic: confirm member independence", toMe: true },
     });
     expect(asPreparer!.returned!.byName).toEqual(expect.any(String));
-    expect(asPreparer!.nextRoles).toContain("COMMITTEE_SECRETARY");
-    expect(await returnedRow("committeeChair")).toMatchObject({
+    expect(asPreparer!.nextRoles).toContain("CASE_MANAGER");
+    expect(await returnedRow("grcDirector")).toMatchObject({
       capabilities: { canSave: false, canReview: false, canApprove: false },
       returned: { reason: null, toMe: false },
     });
     // Saving again does not hide the return; preparing it again does.
     expect(
       failure(
-        await forms.saveDraft(ctx, secretary, {
+        await forms.saveDraft(ctx, preparer, {
           instanceId,
           formCode: "WB-FRM-13",
           data: {
@@ -295,13 +298,13 @@ describe("forms slice", () => {
         }),
       ),
     ).toBe("ok");
-    expect((await returnedRow("committeeSecretary"))!.returned).toMatchObject({ toMe: true });
-    expect(failure(await forms.prepare(ctx, secretary, { instanceId, formCode: "WB-FRM-13" }))).toBe("ok");
-    const prepared = await returnedRow("committeeChair");
+    expect((await returnedRow("caseManager"))!.returned).toMatchObject({ toMe: true });
+    expect(failure(await forms.prepare(ctx, preparer, { instanceId, formCode: "WB-FRM-13" }))).toBe("ok");
+    const prepared = await returnedRow("grcDirector");
     expect(prepared).toMatchObject({ status: "PREPARED", returned: null, capabilities: { canReview: true } });
     expect(prepared!.nextRoles).toEqual(["COMMITTEE_CHAIR", "GRC_DIRECTOR"]);
     // Separation of duties: the preparer is not asked to review their own form.
-    expect((await returnedRow("committeeSecretary"))!.capabilities.canReview).toBe(false);
+    expect((await returnedRow("caseManager"))!.capabilities.canReview).toBe(false);
   });
 
   it("lists a case's forms only to people who can see them, with a next step until each is done", async () => {
