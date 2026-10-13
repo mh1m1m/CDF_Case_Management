@@ -666,6 +666,68 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.apply_minutes_deemed_approval(${t.minutes})`,
   },
+  // The owner's Finalization Set (migration 2030, ADR-040): acting roles, alternates, the snapshot amendment,
+  // emergency meetings, invitee acknowledgements and accommodations, vote revisions, recusals, notes and the
+  // minutes objection ruling.
+  {
+    fn: "activate_acting_chair",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_acting_chair(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "activate_acting_secretary",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_acting_secretary(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "activate_alternate_member",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_alternate_member(${t.participant}, ${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "amend_proceeding_snapshot",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.amend_proceeding_snapshot(${t.committeeProceeding}, ${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "schedule_emergency_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.schedule_emergency_meeting(${t.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)',
+        null, now() + interval '2 hours', now() + interval '3 hours', ${REASON}, 'Synthetic: probe emergency.')`,
+  },
+  {
+    fn: "acknowledge_meeting_confidentiality",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.acknowledge_meeting_confidentiality(${t.witness})`,
+  },
+  {
+    fn: "record_meeting_accommodation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_meeting_accommodation(${t.participant}, 'Synthetic: probe accommodation.')`,
+  },
+  {
+    fn: "revise_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revise_vote(${t.voteItem}, 'REJECT', ${REASON})`,
+  },
+  {
+    fn: "recuse_for_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.recuse_for_conflict(${t.voteItem}, ${REASON})`,
+  },
+  {
+    fn: "record_vote_note",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_vote_note(${t.voteItem}, 'Synthetic: probe note.', false)`,
+  },
+  {
+    fn: "overrule_minutes_objection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.overrule_minutes_objection(${t.minutes}, ${REASON})`,
+  },
 ];
 
 // Records, retention and legal hold commands (ADR-013) take their own objects: a hold, a release request,
@@ -1099,6 +1161,14 @@ const ADMIN_COMMANDS = [
   "create_sector",
   "appoint_sector_member",
   "end_sector_membership",
+  // Migration 2030 (ADR-040): the business calendar (BUSINESS_CALENDAR_ADMIN), invitee-type rules and the
+  // independent conflict authority (COMMITTEE_ADMIN); none takes a case or a meeting.
+  "set_business_calendar_day",
+  "withdraw_business_calendar_day",
+  "set_business_week_pattern",
+  "set_invitee_type_rule",
+  "appoint_conflict_authority",
+  "end_conflict_authority",
 ];
 // Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
 // Covered in referral-preliminary.spec.ts.
@@ -1736,6 +1806,11 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "attendance_excuse",
         "meeting_conflict_concern",
         "witness_exclusion",
+        "meeting_acting_role",
+        "proceeding_snapshot_amendment",
+        "minutes_objection_ruling",
+        "confidentiality_ack",
+        "meeting_accommodation",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
       }

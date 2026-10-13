@@ -94,21 +94,38 @@ export function isQuorate(rule: QuorumRule, eligible: number, present: number): 
 
 // ---- Meetings, voting and minutes (ADR-020, migration 1890) --------------------------------------------
 
-/** Business days are Sunday to Thursday in Asia/Riyadh. Public holidays are SOURCE_REQUIRED and not modelled. */
+/**
+ * Business days in Asia/Riyadh (DEC-F02, migration 2030): the working week in force (Sunday to Thursday unless the
+ * calendar says otherwise) and dated exceptions from config.business_calendar_day. Holidays are never hard-coded: the
+ * caller passes the calendar it read (SOURCE_REQUIRED until a CDF calendar source is connected).
+ */
 const RIYADH_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+3 all year (no daylight saving)
 
-export function isBusinessDay(at: Date): boolean {
-  const day = new Date(at.getTime() + RIYADH_OFFSET_MS).getUTCDay();
-  return day !== 5 && day !== 6;
+export interface BusinessCalendar {
+  /** ISO days of the week that are not working days (1 Monday … 7 Sunday). Default: Friday and Saturday. */
+  nonWorkingIsoDays?: readonly number[];
+  /** Local dates (YYYY-MM-DD) that are holidays or other non-working days. */
+  nonWorkingDates?: readonly string[];
+  /** Local dates (YYYY-MM-DD) that are working days although the week pattern says otherwise. */
+  workingDates?: readonly string[];
+}
+
+export function isBusinessDay(at: Date, calendar: BusinessCalendar = {}): boolean {
+  const local = new Date(at.getTime() + RIYADH_OFFSET_MS);
+  const date = local.toISOString().slice(0, 10);
+  if (calendar.workingDates?.includes(date)) return true;
+  if (calendar.nonWorkingDates?.includes(date)) return false;
+  const isoDay = local.getUTCDay() === 0 ? 7 : local.getUTCDay();
+  return !(calendar.nonWorkingIsoDays ?? [5, 6]).includes(isoDay);
 }
 
 /** `days` business days after `from`, same local time of day (committee.add_business_days). */
-export function addBusinessDays(from: Date, days: number): Date {
+export function addBusinessDays(from: Date, days: number, calendar: BusinessCalendar = {}): Date {
   let t = from.getTime();
   let left = days;
   while (left > 0) {
     t += 24 * 60 * 60 * 1000;
-    if (isBusinessDay(new Date(t))) left -= 1;
+    if (isBusinessDay(new Date(t), calendar)) left -= 1;
   }
   return new Date(t);
 }

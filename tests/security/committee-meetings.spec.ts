@@ -385,13 +385,29 @@ describe("voting (N6, N7, N8)", () => {
     });
   });
 
-  it("closing needs every present eligible member's vote, and quorum from the rule snapshot", async () => {
+  it("no vote opens without quorum (AMB-067, migration 2030)", async () => {
     await scenario(async (s) => {
       // Four eligible voters, two present: majority quorum is three.
       const f = await ready(s);
       await s.as("committeeSecretary");
       await s.tx`select api.record_attendance(${f.participant.legalB!}, 'ABSENT')`;
       await s.tx`select api.record_attendance(${f.participant.lead!}, 'ABSENT')`;
+      await s.expectError(
+        "CDF_CONFLICT:NO_QUORUM",
+        (tx) => tx`select api.open_vote_item(${f.meeting}, 'OTHER', null, 'No quorum (synthetic)')`,
+      );
+      await s.tx`select api.close_meeting(${f.meeting}, ${REASON})`;
+    });
+  });
+
+  it("closing needs every present eligible member's vote, and quorum from the rule snapshot", async () => {
+    await scenario(async (s) => {
+      // A fixed quorum of three. Four eligible, three present: the vote opens; a recusal mid-vote leaves two.
+      await s.as("platformAdmin");
+      await s.tx`select api.set_committee_rule_set(${ic}, now(), 'FIXED_NUMBER', 3, false, 5, false, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`;
+      const f = await ready(s);
+      await s.as("committeeSecretary");
+      await s.tx`select api.record_attendance(${f.participant.legalB!}, 'ABSENT')`;
       const item = await openItem(s, f.meeting);
       await vote(s, "legal", item, "APPROVE");
       await s.as("committeeSecretary");
@@ -403,13 +419,15 @@ describe("voting (N6, N7, N8)", () => {
         "CDF_INVALID:custom_quorum_attested",
         (tx) => tx`select api.close_vote_item(${item}, true)`,
       );
+      await s.as("lead");
+      await s.tx`select api.recuse_for_conflict(${item}, 'Synthetic: related to a party.')`;
       await vote(s, "committeeChair", item, "APPROVE");
       await s.as("committeeSecretary");
       expect((await s.tx<{ r: string }[]>`select api.close_vote_item(${item}, null) as r`)[0]!.r).toBe(
         "NO_QUORUM",
       );
       const r = await itemRow(s, item);
-      expect(r).toMatchObject({ status: "CLOSED", eligible_count: 4, present_count: 2, quorum_required: 3 });
+      expect(r).toMatchObject({ status: "CLOSED", eligible_count: 3, present_count: 2, quorum_required: 3 });
       // A closed item takes no more votes and the meeting can close.
       await s.as("legalB");
       await s.expectError(

@@ -553,7 +553,7 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "set_committee_rule_set",
         actor: "platformAdmin",
         run: (s) =>
-          s.tx`select api.set_committee_rule_set(${ids.committee!}, now(), 'FIXED_NUMBER', 2, true, 3, true, null, null,
+          s.tx`select api.set_committee_rule_set(${ids.committee!}, now(), 'FIXED_NUMBER', 1, true, 3, true, null, null,
             'NO_DECISION', 'SOURCE_REQUIRED', ${REASON})`,
       },
       {
@@ -954,8 +954,8 @@ describe("every state-changing command writes its audit event in the same transa
       },
       {
         // AGENT-09 W2: a legal review on the restricted case needs its authority's approval naming the reviewer.
-        // Fixture: the secretary, the chair, the member and the reviewer are cleared to SECRET (the rule in force needs
-        // two present); the approved referral is used.
+        // Fixture: the secretary, the chair, the member and the reviewer are cleared to SECRET (both voting seats are
+        // recorded present); the approved referral is used.
         fn: "approve_restricted_legal_review",
         actor: "grcDirector",
         run: async (s) => {
@@ -1000,6 +1000,210 @@ describe("every state-changing command writes its audit event in the same transa
           await s.tx`select api.record_package_adoption(${pkg})`;
           await s.as("grcDirector");
           return s.tx`select api.approve_restricted_legal_review(${pkg}, ${USERS.legalB}, ${REASON})`;
+        },
+      },
+      // The owner's Finalization Set (migration 2030, ADR-040): the business calendar, an invitee-type rule and the
+      // independent conflict authority; then, on the walk's proceeding, a member added after the referral, an
+      // emergency meeting with a witness who acknowledges confidentiality and asks for an accommodation, an acting
+      // chair, an alternate member and an acting secretary, a revised vote with a note, a recusal, and a minutes
+      // objection overruled by the chair.
+      {
+        fn: "set_business_week_pattern",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_business_week_pattern(array[5, 6], now() + interval '30 days', 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "set_business_calendar_day",
+        actor: "platformAdmin",
+        run: async (s) =>
+          (ids.calendarDay = await one(
+            s,
+            s.tx`select api.set_business_calendar_day(((now() at time zone 'Asia/Riyadh')::date + 40), 'HOLIDAY',
+              'DEMO-CAL-01', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "withdraw_business_calendar_day",
+        actor: "platformAdmin",
+        run: (s) => s.tx`select api.withdraw_business_calendar_day(${ids.calendarDay!}, ${REASON})`,
+      },
+      {
+        fn: "set_invitee_type_rule",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "appoint_conflict_authority",
+        actor: "platformAdmin",
+        run: async (s) =>
+          (ids.conflictAuthority = await one(
+            s,
+            s.tx`select api.appoint_conflict_authority(${ids.committee!}, ${USERS.complianceManager}, now(), null,
+              'DEMO-CA-01', 'SOURCE_REQUIRED', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "end_conflict_authority",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.end_conflict_authority(${ids.conflictAuthority!}, now() + interval '30 days', ${REASON})`,
+      },
+      {
+        fn: "amend_proceeding_snapshot",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          // Fixture: a deputy chair, an alternate member and an alternate secretary appointed after the referral (none
+          // sits on the Grievance Committee below, so its firewall is unaffected).
+          await s.as("platformAdmin");
+          const deputy = await one(
+            s,
+            s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.investigatorB}, 'DEPUTY_CHAIR', now(), null, 'DEMO-APPT-04') as id`,
+          );
+          const alternate = await one(
+            s,
+            s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.lead}, 'ALTERNATE_MEMBER', now(), null, 'DEMO-APPT-05') as id`,
+          );
+          await s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.grcDeputy}, 'ALTERNATE_SECRETARY', now(), null, 'DEMO-APPT-06')`;
+          await s.as("committeeSecretary");
+          await s.tx`select api.amend_proceeding_snapshot(${ids.committeeProceeding!}, ${deputy}, 'Synthetic: deputy chair appointed after the referral.')`;
+          return s.tx`select api.amend_proceeding_snapshot(${ids.committeeProceeding!}, ${alternate}, 'Synthetic: alternate member appointed after the referral.')`;
+        },
+      },
+      {
+        fn: "schedule_emergency_meeting",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          ids.meeting2 = await one(
+            s,
+            s.tx`select api.schedule_emergency_meeting(${ids.committeeProceeding!}, 'DELIBERATION', 'IN_PERSON',
+              'Room (synthetic)', null, now() + interval '1 hour', now() + interval '2 hours', ${REASON},
+              'Synthetic: urgent walk meeting.') as id`,
+          );
+          const rows = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${ids.meeting2}`;
+          for (const [key, user] of [
+            ["m2Chair", USERS.committeeChair],
+            ["m2Member", USERS.committee],
+            ["m2Deputy", USERS.investigatorB],
+            ["m2Alternate", USERS.lead],
+          ] as const) {
+            ids[key] = rows.find((r) => r.user_id === user)!.id;
+          }
+          return ids.meeting2;
+        },
+      },
+      {
+        fn: "acknowledge_meeting_confidentiality",
+        actor: "employeeB",
+        run: async (s) => {
+          await s.as("committeeSecretary");
+          ids.m2Witness = await one(
+            s,
+            s.tx`select api.invite_to_meeting(${ids.meeting2!}, 'WITNESS', ${USERS.employeeB}, null, false, ${REASON}) as id`,
+          );
+          await s.as("employeeB");
+          return s.tx`select api.acknowledge_meeting_confidentiality(${ids.m2Witness!})`;
+        },
+      },
+      {
+        fn: "record_meeting_accommodation",
+        actor: "employeeB",
+        run: (s) =>
+          s.tx`select api.record_meeting_accommodation(${ids.m2Witness!}, 'Synthetic: step-free access requested.')`,
+      },
+      {
+        fn: "activate_acting_chair",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          // Fixture: everyone declares; the meeting opens with the chair and the member recorded absent.
+          for (const [key, seatKey] of [
+            ["committeeChair", "m2Chair"],
+            ["committee", "m2Member"],
+            ["investigatorB", "m2Deputy"],
+            ["lead", "m2Alternate"],
+          ] as const) {
+            await s.as(key);
+            await s.tx`select api.declare_meeting_conflict(${ids[seatKey]!}, 'NO_CONFLICT', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_meeting(${ids.meeting2!}, ${REASON})`;
+          await s.tx`select api.record_attendance(${ids.m2Deputy!}, 'PRESENT')`;
+          await s.tx`select api.record_attendance(${ids.m2Alternate!}, 'PRESENT')`;
+          await s.tx`select api.record_attendance(${ids.m2Chair!}, 'ABSENT')`;
+          await s.tx`select api.record_attendance(${ids.m2Member!}, 'ABSENT')`;
+          return s.tx`select api.activate_acting_chair(${ids.meeting2!}, 'Synthetic: the chair is absent today.')`;
+        },
+      },
+      {
+        fn: "activate_alternate_member",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.activate_alternate_member(${ids.m2Alternate!}, ${ids.m2Member!}, 'Synthetic: the member is absent today.')`,
+      },
+      {
+        fn: "activate_acting_secretary",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.activate_acting_secretary(${ids.meeting2!}, 'Synthetic: handing over for the rest of the meeting.')`,
+      },
+      {
+        fn: "revise_vote",
+        actor: "investigatorB",
+        run: async (s) => {
+          await s.as("grcDeputy");
+          ids.m2Item = await one(
+            s,
+            s.tx`select api.open_vote_item(${ids.meeting2!}, 'OTHER', null, 'Walk emergency item (synthetic)') as id`,
+          );
+          await s.as("investigatorB");
+          await s.tx`select api.cast_vote(${ids.m2Item!}, 'APPROVE', null)`;
+          return s.tx`select api.revise_vote(${ids.m2Item!}, 'REJECT', 'Synthetic: reconsidered.')`;
+        },
+      },
+      {
+        fn: "record_vote_note",
+        actor: "investigatorB",
+        run: (s) =>
+          s.tx`select api.record_vote_note(${ids.m2Item!}, 'Synthetic: a dissent note for the minutes.', true)`,
+      },
+      {
+        fn: "recuse_for_conflict",
+        actor: "lead",
+        run: async (s) => {
+          await s.tx`select api.cast_vote(${ids.m2Item!}, 'APPROVE', null)`;
+          await s.as("grcDeputy");
+          await s.tx`select api.close_vote_item(${ids.m2Item!}, null)`;
+          // The chair is back for the second item.
+          await s.tx`select api.record_attendance(${ids.m2Chair!}, 'PRESENT')`;
+          ids.m2Item2 = await one(
+            s,
+            s.tx`select api.open_vote_item(${ids.meeting2!}, 'OTHER', null, 'Walk second emergency item (synthetic)') as id`,
+          );
+          await s.as("lead");
+          return s.tx`select api.recuse_for_conflict(${ids.m2Item2!}, 'Synthetic: related to a party.')`;
+        },
+      },
+      {
+        fn: "overrule_minutes_objection",
+        actor: "committeeChair",
+        run: async (s) => {
+          for (const key of ["committeeChair", "investigatorB"] as const) {
+            await s.as(key);
+            await s.tx`select api.cast_vote(${ids.m2Item2!}, 'APPROVE', null)`;
+          }
+          await s.as("grcDeputy");
+          await s.tx`select api.close_vote_item(${ids.m2Item2!}, null)`;
+          await s.tx`select api.close_meeting(${ids.meeting2!}, ${REASON})`;
+          const minutes = await one(
+            s,
+            s.tx`select api.generate_minutes(${ids.meeting2!}, 'Synthetic minutes of the emergency meeting.') as id`,
+          );
+          await s.as("investigatorB");
+          await s.tx`select api.review_minutes(${minutes}, 'REQUEST_CHANGES', 'Synthetic: please correct item two.')`;
+          await s.as("committeeChair");
+          return s.tx`select api.overrule_minutes_objection(${minutes}, 'Synthetic: the minutes record item two correctly.')`;
         },
       },
       {

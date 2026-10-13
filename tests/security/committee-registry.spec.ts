@@ -225,9 +225,10 @@ describe("committee proceedings and snapshots (Q30, Q45–Q46)", () => {
         select rule_snapshot->>'quorum_type' as quorum_type, (rule_snapshot->>'minutes_review_business_days')::int as minutes
         from committee.committee_proceeding where id = ${cp}`;
       expect(snap).toEqual({ quorum_type: "MAJORITY_ELIGIBLE", minutes: 3 });
-      // The ended member still sees the proceeding they sat on.
+      // The snapshot keeps the ended seat for the record, but since 2030 (AMB-039, ADR-040)
+      // visibility follows the current seat: the ended member no longer sees the proceeding.
       await s.as("committee");
-      expect(await s.tx`select id from committee.committee_proceeding where id = ${cp}`).toHaveLength(1);
+      expect(await s.tx`select id from committee.committee_proceeding where id = ${cp}`).toHaveLength(0);
     });
   });
 

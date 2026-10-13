@@ -408,22 +408,29 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
     });
   });
 
-  it("a chair with a declared conflict does not decide, and the deputy chair does not stand in (fail closed)", async () => {
+  // DEC-F04 (migration 2030, ADR-040) replaced the fail-closed rule of 2000: when the chair
+  // cannot decide, the deputy chair stands in, then the configured independent authority.
+  it("a chair with a declared conflict does not decide; the deputy chair stands in (DEC-F04)", async () => {
     await ownerScenario(async (s) => {
       const f = await ready(s, ["legal", "legalB", "lead"], DEPUTY_SEATS);
       await s.as("committeeChair");
       await s.tx`select api.declare_meeting_conflict(${f.participant.committeeChair!}, 'CONFLICT_DECLARED', 'Synthetic: related.')`;
       await s.as("legal");
       const [k] = await raise(s, f.participant.legalB!);
-      for (const u of ["committeeChair", "lead"] as const) {
-        await s.as(u);
-        await s.expectError("CDF_NOT_FOUND", () => decide(s, k!.id, "UPHELD"));
-      }
+      await s.as("committeeChair");
+      await s.expectError("CDF_NOT_FOUND", () => decide(s, k!.id, "UPHELD"));
       await s.as("committeeSecretary");
       await s.expectError(
         "CDF_CONFLICT:CONFLICT_CONCERN_OPEN",
         (tx) => tx`select api.open_vote_item(${f.meeting}, 'OTHER', null, 'Blocked (synthetic)')`,
       );
+      expect(await concernsSeenBy(s, "lead")).toEqual([k!.id]);
+      await s.as("lead");
+      await decide(s, k!.id, "DISMISSED");
+      await s.asOwner();
+      const [row] = await s.tx<{ decided_as: string; decided_by: string }[]>`
+        select decided_as, decided_by from committee.meeting_conflict_concern where id = ${k!.id}`;
+      expect(row).toEqual({ decided_as: "DEPUTY_CHAIR", decided_by: USERS.lead });
     });
   });
 
