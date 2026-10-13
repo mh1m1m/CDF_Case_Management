@@ -483,11 +483,39 @@ new command: the screens call the 1870 `api.*` commands, which check access agai
   views, so the coordinator ruling that purpose views read DB read models behind the shared gate (P12-0b, migration
   2045, ADR-051) does not apply to them. Forms show only where the command would be accepted; every command checks
   again.
-- **Known gaps, proposed for migration 2045.** (1) The referral confirmation cannot yet say how many current members
-  would be cleared and voting: the case team has no read of current seats. (2) The case history (migration 1830) does
-  not yet list the 1870 events (proceedings opened, changed and closed; people, allegations and links added; findings
-  recorded; committee referral and its approval). The stage on the overview does not move with these tabs yet; its
-  pending actions point to them.
+- **Known gaps, allocated to migration 2045 (ADR-051) by the coordinator.** (1) The referral confirmation cannot yet
+  say how many current members would be cleared and voting: the case team has no read of current seats; 2045 adds
+  counts per seat type only, behind the case gate. (2) The case history (migration 1830) does not yet list the 1870
+  events (proceedings opened, changed and closed; people, allegations and links added; findings recorded; committee
+  referral and its approval); 2045 adds them under the History tab's audience, and the restricted referral approval
+  only for the case owner and the Restricted Case Authority. The stage on the overview does not move with these tabs
+  yet; its pending actions point to them.
+
+## Phase 12 owner decisions (2026-10-13)
+
+The owner decided the whole Phase 12 owner pack on 2026-10-13 at 14:43 UTC, and DEC-AMB-013 at 14:40 UTC. His
+messages are the record. They are quoted in full in the Phase 12 plan (project files,
+`uiux/impl/phase12/PHASE12_PLAN.md`, appendices A and B), and the owner-decision register and the rebase ADRs record
+them through the rebase thread. This amendment says only what each decision means for the UX target; where it and his
+text differ, his text governs. None of these rows is open any more.
+
+| Decision                            | For the UX target                                                                                                                                                                                                                                                                                            | Built in                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| DEC-04 Form RACI and withdrawal     | Capability-based RACI stays. A draft is withdrawn under normal draft handling. After formal submission, a withdrawal request records who asked, when, why, the workflow state and the accepting authority where one is required. Nothing is erased, and a proceeding that has materially begun is not ended  | Migration 2150 (ADR-052)                       |
+| DEC-05, four open parts             | Today's rules stay. Only a specific contradiction with a later confirmed decision, a security invariant or a purpose-bound rule is raised                                                                                                                                                                    | No change                                      |
+| DEC-19 Snapshot or reference        | Decision-relevant data is snapshotted at material events; live reference stays only for non-material metadata where safe. A snapshot never widens who may read a module's content                                                                                                                            | Each screen that shows a completed decision    |
+| DEC-49 Form gating and ownership    | Today's gates stay. Work belongs to the case, proceeding, task or action owner, never to a form; the 274-form catalogue is a control catalogue                                                                                                                                                               | No gate change                                 |
+| DEC-22 My Work row fields           | Approved as built (S1, S3): action label, object id, a non-sensitive code or type, status, dates and priority where authorized or configured; the case number only with case-metadata visibility; never a subject name, allegation text, reporter identity, sensitive title or a restricted case's existence | Migration 2045 adds the form code to form rows |
+| DEC-18 Server-side drafts           | Controlled server drafts for authenticated internal users, purpose-bound, under the owner's requirement list. Never for anonymous or unauthenticated flows, evidence binaries, or where an approved security rule forbids them. Restricted-case gates apply                                                  | Migration 2150 (ADR-052)                       |
+| DEC-48 Finding vocabularies         | Governed, effective-dated vocabularies; SOURCE_REQUIRED where no authoritative source exists; an authorized OTHER finding only with a mandatory rationale; additive, so recorded findings keep their codes                                                                                                   | Migration 2150 (ADR-052)                       |
+| DEC-51 Hijri dates                  | Gregorian first and Hijri second on formal generated records only; storage stays canonical; the platform's Umm al-Qura calendar, never a hand-written conversion                                                                                                                                             | Application only                               |
+| DEC-11 Oversight free text          | The general free-text field stays hidden; a controlled `OVERSIGHT_NOTE` where narrative is genuinely needed                                                                                                                                                                                                  | Migration 2160 (ADR-053)                       |
+| DEC-12 Dual control on grants       | Dual control on grants that materially expand access; the requester never approves; no self-approval; revocation is never delayed                                                                                                                                                                            | Migration 2160 (ADR-053)                       |
+| DEC-13 Clearance command, owner     | A dedicated `CLEARANCE_ADMIN`: elevation approved, lowering immediate, history kept. Its organisational owner is SOURCE_REQUIRED, so it stays fail closed until a holder is configured. `ROLE_ADMIN`, technical and committee administration never change clearance                                          | Migration 2160 (ADR-053)                       |
+| DEC-36 Reporting role and KPIs      | Explicit reporting permissions and aggregate read models, never a role that opens cases. Reporting shows inside Oversight; a standalone area only for principally-reporting users within five areas                                                                                                          | Migration 2160 (ADR-053)                       |
+| DEC-AMB-013 conflict after decision | Option A: re-vote without the conflicted member, the authority decides again, and the earlier decision is kept and marked SUPERSEDED. The committee and authority screens show it                                                                                                                            | Migration 2030 (rebase)                        |
+
+Every piece keeps D0's rule: the database decides, and the screen explains.
 
 ## Delivery governance
 
@@ -507,12 +535,14 @@ new command: the screens call the 1870 `api.*` commands, which check access agai
 - S0 and the shared foundation start at once. S1 and S2 follow without waiting for S3–S6 decisions.
 - D2–D6 each need their own migration, allocated one at a time above the highest number on `main`, plus a security review before merge.
 - **Still OPEN.** These decisions are not made here. Each is raised when its gate is reached (audit O28 §28.10):
-  - DEC-22 (My Work row fields, S1);
   - DEC-47, DEC-20, DEC-16, DEC-14, DEC-29 and DEC-32 (S1);
   - DEC-54, DEC-38, DEC-40, DEC-41 and DEC-25 (S2), and the open parts of DEC-37 (D8);
-  - DEC-04, the open parts of DEC-05, DEC-19 and DEC-49 (S3; see the S3 amendment for DEC-31, DEC-35 and DEC-50);
-  - the S4–S6 and portal-track decisions;
+  - DEC-31, DEC-35 and DEC-50, as the S3 amendment records them;
+  - the portal-track decisions;
   - DEC-59 and DEC-60 (verification).
+- **Decided since.** DEC-22, DEC-04, the four open parts of DEC-05, DEC-19, DEC-49 and the S4–S6 decisions of the
+  Phase 12 owner pack (DEC-18, DEC-48, DEC-51, DEC-11, DEC-12, DEC-13, DEC-36), on 2026-10-13: see the Phase 12 owner
+  decisions amendment.
 
 ## Production mapping
 
