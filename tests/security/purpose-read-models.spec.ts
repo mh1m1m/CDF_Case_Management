@@ -1,4 +1,4 @@
-// Business architecture rebase, migration 2030 section 4 (20261007002036; ADR-040; DEC-02, DEC-F01, DEC-F04, DEC-F07;
+// Business architecture rebase, migration 2030 section 4 (ADR-040; DEC-02, DEC-F01, DEC-F04, DEC-F07;
 // AMB-083; Phase 12 asks §6 (b), (c), (d)): purpose read models for a meeting and its minutes, the two meeting
 // notifications, and the synthetic committee seats of the demo seed. The reads never open the case: each part follows
 // the predicate of the table it comes from (logistics, own row, roster, deliberation, concern, minutes), the case is
