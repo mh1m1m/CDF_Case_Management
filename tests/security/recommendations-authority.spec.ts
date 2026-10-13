@@ -26,7 +26,13 @@ import {
   voteOnPackage,
   type PackageFixture,
 } from "../support/decision";
-import { decisionNotice, executeSanction, recordDelivery, setSanctionRule } from "../support/grievance";
+import {
+  decisionNotice,
+  executeSanction,
+  recordDelivery,
+  setSanctionRule,
+  thenUndo,
+} from "../support/grievance";
 
 let caseA: string, caseB: string, ic: string, gc: string;
 
@@ -692,6 +698,8 @@ describe("a subject who leaves employment during the case (DEC-AMB-009 (owner, 2
           executed,
           blocked_by: blocked,
           executable: !executed && blocked === null,
+          executed_under_decision_id: executed ? d!.id : null,
+          execution_origin: null,
         },
       ];
       expect(await shown()).toEqual(row("SUBJECT_LEFT_EMPLOYMENT"));
@@ -2184,7 +2192,11 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
     describe("found after the authority decided (DEC-AMB-013, owner, 2026-10-13, option A)", () => {
       const REMEDIATION = "CDF_CONFLICT:CONFLICT_REMEDIATION_OPEN";
       const SUPERSEDED = "CDF_CONFLICT:DECISION_SUPERSEDED";
+      const FROZEN = "CDF_CONFLICT:FROZEN_BY_SUPERSEDED_DECISION";
       const NOTICE = "Synthetic: the decision on your case.";
+      /** The replacement decision's source document (the first decision cites MEMO-DEMO-0201). */
+      const REPLACEMENT_SOURCE = "MEMO-DEMO-0202";
+      const DISPOSAL = "Synthetic: the replacement decision's ruling on this action.";
 
       /** Chair and lead approve, legal rejects (the lead's vote decides); after legal review the CEO decides round one. */
       async function decidedByLead(s: Scenario): Promise<{ f: PackageFixture; d1: string; vi1: string }> {
@@ -2244,6 +2256,24 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
       };
       const closeCase = (s: Scenario) =>
         s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', 'Synthetic: closing after the decision.')`;
+      /** DEC-AMB-014: the replacement decision's disposition of a frozen action, recorded by the acting manager. */
+      const dispose = (
+        s: Scenario,
+        action: string,
+        disposition: string,
+        o: {
+          source?: string;
+          reason?: string;
+          title?: string | null;
+          description?: string | null;
+          owner?: string | null;
+          due?: number | null;
+        } = {},
+      ) =>
+        s.tx<{ id: string }[]>`
+          select api.dispose_superseded_corrective_action(${action}, ${disposition}, ${o.source ?? REPLACEMENT_SOURCE},
+            ${o.reason ?? DISPOSAL}, ${o.title ?? null}::text, ${o.description ?? null}::text, ${o.owner ?? null}::uuid,
+            (now() at time zone 'Asia/Riyadh')::date + ${o.due ?? null}::int) as id`;
 
       it("T-AMB-028: a decisive tainted vote is never confirmed; the committee votes again without the conflicted member, the authority decides again, and only then is the earlier decision marked SUPERSEDED, never edited", async () => {
         await ownerScenario(async (s) => {
@@ -2484,7 +2514,14 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             ],
             [
               "AUTHORITY_DECISION_SUPERSEDED",
-              ["package_id", "remediation_id", "round_no", "superseded_by", "superseded_by_round"],
+              [
+                "corrective_actions_frozen",
+                "package_id",
+                "remediation_id",
+                "round_no",
+                "superseded_by",
+                "superseded_by_round",
+              ],
             ],
             [
               "CONFLICT_REMEDIATION_CLOSED",
@@ -2505,6 +2542,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             excluded: 1,
             decisions_held: 1,
           });
+          expect(events[1]!.metadata).toMatchObject({ corrective_actions_frozen: 0 });
           expect(events[2]!.metadata).toMatchObject({ redecided_round: 2, superseded: 1 });
           expect(JSON.stringify(events)).not.toContain(USERS.lead);
           expect(JSON.stringify(events)).not.toContain(FIRM);
@@ -2742,16 +2780,18 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           await tryAll(REMEDIATION);
 
           // The authority's new decision: the earlier one is superseded and stays blocked for good; the new one proceeds
-          // once it is notified, like any decision.
+          // once it is notified, like any decision. Its action is frozen (DEC-AMB-014).
           await s.as("committeeSecretary");
-          const [d2] = await decideWith(s, f, "CEO", "APPROVE_AS_RECOMMENDED");
+          const [d2] = await decideWith(s, f, "CEO", "APPROVE_AS_RECOMMENDED", {
+            source: REPLACEMENT_SOURCE,
+          });
           expect(await blocked()).toEqual({
             sanction: [[d2!.id, "DECISION_NOT_DELIVERED"]],
-            action: "DECISION_SUPERSEDED",
+            action: "FROZEN_BY_SUPERSEDED_DECISION",
           });
           await s.as("financeEmployee");
           await s.expectError(
-            SUPERSEDED,
+            FROZEN,
             (tx) =>
               tx`select api.record_corrective_action_progress(${a1!.id}, 40, 'Synthetic: progress note.')`,
           );
@@ -2767,16 +2807,788 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           expect(
             await s.tx`select authority_decision_id from decision.sanction_execution where item_id = ${f.sanction}`,
           ).toEqual([{ authority_decision_id: d2!.id }]);
-          // The superseded decision's action stays frozen, so the case does not close until it is waived; the new
-          // decision's action is opened and reminded as usual.
+          // DEC-AMB-014: the superseded decision's action stays frozen until the replacement decision disposes of it, so
+          // the case does not close and no other action is opened on its item. Here the new decision replaces it with a
+          // new action, which is reminded as usual; the old one is closed and is not.
+          await s.as("caseManager");
+          await s.expectError(FROZEN, () => closeCase(s));
+          await s.expectError(FROZEN, () => openAction(s, f));
+          const [x] = await dispose(s, a1!.id, "REPLACE_WITH_NEW_ACTION", {
+            title: "Synthetic: strengthen approval controls",
+            description: "Synthetic: add a second approver to payments above the threshold.",
+            owner: USERS.financeEmployee,
+            due: 5,
+          });
+          await s.asOwner();
+          const [a2] = await s.tx<{ id: string }[]>`
+            select replacement_action_id as id from decision.corrective_action_disposition where id = ${x!.id}`;
           await s.as("caseManager");
           await s.expectError("CDF_CONFLICT:CORRECTIVE_ACTIONS_OUTSTANDING", () => closeCase(s));
-          const [a2] = await openAction(s, f);
           await s.asOwner();
           expect(await s.tx`select notify.emit_due_reminders() as n`).toEqual([{ n: 1 }]);
           expect(
             await s.tx`select object_id from notify.outbox where template_code = 'CORRECTIVE_ACTION_DUE'`,
           ).toEqual([{ object_id: a2!.id }]);
+        });
+      });
+
+      // DEC-AMB-014 and DEC-AMB-015 (owner, 2026-10-13, option A each) and the neighbouring consequences Fady kept as
+      // coordinator defaults, with his markings. Migration 2030 §3.11 and §3.12; 2040 reads.
+      interface ActionCard {
+        status: string;
+        title: string;
+        version_no: number;
+        versions: { version_no: number; title: string }[];
+        origin: {
+          authority_decision_id: string;
+          governing_decision_id: string;
+          decision_block: string | null;
+          dispositions: Record<string, unknown>[];
+          disposition_options: string[];
+        } | null;
+        capabilities: Record<string, boolean>;
+      }
+      const actionView = async (s: Scenario, action: string, as: UserKey = "caseManager") => {
+        await s.as(as);
+        const [r] = await s.tx<{ v: ActionCard }[]>`select api.corrective_action_view(${action}) as v`;
+        return r!.v;
+      };
+      const REVISED = {
+        title: "Synthetic: revised approval controls",
+        description: "Synthetic: a second approver above the revised threshold.",
+      };
+      /** Round one decided by the lead's vote, and `n` corrective actions opened under it by the case manager. */
+      async function decidedWithActions(
+        s: OwnerScenario,
+        n: number,
+      ): Promise<{ f: PackageFixture; d1: string; a: string[] }> {
+        await implementationOwner(s);
+        const { f, d1 } = await decidedByLead(s);
+        const a: string[] = [];
+        await s.as("caseManager");
+        for (let i = 0; i < n; i++) a.push((await openAction(s, f))[0]!.id);
+        return { f, d1, a };
+      }
+      /** The conflict comes to light; the committee votes again without the lead; the CEO decides round two from
+       *  REPLACEMENT_SOURCE, approving everything or with the given item outcomes. Returns the replacement decision. */
+      async function supersede(s: Scenario, f: PackageFixture, items?: unknown): Promise<string> {
+        await upheldOnLead(s, f);
+        await s.as("committeeSecretary");
+        await resolve(s, f.sanction, "RE_VOTE");
+        await revote(s, f, f.meeting.meeting, ["committeeChair", "legal"]);
+        await s.as("committeeSecretary");
+        await s.tx`select api.record_package_adoption(${f.pkg})`;
+        await toAuthority(s, f);
+        await s.as("committeeSecretary");
+        const [d2] = await decideWith(s, f, "CEO", items ? "APPROVE_PARTIALLY" : "APPROVE_AS_RECOMMENDED", {
+          source: REPLACEMENT_SOURCE,
+          items,
+        });
+        return d2!.id;
+      }
+      const insertDisposition = (
+        tx: Scenario["tx"],
+        v: {
+          action: string;
+          item: string;
+          superseded: string;
+          replacement: string;
+          disposition: string;
+          replacementAction?: string;
+          source?: string;
+          revised?: number;
+        },
+      ) =>
+        tx`insert into decision.corrective_action_disposition (action_id, case_id, recommendation_item_id,
+             superseded_decision_id, replacement_decision_id, disposition, prior_status, source_document_reference, reason,
+             revised_version_no, replacement_action_id, recorded_by)
+           values (${v.action}, ${caseB}, ${v.item}, ${v.superseded}, ${v.replacement}, ${v.disposition}, 'OPEN',
+             ${v.source ?? REPLACEMENT_SOURCE}, ${DISPOSAL}, ${v.revised ?? null}::int, ${v.replacementAction ?? null}::uuid,
+             ${USERS.caseManager})`;
+
+      it("T-AMB-028 (DEC-AMB-014): an action of the superseded decision is frozen: it does not progress, is not verified or waived, takes no sibling and keeps the case open until the replacement decision disposes of it; RE_ADOPT resumes it as it stands", async () => {
+        await ownerScenario(async (s) => {
+          await s.as("grcDirector");
+          await s.tx`select api.set_corrective_action_policy('CORRECTIVE_ACTION', 30, 7, 3, 'NOTE_ONLY', now(), 'APPROVED',
+            ${REASON}) as id`;
+          const {
+            f,
+            d1,
+            a: [a1, a2],
+          } = await decidedWithActions(s, 2);
+          // Before the conflict comes to light the owner submits a2's completion; it awaits verification.
+          await s.as("financeEmployee");
+          await s.tx`select api.submit_corrective_action_completion(${a2!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
+          const d2 = await supersede(s, f);
+          await s.asOwner();
+          const [before] =
+            await s.tx`select to_jsonb(a) as row from decision.corrective_action a where a.id = ${a1!}`;
+          const history = await s.tx`
+            select id, event_type from decision.corrective_action_event where action_id = ${a1!} order by created_at, id`;
+
+          // 1. Frozen, and the case team is told why and what the replacement decision may decide; the owner sees no
+          //    progress command and nothing of the decisions.
+          const v = await actionView(s, a1!);
+          expect(v.origin).toMatchObject({
+            authority_decision_id: d1,
+            governing_decision_id: d1,
+            decision_block: "FROZEN_BY_SUPERSEDED_DECISION",
+            dispositions: [],
+            disposition_options: ["RE_ADOPT", "MODIFY", "WAIVE", "REPLACE_WITH_NEW_ACTION"],
+          });
+          expect(v.capabilities).toMatchObject({ may_dispose: true, may_waive: false });
+          const card = await actionView(s, a1!, "financeEmployee");
+          expect(card.origin).toBeNull();
+          expect(card.capabilities).toMatchObject({
+            may_record_progress: false,
+            may_submit_completion: false,
+            may_dispose: false,
+          });
+          expect((await actionView(s, a2!)).capabilities).toMatchObject({
+            may_verify: false,
+            may_dispose: true,
+          });
+
+          // 2. Nothing but the disposition moves it, on any path: progress, completion, verification, an ordinary waiver
+          //    (CORRECTIVE_ACTION_WAIVE is SOURCE_REQUIRED and held by no role; granted here for the test only), a direct
+          //    update, another action on its item, closure, or any other move of the case out of ACTIVE. No reminder.
+          await s.as("financeEmployee");
+          await s.expectError(
+            FROZEN,
+            (tx) => tx`select api.record_corrective_action_progress(${a1!}, 40, 'Synthetic: progress note.')`,
+          );
+          await s.expectError(
+            FROZEN,
+            (tx) =>
+              tx`select api.submit_corrective_action_completion(${a1!}, 'Synthetic: done.', 'SOP-DEMO-0202')`,
+          );
+          await s.as("caseManager");
+          await s.expectError(
+            FROZEN,
+            (tx) => tx`select api.verify_corrective_action(${a2!}, 'VERIFIED', null)`,
+          );
+          await s.asOwner();
+          await s.tx`insert into iam.role_permission (role_code, permission_code)
+                     values ('GRC_DIRECTOR', 'CORRECTIVE_ACTION_WAIVE')`;
+          await s.as("grcDirector");
+          await s.expectError(
+            FROZEN,
+            (tx) => tx`select api.waive_corrective_action(${a1!}, ${REPLACEMENT_SOURCE}, ${REASON})`,
+          );
+          await s.asOwner();
+          await s.expectError(
+            FROZEN,
+            (tx) =>
+              tx`update decision.corrective_action set status = 'IN_PROGRESS', percent_complete = 10 where id = ${a1!}`,
+          );
+          await s.expectError(
+            FROZEN,
+            (tx) =>
+              tx`update decision.corrective_action set status = 'COMPLETED', completion_submitted_at = null,
+                   completed_at = now(), verified_by = ${USERS.caseManager} where id = ${a2!}`,
+          );
+          await s.expectError(
+            FROZEN,
+            (tx) =>
+              tx`insert into decision.corrective_action (case_id, recommendation_item_id, authority_decision_id,
+                   action_type, sequence_no, title, description, owner_id, due_date, created_by)
+                 values (${caseB}, ${f.corrective}, ${d2}, 'CORRECTIVE_ACTION', 9, 'Synthetic: approval controls',
+                   'Synthetic: add a second approver.', ${USERS.financeEmployee}, current_date + 30, ${USERS.caseManager})`,
+          );
+          await s.as("caseManager");
+          await s.expectError(FROZEN, () => openAction(s, f));
+          await s.expectError(FROZEN, () => closeCase(s));
+          await s.asOwner();
+          await s.expectError(
+            FROZEN,
+            (tx) => tx`update case_mgmt.case_record set records_state = 'RETENTION' where id = ${caseB}`,
+          );
+          expect(await s.tx`select notify.emit_due_reminders() as n`).toEqual([{ n: 0 }]);
+
+          // 3. The disposition is the replacement decision's, and not a waiver: a corrective-action manager of the case
+          //    records it, citing the replacement decision's own source. The owner, the superseded decision's source,
+          //    an unknown disposition and fields a disposition does not take are refused; so is a disposition written
+          //    at the table that does not name the decision now in force.
+          await s.as("financeEmployee");
+          await s.expectError("CDF_FORBIDDEN", () => dispose(s, a1!, "RE_ADOPT"));
+          await s.as("caseManager");
+          for (const [code, o, d] of [
+            ["CDF_INVALID:source_document_reference", { source: "MEMO-DEMO-0201" }, "RE_ADOPT"],
+            ["CDF_INVALID:disposition", {}, "CARRY_FORWARD"],
+            ["CDF_INVALID:title", { title: REVISED.title }, "RE_ADOPT"],
+            ["CDF_INVALID:due_date", { due: 10 }, "WAIVE"],
+            ["CDF_INVALID:title", {}, "MODIFY"],
+            ["CDF_INVALID:owner_id", REVISED, "REPLACE_WITH_NEW_ACTION"],
+          ] as const) {
+            await s.expectError(code, () => dispose(s, a1!, d, o));
+          }
+          await s.asOwner();
+          await s.expectError("CDF_CONFLICT:NOT_SUPERSEDED", (tx) =>
+            insertDisposition(tx, {
+              action: a1!,
+              item: f.corrective,
+              superseded: d2,
+              replacement: d1,
+              disposition: "RE_ADOPT",
+            }),
+          );
+          // The table repeats every check of the command: the decision now in force, its own source, the next version
+          // for MODIFY and none otherwise, and an ACTIVE case.
+          const forged = { action: a1!, item: f.corrective, superseded: d1, replacement: d2 };
+          for (const [code, v] of [
+            ["CDF_CONFLICT:NOT_SUPERSEDED", { ...forged, replacement: d1, disposition: "WAIVE" }],
+            [
+              "CDF_INVALID:source_document_reference",
+              { ...forged, disposition: "RE_ADOPT", source: "MEMO-DEMO-0201" },
+            ],
+            ["CDF_INVALID:revised_version_no", { ...forged, disposition: "MODIFY", revised: 5 }],
+            ["CDF_INVALID:revised_version_no", { ...forged, disposition: "WAIVE", revised: 2 }],
+          ] as const) {
+            await s.expectError(code, (tx) => insertDisposition(tx, v));
+          }
+          // A case that left ACTIVE on a path that skipped the closure guard (simulated with the guards off) takes no
+          // disposition either.
+          await thenUndo(s, async (tx) => {
+            await tx`alter table case_mgmt.case_record disable trigger user`;
+            await tx`update case_mgmt.case_record set records_state = 'RETENTION' where id = ${caseB}`;
+            await tx`alter table case_mgmt.case_record enable trigger user`;
+            await expect(insertDisposition(tx, { ...forged, disposition: "WAIVE" })).rejects.toThrow(
+              "CDF_CONFLICT:CASE_NOT_ACTIVE",
+            );
+          });
+
+          // 4. RE_ADOPT: the action resumes under the replacement decision as it stands; its row and history are kept,
+          //    and only the replacement decision's next supersession would freeze it again.
+          await s.as("caseManager");
+          const [x] = await dispose(s, a1!, "RE_ADOPT");
+          await s.expectError("CDF_CONFLICT:NOT_SUPERSEDED", () => dispose(s, a1!, "WAIVE"));
+          await s.asOwner();
+          expect(
+            await s.tx`select to_jsonb(a) as row from decision.corrective_action a where a.id = ${a1!}`,
+          ).toEqual([before]);
+          expect(
+            await s.tx`select id, event_type from decision.corrective_action_event where action_id = ${a1!}
+                       order by created_at, id`,
+          ).toEqual(history);
+          expect(
+            await s.tx`select action_id, superseded_decision_id, replacement_decision_id, disposition, prior_status,
+                         source_document_reference, reason, revised_version_no, replacement_action_id, recorded_by
+                       from decision.corrective_action_disposition where id = ${x!.id}`,
+          ).toEqual([
+            {
+              action_id: a1,
+              superseded_decision_id: d1,
+              replacement_decision_id: d2,
+              disposition: "RE_ADOPT",
+              prior_status: "OPEN",
+              source_document_reference: REPLACEMENT_SOURCE,
+              reason: DISPOSAL,
+              revised_version_no: null,
+              replacement_action_id: null,
+              recorded_by: USERS.caseManager,
+            },
+          ]);
+          const resumed = await actionView(s, a1!);
+          expect(resumed.origin).toMatchObject({
+            governing_decision_id: d2,
+            decision_block: null,
+            disposition_options: [],
+          });
+          expect(resumed.capabilities.may_dispose).toBe(false);
+          await s.as("financeEmployee");
+          await s.tx`select api.record_corrective_action_progress(${a1!}, 40, 'Synthetic: progress note.')`;
+          // Each action is disposed of on its own: a2 is still frozen, and so is the case.
+          await s.as("caseManager");
+          await s.expectError(
+            FROZEN,
+            (tx) => tx`select api.verify_corrective_action(${a2!}, 'VERIFIED', null)`,
+          );
+          await s.expectError(FROZEN, () => closeCase(s));
+
+          // 5. The ledger: each action frozen at the supersession, and the disposition, by ids and codes; the reason only
+          //    in the event's reason field. The disposition is append-only.
+          await s.as("dpo");
+          const events = await s.tx<
+            { action: string; object_id: string; reason: string | null; metadata: Record<string, unknown> }[]
+          >`select action, object_id, reason, metadata from audit.audit_event
+            where action in ('CORRECTIVE_ACTION_FROZEN', 'CORRECTIVE_ACTION_DISPOSED') order by seq`;
+          expect(events.map((e) => e.action)).toEqual([
+            "CORRECTIVE_ACTION_FROZEN",
+            "CORRECTIVE_ACTION_FROZEN",
+            "CORRECTIVE_ACTION_DISPOSED",
+          ]);
+          expect(
+            events
+              .slice(0, 2)
+              .map((e) => e.object_id)
+              .sort(),
+          ).toEqual([a1!, a2!].sort());
+          expect(events[0]!.metadata).toEqual({
+            authority_decision_id: d1,
+            superseded_by: d2,
+            remediation_id: expect.any(String),
+          });
+          expect(events[2]).toMatchObject({ object_id: a1, reason: DISPOSAL });
+          expect(events[2]!.metadata).toEqual({
+            disposition_id: x!.id,
+            disposition: "RE_ADOPT",
+            recommendation_item_id: f.corrective,
+            opened_under_decision_id: d1,
+            superseded_decision_id: d1,
+            replacement_decision_id: d2,
+            prior_status: "OPEN",
+            status: "OPEN",
+            source_document_reference: REPLACEMENT_SOURCE,
+            revised_version_no: null,
+            replacement_action_id: null,
+          });
+          expect(JSON.stringify(events.map((e) => e.metadata))).not.toContain(DISPOSAL);
+          await s.asOwner();
+          await s.expectError(
+            "decision.corrective_action_disposition is append-only",
+            (tx) => tx`update decision.corrective_action_disposition set disposition = 'WAIVE'`,
+          );
+          await s.expectError(
+            "decision.corrective_action_disposition is append-only",
+            (tx) => tx`delete from decision.corrective_action_disposition`,
+          );
+        });
+      });
+
+      it("T-AMB-028 (DEC-AMB-014): MODIFY keeps every earlier wording as a version; WAIVE keeps the action for good as WAIVED_BY_SUPERSEDING_DECISION; REPLACE_WITH_NEW_ACTION links a new action under the replacement decision; a completed action keeps its completion", async () => {
+        await ownerScenario(async (s) => {
+          const {
+            f,
+            d1,
+            a: [a1, a2, a3, a4],
+          } = await decidedWithActions(s, 4);
+          // Before the conflict comes to light: a1 awaits verification; a4 is completed.
+          await s.as("financeEmployee");
+          for (const a of [a1!, a4!]) {
+            await s.tx`select api.submit_corrective_action_completion(${a}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
+          }
+          await s.as("caseManager");
+          await s.tx`select api.verify_corrective_action(${a4!}, 'VERIFIED', null)`;
+          const d2 = await supersede(s, f);
+          await s.asOwner();
+          const [completed] =
+            await s.tx`select to_jsonb(a) as row from decision.corrective_action a where a.id = ${a4!}`;
+
+          // MODIFY: the revised wording is version 2 and version 1 is kept as opened; the completion submitted against
+          // the earlier wording goes back to IN_PROGRESS; the due date moves.
+          await s.as("caseManager");
+          const [m] = await dispose(s, a1!, "MODIFY", { ...REVISED, due: 12 });
+          await s.asOwner();
+          expect(
+            await s.tx`select status, title, description, version_no, completion_submitted_at,
+                         due_date = (now() at time zone 'Asia/Riyadh')::date + 12 as moved
+                       from decision.corrective_action where id = ${a1!}`,
+          ).toEqual([
+            {
+              status: "IN_PROGRESS",
+              ...REVISED,
+              version_no: 2,
+              completion_submitted_at: null,
+              moved: true,
+            },
+          ]);
+          expect(
+            await s.tx`select version_no, title, disposition_id, recorded_by from decision.corrective_action_version
+                       where action_id = ${a1!} order by version_no`,
+          ).toEqual([
+            {
+              version_no: 1,
+              title: "Synthetic: strengthen approval controls",
+              disposition_id: null,
+              recorded_by: USERS.caseManager,
+            },
+            { version_no: 2, title: REVISED.title, disposition_id: m!.id, recorded_by: USERS.caseManager },
+          ]);
+          expect(
+            (
+              await s.tx<{ event_type: string }[]>`
+                select event_type from decision.corrective_action_event where action_id = ${a1!} order by created_at, id`
+            ).map((e) => e.event_type),
+          ).toEqual(["OPENED", "COMPLETION_SUBMITTED", "RETURNED", "DUE_DATE_CHANGED"]);
+          // The wording changes only to a recorded next version; no version is rewritten or invented.
+          await s.expectError(
+            `corrective action ${a1!} is final or its origin is immutable`,
+            (tx) =>
+              tx`update decision.corrective_action set title = 'Synthetic: an unrecorded title' where id = ${a1!}`,
+          );
+          await s.expectError(
+            `corrective action ${a1!} is final or its origin is immutable`,
+            (tx) =>
+              tx`update decision.corrective_action set title = 'Synthetic: strengthen approval controls', version_no = 1
+                 where id = ${a1!}`,
+          );
+          await s.expectError(
+            `corrective action ${a1!} is final or its origin is immutable`,
+            (tx) =>
+              tx`update decision.corrective_action set title = 'Synthetic: an unrecorded title', version_no = 3
+                 where id = ${a1!}`,
+          );
+          await s.expectError(
+            "decision.corrective_action_version is append-only",
+            (tx) =>
+              tx`update decision.corrective_action_version set title = 'Synthetic: a rewritten wording'`,
+          );
+          await s.expectError(
+            "CDF_INVALID:version_no",
+            (tx) =>
+              tx`insert into decision.corrective_action_version (action_id, version_no, case_id, title, description,
+                   recorded_by)
+                 values (${a2!}, 2, ${caseB}, 'Synthetic: unrecorded', 'Synthetic: an unrecorded wording.',
+                   ${USERS.caseManager})`,
+          );
+          // The owner works from the current wording and sees every version, never the disposition.
+          const card = await actionView(s, a1!, "financeEmployee");
+          expect(card).toMatchObject({ title: REVISED.title, version_no: 2, origin: null });
+          expect(card.versions.map((x) => x.version_no)).toEqual([1, 2]);
+          await s.as("financeEmployee");
+          expect(await s.tx`select id from decision.corrective_action_disposition`).toEqual([]);
+          await s.tx`select api.record_corrective_action_progress(${a1!}, 60, 'Synthetic: progress note.')`;
+
+          // WAIVE: no holder of CORRECTIVE_ACTION_WAIVE is needed (there is none); the action is waived from the
+          // replacement decision's source and kept for good.
+          await s.as("caseManager");
+          await dispose(s, a2!, "WAIVE");
+          // One disposition per action and superseded decision, by the command and at the table; a waived action is
+          // never re-adopted.
+          await s.expectError("CDF_CONFLICT:ALREADY_DISPOSED", () => dispose(s, a2!, "WAIVE"));
+          await s.asOwner();
+          await s.expectError("CDF_CONFLICT:ACTION_CLOSED", (tx) =>
+            insertDisposition(tx, {
+              action: a2!,
+              item: f.corrective,
+              superseded: d1,
+              replacement: d2,
+              disposition: "RE_ADOPT",
+            }),
+          );
+          await s.expectError(
+            'duplicate key value violates unique constraint "corrective_action_disposition_once"',
+            (tx) =>
+              insertDisposition(tx, {
+                action: a2!,
+                item: f.corrective,
+                superseded: d1,
+                replacement: d2,
+                disposition: "WAIVE",
+              }),
+          );
+          // REPLACE_WITH_NEW_ACTION: a replacement written at the table may not name an existing action; through the
+          // command the new action is opened under the replacement decision and linked.
+          await s.asOwner();
+          await s.expectError("CDF_CONFLICT:REPLACEMENT_ACTION_MISMATCH", (tx) =>
+            insertDisposition(tx, {
+              action: a3!,
+              item: f.corrective,
+              superseded: d1,
+              replacement: d2,
+              disposition: "REPLACE_WITH_NEW_ACTION",
+              replacementAction: a1!,
+            }),
+          );
+          await s.as("caseManager");
+          const [r] = await dispose(s, a3!, "REPLACE_WITH_NEW_ACTION", {
+            title: "Synthetic: an independent payment review",
+            description: "Synthetic: an independent review of payments above the threshold.",
+            owner: USERS.financeEmployee,
+            due: 20,
+          });
+          // A completed action is not modified; re-adopted, its completion stands unchanged.
+          await s.expectError("CDF_CONFLICT:ACTION_CLOSED", () => dispose(s, a4!, "MODIFY", REVISED));
+          await dispose(s, a4!, "RE_ADOPT");
+          await s.asOwner();
+          expect(
+            await s.tx`select to_jsonb(a) as row from decision.corrective_action a where a.id = ${a4!}`,
+          ).toEqual([completed]);
+          const [a5] = await s.tx<{ id: string }[]>`
+            select replacement_action_id as id from decision.corrective_action_disposition where id = ${r!.id}`;
+          expect(
+            await s.tx`select id, status, authority_decision_id, sequence_no, title from decision.corrective_action
+                       where recommendation_item_id = ${f.corrective} order by sequence_no`,
+          ).toEqual([
+            {
+              id: a1,
+              status: "IN_PROGRESS",
+              authority_decision_id: d1,
+              sequence_no: 1,
+              title: REVISED.title,
+            },
+            {
+              id: a2,
+              status: "WAIVED",
+              authority_decision_id: d1,
+              sequence_no: 2,
+              title: "Synthetic: strengthen approval controls",
+            },
+            {
+              id: a3,
+              status: "WAIVED",
+              authority_decision_id: d1,
+              sequence_no: 3,
+              title: "Synthetic: strengthen approval controls",
+            },
+            {
+              id: a4,
+              status: "COMPLETED",
+              authority_decision_id: d1,
+              sequence_no: 4,
+              title: "Synthetic: strengthen approval controls",
+            },
+            {
+              id: a5!.id,
+              status: "OPEN",
+              authority_decision_id: d2,
+              sequence_no: 5,
+              title: "Synthetic: an independent payment review",
+            },
+          ]);
+          expect(
+            await s.tx`select action_id, source_document_reference from decision.corrective_action_event
+                       where action_id in (${a2!}, ${a3!}) and event_type = 'WAIVED' order by action_id`,
+          ).toEqual(
+            [a2!, a3!].sort().map((id) => ({ action_id: id, source_document_reference: REPLACEMENT_SOURCE })),
+          );
+          // Waived and replaced actions are final on every path (the freeze trigger answers first, with the reason).
+          await s.expectError(
+            "CDF_CONFLICT:WAIVED_BY_SUPERSEDING_DECISION",
+            (tx) =>
+              tx`update decision.corrective_action set status = 'OPEN', waived_at = null where id = ${a2!}`,
+          );
+          // Why each stands where it does, for the case team.
+          const blocks: (string | null)[] = [];
+          for (const a of [a1!, a2!, a3!, a4!, a5!.id])
+            blocks.push((await actionView(s, a)).origin!.decision_block);
+          expect(blocks).toEqual([
+            null,
+            "WAIVED_BY_SUPERSEDING_DECISION",
+            "REPLACED_BY_NEW_ACTION",
+            null,
+            null,
+          ]);
+          expect((await actionView(s, a3!)).origin!.dispositions).toMatchObject([
+            { disposition: "REPLACE_WITH_NEW_ACTION", replacement_action_id: a5!.id, prior_status: "OPEN" },
+          ]);
+          // Nothing is frozen any more: the case closes once the live actions are done.
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:CORRECTIVE_ACTIONS_OUTSTANDING", () => closeCase(s));
+        });
+      });
+
+      it("T-AMB-028 (DEC-AMB-014, the defaults Fady kept): what was done under the superseded decision stays: the decision row, a sanction executed under it (never executed again, marked SUPERSEDED_DECISION) and a grievance against it (kept as filed, marked SUPERSEDED_DECISION); actions on an item the replacement decision rejects can only be waived", async () => {
+        await ownerScenario(async (s) => {
+          await setSanctionRule(s, "WARNING", null, false, "PROCEED");
+          const {
+            f,
+            d1,
+            a: [a1, a2],
+          } = await decidedWithActions(s, 2);
+          // Before the conflict comes to light: a2 is completed; the decision is delivered to Sigma, the sanction is
+          // executed, and Sigma files a grievance against the decision.
+          await s.as("financeEmployee");
+          await s.tx`select api.submit_corrective_action_completion(${a2!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
+          await s.as("caseManager");
+          await s.tx`select api.verify_corrective_action(${a2!}, 'VERIFIED', null)`;
+          await s.tx`select api.link_subject_portal_account(${f.subject}, ${USERS.employee}, ${REASON})`;
+          const notice = await decisionNotice(s, f.subject, d1);
+          await recordDelivery(s, notice);
+          await s.as("caseManager");
+          await executeSanction(s, f.sanction, f.subject);
+          await s.as("employee");
+          const [g] = await s.tx<{ id: string }[]>`
+            select api.file_grievance_on_decision_notice(${notice}, 'Synthetic: the decision ignored my defence.') as id`;
+          const snapshot = async () => {
+            await s.asOwner();
+            return s.tx`
+              select (select to_jsonb(d) from decision.authority_decision d where d.id = ${d1}) as decision,
+                     (select to_jsonb(e) from decision.sanction_execution e where e.item_id = ${f.sanction}) as execution,
+                     (select to_jsonb(x) from grievance.grievance x where x.id = ${g!.id}) as grievance,
+                     (select count(*)::int from audit.audit_event a where a.object_id = ${g!.id}) as grievance_events`;
+          };
+          const before = await snapshot();
+
+          // The replacement decision approves the sanction and rejects the corrective item.
+          const d2 = await supersede(s, f, [
+            { item_id: f.sanction, outcome: "APPROVED" },
+            { item_id: f.corrective, outcome: "REJECTED" },
+          ]);
+          // The superseded decision, the execution and the grievance are as they were, with the grievance's history.
+          expect(await snapshot()).toEqual(before);
+          await s.expectError(
+            "decision.authority_decision is append-only",
+            (tx) => tx`update decision.authority_decision set outcome = 'REJECT' where id = ${d1}`,
+          );
+          await s.expectError(
+            "decision.authority_decision is append-only",
+            (tx) => tx`delete from decision.authority_decision where id = ${d1}`,
+          );
+          await s.expectError(
+            "decision.sanction_execution is append-only",
+            (tx) =>
+              tx`update decision.sanction_execution set authority_decision_id = ${d2} where item_id = ${f.sanction}`,
+          );
+
+          // The sanction is not executed again, even once the replacement decision is delivered: it is listed as executed
+          // under the superseded decision, and a second execution is refused on every path.
+          await s.as("caseManager");
+          const executability = async () => {
+            await s.as("caseManager");
+            const [x] = await s.tx<{ v: Record<string, unknown>[] }[]>`
+              select api.sanction_executability(${caseB}) as v`;
+            return x!.v;
+          };
+          const executed = {
+            item_id: f.sanction,
+            subject_id: f.subject,
+            authority_decision_id: d2,
+            decided_sanction_code: "WARNING",
+            sanction_code: "WARNING",
+            executed: true,
+            blocked_by: null,
+            executable: false,
+            executed_under_decision_id: d1,
+            execution_origin: "SUPERSEDED_DECISION",
+          };
+          expect(await executability()).toEqual([executed]);
+          await recordDelivery(s, await decisionNotice(s, f.subject, d2));
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:ALREADY_EXECUTED", () =>
+            executeSanction(s, f.sanction, f.subject),
+          );
+          expect(await executability()).toEqual([executed]);
+          await s.asOwner();
+          await s.expectError(
+            "duplicate key value violates unique constraint",
+            (tx) =>
+              tx`insert into decision.sanction_execution (item_id, subject_id, case_id, authority_decision_id,
+                   effective_from, execution_reference, recorded_by)
+                 values (${f.sanction}, ${f.subject}, ${caseB}, ${d2}, now(), 'HR-DEMO-2040', ${USERS.caseManager})`,
+          );
+
+          // The grievance is kept as filed and says the decision it contests was superseded.
+          await s.as("employee");
+          const [view] = await s.tx<
+            { v: Record<string, unknown> }[]
+          >`select api.grievance_view(${g!.id}) as v`;
+          expect(view!.v).toMatchObject({
+            status: "RECEIVED",
+            contested_authority_decision_id: d1,
+            contested_decision_relationship: "SUPERSEDED_DECISION",
+          });
+
+          // The replacement decision rejects the corrective item: its frozen actions may only be waived. The completed
+          // one keeps its completion and is closed for good.
+          const v = await actionView(s, a1!);
+          expect(v.origin!.disposition_options).toEqual(["WAIVE"]);
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () => dispose(s, a1!, "RE_ADOPT"));
+          await s.asOwner();
+          await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", (tx) =>
+            insertDisposition(tx, {
+              action: a1!,
+              item: f.corrective,
+              superseded: d1,
+              replacement: d2,
+              disposition: "RE_ADOPT",
+            }),
+          );
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () => dispose(s, a1!, "MODIFY", REVISED));
+          await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () =>
+            dispose(s, a1!, "REPLACE_WITH_NEW_ACTION", { ...REVISED, owner: USERS.financeEmployee, due: 5 }),
+          );
+          await dispose(s, a1!, "WAIVE");
+          await dispose(s, a2!, "WAIVE");
+          await s.asOwner();
+          expect(
+            await s.tx`select id, status, completed_at is not null as completed from decision.corrective_action
+                       where id in (${a1!}, ${a2!}) order by sequence_no`,
+          ).toEqual([
+            { id: a1, status: "WAIVED", completed: false },
+            { id: a2, status: "COMPLETED", completed: true },
+          ]);
+          await s.as("caseManager");
+          await s.expectError(
+            "CDF_CONFLICT:WAIVED_BY_SUPERSEDING_DECISION",
+            (tx) => tx`select api.reopen_corrective_action(${a2!}, ${REASON})`,
+          );
+          const closed = await actionView(s, a2!);
+          expect(closed.origin!.decision_block).toBe("WAIVED_BY_SUPERSEDING_DECISION");
+          expect(closed.capabilities.may_reopen).toBe(false);
+        });
+      });
+
+      it("T-AMB-028 (DEC-AMB-015): a conflict found after the case closed never enters the remediation directly: the case is reopened first, for DECISIVE_POST_DECISION_CONFLICT (migration 2060)", async () => {
+        await ownerScenario(async (s) => {
+          const {
+            f,
+            d1,
+            a: [a1],
+          } = await decidedWithActions(s, 1);
+          await s.as("financeEmployee");
+          await s.tx`select api.submit_corrective_action_completion(${a1!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
+          await s.as("caseManager");
+          await s.tx`select api.verify_corrective_action(${a1!}, 'VERIFIED', null)`;
+          await closeCase(s);
+          await s.asOwner();
+          const [before] =
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`;
+
+          // After closure nobody raises the concern through the meeting: the case is not ACTIVE.
+          await s.as("legal");
+          await s.expectError(
+            "CDF_CONFLICT:CASE_NOT_ACTIVE",
+            (tx) =>
+              tx`select api.raise_meeting_conflict(${f.meeting.participant.lead!}, 'Synthetic: the lead is related.')`,
+          );
+          // The validated conflict itself is written on the owner connection (validating it on a closed case belongs to
+          // migration 2060): a confirmed case conflict of the lead, whose vote decided round one.
+          await s.asOwner();
+          await s.tx`update case_mgmt.conflict_check set is_current = false
+                     where case_id = ${caseB} and user_id = ${USERS.lead} and is_current`;
+          await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration, decided_by, decided_at,
+                                                           decision_reason)
+            values (${caseB}, ${USERS.lead}, 'CONFLICT_CONFIRMED', 'Synthetic: the lead is related to the subject.',
+                    ${USERS.caseManager}, now(), 'Synthetic: the relationship is confirmed.')`;
+          await s.as("committeeSecretary");
+          expect(await tainted(s, f)).toEqual(bothTainted(f));
+
+          // The committee's RE_VOTE is refused: the case is not ACTIVE.
+          await s.expectError("CDF_CONFLICT:CASE_NOT_ACTIVE", () => resolve(s, f.sanction, "RE_VOTE"));
+          // Nor at the table: a RE_VOTE resolution written directly opens no remediation on a closed case.
+          await s.asOwner();
+          const [vi] = await s.tx<{ id: string }[]>`
+            select id from committee.vote_item where package_id = ${f.pkg} and package_round = 1`;
+          const [res] = await s.tx<{ id: string }[]>`
+            insert into decision.conflict_taint_resolution (item_id, package_id, case_id, package_round, vote_item_id,
+              meeting_id, resolution, conflicted_user_ids, original_result, recount_result, reason, resolved_by)
+            values (${f.sanction}, ${f.pkg}, ${caseB}, 1, ${vi!.id}, ${f.meeting.meeting}, 'RE_VOTE',
+              ${[USERS.lead]}::uuid[], 'APPROVED', 'TIED', ${FIRM}, ${USERS.committeeSecretary})
+            returning id`;
+          await s.expectError(
+            "CDF_CONFLICT:CASE_NOT_ACTIVE",
+            (tx) =>
+              tx`insert into decision.conflict_remediation (package_id, case_id, resolution_id, vote_item_id, decided_round,
+                   revote_round, original_decided_at, conflicted_user_ids, conflict_events, original_result, recount_result,
+                   opened_by)
+                 select ${f.pkg}, ${caseB}, ${res!.id}, ${vi!.id}, 1, 2, p.decided_at, ${[USERS.lead]}::uuid[], '[]'::jsonb,
+                   'APPROVED', 'TIED', ${USERS.committeeSecretary}
+                 from decision.recommendation_package p where p.id = ${f.pkg}`,
+          );
+          // Nothing moved: the package is DECIDED in round one, its decision is not superseded and is unchanged, and
+          // the case stays CLOSED until the 2060 reopening.
+          expect(await packageStatus(s, f.pkg)).toEqual({ status: "DECIDED", round_no: 1 });
+          expect(await superseded(s, f.pkg)).toEqual([]);
+          expect(await s.tx`select id from decision.conflict_remediation`).toEqual([]);
+          expect(
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`,
+          ).toEqual([before]);
+          expect(await s.tx`select records_state from case_mgmt.case_record where id = ${caseB}`).toEqual([
+            { records_state: "CLOSED" },
+          ]);
         });
       });
     });

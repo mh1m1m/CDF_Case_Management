@@ -2266,6 +2266,108 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.cancel_bcp_import(${batch}, ${REASON})`;
         },
       },
+      {
+        // DEC-AMB-013/014 (owner, 2026-10-13): a second walk package on the walk proceeding, decided on the decisive vote
+        // of a member added for it; that member then declares a conflict, the committee votes again without them, the
+        // authority decides again, and the case manager records the replacement decision's disposition of the action
+        // the first decision opened (fixture: every step before the disposition, through the api.* commands). The
+        // member is absent and the alternate not called: their votes would be tainted by the concern upheld and
+        // reversed above (DEC-AMB-010) and by the alternate's recusal.
+        fn: "dispose_superseded_corrective_action",
+        actor: "caseManager",
+        run: async (s) => {
+          await s.as("platformAdmin");
+          const added = await one(
+            s,
+            s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.legal}, 'MEMBER', now(), null,
+              'DEMO-APPT-07') as id`,
+          );
+          await s.as("committeeSecretary");
+          await s.tx`select api.amend_proceeding_snapshot(${ids.committeeProceeding!}, ${added},
+            'Synthetic: a member appointed for the second walk package.')`;
+          const m = await one(
+            s,
+            s.tx`select api.schedule_meeting(${ids.committeeProceeding!}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)',
+              null, now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`,
+          );
+          const rows = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${m}`;
+          const seat = (u: UserKey) => rows.find((r) => r.user_id === USERS[u])!.id;
+          for (const u of ["committeeChair", "committee", "legal"] as const) {
+            await s.as(u);
+            await s.tx`select api.declare_meeting_conflict(${seat(u)}, 'NO_CONFLICT', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_meeting(${m}, ${REASON})`;
+          for (const u of ["committeeChair", "legal"] as const) {
+            await s.tx`select api.record_attendance(${seat(u)}, 'PRESENT')`;
+          }
+          await s.tx`select api.record_attendance(${seat("committee")}, 'ABSENT')`;
+          const pkg = await one(
+            s,
+            s.tx`select api.create_recommendation_package(${ids.committeeProceeding!}, 'PACKAGE') as id`,
+          );
+          const item = await one(
+            s,
+            s.tx`select api.add_recommendation_item(${pkg}, 'CORRECTIVE_ACTION', null, null,
+              'Synthetic: second walk corrective action.', null, null) as id`,
+          );
+          await s.tx`select api.submit_package_for_vote(${pkg})`;
+          // One round: the package vote, adoption, legal review and the authority's decision citing `source`.
+          const round = async (choices: [UserKey, string][], source: string) => {
+            await s.as("committeeSecretary");
+            await s.tx`select api.open_package_vote(${m}, ${pkg})`;
+            const vi = await one(
+              s,
+              s.tx`select vi.id from committee.vote_item vi
+                   join decision.recommendation_package p on p.id = vi.package_id and vi.package_round = p.round_no
+                   where p.id = ${pkg}`,
+            );
+            for (const [u, choice] of choices) {
+              await s.as(u);
+              await s.tx`select api.cast_vote(${vi}, ${choice}, null)`;
+            }
+            await s.as("committeeSecretary");
+            await s.tx`select api.close_vote_item(${vi}, null)`;
+            await s.tx`select api.record_package_adoption(${pkg})`;
+            const request = await one(
+              s,
+              s.tx`select api.request_legal_review(${pkg}, ${USERS.legalB}, ${REASON}, null, null) as id`,
+            );
+            await s.as("legalB");
+            await s.tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`;
+            await s.as("committeeSecretary");
+            await s.tx`select api.submit_to_authority(${pkg})`;
+            return one(
+              s,
+              s.tx`select api.record_authority_decision(${pkg}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED', now(),
+                'Delegated executive (synthetic)', ${source}, null, ${REASON}) as id`,
+            );
+          };
+          await round(
+            [
+              ["legal", "APPROVE"],
+              ["committeeChair", "ABSTAIN"],
+            ],
+            "MEMO-DEMO-WALK-D1",
+          );
+          await s.as("caseManager");
+          const action = await one(
+            s,
+            s.tx`select api.open_corrective_action(${item}, 'Synthetic: second walk action',
+              'Synthetic: second walk corrective action text.', ${USERS.financeEmployee}, current_date + 30) as id`,
+          );
+          await s.as("legal");
+          await s.tx`select api.declare_meeting_conflict(${seat("legal")}, 'CONFLICT_DECLARED',
+            'Synthetic: walk conflict found after the decision.')`;
+          await s.as("committeeSecretary");
+          await s.tx`select api.resolve_conflict_taint(${item}, 'RE_VOTE', 'Synthetic: the vote is taken again.')`;
+          await round([["committeeChair", "APPROVE"]], "MEMO-DEMO-WALK-D2");
+          await s.as("caseManager");
+          return s.tx`select api.dispose_superseded_corrective_action(${action}, 'RE_ADOPT', 'MEMO-DEMO-WALK-D2',
+            ${REASON}, null, null, null, null)`;
+        },
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);

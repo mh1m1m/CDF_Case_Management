@@ -5,6 +5,7 @@
   - the Finalization Set DEC-F01 to DEC-F41 (2026-10-13 02:54 UTC), recorded in `docs/business-architecture/OWNER_DECISIONS_FINALIZATION.md`;
   - the ambiguity decisions DEC-AMB-001 to DEC-AMB-012 (2026-10-13 10:01 UTC), recorded in the same file, section 16;
   - DEC-AMB-013, option A (2026-10-13 14:40 UTC, confirmed final 14:43), recorded in section 16 and applied in section 3 item 10 below;
+  - DEC-AMB-014 and DEC-AMB-015, option A each (2026-10-13 15:48 UTC, one message, final), recorded in section 16 and applied in section 3 items 11 and 12 below; the reopening half of DEC-AMB-015 is migration 2060's (ADR-042);
   - the Phase 12 owner pack (DEC-04, 05, 11, 12, 13, 18, 19, 22, 36, 48, 49, 51; 2026-10-13 14:43 UTC), recorded in section 17. PR-A builds none of it: the screens and migrations 2150 (ADR-052) and 2160 (ADR-053) belong to the UX thread. PR-A was checked against DEC-05, DEC-12, DEC-13, DEC-19 and DEC-49 (Consequences).
 - **Protocol:** §12–§14, §18–§22, §29, §65, §68, §87, §88.
 
@@ -201,7 +202,7 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
   A casting vote needs the caster's own counted vote, so an excluded chair never casts. A DEC-AMB-010 reversal of the conflict does not lift the exclusion: the remediation exists because of that conflict (fail closed).
 
 - **Preserved, then superseded.** The original votes, tally, resolution and authority decisions are not edited. When the authority's decision makes the package DECIDED again, `decision.close_conflict_remediation` closes the remediation and marks each decision of the remediated round SUPERSEDED in `decision.authority_decision_supersession`, naming the replacement. A trigger refuses a supersession before that replacement exists (`REPLACEMENT_DECISION_REQUIRED`). The table is append-only. `decision.authority_decision_overview` flags a superseded decision `SUPERSEDED`.
-- **Downstream blocked.** `decision.decision_block(decision)` gives `TAINTED_BY_CONFLICT`, `CONFLICT_REMEDIATION_OPEN` (while the package is being re-voted and re-decided) or `DECISION_SUPERSEDED` (for good). Every downstream guard reads it:
+- **Downstream blocked.** `decision.decision_block(decision)` gives `TAINTED_BY_CONFLICT`, `CONFLICT_REMEDIATION_OPEN` (while the package is being re-voted and re-decided) or `DECISION_SUPERSEDED` (for good; a corrective action of a superseded decision is FROZEN_BY_SUPERSEDED_DECISION until the replacement decision disposes of it, item 11). Every downstream guard reads it:
   - opening a corrective action;
   - progress on one (status or percentage; the due date, the owner and a waiver are not progress);
   - issuing a decision notice, and delivering one (2040), so no grievance window starts on such a decision;
@@ -217,6 +218,37 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
   - the conflicted member takes no part, even after a reversal;
   - the earlier decision stays unchanged and is superseded only after the replacement;
   - downstream execution stays blocked until the new decision.
+
+11. **Corrective actions of a superseded decision: DEC-AMB-014 (owner, 2026-10-13 15:48), option A (AMB-051).** Fady: "The replacement authority decision must explicitly determine the disposition of every corrective action that originated from the superseded decision." This replaces the earlier fail-closed default (the action stays frozen and the case cannot close until it is waived, which no role can do while `CORRECTIVE_ACTION_WAIVE` is SOURCE_REQUIRED), with its negative tests in the same migration.
+
+- **Frozen.** Once a decision is superseded (item 10), every corrective action that executes it is `FROZEN_BY_SUPERSEDED_DECISION` (`decision.action_block`, the one source for the guards, the reminders, the closure guard and the action view). Until the replacement decision disposes of it, the database refuses on every path:
+  - progress and status changes (the freeze trigger on `decision.corrective_action`), so it is not submitted or verified complete;
+  - an ordinary waiver ("not an ordinary standalone waiver"): `CORRECTIVE_ACTION_WAIVE` plays no part in a supersession and stays SOURCE_REQUIRED;
+  - any other action on the same item (`decision.guard_action_insert`), except the replacement action its own disposition names;
+  - case closure and any other move out of ACTIVE (the 1940 closure guard and the 2030 conflict trigger on `case_record`).
+
+  Reminders skip it. Nothing is carried forward and nothing is waived automatically. When the remediation closes, the ledger gets `CORRECTIVE_ACTION_FROZEN` per action (ids only) and the supersession event counts them.
+
+- **The disposition.** A corrective-action manager of the case records the replacement decision's disposition with `api.dispose_superseded_corrective_action`, citing one of that decision's own source documents (N15), on an ACTIVE case. One row per action and superseded decision in `decision.corrective_action_disposition` (append-only; a trigger repeats every check on every path):
+  - `RE_ADOPT`: the action resumes under the replacement decision as it stands, with its events, progress and any completion. The action row is never re-pointed: `decision.action_governing_decision` derives the decision it now executes, so a later supersession of the replacement freezes it again.
+  - `MODIFY`: a revised title and description become the next version. Every earlier wording is kept in `decision.corrective_action_version` (append-only), the first one snapshotted from the row. A new due date may be given. An action awaiting verification goes back to IN_PROGRESS, since its completion answered the earlier wording. `decision.protect_corrective_records` lets the wording change only to the next version number with its version row, which only a MODIFY disposition creates.
+  - `WAIVE`: kept for good as `WAIVED_BY_SUPERSEDING_DECISION`. An open action is closed as WAIVED with the replacement decision's source; a completed or already waived one keeps its record. It is final on every path.
+  - `REPLACE_WITH_NEW_ACTION`: a new action on the item under the replacement decision, linked from the disposition (a unique, deferred key); the old one is closed as for WAIVE and shows `REPLACED_BY_NEW_ACTION`. The new action names its owner as any new action does (the Restricted Case Authority on a restricted case) and takes the policy due date when none is given.
+
+  RE_ADOPT, MODIFY and REPLACE_WITH_NEW_ACTION need the replacement decision to approve the item; where it does not, only WAIVE is open. RE_ADOPT and MODIFY never reopen a waived action, and MODIFY never a completed one.
+
+- **Audit**, the lineage Fady listed: `CORRECTIVE_ACTION_DISPOSED` on the action (the original corrective action), with the decision it was opened under, the superseded and the replacement decision, the disposition, the prior and new status, the source, the revised version and the replacement action. Actor and time are the event's own. The reason goes in the event's reason field, as for a waiver, and stays in the row. A replacement action also gets `CORRECTIVE_ACTION_OPENED`, naming the action it replaces.
+- **Reads.** `api.corrective_action_view` gives every viewer of the action its version and earlier wordings. The case team also gets the decision it executes now, its dispositions (without their reasons: the card carries no reason) and the dispositions still open, with `may_dispose`.
+- **Tests** (`tests/security/recommendations-authority.spec.ts`, T-AMB-028, "DEC-AMB-014"): a frozen action does not progress, is not verified or waived, takes no sibling and keeps the case open until disposed of, and RE_ADOPT resumes it with its history; MODIFY keeps every version and REPLACE links the new action; WAIVE is final; dispositions are refused for a decision that is not superseded, from a source the replacement decision does not cite, for an item it does not approve, twice, and at the table on every forged path.
+- **Neighbouring consequences, kept by Fady as coordinator defaults "for now"** (owner-confirmed defaults, not new decisions; 2040, item 5.10 and 5.5):
+  - A sanction already executed under the superseded decision keeps its execution record and is not executed again (one execution per item and subject, append-only). `api.sanction_executability` names the decision it was executed under and marks it `execution_origin: SUPERSEDED_DECISION`. The replacement decision determines any remedial consequence separately.
+  - A grievance already filed against the superseded decision is not deleted, cancelled or migrated. `api.grievance_view` marks it `contested_decision_relationship: SUPERSEDED_DECISION`, and its submissions and audit history stay as they are.
+  - Tests: the original authority decision is unchanged, a superseded sanction is not re-executed, and an existing grievance is preserved rather than rewritten.
+
+12. **Conflict found after the case closed: DEC-AMB-015 (owner, 2026-10-13 15:48), option A (AMB-051, AMB-218).** Fady: "Use the controlled reopening machinery of DEC-AMB-002, but treat the validated post-decision conflict event as an authorized reopening trigger alongside new evidence." It is split as the coordinator placed it:
+
+- **2030 (this record).** A closed case never enters item 10 directly. A conflict remediation is refused unless the case is ACTIVE (`CASE_NOT_ACTIVE`, in the remediation trigger, on every path); the committee's RE_VOTE was already refused on a closed case, and the meeting commands need an active case. Test (T-AMB-028, "DEC-AMB-015"): on a closed case the RE_VOTE and a forged remediation are refused, and the package, its decision and the case stay as they were.
+- **2060 (ADR-042, with DEC-AMB-002).** The governed reopening reason `DECISIVE_POST_DECISION_CONFLICT`, distinct from new evidence. The conflict is validated through the applicable conflict process first; the closure authority approves the reopening with reason and audit and does not re-decide the conflict's merits; it fails closed while `CASE_CLOSURE_APPROVAL_RULE` (AMB-212) is SOURCE_REQUIRED, with no new setting. Once the case is ACTIVE again, item 10 applies, then item 11. Fady's negative test "reopening for post-decision conflict requires closure-authority approval" is T-AMB-131 (AMB-218) and lands with 2060.
 
 ### 4. Purpose read models, meeting notices and demo seats (2030, section 4)
 
@@ -270,6 +302,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
    - The grievant withdraws before the outcome (`api.withdraw_grievance`); the window is not reopened.
    - Completion is requested and supplied.
    - The contested items are named.
+   - A grievance against a decision later superseded stays as filed; `api.grievance_view` marks the relationship `SUPERSEDED_DECISION` (Fady's kept default, section 3 item 11).
 6. **One reconsideration (DEC-AMB-001, owner, option B; AMB-145, T-AMB-085).**
    - After a grievance is decided, the grievant may file one reconsideration of the same decision, only on genuinely new evidence stated with a description and a reference. It is filed through the portal (`api.file_grievance_reconsideration`) or recorded by the secretary (`api.record_grievance_reconsideration`).
    - Admissibility confirms that the evidence is new.
@@ -293,6 +326,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
     - It refuses on undelivered notices (AMB-109), on the employment rule (DEC-AMB-009), on a grievance that cancelled the item or returned it for reinvestigation (DEC-AMB-011), and on the suspension rule (DEC-AMB-004).
     - It also refuses while the package carries an unresolved TAINTED_BY_CONFLICT item (DEC-AMB-003). That item stays blocked even if the taint arises after the decision notice.
     - It refuses a decision under conflict remediation or superseded (DEC-AMB-013, section 3 item 10). While the package is back with the committee, `api.record_sanction_execution` says `CONFLICT_REMEDIATION_OPEN`, and `api.sanction_executability` keeps listing the sanction under its earlier decision, blocked. After the new decision the sanction is executed under the new decision, once its own notice is delivered.
+    - An execution recorded before the decision was superseded stays, and is not repeated. `api.sanction_executability` names the decision each execution was recorded under (`executed_under_decision_id`) and marks one under a superseded decision `execution_origin: SUPERSEDED_DECISION` (Fady's kept default, section 3 item 11).
 11. **A failed mandatory email notice (AMB-175).** It opens a delivery task for the issuer.
 12. **Corrective actions (DEC-F26, F27, F28; CON-009).**
     - Escalation steps, evidence types and owner kinds, including pools. Pools are acted for through `decision.acts_for_action`.
@@ -361,6 +395,11 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
     - `authz.can_view_meeting_concern`: an eligible reverser and the reverser can read the concern (DEC-AMB-010);
     - `authz.has_meeting_conflict`: a conflict that came only from a reversed determination no longer counts (DEC-AMB-010).
   - **DEC-AMB-013 (section 3 item 10):** two new tables, select-only, with RLS. `decision.conflict_remediation` is read like `decision.conflict_taint_resolution`; `decision.authority_decision_supersession` is read with the package. `decision.protect_records` admits one new transition (DECIDED back to VOTING, only under an open remediation). Quorum, the close check and `may_vote` are narrowed by the re-vote exclusion. Nothing is widened.
+  - **DEC-AMB-014 and DEC-AMB-015 (section 3 items 11 and 12):**
+    - Two new tables, append-only and select-only, with RLS: `decision.corrective_action_disposition` (the case's viewers, `authz.can_view_case`) and `decision.corrective_action_version` (the action's viewers, `authz.can_view_corrective_action`). One new command, in the IDOR catalog and the audit walk.
+    - **Narrowed:** the freeze trigger (an ordinary waiver is refused on a frozen action), the closure guard (a frozen action keeps the case ACTIVE), a new insert guard (no second action on a frozen item), the remediation trigger (`CASE_NOT_ACTIVE`), and the reminders.
+    - **Widened by owner decision:** `decision.protect_corrective_records` lets an action's title and description change, only to the next version number with its version row, which only a MODIFY disposition writes (DEC-AMB-014: "create an auditable revised action version"). Status, decision, item and every other fixed column stay as they were.
+    - **Read models:** `api.corrective_action_view` adds the version and earlier wordings for the action's viewers, and the governing decision, dispositions (no reasons) and `may_dispose` for the case team; `api.sanction_executability` adds two keys; `api.grievance_view` adds one. None shows anything its reader could not already read.
 - **Phase 12 owner pack (section 17), checked against PR-A without widening it:**
   - DEC-19 (snapshot for decision-relevant data): satisfied. Rule snapshots, frozen tallies, packets, authority requirements and decisions are snapshots; DEC-AMB-013 keeps the superseded decision unchanged.
   - DEC-49 (workflow follows the object): satisfied. Every 2030/2040 command keys on the case, proceeding, package, action, notice or grievance; catalogue rows own nothing.
@@ -383,12 +422,12 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
 - Enabling INTERPRETER, and the acknowledgement wording reference.
 - An approval path for amending a restricted case's snapshot.
 - Whether the Restricted Case Authority names a grievance admissibility decider on a restricted case where no seated decider can view the case. Until a source decides it, nobody is asked (fail closed).
-- Two DEC-AMB-013 questions for the owner, both fail closed until decided:
-  - A corrective action opened under a superseded decision stays frozen, and the case cannot close until it is waived.
-  - A conflict found after the case has closed cannot enter the remediation path, because the path needs an open meeting on an active case.
+- The two DEC-AMB-013 questions are decided (DEC-AMB-014 and DEC-AMB-015, section 3 items 11 and 12). What they leave open:
+  - `CORRECTIVE_ACTION_WAIVE`: still held by no role; a disposition does not need it.
+  - `CASE_CLOSURE_APPROVAL_RULE` (AMB-212): until it is configured, a reopening for `DECISIVE_POST_DECISION_CONFLICT` (2060) is refused, so a decisive conflict found after closure stays without a remedy (fail closed, as Fady requires).
 - DEC-AMB-013 coordinator defaults, kept as built:
-  - a sanction already executed under a superseded decision stays recorded and is not executed again;
-  - a grievance already filed on one is left as it is;
-  - both show their decision as SUPERSEDED;
+  - a sanction already executed under a superseded decision stays recorded and is not executed again (kept by Fady "for now", 15:48);
+  - a grievance already filed on one is left as it is (kept by Fady "for now", 15:48);
+  - both show their decision as superseded (`execution_origin` and `contested_decision_relationship`, `SUPERSEDED_DECISION`);
   - a new grievance filed on a decision while its remediation is open is not refused (it protects the subject and executes nothing);
   - a package withdrawn or cancelled while it is being remediated leaves the remediation OPEN, so the case cannot close.

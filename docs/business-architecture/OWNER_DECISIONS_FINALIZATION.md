@@ -96,7 +96,7 @@ The decision text below is the owner's, lightly reformatted.
 
 - **DEC-F41: corrective action from preliminary review.** The architecture may let a corrective action originate from preliminary Compliance review, but not automatically for every preliminary case: only where the configured business rule permits. The preliminary team may recommend a corrective action without escalating to the Investigation Committee where the matter needs no committee investigation or disciplinary action. Any authority or approval requirement for the action follows its corrective-action type. Configurable and auditable.
 
-## 16. Ambiguity register: owner decisions DEC-AMB-001 to DEC-AMB-013
+## 16. Ambiguity register: owner decisions DEC-AMB-001 to DEC-AMB-015
 
 Given on 2026-10-13 (10:01 UTC, project timeline) on `OWNER_PACK.md` of the ambiguity register (PR #60). Every item takes the recommended option, and these decisions supersede the temporary fail-safe defaults. Fail-safes stay in place until the replacement rule and its negative tests are in the same migration. For DEC-AMB-012, the CDF-206 prohibition on lifting restriction stays until the two-person path is built and security-cleared. Placement: ADR-040 (2030, 2040), ADR-041 (2050), ADR-042 (2060), ADR-048 (2120), ADR-049 (2130).
 
@@ -130,6 +130,43 @@ DEC-AMB-013 was given on 2026-10-13 (14:40 UTC, project timeline) and confirmed 
   Do not route this through the ordinary closed-case reopening mechanism under DEC-AMB-002. This is remediation of a procedurally tainted decision chain, not a new-evidence reopening. Implement under migration 2030 with negative tests ensuring: a decisive tainted vote cannot be confirmed; a decided package can enter this controlled re-vote path only because of the validated conflict event; the conflicted member cannot participate; the prior authority decision remains immutable and is marked superseded only after the replacement decision; downstream execution remains blocked until the new authority decision is recorded.
 
   The three values that stay `SOURCE_REQUIRED` need governing sources, not design decisions: the sanction types suspended during a grievance, the sanction severity ranking, and the identity of the second approver for lifting restriction.
+
+DEC-AMB-014 and DEC-AMB-015 were given on 2026-10-13 (15:48 UTC, project timeline, one message) on the two DEC-AMB-013 questions the coordinator put to him as decision cards. Option A for both; final, never re-raised. Register rows: DEC-AMB-014 is AMB-051; DEC-AMB-015 is AMB-051 (closed-case guard) and AMB-218 (reopening reason). Placement: DEC-AMB-014 in ADR-040 section 3 item 11, migration 2030 §3.11, with the markers in 2040; DEC-AMB-015 in ADR-040 section 3 item 12, migration 2030 §3.12 (a closed case never enters DEC-AMB-013 directly), and in migration 2060 with DEC-AMB-002 (ADR-042: the reopening reason `DECISIVE_POST_DECISION_CONFLICT`).
+
+- **DEC-AMB-014 → A.** Fady's words:
+
+  > Corrective action opened under a superseded authority decision
+  >
+  > Choose Option A — New decision disposes.
+  >
+  > The replacement authority decision must explicitly determine the disposition of every corrective action that originated from the superseded decision.
+  >
+  > For each affected action, the replacement decision must choose one of: `RE_ADOPT` · `MODIFY` · `WAIVE` · `REPLACE_WITH_NEW_ACTION`
+  >
+  > Until that disposition is recorded, the action remains: `FROZEN_BY_SUPERSEDED_DECISION` and must not progress, be verified complete, or support case closure.
+  >
+  > Do not automatically carry the action forward. Do not automatically waive it. Do not depend on `CORRECTIVE_ACTION_WAIVE` merely to resolve this supersession scenario. This is a disposition by the replacement authority decision itself, not an ordinary standalone waiver.
+  >
+  > Audit must preserve: original corrective action; original authority decision; superseding decision; disposition selected; reason; actor; timestamps; any replacement action linkage.
+  >
+  > If re-adopted, the action resumes under the new authority decision without losing its historical execution evidence. If modified, preserve the prior version and create an auditable revised action version. If waived, retain it permanently as `WAIVED_BY_SUPERSEDING_DECISION`. Case closure remains blocked until every frozen action has a final disposition.
+
+- **DEC-AMB-015 → A.** Fady's words:
+
+  > Decisive conflict discovered only after the case has already closed
+  >
+  > Choose Option A — Reopen then remediate, with one important clarification: Use the controlled reopening machinery of DEC-AMB-002, but treat the validated post-decision conflict event as an authorized reopening trigger alongside new evidence.
+  >
+  > The workflow is: `CLOSED CASE` → validated decisive conflict event → closure authority reviews reopening request → reopening approved with reason and audit → case reopens → affected decision chain marked `TAINTED_BY_CONFLICT` → committee reconvenes → quorum and eligibility recalculated → re-vote without conflicted member → competent authority re-decides → former authority decision remains immutable and becomes `SUPERSEDED` → downstream consequences reconciled → case may proceed toward closure again.
+  >
+  > This does not mean the conflict itself is treated as "new evidence." Instead: `DEC-AMB-002 reopening infrastructure` is reused as the controlled reopening gate, while the reopening reason type is: `DECISIVE_POST_DECISION_CONFLICT`. Add this as a distinct governed reopening reason. The closure authority must not re-decide the conflict merits; it authorizes reopening once the conflict event has already been validated through the applicable conflict process. Fail closed if the required closure authority is not configured.
+
+- **Neighbouring consequences**, kept by Fady as coordinator defaults "for now" (owner-confirmed defaults, not new decisions). Fady's words:
+
+  > 1. Sanction already executed under the superseded decision: retain the execution record; do not automatically execute it again; mark it as originating from a `SUPERSEDED` decision; the replacement authority decision determines any remedial consequence separately.
+  > 2. Grievance already filed against the superseded decision: do not delete, cancel or silently migrate it; retain it with an explicit `SUPERSEDED_DECISION` relationship/status; preserve all submissions and audit history; any further procedural treatment should be derived from the replacement decision/grievance rules rather than automatic mutation.
+
+- **Negative tests**, in Fady's words: "frozen corrective actions cannot resume without replacement-decision disposition; a closed case cannot enter DEC-AMB-013 directly; reopening for post-decision conflict requires closure-authority approval; the original authority decision is immutable; superseded sanctions are not automatically re-executed; existing grievances are preserved rather than rewritten." Five are in migration 2030's tests (T-AMB-028, AMB-051); the reopening test is T-AMB-131 (AMB-218) and lands with migration 2060, where the reopening is built. The reopening fails closed while `CASE_CLOSURE_APPROVAL_RULE` (AMB-212) is `SOURCE_REQUIRED`; no new setting is added.
 
 ## 17. Phase 12 owner pack: DEC-04, DEC-05, DEC-11, DEC-12, DEC-13, DEC-18, DEC-19, DEC-22, DEC-36, DEC-48, DEC-49, DEC-51
 

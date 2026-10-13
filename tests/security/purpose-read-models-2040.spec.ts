@@ -611,6 +611,7 @@ const GRIEVANCE: Model = {
     "completion_requests",
     "contested_authority_decision_id",
     "contested_decision_date",
+    "contested_decision_relationship",
     "contested_items",
     "decision_notice_id",
     "grievant",
@@ -1337,11 +1338,14 @@ const ACTION: Model = {
     "title",
     "updated_at",
     "verified_by",
+    "version_no",
+    "versions",
     "waived_at",
   ],
   caps: [
     "may_assign_owner",
     "may_change_due_date",
+    "may_dispose",
     "may_record_progress",
     "may_reopen",
     "may_set_owner_kind",
@@ -1377,6 +1381,12 @@ const actionProbes =
     may_verify: [(tx) => tx`select api.verify_corrective_action(${a}, 'VERIFIED', null)`],
     may_reopen: [(tx) => tx`select api.reopen_corrective_action(${a}, ${REASON})`],
     may_waive: [(tx) => tx`select api.waive_corrective_action(${a}, 'MEMO-DEMO-2040', ${REASON})`],
+    // DEC-AMB-014: only an action of a superseded decision, from a source of the replacement decision.
+    may_dispose: [
+      (tx) =>
+        tx`select api.dispose_superseded_corrective_action(${a}, 'WAIVE', 'MEMO-DEMO-2040', ${REASON}, null, null,
+          null, null)`,
+    ],
     may_change_due_date: [
       (tx) => tx`select api.change_corrective_action_due_date(${a}, current_date + 60, ${REASON})`,
     ],
@@ -1464,7 +1474,10 @@ describe("api.corrective_action_view (authz.can_view_corrective_action; R2, R3)"
       expect(team.origin).toEqual({
         recommendation_item_id: item,
         authority_decision_id: decision,
+        governing_decision_id: decision,
         decision_block: null,
+        dispositions: [],
+        disposition_options: [],
       });
       await s.as("financeEmployee");
       await s.tx`select api.record_corrective_action_progress(${action}, 50, 'Synthetic: progress note.')`;

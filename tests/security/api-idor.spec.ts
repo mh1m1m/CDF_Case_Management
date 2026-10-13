@@ -1227,6 +1227,14 @@ const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.waive_corrective_action(${t.action}, 'MEMO-PROBE-0001', ${REASON})`,
   },
+  // Migration 2030 (DEC-AMB-014): the replacement decision's disposition of a frozen action.
+  {
+    fn: "dispose_superseded_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.dispose_superseded_corrective_action(${t.action}, 'WAIVE', 'MEMO-PROBE-0001', ${REASON}, null, null,
+        null, null)`,
+  },
   // Migration 2040 (DEC-F28): a unit, pool or external party owns the action.
   {
     fn: "set_corrective_action_owner_kind",

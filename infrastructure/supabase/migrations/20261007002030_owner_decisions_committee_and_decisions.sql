@@ -2,7 +2,7 @@
 -- 2030 Owner Finalization Set, part 1: committees, meetings, votes, minutes, recommendations, legal review and
 -- authority decisions (Business Architecture Rebase; CDF-196 programme; DEC-F01–F07, F11–F13, F19, F20 and the
 -- ambiguity register rows routed to this migration)
--- Requirements: owner decisions DEC-F01 to DEC-F41 and DEC-AMB-003, 007 and 010
+-- Requirements: owner decisions DEC-F01 to DEC-F41 and DEC-AMB-003, 007, 010, 013, 014 and 015
 -- (docs/business-architecture/OWNER_DECISIONS_FINALIZATION.md, 2026-10-13); owner Q&A; ADR-019 to ADR-023, ADR-038,
 -- ADR-039; ADR-040 (this migration and 2040)
 --
@@ -2794,7 +2794,8 @@ to authenticated;
 -- =============================================================================
 -- Section 3. Recommendation packages, legal review and authority decisions
 -- =============================================================================
--- DEC-F11, DEC-F12, DEC-F13, DEC-F19, DEC-F20, DEC-AMB-003, DEC-AMB-013 and the ambiguity register rows routed here (AMB-018, AMB-026, AMB-030,
+-- DEC-F11, DEC-F12, DEC-F13, DEC-F19, DEC-F20, DEC-AMB-003, DEC-AMB-013, DEC-AMB-014, DEC-AMB-015 and the ambiguity register rows
+-- routed here (AMB-018, AMB-026, AMB-030,
 -- AMB-036, AMB-051, AMB-100–AMB-102, AMB-108, AMB-113, AMB-115, AMB-117, AMB-119, AMB-120, AMB-123, AMB-125–AMB-127,
 -- AMB-129–AMB-133, AMB-135, AMB-229); contradictions CON-017 and CON-018.
 --
@@ -2859,9 +2860,28 @@ to authenticated;
 --       decision) and each decision of the earlier round is marked SUPERSEDED in decision.authority_decision_supersession;
 --       the decision row itself is never edited. While the remediation is open, and for good once a decision is
 --       superseded, nothing proceeds from that decision: no corrective action is opened or progresses (a waiver is still
---       possible), no decision notice is issued or delivered (2040), no sanction is executed (2040), and the case does
---       not close. Where the recount gives the same result, the DEC-AMB-003 CONFIRM path stays and RE_VOTE is refused on
---       a decided package (RESULT_UNCHANGED).
+--       possible while the remediation is open; a superseded decision's actions are frozen, 3.11), no decision notice is
+--       issued or delivered (2040), no sanction is executed (2040), and the case does not close. Where the recount gives
+--       the same result, the DEC-AMB-003 CONFIRM path stays and RE_VOTE is refused on a decided package
+--       (RESULT_UNCHANGED).
+--   3.11 Corrective actions under a superseded decision (DEC-AMB-014, owner, 2026-10-13, option A). Once a decision is
+--       superseded (3.10), every corrective action that executes it is FROZEN_BY_SUPERSEDED_DECISION until the
+--       replacement decision disposes of it: it makes no progress, is not verified complete, is not waived by an
+--       ordinary waiver, is not reminded, no other action is opened on its item, and the case does not leave ACTIVE.
+--       Nothing is carried forward or waived automatically. A corrective-action manager of the case records the
+--       replacement decision's disposition of each action, citing that decision's own source document
+--       (api.dispose_superseded_corrective_action into decision.corrective_action_disposition, append-only):
+--       RE_ADOPT (the action resumes under the replacement decision with its history), MODIFY (a revised wording as a
+--       new version; every earlier version is kept in decision.corrective_action_version), WAIVE (kept for good as
+--       WAIVED_BY_SUPERSEDING_DECISION) or REPLACE_WITH_NEW_ACTION (a new action on the item under the replacement
+--       decision, linked; the old one is closed as for WAIVE). It is not a waiver: CORRECTIVE_ACTION_WAIVE plays no
+--       part and stays SOURCE_REQUIRED. An action executes the decision it was opened under until a RE_ADOPT or MODIFY
+--       moves it to the replacement (decision.action_governing_decision), so a later supersession freezes it again.
+--   3.12 Conflict found after the case closed (DEC-AMB-015, owner, 2026-10-13, option A). A closed case never enters
+--       3.10 directly: a remediation is refused on every path unless the case is ACTIVE (CASE_NOT_ACTIVE). The case is
+--       reopened first, through the DEC-AMB-002 reopening machinery with the governed reason
+--       DECISIVE_POST_DECISION_CONFLICT and the closure authority's approval (migration 2060, ADR-042); then 3.10
+--       applies.
 --
 -- Existing functions replaced (create or replace: same signature, owner, SECURITY DEFINER and search_path; no check
 -- weakened):
@@ -2884,6 +2904,9 @@ to authenticated;
 --   decision.protect_records()                  as in 1900, except that a DECIDED package may go back to VOTING in
 --                                               the next round, once, when an open conflict remediation names that
 --                                               round (DEC-AMB-013); nothing else of a decided package changes.
+--   decision.protect_corrective_records()       as in 1940, except that a corrective action's wording may change to
+--                                               the next version a MODIFY disposition recorded (DEC-AMB-014); its
+--                                               origin stays fixed and a waived action stays final.
 -- One index is recreated under its name with a wider key: restricted_legal_review_approval_open is unique per package
 -- round instead of per package (an unused approval of an earlier round no longer blocks the next one).
 -- =============================================================================
@@ -3284,6 +3307,72 @@ comment on table decision.authority_decision_supersession is
   'DEC-AMB-013 (migration 2030): an authority decision SUPERSEDED by the authority''s decision on a conflict '
   'remediation''s re-vote. Written only after that replacement decision; the superseded decision is never edited.';
 
+-- DEC-AMB-014 (owner, 2026-10-13, option A): what the replacement decision decided for a corrective action that executed
+-- the decision it superseded. One row per action and superseded decision, written by
+-- api.dispose_superseded_corrective_action and checked by decision.guard_action_disposition; append-only.
+create table decision.corrective_action_disposition (
+  id                        uuid primary key default gen_random_uuid(),
+  action_id                 uuid not null references decision.corrective_action (id),
+  case_id                   uuid not null references case_mgmt.case_record (id),
+  recommendation_item_id    uuid not null references decision.recommendation_item (id),
+  -- The decision the action executed when it froze (the one it was opened under, or the one an earlier disposition
+  -- re-adopted it under) and the decision now in force that superseded it.
+  superseded_decision_id    uuid not null references decision.authority_decision (id),
+  replacement_decision_id   uuid not null references decision.authority_decision (id),
+  disposition               text not null
+                              check (disposition in ('RE_ADOPT', 'MODIFY', 'WAIVE', 'REPLACE_WITH_NEW_ACTION')),
+  -- The action's status when the disposition was recorded (taken here, never from the writer).
+  prior_status              text not null,
+  -- One of the replacement decision's own source documents (N15).
+  source_document_reference text not null check (length(source_document_reference) between 3 and 300),
+  reason                    text not null check (length(reason) between 5 and 2000),
+  -- MODIFY: the action's new version (decision.corrective_action_version).
+  revised_version_no        int check (revised_version_no >= 2),
+  -- REPLACE_WITH_NEW_ACTION: the action opened in the same transaction under the replacement decision.
+  replacement_action_id     uuid unique references decision.corrective_action (id) deferrable initially deferred,
+  recorded_by               uuid not null references iam.user_profile (id),
+  recorded_at               timestamptz not null default now(),
+  constraint corrective_action_disposition_once unique (action_id, superseded_decision_id),
+  check (replacement_decision_id <> superseded_decision_id),
+  check ((disposition = 'MODIFY') = (revised_version_no is not null)),
+  check ((disposition = 'REPLACE_WITH_NEW_ACTION') = (replacement_action_id is not null)),
+  check (replacement_action_id is distinct from action_id)
+);
+create index corrective_action_disposition_case on decision.corrective_action_disposition (case_id);
+create index corrective_action_disposition_item on decision.corrective_action_disposition (recommendation_item_id);
+create index corrective_action_disposition_superseded on decision.corrective_action_disposition (superseded_decision_id);
+create index corrective_action_disposition_replacement on decision.corrective_action_disposition (replacement_decision_id);
+create index corrective_action_disposition_recorded_by on decision.corrective_action_disposition (recorded_by);
+comment on table decision.corrective_action_disposition is
+  'DEC-AMB-014 (owner, 2026-10-13, option A; migration 2030): the replacement authority decision''s disposition of a '
+  'corrective action opened under the decision it superseded: RE_ADOPT, MODIFY, WAIVE (WAIVED_BY_SUPERSEDING_DECISION) '
+  'or REPLACE_WITH_NEW_ACTION. Not a waiver. Read by the case team.';
+
+-- DEC-AMB-014: the wording of a corrective action, version by version. Version 1 is the wording it was opened with,
+-- copied when it is first modified; each later version comes from a MODIFY disposition. The action row carries the
+-- current version. Append-only.
+create table decision.corrective_action_version (
+  action_id      uuid not null references decision.corrective_action (id),
+  version_no     int not null check (version_no >= 1),
+  case_id        uuid not null references case_mgmt.case_record (id),
+  title          text not null check (length(title) between 5 and 200),
+  description    text not null check (length(description) between 10 and 4000),
+  disposition_id uuid unique references decision.corrective_action_disposition (id),
+  recorded_by    uuid not null references iam.user_profile (id),
+  recorded_at    timestamptz not null default now(),
+  primary key (action_id, version_no),
+  check ((version_no = 1) = (disposition_id is null))
+);
+create index corrective_action_version_case on decision.corrective_action_version (case_id);
+create index corrective_action_version_recorded_by on decision.corrective_action_version (recorded_by);
+comment on table decision.corrective_action_version is
+  'DEC-AMB-014 (migration 2030): every wording of a corrective action; version 1 as opened, each later one from the '
+  'replacement decision''s MODIFY. Read as the action.';
+
+alter table decision.corrective_action add column version_no int not null default 1 check (version_no >= 1);
+comment on column decision.corrective_action.version_no is
+  'DEC-AMB-014: the version of the wording the action carries (decision.corrective_action_version); 1 until a MODIFY.';
+
 -- -----------------------------------------------------------------------------
 -- 3.6 Purpose access grace (AMB-229)
 -- -----------------------------------------------------------------------------
@@ -3323,7 +3412,8 @@ begin
                            'decision.authority_decision_source', 'decision.authority_decision_condition',
                            'decision.package_return', 'decision.legal_review_cancellation',
                            'decision.legal_opinion_revision', 'decision.conflict_taint_resolution',
-                           'decision.vote_tally_entry', 'decision.authority_decision_supersession'] loop
+                           'decision.vote_tally_entry', 'decision.authority_decision_supersession',
+                           'decision.corrective_action_disposition', 'decision.corrective_action_version'] loop
     execute format('create trigger no_update before update on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
@@ -3691,7 +3781,8 @@ as $$
 $$;
 
 -- DEC-AMB-013: a remediation opens only from the committee's RE_VOTE on a validated, decisive taint of the decided
--- round, on every path: the resolution is RE_VOTE on this package's decided round with a recount that differs; the
+-- round, on every path, and only on an ACTIVE case (DEC-AMB-015): the resolution is RE_VOTE on this package's decided
+-- round with a recount that differs; the
 -- package is DECIDED in that round; every conflicted member took part in a vote of the round and has a recorded
 -- conflict (the conflict events are taken here, never from the writer). It closes once, as REDECIDED, only when the
 -- authority's decision on a later round made the package DECIDED again; nothing else in it changes.
@@ -3707,6 +3798,11 @@ begin
   if tg_op = 'INSERT' then
     select * into v_r from decision.conflict_taint_resolution r where r.id = new.resolution_id;
     select * into v_p from decision.recommendation_package p where p.id = new.package_id;
+    -- DEC-AMB-015 (owner, 2026-10-13, option A): never on a case that is not ACTIVE. A conflict found after closure
+    -- comes here only once the case is reopened for it (DECISIVE_POST_DECISION_CONFLICT, migration 2060).
+    if not exists (select 1 from case_mgmt.case_record c where c.id = v_p.case_id and c.records_state = 'ACTIVE') then
+      perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE');
+    end if;
     new.conflict_events := decision.conflict_events(new.package_id, new.conflicted_user_ids);
     if v_r.id is null or v_r.package_id <> new.package_id or v_r.resolution <> 'RE_VOTE'
        or v_r.package_round <> new.decided_round or v_r.vote_item_id <> new.vote_item_id
@@ -3796,9 +3892,176 @@ $$;
 create trigger vote_revote_exclusion before insert on committee.vote
   for each row execute function decision.refuse_excluded_vote();
 
--- DEC-AMB-003, DEC-AMB-013: a corrective action whose decision is tainted, under remediation or superseded makes no
--- progress (status or percentage) on any path. Its owner and due date may still change, and the authority may still
--- waive it.
+-- DEC-AMB-014 (owner, 2026-10-13, option A): the decision now in force that superseded a decision, following the
+-- chain of supersessions; null when the decision is not superseded.
+create function decision.superseding_decision(p_decision_id uuid)
+returns uuid
+language sql stable
+set search_path = ''
+as $$
+  with recursive chain (decision_id, depth) as (
+    select x.superseded_by, 1 from decision.authority_decision_supersession x where x.decision_id = p_decision_id
+    union all
+    select x.superseded_by, c.depth + 1
+    from chain c join decision.authority_decision_supersession x on x.decision_id = c.decision_id
+    where c.depth < 100
+  )
+  select c.decision_id from chain c order by c.depth desc limit 1;
+$$;
+
+-- DEC-AMB-014: the decision a corrective action executes now: the replacement decision of its latest RE_ADOPT or MODIFY
+-- disposition, else the decision it was opened under.
+create function decision.action_governing_decision(p_action_id uuid)
+returns uuid
+language sql stable
+set search_path = ''
+as $$
+  select coalesce((select x.replacement_decision_id from decision.corrective_action_disposition x
+                   where x.action_id = a.id and x.disposition in ('RE_ADOPT', 'MODIFY')
+                   order by x.recorded_at desc, x.id desc limit 1),
+                  a.authority_decision_id)
+  from decision.corrective_action a
+  where a.id = p_action_id;
+$$;
+
+-- DEC-AMB-003, DEC-AMB-013, DEC-AMB-014: why a corrective action may not move now, as a code, or null when it may.
+-- FROZEN_BY_SUPERSEDED_DECISION: the decision it executes was superseded and the replacement decision has not disposed
+-- of it yet. WAIVED_BY_SUPERSEDING_DECISION and REPLACED_BY_NEW_ACTION: the replacement decision closed it, for good.
+-- Otherwise the block of the decision it executes (TAINTED_BY_CONFLICT, CONFLICT_REMEDIATION_OPEN). The one source for
+-- the action guards, the reminders, the closure guard and the action view.
+create function decision.action_block(p_action_id uuid)
+returns text
+language sql stable
+set search_path = ''
+as $$
+  select case
+           when not exists (select 1 from decision.authority_decision_supersession x where x.decision_id = g.decision_id)
+             then decision.decision_block(g.decision_id)
+           when y.disposition = 'WAIVE' then 'WAIVED_BY_SUPERSEDING_DECISION'
+           when y.disposition = 'REPLACE_WITH_NEW_ACTION' then 'REPLACED_BY_NEW_ACTION'
+           else 'FROZEN_BY_SUPERSEDED_DECISION'
+         end
+  from (select decision.action_governing_decision(p_action_id) as decision_id) g
+  left join decision.corrective_action_disposition y
+    on y.action_id = p_action_id and y.superseded_decision_id = g.decision_id
+  where g.decision_id is not null;
+$$;
+
+-- DEC-AMB-014: a disposition, on every path, is the replacement decision's: the action executes a superseded decision
+-- not yet disposed of, on an ACTIVE case; it names the decision in force that superseded it and one of that
+-- decision's source documents; RE_ADOPT, MODIFY and REPLACE_WITH_NEW_ACTION need that decision to approve the item;
+-- RE_ADOPT and MODIFY never reopen a waived action and MODIFY never a completed one; MODIFY names the next version;
+-- REPLACE_WITH_NEW_ACTION names an action that does not exist yet (decision.guard_action_insert checks it when it is
+-- opened, and the deferred key that it is). The prior status is taken here.
+create function decision.guard_action_disposition()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_a decision.corrective_action;
+begin
+  select * into v_a from decision.corrective_action a where a.id = new.action_id for update;
+  if v_a.id is null or v_a.case_id <> new.case_id or v_a.recommendation_item_id <> new.recommendation_item_id then
+    perform api._fail('INVALID', 'action_id');
+  end if;
+  if not exists (select 1 from case_mgmt.case_record c where c.id = v_a.case_id and c.records_state = 'ACTIVE') then
+    perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE');
+  end if;
+  if new.superseded_decision_id is distinct from decision.action_governing_decision(v_a.id)
+     or new.replacement_decision_id is distinct from decision.superseding_decision(new.superseded_decision_id) then
+    perform api._fail('CONFLICT', 'NOT_SUPERSEDED');
+  end if;
+  if not exists (select 1 from decision.authority_decision_source x
+                 where x.decision_id = new.replacement_decision_id and x.reference = new.source_document_reference) then
+    perform api._fail('INVALID', 'source_document_reference');
+  end if;
+  if new.disposition <> 'WAIVE'
+     and decision.approving_decision(v_a.recommendation_item_id) is distinct from new.replacement_decision_id then
+    perform api._fail('CONFLICT', 'ITEM_NOT_APPROVED');
+  end if;
+  if (new.disposition in ('RE_ADOPT', 'MODIFY') and v_a.status = 'WAIVED')
+     or (new.disposition = 'MODIFY' and v_a.status = 'COMPLETED') then
+    perform api._fail('CONFLICT', 'ACTION_CLOSED');
+  end if;
+  if new.revised_version_no is distinct from (case when new.disposition = 'MODIFY' then v_a.version_no + 1 end) then
+    perform api._fail('INVALID', 'revised_version_no');
+  end if;
+  if exists (select 1 from decision.corrective_action a where a.id = new.replacement_action_id) then
+    perform api._fail('CONFLICT', 'REPLACEMENT_ACTION_MISMATCH');
+  end if;
+  new.prior_status := v_a.status;
+  return new;
+end;
+$$;
+create trigger corrective_action_disposition_guard before insert on decision.corrective_action_disposition
+  for each row execute function decision.guard_action_disposition();
+
+-- DEC-AMB-014: version 1 is the wording the action was opened with, by whoever opened it; each later version is the
+-- next one, from this action's MODIFY disposition, by whoever recorded it.
+create function decision.guard_action_version()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_a decision.corrective_action;
+  v_x decision.corrective_action_disposition;
+begin
+  select * into v_a from decision.corrective_action a where a.id = new.action_id;
+  select * into v_x from decision.corrective_action_disposition x where x.id = new.disposition_id;
+  if v_a.id is null or new.case_id <> v_a.case_id
+     or (new.version_no = 1
+         and (v_a.version_no <> 1 or new.title <> v_a.title or new.description <> v_a.description
+              or new.recorded_by <> v_a.created_by or new.recorded_at <> v_a.created_at))
+     or (new.version_no > 1
+         and (v_x.id is null or v_x.action_id <> v_a.id or v_x.disposition <> 'MODIFY'
+              or v_x.revised_version_no <> new.version_no or v_a.version_no <> new.version_no - 1
+              or new.recorded_by <> v_x.recorded_by
+              or not exists (select 1 from decision.corrective_action_version v
+                             where v.action_id = v_a.id and v.version_no = new.version_no - 1))) then
+    perform api._fail('INVALID', 'version_no');
+  end if;
+  return new;
+end;
+$$;
+create trigger corrective_action_version_guard before insert on decision.corrective_action_version
+  for each row execute function decision.guard_action_version();
+
+-- DEC-AMB-014: a new action starts at version 1, and is opened on an item none of whose actions is frozen by a
+-- superseded decision; the one exception is the action a REPLACE_WITH_NEW_ACTION disposition names, which must be on
+-- its item and case, under its replacement decision.
+create function decision.guard_action_insert()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_x decision.corrective_action_disposition;
+begin
+  if new.version_no <> 1 then perform api._fail('INVALID', 'version_no'); end if;
+  select * into v_x from decision.corrective_action_disposition x where x.replacement_action_id = new.id;
+  if v_x.id is not null then
+    if new.recommendation_item_id <> v_x.recommendation_item_id or new.case_id <> v_x.case_id
+       or new.authority_decision_id <> v_x.replacement_decision_id then
+      perform api._fail('CONFLICT', 'REPLACEMENT_ACTION_MISMATCH');
+    end if;
+  elsif exists (select 1 from decision.corrective_action a
+                where a.recommendation_item_id = new.recommendation_item_id
+                  and decision.action_block(a.id) = 'FROZEN_BY_SUPERSEDED_DECISION') then
+    perform api._fail('CONFLICT', 'FROZEN_BY_SUPERSEDED_DECISION');
+  end if;
+  return new;
+end;
+$$;
+create trigger corrective_action_frozen_item before insert on decision.corrective_action
+  for each row execute function decision.guard_action_insert();
+
+-- DEC-AMB-003, DEC-AMB-013, DEC-AMB-014: a corrective action that may not move (decision.action_block) makes no
+-- progress (status or percentage) on any path, and is never verified complete. Its owner and due date may still change.
+-- The one move left is to WAIVED from an open status: the authority's waiver while the decision is tainted or under
+-- remediation, or the close-out of the replacement decision's WAIVE or REPLACE_WITH_NEW_ACTION. An action frozen by a
+-- superseded decision is not waived that way: only the replacement decision's disposition resolves it.
 create function decision.freeze_blocked_action()
 returns trigger
 language plpgsql
@@ -3807,10 +4070,13 @@ as $$
 declare
   v_block text;
 begin
-  if (new.status is distinct from old.status or new.percent_complete is distinct from old.percent_complete)
-     and new.status <> 'WAIVED' then
-    v_block := decision.decision_block(old.authority_decision_id);
-    if v_block is not null then perform api._fail('CONFLICT', v_block); end if;
+  if new.status is distinct from old.status or new.percent_complete is distinct from old.percent_complete then
+    v_block := decision.action_block(old.id);
+    if v_block is not null
+       and not (new.status = 'WAIVED' and old.status in ('OPEN', 'IN_PROGRESS', 'PENDING_VERIFICATION')
+                and v_block <> 'FROZEN_BY_SUPERSEDED_DECISION') then
+      perform api._fail('CONFLICT', v_block);
+    end if;
   end if;
   return new;
 end;
@@ -3819,8 +4085,8 @@ create trigger corrective_action_decision_block before update on decision.correc
   for each row execute function decision.freeze_blocked_action();
 
 -- DEC-AMB-003, DEC-AMB-013: a case does not close, or leave ACTIVE any other way, while one of its packages is under
--- conflict remediation, or decided and tainted. Any move out of ACTIVE is guarded, so no later path out can skip it
--- (AGENT-09, pack 5).
+-- conflict remediation, or decided and tainted, or (DEC-AMB-014) while one of its corrective actions is frozen by a
+-- superseded decision. Any move out of ACTIVE is guarded, so no later path out can skip it (AGENT-09, pack 5).
 create function decision.guard_case_closure_conflict()
 returns trigger
 language plpgsql
@@ -3834,6 +4100,11 @@ begin
              where p.case_id = new.id and p.status = 'DECIDED' and decision.package_tainted(p.id)) then
     perform api._fail('CONFLICT', 'TAINTED_BY_CONFLICT');
   end if;
+  -- DEC-AMB-014: nor while a corrective action awaits the replacement decision's disposition.
+  if exists (select 1 from decision.corrective_action a
+             where a.case_id = new.id and decision.action_block(a.id) = 'FROZEN_BY_SUPERSEDED_DECISION') then
+    perform api._fail('CONFLICT', 'FROZEN_BY_SUPERSEDED_DECISION');
+  end if;
   return new;
 end;
 $$;
@@ -3844,7 +4115,8 @@ create trigger case_record_conflict_remediation before update of records_state o
 -- DEC-AMB-013: called by api.record_authority_decision when its decision makes a package DECIDED. An open remediation
 -- of the package closes with its lineage (the new vote on the tainted target and its result, the replacement
 -- decision), and every decision of the remediated round is marked SUPERSEDED, after the replacement, never edited.
--- The ledger gets ids and counts, never a result.
+-- Each corrective action that executed one of them is frozen from then on (DEC-AMB-014, decision.action_block) and the
+-- ledger says so per action. The ledger gets ids and counts, never a result.
 create function decision.close_conflict_remediation(p_package_id uuid, p_decision_id uuid)
 returns void
 language plpgsql
@@ -3856,7 +4128,9 @@ declare
   v_target committee.vote_item;
   v_new committee.vote_item;
   v_d record;
+  v_a record;
   v_count int := 0;
+  v_frozen int;
 begin
   select * into v_r from decision.conflict_remediation r where r.package_id = p_package_id and r.status = 'OPEN' for update;
   if v_r.id is null then return; end if;
@@ -3877,10 +4151,21 @@ begin
              order by d.recorded_at, d.id loop
     insert into decision.authority_decision_supersession (decision_id, package_id, case_id, remediation_id, superseded_by)
     values (v_d.id, p_package_id, v_p.case_id, v_r.id, p_decision_id);
+    -- DEC-AMB-014: every action that executed the decision is now frozen until the replacement decision disposes of it.
+    v_frozen := 0;
+    for v_a in select a.id from decision.corrective_action a
+               where a.case_id = v_p.case_id and decision.action_governing_decision(a.id) = v_d.id
+               order by a.created_at, a.id loop
+      perform audit.record_event('CORRECTIVE_ACTION_FROZEN', 'BUSINESS', 'SUCCESS', v_p.case_id, 'corrective_action',
+        v_a.id::text, null,
+        jsonb_build_object('authority_decision_id', v_d.id, 'superseded_by', p_decision_id, 'remediation_id', v_r.id));
+      v_frozen := v_frozen + 1;
+    end loop;
     perform audit.record_event('AUTHORITY_DECISION_SUPERSEDED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'authority_decision',
       v_d.id::text, null,
       jsonb_build_object('package_id', p_package_id, 'round_no', v_d.package_round, 'remediation_id', v_r.id,
-                         'superseded_by', p_decision_id, 'superseded_by_round', v_p.round_no));
+                         'superseded_by', p_decision_id, 'superseded_by_round', v_p.round_no,
+                         'corrective_actions_frozen', v_frozen));
     v_count := v_count + 1;
   end loop;
   perform audit.record_event('CONFLICT_REMEDIATION_CLOSED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'conflict_remediation',
@@ -4070,6 +4355,38 @@ begin
 end;
 $$;
 
+-- As in 1940 (an action keeps its origin; a waived action is final; a policy version can only be given an end, once),
+-- except that an action's wording may change to its next version, once that version is recorded from the replacement
+-- decision's MODIFY (DEC-AMB-014).
+create or replace function decision.protect_corrective_records()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_fixed text[] := array['id', 'case_id', 'recommendation_item_id', 'authority_decision_id', 'action_type',
+                          'sequence_no', 'created_by', 'created_at'];
+begin
+  if tg_table_name = 'corrective_action' then
+    if old.status = 'WAIVED'
+       or (select jsonb_object_agg(k, to_jsonb(new) -> k) from unnest(v_fixed) k)
+          <> (select jsonb_object_agg(k, to_jsonb(old) -> k) from unnest(v_fixed) k)
+       or ((new.title, new.description, new.version_no) is distinct from (old.title, old.description, old.version_no)
+           and (new.version_no <> old.version_no + 1
+                or not exists (select 1 from decision.corrective_action_version v
+                               where v.action_id = old.id and v.version_no = new.version_no
+                                 and v.title = new.title and v.description = new.description))) then
+      raise exception 'corrective action % is final or its origin is immutable', old.id using errcode = 'insufficient_privilege';
+    end if;
+  elsif tg_table_name = 'corrective_action_policy' then
+    if (to_jsonb(new) - 'effective_to') <> (to_jsonb(old) - 'effective_to') or old.effective_to is not null then
+      raise exception 'corrective-action policy % can only be given an end, once', old.id using errcode = 'insufficient_privilege';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
 -- DEC-F12 (CON-017): required by a rule in force for the committee's kind (by item type, or by the item's
 -- legal-justification flag), or by the item's catalogue version. A NOT_REQUIRED rule never cancels another source.
 create or replace function decision.legal_review_required(p_package_id uuid)
@@ -4190,6 +4507,8 @@ alter table decision.conflict_taint_resolution enable row level security;
 alter table decision.vote_tally_entry enable row level security;
 alter table decision.conflict_remediation enable row level security;
 alter table decision.authority_decision_supersession enable row level security;
+alter table decision.corrective_action_disposition enable row level security;
+alter table decision.corrective_action_version enable row level security;
 
 -- decision.sanction_catalogue_version: no policy and no grant; read through decision.sanction_catalogue_entry.
 -- decision.vote_tally_entry: no policy and no grant; read only by the DEC-AMB-003 taint functions.
@@ -4259,6 +4578,15 @@ grant select on decision.conflict_remediation to authenticated;
 create policy authority_decision_supersession_read on decision.authority_decision_supersession for select to authenticated
   using (authz.can_view_recommendation_package(package_id));
 grant select on decision.authority_decision_supersession to authenticated;
+-- DEC-AMB-014: a disposition names decisions and the replacement decision's reasoning: read by the case team, as the
+-- action's origin is (api.corrective_action_view). Its owner sees the action's own state and wording only.
+create policy corrective_action_disposition_read on decision.corrective_action_disposition for select to authenticated
+  using (authz.can_view_case(case_id));
+grant select on decision.corrective_action_disposition to authenticated;
+-- The wording, version by version, is read as the action is (its owner included), like its history.
+create policy corrective_action_version_read on decision.corrective_action_version for select to authenticated
+  using (authz.can_view_corrective_action(action_id));
+grant select on decision.corrective_action_version to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Read models
@@ -5609,6 +5937,185 @@ begin
 end;
 $$;
 
+-- -----------------------------------------------------------------------------
+-- Command: the replacement decision's disposition of a frozen corrective action (DEC-AMB-014)
+-- -----------------------------------------------------------------------------
+-- DEC-AMB-014 (owner, 2026-10-13, option A): "The replacement authority decision must explicitly determine the
+-- disposition of every corrective action that originated from the superseded decision." A corrective-action manager of
+-- the case records it from one of the replacement decision's own source documents (N15), as actions are opened from a
+-- decision (1940). It is not a waiver: CORRECTIVE_ACTION_WAIVE plays no part. One disposition per action and superseded
+-- decision; the table guard (decision.guard_action_disposition) repeats every check below.
+--   RE_ADOPT                 the action resumes under the replacement decision as it stands, its history and any
+--                            completion kept. Not a waived action.
+--   MODIFY                   a revised title and description become the action's next version (every earlier version
+--                            kept); a new due date if given; an action awaiting verification goes back to IN_PROGRESS,
+--                            since its completion answered the earlier wording. Not a completed or waived action.
+--   WAIVE                    kept for good as WAIVED_BY_SUPERSEDING_DECISION: an open action is closed as WAIVED with
+--                            the replacement decision's source; a completed or waived one keeps its record.
+--   REPLACE_WITH_NEW_ACTION  a new action on the item under the replacement decision, linked from the disposition; the
+--                            old one is closed as for WAIVE.
+-- RE_ADOPT, MODIFY and REPLACE_WITH_NEW_ACTION need the replacement decision to approve the item; the replacement action
+-- names its owner (Restricted Case Authority on a restricted case, as 1940) and takes the policy due date when none is
+-- given. Fields a disposition does not use must be null. The ledger gets ids and codes (the action, the decision it was
+-- opened under, the superseded and the replacement decision, the disposition, the statuses, the source, the version and
+-- the replacement action; actor and time as every event); the reason goes in the event's reason field, as for a waiver,
+-- and stays in the row.
+create function api.dispose_superseded_corrective_action(
+  p_action_id uuid, p_disposition text, p_source_document_reference text, p_reason text, p_title text,
+  p_description text, p_owner_id uuid, p_due_date date
+)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v decision.corrective_action;
+  v_governing uuid;
+  v_replacement uuid;
+  v_reference text;
+  v_reason text;
+  v_title text;
+  v_description text;
+  v_due date;
+  v_old_due date;
+  v_prior text;
+  v_version int;
+  v_new_id uuid;
+  v_new decision.corrective_action;
+  v_seq int;
+  v_id uuid;
+begin
+  v := decision.lock_action(p_action_id);
+  perform decision.require_manager(v.case_id);
+  if (select c.records_state from case_mgmt.case_record c where c.id = v.case_id) <> 'ACTIVE' then
+    perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE');
+  end if;
+  perform pg_advisory_xact_lock(hashtext('decision.corrective_action:' || v.recommendation_item_id));
+  v_governing := decision.action_governing_decision(v.id);
+  v_replacement := decision.superseding_decision(v_governing);
+  if v_replacement is null then perform api._fail('CONFLICT', 'NOT_SUPERSEDED'); end if;
+  if exists (select 1 from decision.corrective_action_disposition x
+             where x.action_id = v.id and x.superseded_decision_id = v_governing) then
+    perform api._fail('CONFLICT', 'ALREADY_DISPOSED');
+  end if;
+  if p_disposition is null or p_disposition not in ('RE_ADOPT', 'MODIFY', 'WAIVE', 'REPLACE_WITH_NEW_ACTION') then
+    perform api._fail('INVALID', 'disposition');
+  end if;
+  v_reference := api._require_text(p_source_document_reference, 'source_document_reference', 3, 300);
+  if not exists (select 1 from decision.authority_decision_source x
+                 where x.decision_id = v_replacement and x.reference = v_reference) then
+    perform api._fail('INVALID', 'source_document_reference');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  if p_disposition <> 'WAIVE' and decision.approving_decision(v.recommendation_item_id) is distinct from v_replacement then
+    perform api._fail('CONFLICT', 'ITEM_NOT_APPROVED');
+  end if;
+  if (p_disposition in ('RE_ADOPT', 'MODIFY') and v.status = 'WAIVED')
+     or (p_disposition = 'MODIFY' and v.status = 'COMPLETED') then
+    perform api._fail('CONFLICT', 'ACTION_CLOSED');
+  end if;
+  if p_disposition in ('MODIFY', 'REPLACE_WITH_NEW_ACTION') then
+    v_title := api._require_text(p_title, 'title', 5, 200);
+    v_description := api._require_text(p_description, 'description', 10, 4000);
+  elsif p_title is not null then
+    perform api._fail('INVALID', 'title');
+  elsif p_description is not null then
+    perform api._fail('INVALID', 'description');
+  end if;
+  if p_disposition = 'REPLACE_WITH_NEW_ACTION' then
+    perform decision.require_owner_naming(v.case_id);
+    if not decision.owner_eligible(p_owner_id, v.case_id) then perform api._fail('INVALID', 'owner_id'); end if;
+  elsif p_owner_id is not null then
+    perform api._fail('INVALID', 'owner_id');
+  end if;
+  if (p_disposition in ('RE_ADOPT', 'WAIVE') and p_due_date is not null) or p_due_date < decision.local_today() then
+    perform api._fail('INVALID', 'due_date');
+  end if;
+  if p_disposition = 'REPLACE_WITH_NEW_ACTION' then
+    v_due := coalesce(p_due_date, decision.local_today() + (decision.current_corrective_policy(v.action_type)).default_due_days);
+    if v_due is null then perform api._fail('INVALID', 'due_date'); end if;
+    v_new_id := gen_random_uuid();
+  end if;
+  v_prior := v.status;
+  v_old_due := v.due_date;
+  if p_disposition = 'MODIFY' then v_version := v.version_no + 1; end if;
+
+  insert into decision.corrective_action_disposition (action_id, case_id, recommendation_item_id, superseded_decision_id,
+                                                      replacement_decision_id, disposition, prior_status,
+                                                      source_document_reference, reason, revised_version_no,
+                                                      replacement_action_id, recorded_by)
+  values (v.id, v.case_id, v.recommendation_item_id, v_governing, v_replacement, p_disposition, v.status, v_reference,
+          v_reason, v_version, v_new_id, v_actor)
+  returning id into v_id;
+
+  if p_disposition = 'MODIFY' then
+    -- The earlier wording is kept as a version before the row carries the new one.
+    if v.version_no = 1 then
+      insert into decision.corrective_action_version (action_id, version_no, case_id, title, description, recorded_by,
+                                                      recorded_at)
+      values (v.id, 1, v.case_id, v.title, v.description, v.created_by, v.created_at);
+    end if;
+    insert into decision.corrective_action_version (action_id, version_no, case_id, title, description, disposition_id,
+                                                    recorded_by)
+    values (v.id, v_version, v.case_id, v_title, v_description, v_id, v_actor);
+    update decision.corrective_action
+       set title = v_title, description = v_description, version_no = v_version, due_date = coalesce(p_due_date, due_date),
+           status = case when status = 'PENDING_VERIFICATION' then 'IN_PROGRESS' else status end,
+           completion_submitted_at = null, updated_at = now(), row_version = row_version + 1
+     where id = v.id
+    returning * into v;
+    if v_prior = 'PENDING_VERIFICATION' then
+      perform decision.record_action_event(v, 'RETURNED', v_reason, null, null, null, null, null);
+    end if;
+    if v.due_date <> v_old_due then
+      perform decision.record_action_event(v, 'DUE_DATE_CHANGED', v_reason, null, null, null, v.due_date, null);
+    end if;
+  elsif p_disposition in ('WAIVE', 'REPLACE_WITH_NEW_ACTION') and v.status in ('OPEN', 'IN_PROGRESS', 'PENDING_VERIFICATION') then
+    update decision.corrective_action
+       set status = 'WAIVED', completion_submitted_at = null, waived_at = now(), updated_at = now(),
+           row_version = row_version + 1
+     where id = v.id
+    returning * into v;
+    perform decision.record_action_event(v, 'WAIVED', v_reason, null, null, null, null, v_reference);
+  end if;
+  -- The owner hears that their action changed (ids only, ADR-025) while they may still open it.
+  if (p_disposition = 'MODIFY' or (v.status = 'WAIVED' and v_prior <> 'WAIVED'))
+     and decision.owner_eligible(v.owner_id, v.case_id) then
+    perform notify.enqueue('CORRECTIVE_ACTION_CHANGED', v.owner_id, v.id, null,
+                           'action-changed:' || v.id || ':' || v.row_version);
+  end if;
+
+  if p_disposition = 'REPLACE_WITH_NEW_ACTION' then
+    select coalesce(max(a.sequence_no), 0) + 1 into v_seq from decision.corrective_action a
+     where a.recommendation_item_id = v.recommendation_item_id;
+    insert into decision.corrective_action (id, case_id, recommendation_item_id, authority_decision_id, action_type,
+                                            sequence_no, title, description, owner_id, due_date, created_by)
+    values (v_new_id, v.case_id, v.recommendation_item_id, v_replacement, v.action_type, v_seq, v_title, v_description,
+            p_owner_id, v_due, v_actor)
+    returning * into v_new;
+    perform decision.record_action_event(v_new, 'OPENED', null, null, null, p_owner_id, v_due, null);
+    perform notify.enqueue('CORRECTIVE_ACTION_ASSIGNED', p_owner_id, v_new.id, null,
+                           'action-assigned:' || v_new.id || ':' || v_seq || ':0');
+    perform audit.record_event('CORRECTIVE_ACTION_OPENED', 'BUSINESS', 'SUCCESS', v.case_id, 'corrective_action',
+      v_new.id::text, null,
+      jsonb_build_object('recommendation_item_id', v.recommendation_item_id, 'authority_decision_id', v_replacement,
+                         'action_type', v.action_type, 'sequence_no', v_seq, 'owner_id', p_owner_id, 'due_date', v_due,
+                         'due_date_from_policy', p_due_date is null, 'replaces_action_id', v.id,
+                         'disposition_id', v_id));
+  end if;
+  perform audit.record_event('CORRECTIVE_ACTION_DISPOSED', 'BUSINESS', 'SUCCESS', v.case_id, 'corrective_action',
+    v.id::text, v_reason,
+    jsonb_build_object('disposition_id', v_id, 'disposition', p_disposition,
+                       'recommendation_item_id', v.recommendation_item_id,
+                       'opened_under_decision_id', v.authority_decision_id, 'superseded_decision_id', v_governing,
+                       'replacement_decision_id', v_replacement, 'prior_status', v_prior, 'status', v.status,
+                       'source_document_reference', v_reference, 'revised_version_no', v_version,
+                       'replacement_action_id', v_new_id));
+  return v_id;
+end;
+$$;
+
 grant execute on function
   api.set_sanction_catalogue_entry(text, text, text, text, text, text[], text, timestamptz, text, text, text),
   api.set_legal_review_rule(text, text, text, text, timestamptz, text, text),
@@ -5621,7 +6128,8 @@ grant execute on function
   api.cancel_legal_review_request(uuid, text),
   api.give_superseding_legal_opinion(uuid, text, text),
   api.resolve_conflict_taint(uuid, text, text),
-  api.record_authority_decision(uuid, text, text, timestamptz, text, text, jsonb, text, text, text, text, text[], jsonb)
+  api.record_authority_decision(uuid, text, text, timestamptz, text, text, jsonb, text, text, text, text, text[], jsonb),
+  api.dispose_superseded_corrective_action(uuid, text, text, text, text, text, uuid, date)
 to authenticated;
 
 -- -----------------------------------------------------------------------------
@@ -5656,6 +6164,13 @@ update config.target_module
        notes = notes || ' Since 2030: a case that is not a direct referral needs an approved preliminary recommendation '
                         'REFERRED_TO_COMMITTEE (AMB-018).'
  where code = 'COMMITTEE_REFERRAL';
+update config.target_module
+   set commands = commands || array['api.dispose_superseded_corrective_action'],
+       delivered_in = case when '2030' = any (delivered_in) then delivered_in else delivered_in || '2030'::text end,
+       notes = notes || ' Since 2030: an action under a superseded decision is frozen until the replacement decision '
+                        'disposes of it: RE_ADOPT, MODIFY (versioned wording), WAIVE or REPLACE_WITH_NEW_ACTION '
+                        '(DEC-AMB-014).'
+ where code = 'CORRECTIVE_ACTION';
 
 -- =============================================================================
 -- Section 4. Purpose read models for a meeting and its minutes, and two content-free meeting notifications
