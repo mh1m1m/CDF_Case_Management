@@ -17,7 +17,12 @@ import {
 
 let caseA: string, caseB: string, caseExec: string, caseD: string;
 beforeAll(async () => {
-  [caseA, caseB, caseExec, caseD] = await Promise.all(["0001", "0002", "0003", "0004"].map((n) => caseId(n)));
+  [caseA, caseB, caseExec, caseD] = await Promise.all([
+    caseId("0001"),
+    caseId("0002"),
+    caseId("0003"),
+    caseId("0004"),
+  ]);
 });
 
 const COMMITTEE_FORMATION = {
@@ -482,13 +487,19 @@ describe("reconciliation narrows legacy grants to in-flight forms, never the cas
         select id, form_code || ':' || instance_no as code from forms.form_instance where case_id = ${caseA}`;
       const code = (id: string) => numbers.find((n) => n.id === id)!.code;
       const ourCodes = new Set(f.mine(numbers.map((n) => n.id)).map(code));
-      const chairAccess = await s.tx<{ basis: string; code: string; case_id: string | null }[]>`
-        select basis, code, case_id from api.my_access() where basis in ('GRANT', 'FORM_ACCESS')`;
-      expect(chairAccess.every((r) => r.basis === "FORM_ACCESS" && r.case_id === null)).toBe(true);
-      const ourAccess = chairAccess.filter((r) => ourCodes.has(r.code));
+      const chairAccess = await s.tx<
+        { basis: string; code: string; case_id: string | null; target_id: string | null }[]
+      >`select basis, code, case_id, target_id from api.my_access()`;
+      const formRows = chairAccess.filter((r) => r.basis !== "CLEARANCE" && r.basis !== "ROLE");
+      expect(formRows.every((r) => r.basis === "FORM_ACCESS" && r.case_id === null)).toBe(true);
+      // Each kept form's row leads to that form; no other row carries a target.
+      expect(chairAccess.filter((r) => r.basis !== "FORM_ACCESS").every((r) => r.target_id === null)).toBe(
+        true,
+      );
+      const ourAccess = formRows.filter((r) => ourCodes.has(r.code));
       expect(ourAccess.sort((a, b) => (a.code < b.code ? -1 : 1))).toEqual([
         ...[f.f13prepared, f.f13draft, f.f15draft]
-          .map((id) => ({ basis: "FORM_ACCESS", code: code(id), case_id: null }))
+          .map((id) => ({ basis: "FORM_ACCESS", code: code(id), case_id: null, target_id: id }))
           .sort((a, b) => (a.code < b.code ? -1 : 1)),
       ]);
       const chairAreas = await s.tx<{ area_code: string }[]>`select area_code from api.my_areas()`;

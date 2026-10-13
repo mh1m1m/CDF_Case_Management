@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { STATES, TRANSITIONS, lastReturn, progressSteps, transitionsFrom } from "./index";
+import {
+  STATES,
+  TRANSITIONS,
+  isHandOver,
+  isTriageState,
+  lastReturn,
+  progressSteps,
+  transitionsFrom,
+} from "./index";
 
 describe("CDF_CASE_V1", () => {
   it("has the 15 protocol states in order", () => {
@@ -94,5 +102,15 @@ describe("progressSteps (path-aware, UX-032)", () => {
   it("falls back to positions only when no path is recorded, and to all upcoming for an unknown state", () => {
     expect(progressSteps("TRIAGE", []).filter((s) => s.state === "done")).toHaveLength(4);
     expect(progressSteps(null, []).every((s) => s.state === "upcoming")).toBe(true);
+  });
+});
+
+describe("hand-over (ADR-016 D3)", () => {
+  it("is every step out of the triage stages, and only those", () => {
+    const handOvers = TRANSITIONS.filter((t) => isHandOver(t.from, t.to)).map((t) => t.code);
+    expect(handOvers.sort()).toEqual(["COMPLETE_TRIAGE", "SCREEN_OUT"]);
+    expect(isTriageState("TRIAGE")).toBe(true);
+    expect(isTriageState("JURISDICTION")).toBe(false);
+    expect(isTriageState("NO_SUCH_STATE")).toBe(false);
   });
 });

@@ -11,6 +11,24 @@ export function transitionsFrom(state: string) {
   return TRANSITIONS.filter((t) => t.from === state && !t.isSystem);
 }
 
+/**
+ * The triage stages: every state before JURISDICTION (mirror of workflow.is_triage_state, migration 2020). An
+ * unknown state is not a triage stage (fail closed, as in the database).
+ */
+export function isTriageState(state: string): boolean {
+  const s = stateByCode(state);
+  const jurisdiction = stateByCode("JURISDICTION");
+  return !!s && !!jurisdiction && s.sequence < jurisdiction.sequence;
+}
+
+/**
+ * A hand-over (ADR-016 D3, DEC-03): a step out of the triage stages. The database ends every TRIAGE grant on the case
+ * in the same transaction; the UI says so before the step is taken.
+ */
+export function isHandOver(from: string, to: string): boolean {
+  return isTriageState(from) && !isTriageState(to);
+}
+
 /** Position of a state on the case progress tracker (0-based), or -1. */
 export function progressIndex(state: string): number {
   return STATES.findIndex((s) => s.code === state);

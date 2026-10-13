@@ -768,9 +768,14 @@ as $$
    order by g.ord;
 $$;
 
--- My access: from 1820, with scope-aware grants and form-scoped access.
-create or replace function api.my_access()
-returns table (basis text, code text, case_id uuid, case_number text, since_at timestamptz, until_at timestamptz)
+-- My access: from 1820, with scope-aware grants and form-scoped access. One output column is added at the end,
+-- target_id: the kept form's id on a FORM_ACCESS row (null elsewhere), so the row can lead to that form. Without
+-- it, forms with the same number on different cases read alike, because the case is not named. A new output
+-- column means dropping and creating the function again, with its grant; it reads only, so nothing is lost.
+drop function api.my_access();
+create function api.my_access()
+returns table (basis text, code text, case_id uuid, case_number text, since_at timestamptz, until_at timestamptz,
+               target_id uuid)
 language sql stable security definer
 set search_path = ''
 as $$
@@ -779,22 +784,22 @@ as $$
   )
   select x.basis, x.code, x.case_id,
          case when x.case_id is not null and authz.can_view_case_metadata(x.case_id) then c.case_number end,
-         x.since_at, x.until_at
+         x.since_at, x.until_at, x.target_id
     from (
       select 'CLEARANCE'::text as basis, me.clearance::text as code, null::uuid as case_id,
-             null::timestamptz as since_at, null::timestamptz as until_at, 0 as ord
+             null::timestamptz as since_at, null::timestamptz as until_at, 0 as ord, null::uuid as target_id
         from me
       union all
-      select 'ROLE', a.role_code, null, a.effective_from::timestamptz, a.effective_to::timestamptz, 1
+      select 'ROLE', a.role_code, null, a.effective_from::timestamptz, a.effective_to::timestamptz, 1, null
         from iam.user_role_assignment a, me
        where a.user_id = me.id and a.status = 'ACTIVE'
          and (a.effective_to is null or a.effective_to >= current_date)
       union all
-      select 'ASSIGNMENT', a.assignment_role, a.case_id, a.assigned_at, null, 2
+      select 'ASSIGNMENT', a.assignment_role, a.case_id, a.assigned_at, null, 2, null
         from case_mgmt.case_assignment a, me
        where a.user_id = me.id and a.status = 'ACTIVE' and authz.can_view_case_metadata(a.case_id)
       union all
-      select 'GRANT', g.scope, g.case_id, g.effective_from, g.effective_to, 3
+      select 'GRANT', g.scope, g.case_id, g.effective_from, g.effective_to, 3, null
         from case_mgmt.case_access_grant g, me
        where g.user_id = me.id and g.status = 'ACTIVE' and (g.effective_to is null or g.effective_to > now())
          and (g.scope in ('CASE', 'AUDIT') or (g.scope = 'TRIAGE' and authz.case_before_handover(g.case_id)))
@@ -803,17 +808,17 @@ as $$
       -- S3 (ADR-016 D2, path (a)): one row per kept form, coded '<form code>:<instance no>' so each form is told
       -- apart. The case is named only where the caller may see its metadata, as for every other row.
       select 'FORM_ACCESS', i.form_code || ':' || i.instance_no,
-             case when authz.can_view_case_metadata(i.case_id) then i.case_id end, fa.created_at, null, 4
+             case when authz.can_view_case_metadata(i.case_id) then i.case_id end, fa.created_at, null, 4, i.id
         from case_mgmt.form_instance_access fa
         join forms.form_instance i on i.id = fa.instance_id, me
        where fa.user_id = me.id and authz.can_view_form_instance(i.id)
       union all
-      select 'TASK', t.task_type, t.case_id, t.access_granted_at, t.expires_at, 5
+      select 'TASK', t.task_type, t.case_id, t.access_granted_at, t.expires_at, 5, null
         from case_mgmt.case_task t, me
        where t.assigned_user_id = me.id and t.status in ('OPEN', 'IN_PROGRESS') and t.expires_at > now()
          and authz.can_view_case_metadata(t.case_id)
       union all
-      select 'BREAK_GLASS', b.status, b.case_id, coalesce(b.decided_at, b.requested_at), b.access_expires_at, 6
+      select 'BREAK_GLASS', b.status, b.case_id, coalesce(b.decided_at, b.requested_at), b.access_expires_at, 6, null
         from case_mgmt.break_glass_access b, me
        where b.requested_by = me.id and b.status in ('REQUESTED', 'ACTIVE')
          and (b.access_expires_at is null or b.access_expires_at > now())
@@ -821,6 +826,7 @@ as $$
     left join case_mgmt.case_record c on c.id = x.case_id
    order by x.ord, x.since_at nulls first, x.code;
 $$;
+grant execute on function api.my_access() to authenticated;
 
 -- The case roster: from 1830, plus form-scoped access for those who manage the team.
 create or replace function api.case_access_roster(p_case_id uuid)

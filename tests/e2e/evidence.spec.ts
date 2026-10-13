@@ -89,8 +89,9 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   await expect(investigator.getByTestId("evidence-table")).not.toContainText(`Disguised file ${stamp}`);
   await investigator.context().close();
 
-  // 5. An unassigned investigator cannot open the case or the download. The triage officer sees the case and
-  //    the reporter's files, but not the register (DEC-09); the GRC Director's oversight gets no Evidence tab.
+  // 5. An unassigned investigator cannot open the case or the download, and neither can the triage officer once
+  //    the case left triage (S3, DEC-03). On a case still in triage they see the reporter's files, but not the
+  //    register (DEC-09); the GRC Director's oversight gets no Evidence tab.
   const outsider = await signIn(browser, "investigator.b@example.test");
   expect((await outsider.request.get(href)).status()).toBe(404);
   expect((await outsider.goto(caseUrl))?.status()).toBe(404);
@@ -98,14 +99,17 @@ test("evidence is uploaded, scanned, listed, downloaded and kept from outsiders"
   await outsider.context().close();
 
   const triage = await signIn(browser, "triage@example.test");
-  await triage.goto(caseUrl);
+  expect((await triage.request.get(href)).status()).toBe(404);
+  expect((await triage.goto(caseUrl))?.status()).toBe(404);
+  expect((await triage.goto(itemUrl))?.status()).toBe(404);
+  await triage.goto("/cases");
+  await triage.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0002"]').click();
+  await triage.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
+  await triage.goto(`${new URL(triage.url()).pathname}/evidence`);
   await expect(triage.getByTestId("evidence-team-only")).toBeVisible();
   await expect(triage.getByTestId("reporter-files")).toBeVisible();
   await expect(triage.getByTestId("evidence-card")).toHaveCount(0);
   await expect(triage.getByTestId("evidence-form")).toHaveCount(0);
-  await expect(triage.locator("main")).not.toContainText(`Synthetic invoice batch ${stamp}`);
-  expect((await triage.request.get(href)).status()).toBe(404);
-  expect((await triage.goto(itemUrl))?.status()).toBe(404);
   await triage.context().close();
 
   const grc = await signIn(browser, "grc.director@example.test");

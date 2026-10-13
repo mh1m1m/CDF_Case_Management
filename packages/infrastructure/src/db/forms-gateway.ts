@@ -20,8 +20,10 @@ import { withUserContext, type Sql, type Tx } from "./security-context";
 const iso = (v: Date | string | null) => (v === null ? null : new Date(v).toISOString());
 
 type SummaryRow = Omit<FormInstanceSummary, "createdAt" | "updatedAt"> & { createdAt: Date; updatedAt: Date };
-type DetailRow = SummaryRow &
+type DetailRow = Omit<SummaryRow, "caseId" | "caseNumber"> &
   FormInstanceCapabilities & {
+    caseId: string | null;
+    caseNumber: string | null;
     definitionVersionNo: number;
     schemaHash: string;
     sections: FormSectionDefinition[];
@@ -92,8 +94,9 @@ export class PostgresFormsGateway implements FormsGateway {
                i.created_at as "createdAt", i.updated_at as "updatedAt",
                forms.terminal_status(d.review_required, d.approval_required) as "finalStatus",
                up.display_name as "preparedByName", i.prepared_at as "preparedAt",
-               (authz.can_prepare_form(i.case_id, i.form_code) and i.status = 'DRAFT') as "canSave",
-               (authz.can_prepare_form(i.case_id, i.form_code) and i.status = 'DRAFT' and i.current_version_id is not null) as "canPrepare",
+               -- Saving and preparing follow the instance (S3: form-scoped access too); withdrawing stays case-level.
+               (authz.can_prepare_form_instance(i.id) and i.status = 'DRAFT') as "canSave",
+               (authz.can_prepare_form_instance(i.id) and i.status = 'DRAFT' and i.current_version_id is not null) as "canPrepare",
                (authz.can_review_form(i.id) and i.status = 'PREPARED' and i.prepared_by is distinct from authz.current_user_id()) as "canReview",
                (authz.can_approve_form(i.id) and i.status = 'REVIEWED'
                   and authz.current_user_id() is distinct from i.prepared_by and authz.current_user_id() is distinct from i.reviewed_by) as "canApprove",
@@ -168,7 +171,7 @@ export class PostgresFormsGateway implements FormsGateway {
       const [gate] = await tx<{ ok: boolean }[]>`select api.open_form_instance(${instanceId}) as ok`;
       if (!gate?.ok) return null;
       const [r] = await tx<DetailRow[]>`
-        select i.id, i.case_id as "caseId", c.case_number as "caseNumber", i.form_code as "formCode", d.name_ar as "formNameAr",
+        select i.id, c.id as "caseId", c.case_number as "caseNumber", i.form_code as "formCode", d.name_ar as "formNameAr",
                d.name_en as "formNameEn", d.purpose_ar as "purposeAr", d.purpose_en as "purposeEn", d.review_required as "reviewRequired",
                d.approval_required as "approvalRequired", forms.terminal_status(d.review_required, d.approval_required) as "finalStatus",
                i.instance_no as "instanceNo", i.status, i.classification,
@@ -181,15 +184,17 @@ export class PostgresFormsGateway implements FormsGateway {
                i.approved_by as "approvedBy", ua.display_name as "approvedByName", i.approved_at as "approvedAt",
                i.withdrawn_by as "withdrawnBy", uw.display_name as "withdrawnByName", i.withdrawn_at as "withdrawnAt",
                -- What the database would allow now (mirrors the command guards; the commands re-check).
-               (authz.can_prepare_form(i.case_id, i.form_code) and i.status = 'DRAFT') as "canSave",
-               (authz.can_prepare_form(i.case_id, i.form_code) and i.status = 'DRAFT' and i.current_version_id is not null) as "canPrepare",
+               -- Saving and preparing follow the instance (S3: form-scoped access too); withdrawing stays case-level.
+               (authz.can_prepare_form_instance(i.id) and i.status = 'DRAFT') as "canSave",
+               (authz.can_prepare_form_instance(i.id) and i.status = 'DRAFT' and i.current_version_id is not null) as "canPrepare",
                (authz.can_review_form(i.id) and i.status = 'PREPARED' and i.prepared_by is distinct from authz.current_user_id()) as "canReview",
                (authz.can_approve_form(i.id) and i.status = 'REVIEWED'
                   and authz.current_user_id() is distinct from i.prepared_by and authz.current_user_id() is distinct from i.reviewed_by) as "canApprove",
                (authz.can_prepare_form(i.case_id, i.form_code) and i.status <> 'WITHDRAWN'
                   and i.status <> forms.terminal_status(d.review_required, d.approval_required)) as "canWithdraw"
         from forms.form_instance i
-        join case_mgmt.case_record c on c.id = i.case_id
+        -- RLS on the case: a caller holding only form-scoped access (S3, ADR-016 D2) gets no case id or number.
+        left join case_mgmt.case_record c on c.id = i.case_id
         join forms.form_definition d on d.code = i.form_code
         join forms.form_definition_version dv on dv.id = i.definition_version_id
         left join forms.form_instance_version cv on cv.id = i.current_version_id

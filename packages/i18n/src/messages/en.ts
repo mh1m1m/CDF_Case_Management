@@ -105,7 +105,8 @@ export const en = {
         title: "Close this case at screening?",
         body: "The case moves to Closure. Its forms, interviews and evidence can no longer be changed, and the reporter's follow-up page shows the report as closed, so they can no longer reply.",
         undo: "No. Reopening a closed case is not available in this version.",
-        affected: "The case team, and the reporter, who sees the report as closed.",
+        affected:
+          "The case team; triage, whose access to the case ends; and the reporter, who sees the report as closed.",
       },
       closeOutOfJurisdiction: {
         action: "Close case: outside jurisdiction",
@@ -862,6 +863,11 @@ export const en = {
     saved: "Draft saved. {message}",
     savedDetail: "Version {no}, SHA-256 {hash}",
     readOnly: "This form is {status} and can no longer be edited.",
+    // The purpose view (S3, ADR-016 D2): a form kept for the reader's part of the work, without its case.
+    purposeView: {
+      title: "You are seeing one form, not the case file",
+      body: "This form was kept open for your part of the work on it. The case and its other records stay closed to you, and the form closes once it is complete or withdrawn.",
+    },
     prepareTitle: "Prepare for review",
     prepareHint: "Locks the current version for review. Every required field must be filled.",
     prepare: "Prepare",
@@ -1456,6 +1462,7 @@ export const en = {
       FORM_TO_REVIEW: "Review a form",
       FORM_TO_APPROVE: "Approve a form",
       FORM_RETURNED: "Rework a returned form",
+      FORM_TO_COMPLETE: "Complete a form",
       INTERVIEW_TO_REVIEW: "Review an interview record",
       INTERVIEW_TO_APPROVE: "Approve an interview record",
       INTERVIEW_SOON: "Attend an interview",
@@ -1500,6 +1507,7 @@ export const en = {
       ROLE: "Role",
       ASSIGNMENT: "Case assignment",
       GRANT: "Case access grant",
+      FORM_ACCESS: "One form (not the case)",
       TASK: "Task",
       BREAK_GLASS: "Emergency access",
     },
@@ -1678,6 +1686,8 @@ export const en = {
     skippedSteps: "Steps not taken: {count}",
     stepSkipped: "not taken",
     youCan: "You can",
+    handOverNote:
+      "This step hands the case over from triage: triage access to it ends now, and the case team carries it on.",
     waitingOn: "Not yet possible",
     whoCan: "Who can do this: {roles}",
     later: "Later in this case",

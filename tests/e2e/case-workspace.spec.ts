@@ -66,8 +66,11 @@ test("the access roster is full for the lead and limited for an investigator", a
   await lead.goto(`${caseUrl}/people`);
   const full = lead.getByTestId("access-roster");
   await expect(full).toContainText("Everyone with access to this case");
+  // The hand-over out of triage ended the triage officer's grant (S3, DEC-03): the row stays, marked as ended.
   await expect(full.getByTestId("roster-GRANT-TRIAGE")).toContainText("Case access grant: Triage");
-  await expect(full.getByTestId("roster-GRANT-COMMITTEE").first()).toContainText("Committee");
+  await expect(full.getByTestId("roster-GRANT-TRIAGE")).toContainText("Withdrawn");
+  // A committee seat opens no case (S3, DEC-02), so no committee grant is on the roster.
+  await expect(full.locator('[data-testid="roster-GRANT-COMMITTEE"]')).toHaveCount(0);
   await expect(full.getByTestId("roster-ASSIGNMENT-LEAD_INVESTIGATOR")).toContainText("(you)");
   // History: the lead manages the team, so access grants are part of the story.
   await lead.goto(`${caseUrl}/history`);

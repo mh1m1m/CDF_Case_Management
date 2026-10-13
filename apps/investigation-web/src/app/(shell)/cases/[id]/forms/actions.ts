@@ -9,9 +9,16 @@ import { formObject, toActionState, type ActionState } from "@/server/actions-he
 
 const FIELD = /^[a-z][a-z0-9_]{1,63}$/;
 
-function refresh(caseId: string, instanceId?: string) {
-  revalidatePath(`/cases/${caseId}/forms`);
-  if (instanceId) revalidatePath(`/cases/${caseId}/forms/${instanceId}`);
+// The case id is used only to refresh pages; the commands authorise on the instance. A form held without its case
+// (S3, ADR-016 D2) has no case id here and lives under My Work.
+function refresh(caseId: string | null, instanceId?: string) {
+  if (caseId) {
+    revalidatePath(`/cases/${caseId}/forms`);
+    if (instanceId) revalidatePath(`/cases/${caseId}/forms/${instanceId}`);
+  } else if (instanceId) {
+    revalidatePath(`/my-work/forms/${instanceId}`);
+  }
+  revalidatePath("/my-work");
 }
 
 export async function startFormAction(
@@ -30,7 +37,7 @@ export async function startFormAction(
 }
 
 export async function saveDraftAction(
-  caseId: string,
+  caseId: string | null,
   instanceId: string,
   formCode: string,
   _: ActionState,
@@ -57,7 +64,7 @@ export async function saveDraftAction(
 }
 
 export async function prepareFormAction(
-  caseId: string,
+  caseId: string | null,
   instanceId: string,
   formCode: string,
   _: ActionState,
@@ -74,7 +81,7 @@ export async function prepareFormAction(
 }
 
 export async function reviewFormAction(
-  caseId: string,
+  caseId: string | null,
   instanceId: string,
   formCode: string,
   _: ActionState,
@@ -87,7 +94,7 @@ export async function reviewFormAction(
 }
 
 export async function approveFormAction(
-  caseId: string,
+  caseId: string | null,
   instanceId: string,
   formCode: string,
   _: ActionState,
@@ -100,7 +107,7 @@ export async function approveFormAction(
 }
 
 export async function withdrawFormAction(
-  caseId: string,
+  caseId: string | null,
   instanceId: string,
   formCode: string,
   _: ActionState,

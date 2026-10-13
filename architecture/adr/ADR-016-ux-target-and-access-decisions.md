@@ -1,6 +1,6 @@
 # ADR-016: UX Target Architecture and Approved Access Decisions
 
-- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`. D4, D5 and D6 are implemented on the S2 branch (migrations 1840, 1830 and 1850), D6 up to the S5 packets. D2 and D3 are approved and not yet implemented (their phase is named in each decision). D8 (DEC-37, decided 2026-10-12) is implemented on the S2 branch (migration 1860), with routing for cases the shared queue cannot take, up to the S4 work item.
+- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`. D4, D5 and D6 are implemented on the S2 branch (migrations 1840, 1830 and 1850), D6 up to the S5 packets. D2 and D3 are implemented on the S3 branch (`20261007002020_purpose_bound_grant_scope.sql`, CDF-179), as described under each decision and in the S3 amendment below. D8 (DEC-37, decided 2026-10-12) is implemented on the S2 branch (migration 1860), with routing for cases the shared queue cannot take, up to the S4 work item.
 - **Decision owner:** Fady, 2026-10-11 12:11 UTC, in the UI/UX audit thread: "IMPLEMENT THE UX REDESIGN", with the decision package recorded here.
 - **Source:** CDF-UX-AUDIT v1.0, run 2026-10-10/11 on synthetic data (report `UIUX_AUDIT_2026-10-10.md` and its summary, held in the project files, not in this repository). Decision IDs `DEC-nn`, debt IDs `UX-nnn` and step IDs `S0`–`S6` are the audit's. Its decision register is O17 §17.7; its gates are O28 §28.10.
 - **Extends:** ADR-014 (purpose-bound authorization). **Amends:** ADR-013 and ADR-014 on case-history audience (D5). **Unchanged:** ADR-003 (PostgreSQL/RLS, command-only writes), ADR-004 (identity vault), ADR-005 (append-only audit), ADR-006 and ADR-015 (evidence and reporter attachments).
@@ -161,6 +161,25 @@ Also: the IDOR probe and audit-coverage lists, and the policy snapshot.
 - The reconciliation report matches the rows changed.
 - Audit events exist for every change.
 
+**As built (S3, `20261007002020`).**
+
+- **Scope decides.** `authz.has_active_grant` counts CASE and AUDIT grants, and a TRIAGE grant only while the case is before hand-over (`authz.case_before_handover`: a state before `JURISDICTION`; a workflow without that state has no triage stage, so the grant opens nothing). COMMITTEE and REVIEW grants open no case. Every predicate built on it narrows with it, including case view, the records catalogue and the classification change.
+- **No new over-purpose grants.** `api.grant_case_access` accepts CASE and AUDIT only. A table trigger refuses a COMMITTEE or REVIEW insert by any path (`CDF_INVALID:scope`). The column check keeps the codes, so reconciled rows keep their original scope. Committee and legal-review work needs no grant: it runs through the referral, meeting, packet and legal-review commands (1870–1920), under DEC-61/DEC-62 for restricted cases.
+- **Interim path (a), for legacy instances only.** `case_mgmt.form_instance_access` keeps, for the holder of a reconciled COMMITTEE or REVIEW grant, each in-flight form instance of that case that their roles may view and their clearance covers. It opens that instance only (`authz.has_form_instance_access`, `authz.can_view_form_instance`, `authz.can_prepare_form_instance`); review and approval follow the existing form entitlements. It never opens the case: `api.open_case` answers false, and the case, its parties, team, evidence, interviews, findings and proceedings stay hidden. The row stops counting when the instance is final or withdrawn, or the case leaves `ACTIVE`. The case gate (`authz.user_case_gate`: active user, clearance, no conflict, not a linked subject or grievant) applies throughout, so an upheld conflict closes a kept form without deleting its row (DEC-F38).
+- **Findings.** `finding_read` also needs a case-file basis (`authz.has_case_file_basis`), so a TRIAGE grant before hand-over shows no findings.
+- **Reconciliation.** `case_mgmt.reconcile_grant_scope()` runs once inside the migration. It is owner-only; no application role may execute it. It ends every over-purpose grant in effect or scheduled (TRIAGE past hand-over, every COMMITTEE and REVIEW grant). Ending a grant never deletes it:
+  - status `REVOKED`, with its time and reason;
+  - one `CASE_ACCESS_REVOKED` event per grant, actor type `SYSTEM`, metadata basis `GRANT_SCOPE_RECONCILIATION` with the outcome and the kept instance ids;
+  - one row per grant in `case_mgmt.grant_scope_reconciliation` (before and after status and end date, outcome `ENDED` or `NARROWED_TO_FORM_INSTANCES`, forms kept, the audit event id). The table is append-only, RLS-enabled and read by no application role.
+
+  The migration then checks its own result and fails if any over-purpose grant is still in effect, or if the report and the audit events disagree. A second run finds nothing. Locally the migration runs before the seed, and the seed no longer creates committee grants, so it changes nothing there. On a hosted database it reconciles the live rows, and the report is the evidence.
+
+- **Where a kept form opens (UX).** A kept form is reached from My Work on its own purpose route, `/my-work/forms/[instanceId]`. This deviates from RC-24's case-route wording, because a case route would name the case. The page says "You are seeing one form, not the case file" «تعرض نموذجًا واحدًا، لا ملف القضية»; its breadcrumbs lead to My Work, and it shows no case number. A viewer who may see the case is redirected to the case route. My access lists the form as "One form (not the case)" «نموذج واحد (لا القضية)», with no case number unless the viewer may see the case metadata, and links each row to its form (`api.my_access` gains a last column, `target_id`), because forms with the same number on different cases would otherwise read alike. The case roster shows each kept form to the full-roster audience (DEC-08/10). Both read models encode the form as `<form code>:<instance no>` (`parseFormAccessCode` in `@cdf/domain`).
+- **Tests.**
+  - `tests/security/grant-scope.spec.ts` covers: no access before reconciliation; command and table refusals; findings; hand-over (including close at screening and the restricted receiving owner); the reconciliation report, events and idempotency; each holder's exact part on a kept form; a conflict closing kept forms; immutability; the read models; reassignment (T-AMB-005).
+  - Existing specs were updated for the narrower model.
+  - `tests/e2e/purpose-bound.spec.ts` and `tests/accessibility/purpose-bound.spec.ts` cover the purpose route in Arabic and English and at 320 px.
+
 ### D3. TRIAGE ends at formal hand-over (DEC-03 / HD-S3). Effective at S3 for ordinary cases; at S0 for restricted creation (D1).
 
 **Decision.** The TRIAGE grant terminates or narrows in the same transaction as formal hand-over. Formal hand-over means a legitimate receiving owner or team exists **and** responsibility has been transferred.
@@ -182,6 +201,15 @@ Also: the IDOR probe and audit-coverage lists, and the policy snapshot.
 
 - After hand-over, the former triage holder gets 404 on the case, its evidence, interviews and forms.
 - A returned task gives exactly its scope until it expires.
+
+**As built (S3, `20261007002020`).**
+
+- **The hand-over transitions** are the two that leave the triage stages: `COMPLETE_TRIAGE` (TRIAGE → JURISDICTION) and `SCREEN_OUT` (SCREENING → CLOSURE). `case_mgmt.hand_over_from_triage` runs inside the transition itself (`workflow.apply_transition`), in the same transaction. It ends every TRIAGE grant on the case, with one `CASE_ACCESS_REVOKED` event per grant (actor: the person who moved the case; metadata basis `HANDOVER`).
+- **Receiving owner.** For an ordinary case, the receiving team is the case-management function, which always exists (`CASE_VIEW_ALL`), and the transition itself is the transfer of responsibility. A restricted case is hidden from that function, so it is handed over only when an owner or investigator assignment, or a CASE grant, is held by someone the case gate admits. Otherwise the transition is refused with `CONFLICT:HANDOVER_NO_RECEIVING_OWNER`.
+- **Residual grants.** TRIAGE grants already past hand-over are reconciled under D2's evidence rule.
+- **Reassignment (AMB-013).** `api.reassign_case` already ends the outgoing assignment in its own transaction, audited `CASE_REASSIGNED` with `from_user_id` and `to_user_id`. That is the built equivalent of the register's `CASE_HANDED_OVER` wording. With the triage residue closed, the former assignee keeps nothing unless an independent relationship (for example a CASE grant) exists. Drafts stay with the case, and the new assignee continues them. Test T-AMB-005 is in `tests/security/grant-scope.spec.ts`; the register named a new `authz-purpose-bound.spec.ts`.
+- **Returned work.** No workflow transition returns a case to a triage state, and the case-task types are LEGAL and RECORDS only. So nothing is built for returned triage work. When a return path is designed, it is a `case_mgmt.case_task` (ADR-014), and its capabilities are decided then.
+- **In the UI.** Each hand-over step says before it is taken: "This step hands the case over from triage: triage access to it ends now, and the case team carries it on." «تُسلِّم هذه الخطوة القضية من الفرز: ينتهي وصول الفرز إليها فورًا، ويتابعها فريق القضية.» The close-at-screening confirmation names it too.
 
 ### D4. Reporter conversation (DEC-06 / HD-S17). Effective at S2.
 
@@ -353,6 +381,36 @@ UX-002 is re-rated only after that.
   - classifying completes only the classifier's own task; another officer's task on the case stays open;
   - a task whose holder has lost the role or the clearance no longer stands for the obligation, so the item comes back.
 
+## S3 amendment: statuses under the business architecture rebase (2026-10-13)
+
+The rebase (owner Q&A of 2026-10-12, ADR-017 to ADR-039) changed what several UX-plan items and audit decisions mean. The statuses below are a **coordinator ruling from the owner-confirmed Q&A, 2026-10-12** (gap map `UX_S3_PLUS_GAP_MAP.md` §2 and §4, in the project files). They are not owner decisions; where the owner has decided, the row says so. The audit's own register (O17 §17.7) is unchanged.
+
+| Item                                                             | Status                                                                                                                                                                                                                   | Basis                                                                                  |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| RC-24: grant scope, TRIAGE ends at hand-over, form purpose check | KEEP, REBASED. Built here (D2, D3).                                                                                                                                                                                      | Coordinator ruling                                                                     |
+| RC-24 interim path (a)                                           | KEEP, for legacy in-flight WB-FRM instances only. Built here.                                                                                                                                                            | Coordinator ruling; DEC-02 (e)                                                         |
+| RC-24 `finding_read`                                             | Narrowed here, not in the rebase stream.                                                                                                                                                                                 | Coordinator ruling                                                                     |
+| RC-25: form framework and catalogue conversion                   | SUPERSEDED for the catalogue (ADR-028, ADR-029); KEEP for the framework (the 2 remaining user-entered forms).                                                                                                            | Coordinator ruling                                                                     |
+| New WB-FRM-13 to 19 instances refused from S3                    | SUPERSEDED: the committee work is in the rebase commands (1870–1920). Form definitions are untouched; no WB-FRM artifact is retired until DEC-F34's conditions hold.                                                     | Coordinator ruling; DEC-F34 (owner, 2026-10-13)                                        |
+| DEC-05 independence                                              | Split. Committee part ANSWERED (Q45–Q46, N9, ADR-024). Four parts OPEN for S3: approver differs from preparer; universal declarations; transitions blocking on an undecided conflict; the named-access conflict decider. | Coordinator ruling                                                                     |
+| DEC-30 committee process                                         | ANSWERED (Q21–Q57, ADR-018 to ADR-020). The recusal decider is rule-set configuration, SOURCE_REQUIRED.                                                                                                                  | Coordinator ruling                                                                     |
+| DEC-34 / HD-S9 phases 9–10                                       | SUPERSEDED by the proceeding model and the multi-dimensional status (ADR-017, ADR-029). The Delegation of Authority stays SOURCE_REQUIRED.                                                                               | Coordinator ruling                                                                     |
+| Audit DEC-62 / HD-S15 (new entities)                             | ANSWERED by ADR-017 to ADR-023. Not the project's DEC-62 (ADR-022).                                                                                                                                                      | Coordinator ruling                                                                     |
+| DEC-68 referral before a meeting                                 | DISSOLVED: referral is `api.refer_case_to_committee`.                                                                                                                                                                    | Coordinator ruling                                                                     |
+| DEC-31 catalogue conversion                                      | NARROWED to the 2 remaining user-entered forms (portal report, grievance submission).                                                                                                                                    | Coordinator ruling, accepted provisionally                                             |
+| DEC-35 option codes                                              | Placeholders stay SOURCE_REQUIRED; no code is inferred.                                                                                                                                                                  | DEC-F35 (owner, 2026-10-13)                                                            |
+| DEC-50 rule values                                               | Configurable, values SOURCE_REQUIRED.                                                                                                                                                                                    | Coordinator ruling; consistent with DEC-F02, F08, F14, F18 and F25 (owner, 2026-10-13) |
+| DEC-37 retention review                                          | Partly decided by the owner (D8); parts 4 and 5 open as D8 records.                                                                                                                                                      | Owner, 2026-10-12 (D8)                                                                 |
+
+**Consistency with the owner's finalization set (DEC-F01 to F41, 2026-10-13).**
+
+- DEC-F19 and DEC-F20: a COMMITTEE or REVIEW grant can no longer be created and opens nothing. So no grant can bypass the Restricted Case Authority approval that referral and legal review of a restricted case need.
+- DEC-F07: S3 adds no witness or meeting entitlement. A kept form opens one form, nothing of the meeting.
+- DEC-F38: a conflict suspends the affected purpose access, never the user. Kept forms close through the case gate and their rows stay.
+- DEC-F34: no form is retired. Path (a) keeps in-flight legacy instances completable.
+
+**Still open for the owner at the S3 gate.** DEC-04 (who prepares, reviews, approves and withdraws each form), the four open parts of DEC-05, DEC-19 (snapshot module content or reference it) and DEC-49 (which forms gate which transitions). S3 decides none of them; today's form entitlements and transition rules are unchanged.
+
 ## Delivery governance
 
 - **Unit path.** Every unit of work follows Requirement → Decision → Linear → Branch → PR → Test → Hosted validation. Delivery goes through the redesign epics and coherent capabilities, not one ticket per debt item.
@@ -374,7 +432,7 @@ UX-002 is re-rated only after that.
   - DEC-22 (My Work row fields, S1);
   - DEC-47, DEC-20, DEC-16, DEC-14, DEC-29 and DEC-32 (S1);
   - DEC-54, DEC-38, DEC-40, DEC-41 and DEC-25 (S2), and the open parts of DEC-37 (D8);
-  - DEC-04, DEC-05, DEC-19, DEC-31, DEC-35, DEC-49 and DEC-50 (S3);
+  - DEC-04, the open parts of DEC-05, DEC-19 and DEC-49 (S3; see the S3 amendment for DEC-31, DEC-35 and DEC-50);
   - the S4–S6 and portal-track decisions;
   - DEC-59 and DEC-60 (verification).
 

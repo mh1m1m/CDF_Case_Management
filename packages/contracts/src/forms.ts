@@ -182,7 +182,13 @@ export interface FormReturn {
   toMe: boolean;
 }
 
-export interface FormInstanceDetail extends FormInstanceSummary {
+/**
+ * One form instance as its page shows it. Since S3 (ADR-016 D2, path (a)) a form can be open to someone who cannot
+ * open its case: then `caseId` and `caseNumber` are null, and the page is the purpose view, never the case.
+ */
+export interface FormInstanceDetail extends Omit<FormInstanceSummary, "caseId" | "caseNumber"> {
+  caseId: string | null;
+  caseNumber: string | null;
   definition: {
     code: string;
     nameAr: string;
