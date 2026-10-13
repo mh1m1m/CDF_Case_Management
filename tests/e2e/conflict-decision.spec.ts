@@ -13,7 +13,7 @@ test("a declared conflict is decided from My Work and clearing it restores acces
 
   // The case manager declares a conflict and loses access at once.
   const manager = await signIn(browser, "casemanager@example.test");
-  await manager.goto(`/cases/${c.caseId}`);
+  await manager.goto(`/cases/${c.caseId}/people`);
   const declare = manager.getByTestId("conflict-form");
   await declare.getByTestId("conflict-yes").check();
   await declare.locator("#declaration").fill("Synthetic: a relative works for a party to this case.");
@@ -28,7 +28,11 @@ test("a declared conflict is decided from My Work and clearing it restores acces
   const item = director.getByTestId("work-item-CONFLICT_TO_DECIDE").filter({ hasText: c.caseNumber });
   await expect(item).toHaveCount(1);
   await item.getByRole("link").click();
-  await expect(director).toHaveURL(new RegExp(`/cases/${c.caseId}#conflict-decisions$`));
+  await expect(director).toHaveURL(new RegExp(`/cases/${c.caseId}/people#conflict-decisions$`));
+  // Every tab of the case carries the same banner, which leads back to the decision (audit §22.9.1).
+  await director.getByTestId("case-tab-overview").click();
+  await director.getByTestId("case-banner-conflict").getByRole("link").click();
+  await expect(director).toHaveURL(new RegExp(`/cases/${c.caseId}/people#conflict-decisions$`));
   const panel = director.getByTestId("conflict-decisions");
   await expect(panel).toContainText("Case Manager Gamma");
   await expect(panel).toContainText("a relative works for a party");
@@ -46,10 +50,11 @@ test("a declared conflict is decided from My Work and clearing it restores acces
   await form.locator('button[type="submit"]').click();
   await expect(director.getByTestId("conflict-decided")).toHaveText("Decision recorded.");
   await expect(director.getByTestId("conflict-decisions")).toHaveCount(0);
+  await expect(director.getByTestId("case-banner-conflict")).toHaveCount(0);
   await director.context().close();
 
   // The declaration is cleared: the case manager can open the case again and sees the outcome.
-  await manager.goto(`/cases/${c.caseId}`);
+  await manager.goto(`/cases/${c.caseId}/people`);
   await expect(manager.getByTestId("my-conflict-status")).toContainText("Conflict cleared");
   await expect(manager.getByTestId("conflict-decisions")).toHaveCount(0);
   await manager.context().close();

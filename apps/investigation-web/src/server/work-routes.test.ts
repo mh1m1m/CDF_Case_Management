@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MyArea, WorkItem } from "@cdf/contracts";
 import { safeLocaleReturnPath, safeReturnPath } from "./return-path";
-import { areaHref, areaOfPath, itemHref, landingFor } from "./work-routes";
+import { areaHref, areaOfPath, daysSince, itemHref, landingFor } from "./work-routes";
 
 const area = (a: MyArea["area"], defaultView = "x"): MyArea => ({ area: a, actionableCount: 0, defaultView });
 const item = (over: Partial<WorkItem>): WorkItem => ({
@@ -47,9 +47,9 @@ describe("routes", () => {
     expect(itemHref(item({ targetType: "REPORT", category: "NEW_REPORT", targetId: "r" }))).toBe("/intake/r");
     expect(
       itemHref(item({ targetType: "REPORT", category: "REPORTER_REPLIED", targetId: "r", caseId: "c" })),
-    ).toBe("/cases/c");
+    ).toBe("/cases/c/reporter");
     expect(itemHref(item({ targetType: "CONFLICT", targetId: "k", caseId: "c" }))).toBe(
-      "/cases/c#conflict-decisions",
+      "/cases/c/people#conflict-decisions",
     );
     expect(itemHref(item({ targetType: "FORM_INSTANCE", targetId: "f", caseId: "c" }))).toBe(
       "/cases/c/forms/f",
@@ -58,6 +58,14 @@ describe("routes", () => {
     expect(itemHref(item({ targetType: "HOLD_REQUEST", targetId: "h", caseId: "c" }))).toBe(
       "/records/legal-holds",
     );
+    expect(
+      itemHref(
+        item({ category: "RETENTION_CLASSIFICATION", targetType: "RECORD", targetId: "c", caseId: "c" }),
+      ),
+    ).toBe("/records/c#retention");
+    expect(
+      itemHref(item({ category: "RETENTION_TO_ROUTE", targetType: "RECORD", targetId: "c", caseId: "c" })),
+    ).toBe("/records/c#route-retention");
   });
 });
 
@@ -100,5 +108,15 @@ describe("return path after a language switch", () => {
   it("refuses other origins and the switch itself", () => {
     for (const bad of ["//evil.example.test", "https://evil.example.test/", "/locale?to=ar", "/\\x", null])
       expect(safeLocaleReturnPath(bad), String(bad)).toBe("/");
+  });
+});
+
+describe("age in a queue (ADR-016 D8)", () => {
+  it("counts whole days and never goes below zero", () => {
+    const now = Date.parse("2026-10-12T12:00:00Z");
+    expect(daysSince("2026-10-12T00:00:00Z", now)).toBe(0);
+    expect(daysSince("2026-10-11T11:59:59Z", now)).toBe(1);
+    expect(daysSince("2026-10-01T12:00:00Z", now)).toBe(11);
+    expect(daysSince("2026-10-13T00:00:00Z", now)).toBe(0);
   });
 });

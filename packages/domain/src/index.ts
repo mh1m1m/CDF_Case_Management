@@ -91,17 +91,28 @@ export {
   FORM_ENTITLEMENTS,
   FORM_FIELD_NAME_PATTERN,
   FORM_NUMBER_PATTERN,
+  FORM_TAB_GROUPS,
   canonicalJson,
   fieldsOf,
   formContentHash,
   formDisplayNumber,
   formFinalStatus,
+  formNextStep,
   formSchemaHash,
+  formTabGroup,
+  formWaitingAction,
   getFormDefinition,
   isFormEntitled,
   sha256Hex,
   validateFormData,
 } from "./forms";
-export type { FormDataCheck, FormDataIssue, FormDataIssueCode } from "./forms";
+export type {
+  FormDataCheck,
+  FormDataIssue,
+  FormDataIssueCode,
+  FormNextStep,
+  FormTabGroup,
+  FormWaitingAction,
+} from "./forms";
 // ---- Interviews (EPIC 09, CDF-60; ADR-012) ---------------------------------------------------------
 export * from "./interviews";

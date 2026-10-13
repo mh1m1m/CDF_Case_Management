@@ -258,6 +258,62 @@ describe("forms slice", () => {
       eventType: "RETURNED",
       reason: "Synthetic: confirm member independence",
     });
+
+    // The Forms tab (S2g, UX-086): the return is listed with its reason, as the preparer's to revise; the chair
+    // sees that it was returned, with nothing to do and no reason (that is read on the form, where the view is
+    // audited), and the next step names the roles that prepare this form.
+    const returnedRow = async (user: UserKey) =>
+      (await forms.listInstances(ctxFor(user), caseA)).find((i) => i.id === instanceId);
+    const asPreparer = await returnedRow("committeeSecretary");
+    expect(asPreparer).toMatchObject({
+      status: "DRAFT",
+      finalStatus: "APPROVED",
+      capabilities: { canSave: true, canReview: false, canApprove: false },
+      returned: { reason: "Synthetic: confirm member independence", toMe: true },
+    });
+    expect(asPreparer!.returned!.byName).toEqual(expect.any(String));
+    expect(asPreparer!.nextRoles).toContain("COMMITTEE_SECRETARY");
+    expect(await returnedRow("committeeChair")).toMatchObject({
+      capabilities: { canSave: false, canReview: false, canApprove: false },
+      returned: { reason: null, toMe: false },
+    });
+    // Saving again does not hide the return; preparing it again does.
+    expect(
+      failure(
+        await forms.saveDraft(ctx, secretary, {
+          instanceId,
+          formCode: "WB-FRM-13",
+          data: {
+            formation_reference: "CDF-DEMO-COMMITTEE-0002",
+            formation_date: "2026-03-02",
+            chair: "Committee Chair Xi",
+            members: "Committee Member Epsilon",
+            secretary: "Committee Secretary Nu",
+            scope: "Synthetic committee scope, revised",
+            independence_confirmed: "true",
+          },
+        }),
+      ),
+    ).toBe("ok");
+    expect((await returnedRow("committeeSecretary"))!.returned).toMatchObject({ toMe: true });
+    expect(failure(await forms.prepare(ctx, secretary, { instanceId, formCode: "WB-FRM-13" }))).toBe("ok");
+    const prepared = await returnedRow("committeeChair");
+    expect(prepared).toMatchObject({ status: "PREPARED", returned: null, capabilities: { canReview: true } });
+    expect(prepared!.nextRoles).toEqual(["COMMITTEE_CHAIR", "GRC_DIRECTOR"]);
+    // Separation of duties: the preparer is not asked to review their own form.
+    expect((await returnedRow("committeeSecretary"))!.capabilities.canReview).toBe(false);
+  });
+
+  it("lists a case's forms only to people who can see them, with a next step until each is done", async () => {
+    expect(await forms.listInstances(ctxFor("investigatorB"), caseA)).toEqual([]);
+    const lead = await forms.listInstances(ctxFor("lead"), caseA);
+    expect(lead.length).toBeGreaterThan(0);
+    for (const i of lead) {
+      // nextRoles is empty exactly when the form is complete or withdrawn.
+      expect(i.nextRoles.length === 0, `${i.formCode} #${i.instanceNo}`).toBe(
+        i.status === "WITHDRAWN" || i.status === i.finalStatus,
+      );
+    }
   });
 
   it("refuses outsiders and unentitled roles and records each denial as a security event", async () => {

@@ -87,6 +87,8 @@ export type ReportAttachmentStatus = "QUARANTINED" | "AVAILABLE" | "REJECTED";
 /** What intake and case teams see. No file name is ever stored; the display name is generated. */
 export interface ReportAttachmentItem {
   id: string;
+  /** The report the file came with; its download route is under the report. */
+  reportId: string;
   sequenceNo: number;
   displayName: string;
   source: AttachmentSource;

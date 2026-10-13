@@ -5,16 +5,19 @@ import type {
   Actor,
   AttachmentSource,
   AuditTimelineEntry,
+  CaseAccessRosterEntry,
   CaseDetail,
   CaseDiscoveryResult,
   CaseListItem,
+  CaseReporterView,
   EvidenceItem,
   EvidenceRejectionCode,
+  EvidenceRestriction,
   FormApprovalOutcome,
   FormData,
   FormDefinitionListItem,
   FormInstanceDetail,
-  FormInstanceSummary,
+  FormInstanceListItem,
   FormReviewOutcome,
   IntakeReportItem,
   LedgerEntry,
@@ -25,6 +28,7 @@ import type {
   PendingConflict,
   PublicReportStatus,
   RecordsCatalogueEntry,
+  RetentionQueueEntry,
   ReportAttachmentItem,
   ReportDetail,
   RestrictedCaseAuthority,
@@ -157,8 +161,15 @@ export interface EvidenceGateway {
   ): Promise<void>;
   /** Records the download (custody + audit) and returns the storage facts, or null when denied/missing. */
   openVersion(ctx: UserRequestContext, versionId: string): Promise<EvidenceDownloadRecord | null>;
+  /** DEC-09: limit an item to the case leads, or open it to the team again (audited in the database). */
+  setRestriction(
+    ctx: UserRequestContext,
+    input: { caseId: string; evidenceId: string; restriction: EvidenceRestriction; reason: string },
+  ): Promise<void>;
   /** Reporter attachments on a report the caller can view (CDF-72), quarantined and rejected ones included. */
   listReportAttachments(ctx: UserRequestContext, reportId: string): Promise<ReportAttachmentItem[]>;
+  /** The reporter's files of every report behind a case, as far as the caller may see them (DEC-09). */
+  listCaseReportAttachments(ctx: UserRequestContext, caseId: string): Promise<ReportAttachmentItem[]>;
   /** Download gate for an available reporter attachment; null when denied, missing or not yet scanned. */
   openReportAttachment(
     ctx: UserRequestContext,
@@ -192,7 +203,7 @@ export interface SavedFormVersion {
 export interface FormsGateway {
   /** The registry with the caller's right to start each form on this case (authz.can_prepare_form). */
   listDefinitions(ctx: UserRequestContext, caseId: string): Promise<FormDefinitionListItem[]>;
-  listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceSummary[]>;
+  listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceListItem[]>;
   /** Calls api.open_form_instance (audit) and returns the instance, or null when denied or missing. */
   getInstance(ctx: UserRequestContext, instanceId: string): Promise<FormInstanceDetail | null>;
   startForm(
@@ -260,7 +271,19 @@ export interface InvestigationGateway {
     ctx: UserRequestContext,
     input: { caseId: string; transitionCode: string; reason?: string },
   ): Promise<string>;
-  caseTimeline(ctx: UserRequestContext, caseId: string): Promise<AuditTimelineEntry[]>;
+  // Case history and access roster (UX redesign S2, migration 1830): the database applies each event's audience.
+  caseTimeline(ctx: UserRequestContext, caseId: string, limit?: number): Promise<AuditTimelineEntry[]>;
+  caseAccessRoster(ctx: UserRequestContext, caseId: string): Promise<CaseAccessRosterEntry[]>;
+  // The conversation with the reporter on a case (UX redesign S2, migration 1840, DEC-06).
+  caseReporterView(ctx: UserRequestContext, caseId: string): Promise<CaseReporterView>;
+  delegateReporterCommunication(
+    ctx: UserRequestContext,
+    input: { caseId: string; userId: string; reason: string },
+  ): Promise<string>;
+  endReporterCommunication(
+    ctx: UserRequestContext,
+    input: { caseId: string; delegationId: string; reason: string },
+  ): Promise<void>;
   directory(ctx: UserRequestContext): Promise<UserDirectoryEntry[]>;
   // Purpose-bound records and legal access (ADR-014): authorised rows, counts and own work only.
   searchRecordsCatalogue(
@@ -278,6 +301,8 @@ export interface InvestigationGateway {
   // Shell read models (UX redesign S1, migration 1820): the caller's own areas, work and access basis.
   myAreas(ctx: UserRequestContext): Promise<MyArea[]>;
   myWorkItems(ctx: UserRequestContext): Promise<WorkItem[]>;
+  /** S2h (migration 1860): archived cases the caller may classify, shared by every records officer who may. */
+  retentionReviewQueue(ctx: UserRequestContext): Promise<RetentionQueueEntry[]>;
   myAccess(ctx: UserRequestContext): Promise<MyAccessEntry[]>;
   pendingConflicts(ctx: UserRequestContext, caseId: string): Promise<PendingConflict[]>;
   decideConflict(

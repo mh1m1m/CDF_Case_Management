@@ -60,6 +60,7 @@ for (const locale of ["ar", "en"] as const) {
     await expect(details.locator("#priority")).toHaveValue("LOW");
 
     // 3. Two selects and a text field (assignment): a too-short reason is refused; both choices stay.
+    await manager.getByTestId("case-tab-people").click();
     const assign = manager.getByTestId("assign-form");
     await assign.locator("#userId").selectOption({ index: 1 });
     const person = await assign.locator("#userId").inputValue();
@@ -73,7 +74,7 @@ for (const locale of ["ar", "en"] as const) {
 
     // 4. Radios and textarea (conflict declaration): a too-short declaration is refused; the answer stays.
     const fresh = await screeningCase(`keep-choice-${locale}`);
-    await manager.goto(`/cases/${fresh.caseId}`);
+    await manager.goto(`/cases/${fresh.caseId}/people`);
     const conflict = manager.getByTestId("conflict-form");
     await conflict.getByTestId("conflict-no").check();
     await conflict.locator("#declaration").fill("abc");
@@ -85,6 +86,7 @@ for (const locale of ["ar", "en"] as const) {
     await expect(manager.getByTestId("my-conflict-status")).toHaveText(TEXT[locale].noDeclaration);
 
     // 5. A refusal by the database, not the schema (the closing reason is too short): the reason stays.
+    await manager.getByTestId("case-tab-overview").click();
     const close = manager.getByTestId("transition-SCREEN_OUT");
     await close.locator("textarea").fill("short");
     await close.getByRole("button").click();
@@ -117,7 +119,7 @@ for (const locale of ["ar", "en"] as const) {
     // Conflict declaration: neither answer is pre-selected; an unanswered declaration records nothing.
     const fresh = await screeningCase(`no-choice-${locale}`);
     const manager = await signIn(browser, "casemanager@example.test", locale);
-    await manager.goto(`/cases/${fresh.caseId}`);
+    await manager.goto(`/cases/${fresh.caseId}/people`);
     const conflict = manager.getByTestId("conflict-form");
     await expect(conflict.getByTestId("conflict-no")).not.toBeChecked();
     await expect(conflict.getByTestId("conflict-yes")).not.toBeChecked();

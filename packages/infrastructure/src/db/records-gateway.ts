@@ -9,6 +9,7 @@ import type {
   RecordCapabilities,
   RecordDetail,
   RetentionClassOption,
+  RetentionReviewer,
 } from "@cdf/contracts";
 import type { RecordsGateway, UserRequestContext } from "@cdf/application";
 import { withUserContext, type Sql, type Tx } from "./security-context";
@@ -68,7 +69,8 @@ export class PostgresRecordsGateway implements RecordsGateway {
                authz.can_approve_disposition(${caseId}) as "approveDisposition",
                authz.can_apply_legal_hold(${caseId}) as "applyLegalHold",
                authz.can_release_legal_hold(${caseId}) as "releaseLegalHold",
-               authz.can_request_legal_hold(${caseId}) as "requestLegalHold"`;
+               authz.can_request_legal_hold(${caseId}) as "requestLegalHold",
+               authz.can_route_retention_review(${caseId}) as "routeRetention"`;
       const requests = await tx<
         (Omit<DispositionRequestInfo, "requestedAt" | "decidedAt"> & {
           requestedAt: Date;
@@ -133,6 +135,14 @@ export class PostgresRecordsGateway implements RecordsGateway {
     );
   }
 
+  listRetentionReviewers(ctx: UserRequestContext, caseId: string): Promise<RetentionReviewer[]> {
+    return this.run(ctx, (tx) =>
+      tx<RetentionReviewer[]>`
+        select user_id as "userId", display_name as "displayName", display_name_ar as "displayNameAr"
+        from api.list_retention_reviewers(${caseId})`.then((r) => [...r]),
+    );
+  }
+
   listHoldRequests(ctx: UserRequestContext): Promise<LegalHoldRequestInfo[]> {
     return this.run(ctx, async (tx) => {
       const rows = await tx<RequestRow[]>`
@@ -179,11 +189,16 @@ export class PostgresRecordsGateway implements RecordsGateway {
     });
   }
 
-  async assignRetentionClass(
+  assignRetentionClass(
     ctx: UserRequestContext,
     i: { caseId: string; retentionClass: string },
-  ): Promise<void> {
-    await this.run(ctx, (tx) => tx`select api.assign_retention_class(${i.caseId}, ${i.retentionClass})`);
+  ): Promise<{ recordVisible: boolean }> {
+    return this.run(ctx, async (tx) => {
+      await tx`select api.assign_retention_class(${i.caseId}, ${i.retentionClass})`;
+      // The caller's own retention task completes with the class (ADR-016 D8). A predicate, not an audited view.
+      const [row] = await tx<{ ok: boolean }[]>`select authz.can_view_case_metadata(${i.caseId}) as ok`;
+      return { recordVisible: row?.ok === true };
+    });
   }
 
   placeLegalHold(
@@ -228,6 +243,17 @@ export class PostgresRecordsGateway implements RecordsGateway {
     return this.id(
       ctx,
       (tx) => tx`select api.assign_legal_hold_request(${i.requestId}, ${i.reviewerId}) as id`,
+    );
+  }
+
+  routeRetentionReview(
+    ctx: UserRequestContext,
+    i: { caseId: string; reviewerId: string; purpose: string },
+  ): Promise<string> {
+    return this.id(
+      ctx,
+      (tx) =>
+        tx`select api.create_case_task(${i.caseId}, 'RETENTION_REVIEW', ${i.reviewerId}, ${i.purpose}) as id`,
     );
   }
 

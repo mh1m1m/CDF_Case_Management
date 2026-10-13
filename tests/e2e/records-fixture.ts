@@ -20,6 +20,8 @@ const url = (user: string, pwVar: string) => {
 const USERS = {
   triage: "a0000000-0000-4000-8000-000000000002",
   caseManager: "a0000000-0000-4000-8000-000000000003",
+  investigatorA: "a0000000-0000-4000-8000-000000000004",
+  grcDirector: "a0000000-0000-4000-8000-000000000008",
   records: "a0000000-0000-4000-8000-000000000019",
 } as const;
 
@@ -100,6 +102,73 @@ export async function screeningCase(label: string): Promise<{ caseId: string; ca
   return { caseId, caseNumber: row!.case_number };
 }
 
+/**
+ * A new case in SCREENING with Investigator Alpha on its team and one message from the reporter through the
+ * portal (DEC-06: the conversation belongs to the case). The message is sent with the report's own credentials.
+ */
+export async function reporterCase(
+  label: string,
+): Promise<{ caseId: string; caseNumber: string; reportId: string; message: string }> {
+  const ref = "WB-" + Array.from(randomBytes(12), (b) => CROCKFORD[b % 32]).join("");
+  const hmac = randomBytes(32).toString("hex");
+  const message = `SYNTHETIC: a detail from the reporter (${label}).`;
+  await withAnonContext(
+    db().portal,
+    randomUUID(),
+    (tx) => tx`
+      select * from public_api.submit_report(${ref}, ${hmac}, 'ANONYMOUS', 'EMPLOYEE', null,
+        'IRREGULAR_TRANSACTIONS', null, 'Employee Alpha (synthetic)',
+        ${`Synthetic report for the reporter conversation e2e (${label}).`}, '2026-09-01', '09:30',
+        'Procurement department (synthetic)', true, 'en', null)`,
+  );
+  const [report] = await as(
+    "triage",
+    (tx) => tx<{ id: string }[]>`select id from intake.report where report_ref = ${ref}`,
+  );
+  const reportId = report!.id;
+  const caseId = await as("triage", async (tx) => {
+    await tx`select api.triage_report(${reportId}, 'OPEN_CASE', 'Synthetic: within mandate for the e2e fixtures.', null, null)`;
+    const [c] = await tx<{ id: string }[]>`
+      select api.create_case_from_report(${reportId}, ${`Reporter e2e case ${label} (synthetic)`},
+        'Synthetic case for the reporter conversation.', 'CONFIDENTIAL'::core.classification_level, false) as id`;
+    await tx`select api.transition_case(${c!.id}, 'START_SCREENING', null)`;
+    return c!.id;
+  });
+  await withAnonContext(
+    db().portal,
+    randomUUID(),
+    (tx) => tx`select public_api.post_reporter_message(${ref}, ${hmac}, ${message})`,
+  );
+  const caseNumber = await as("caseManager", async (tx) => {
+    await tx`select api.assign_case(${caseId}, ${USERS.investigatorA}, 'INVESTIGATOR', 'Synthetic: reporter e2e investigator.')`;
+    const [row] = await tx<
+      { case_number: string }[]
+    >`select case_number from case_mgmt.case_record where id = ${caseId}`;
+    return row!.case_number;
+  });
+  return { caseId, caseNumber, reportId, message };
+}
+
+/** Ends Investigator Alpha's assignment on a fixture case, so the seed's "my cases" stay as they were. */
+export async function endInvestigatorAssignment(caseId: string): Promise<void> {
+  await as("caseManager", async (tx) => {
+    const rows = await tx<{ id: string }[]>`
+      select id from case_mgmt.case_assignment
+       where case_id = ${caseId} and user_id = ${USERS.investigatorA} and status = 'ACTIVE'`;
+    for (const r of rows) await tx`select api.end_assignment(${r.id}, 'Synthetic: e2e fixture clean-up.')`;
+  });
+}
+
+/** A new case in SCREENING under a legal hold placed by the GRC Director (DEC-10 history audience). */
+export async function heldCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
+  const c = await screeningCase(label);
+  await as("grcDirector", async (tx) => {
+    await tx`select api.place_legal_hold(${c.caseId}, 'CASE', null, 'LITIGATION',
+      'Synthetic: preservation for the case-history e2e.', null)`;
+  });
+  return c;
+}
+
 /** A new case closed at screening (CLOSURE), so the case manager can archive it. */
 export async function closedCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
   const c = await screeningCase(label);
@@ -121,6 +190,27 @@ export async function archivedCase(label: string): Promise<{ caseId: string; cas
     select case_number from api.list_records(null, ${caseId})`,
   );
   return { caseId, caseNumber: row!.case_number };
+}
+
+/**
+ * A new case owned by the case manager and restricted by the GRC Director (as the seed's executive case is), then
+ * screened out and archived by the case manager. The shared Records queue never takes a restricted case, so the
+ * people who may create records tasks on it route its retention review (ADR-016 D8).
+ */
+export async function restrictedArchivedCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
+  const c = await screeningCase(label);
+  await as("caseManager", async (tx) => {
+    await tx`select api.assign_case(${c.caseId}, ${USERS.caseManager}, 'CASE_OWNER', 'Synthetic: owner for the records e2e.')`;
+  });
+  await as("grcDirector", async (tx) => {
+    await tx`select api.change_case_classification(${c.caseId}, 'CONFIDENTIAL', true,
+      'Synthetic: restricted for the records e2e.')`;
+  });
+  await as("caseManager", async (tx) => {
+    await tx`select api.transition_case(${c.caseId}, 'SCREEN_OUT', 'Synthetic: screened out for the records e2e.')`;
+    await tx`select api.transition_case(${c.caseId}, 'ARCHIVE_CASE', null)`;
+  });
+  return c;
 }
 
 /** An archived case under the test class, marked eligible for disposition by the records officer. */

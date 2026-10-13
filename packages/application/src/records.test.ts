@@ -177,6 +177,39 @@ describe("records service", () => {
     expect(calls).toEqual([]);
   });
 
+  it("routes a retention review for a case authority, and refuses everyone else before the database (ADR-016 D8)", async () => {
+    const authority = actor(["CASE_TASK_ASSIGN", "CASE_VIEW_ALL"]);
+    const input = {
+      caseId: CASE,
+      reviewerId: REQUEST,
+      purpose: "  Synthetic: confirm the retention class.  ",
+    };
+    const ok = harness();
+    expect(await ok.service.routeRetentionReview(ctx, authority, input)).toEqual({
+      ok: true,
+      value: REQUEST,
+    });
+    expect(ok.calls).toEqual([
+      {
+        method: "routeRetentionReview",
+        input: { caseId: CASE, reviewerId: REQUEST, purpose: "Synthetic: confirm the retention class." },
+      },
+    ]);
+
+    const refused = harness();
+    const r = await refused.service.routeRetentionReview(ctx, investigator, input);
+    expect(r.ok).toBe(false);
+    expect(refused.calls).toEqual([]);
+    expect(refused.events.map((e) => e.metadata)).toEqual([
+      { command: "route_retention_review", outcome: "FORBIDDEN" },
+    ]);
+
+    const short = harness();
+    const bad = await short.service.routeRetentionReview(ctx, authority, { ...input, purpose: "too short" });
+    expect(bad.ok).toBe(false);
+    expect(short.calls).toEqual([]);
+  });
+
   it("maps a database refusal to a safe error and records it; conflicts are not security events", async () => {
     const denied = harness("CDF_FORBIDDEN");
     const r1 = await denied.service.requestDisposition(ctx, recordsOfficer, { caseId: CASE });

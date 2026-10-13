@@ -44,17 +44,24 @@ function displayValue(field: FormFieldDefinition, value: string | undefined, t: 
 function Input({
   field,
   value,
+  hinted,
   t,
 }: {
   field: FormFieldDefinition;
   value: string | undefined;
+  /** The field shows a hint, which the control names as its description. */
+  hinted: boolean;
   t: Translator;
 }) {
   const id = `f-${field.name}`;
+  // A draft may be saved with required fields still empty, so the browser's own `required` check would block the
+  // save: the requirement is announced (aria-required) and enforced when the form is prepared (UX-069, CDF-58).
   const common = {
     id,
     name: field.name,
     className: inputClass,
+    "aria-required": field.required || undefined,
+    "aria-describedby": hinted ? `${id}-hint` : undefined,
     "data-testid": `field-${field.name}`,
   } as const;
   switch (field.type) {
@@ -129,21 +136,24 @@ export function FormFields({
             {t.locale === "ar" ? section.titleAr : section.titleEn}
           </legend>
           {editable ? (
-            section.fields.map((field) => (
-              <CDFField
-                key={field.name}
-                id={`f-${field.name}`}
-                label={`${fieldLabel(field, t.locale)}${field.required ? " *" : ""}`}
-                hint={
-                  field.sensitive
-                    ? t("forms.sensitive")
-                    : ((t.locale === "ar" ? field.helpAr : field.helpEn) ?? undefined)
-                }
-                optionalLabel={field.required ? undefined : t("common.optional")}
-              >
-                <Input field={field} value={data[field.name]} t={t} />
-              </CDFField>
-            ))
+            section.fields.map((field) => {
+              const hint = field.sensitive
+                ? t("forms.sensitive")
+                : ((t.locale === "ar" ? field.helpAr : field.helpEn) ?? undefined);
+              // One convention across the product (CDF-58): "(Required)" or "(Optional)" after the label.
+              return (
+                <CDFField
+                  key={field.name}
+                  id={`f-${field.name}`}
+                  label={fieldLabel(field, t.locale)}
+                  hint={hint}
+                  requiredLabel={field.required ? t("common.required") : undefined}
+                  optionalLabel={field.required ? undefined : t("common.optional")}
+                >
+                  <Input field={field} value={data[field.name]} hinted={Boolean(hint)} t={t} />
+                </CDFField>
+              );
+            })
           ) : (
             <CDFDescriptionList
               items={section.fields.map((field) => ({

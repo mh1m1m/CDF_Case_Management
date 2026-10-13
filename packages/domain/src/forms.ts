@@ -9,6 +9,7 @@ import type {
   FormDefinition,
   FormEntitlementAction,
   FormFieldDefinition,
+  FormInstanceListItem,
   FormSectionDefinition,
   FormStatus,
   Role,
@@ -46,6 +47,38 @@ export function formFinalStatus(def: { reviewRequired: boolean; approvalRequired
 /** Display identifier within a case, e.g. "WB-FRM-11 #2". UUIDs remain the keys (§87). */
 export function formDisplayNumber(formCode: string, instanceNo: number): string {
   return `${formCode} #${instanceNo}`;
+}
+
+// ---- The case's Forms tab (UX redesign S2g; audit §23.13, UX-068, UX-086) -----------------------------------
+/** The step a started form waits for; none once it is complete or withdrawn (mirror of the list's nextRoles). */
+export type FormNextStep = "PREPARE" | "REVIEW" | "APPROVE";
+export function formNextStep(status: FormStatus, finalStatus: FormStatus): FormNextStep | null {
+  if (status === "WITHDRAWN" || status === finalStatus) return null;
+  if (status === "DRAFT") return "PREPARE";
+  if (status === "PREPARED") return "REVIEW";
+  return status === "REVIEWED" ? "APPROVE" : null;
+}
+
+/**
+ * What a form asks of the caller now, from the database's capabilities alone: review it, approve it, or revise it
+ * after it came back to them. Preparing an ordinary draft is "in progress", not waiting.
+ */
+export type FormWaitingAction = "REVIEW" | "APPROVE" | "REVISE";
+type ListedForm = Pick<FormInstanceListItem, "status" | "finalStatus" | "capabilities" | "returned">;
+export function formWaitingAction(
+  f: Pick<ListedForm, "capabilities" | "returned">,
+): FormWaitingAction | null {
+  if (f.capabilities.canReview) return "REVIEW";
+  if (f.capabilities.canApprove) return "APPROVE";
+  return f.returned?.toMe && f.capabilities.canSave ? "REVISE" : null;
+}
+
+export const FORM_TAB_GROUPS = ["WAITING", "IN_PROGRESS", "COMPLETED", "WITHDRAWN"] as const;
+export type FormTabGroup = (typeof FORM_TAB_GROUPS)[number];
+export function formTabGroup(f: ListedForm): FormTabGroup {
+  if (f.status === "WITHDRAWN") return "WITHDRAWN";
+  if (f.status === f.finalStatus) return "COMPLETED";
+  return formWaitingAction(f) ? "WAITING" : "IN_PROGRESS";
 }
 
 export function fieldsOf(sections: readonly FormSectionDefinition[]): FormFieldDefinition[] {

@@ -358,8 +358,89 @@ requirements:
     external_ids: []
     linear_issues: [CDF-177]
     status: COMPLETE
-    enforcement: [api.decide_conflict, "apps/investigation-web/src/app/(shell)/cases/[id]/page.tsx"]
+    enforcement: [api.decide_conflict, "apps/investigation-web/src/app/(shell)/cases/[id]/people/page.tsx"]
     tests: [tests/e2e/conflict-decision.spec.ts, tests/security/my-work-read-models.spec.ts]
+
+  - id: CDF-UX-007
+    title: "Case workspace: one header on every tab, sections as tabs, a stage panel that follows the case's own path"
+    source: [UX audit 2026-10-10 §22.2-§22.4, RC-15, UX-006, UX-011; ADR-016]
+    external_ids: []
+    linear_issues: [CDF-125, CDF-126]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        "apps/investigation-web/src/app/(shell)/cases/[id]/workspace.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/page.tsx",
+        packages/ui/src/case-workspace.tsx,
+        packages/workflow/src/index.ts,
+        api.available_transitions,
+      ]
+    tests:
+      [
+        tests/e2e/case-workspace.spec.ts,
+        tests/accessibility/case-workspace.spec.ts,
+        packages/workflow/src/index.test.ts,
+      ]
+    notes: "Deferred within S2: sticky compact header, select-style tabs on phones, tab counts, open items and who holds them, search in case. Reporter conversation (DEC-06) and evidence need-to-know (DEC-09) follow with their own migrations."
+
+  - id: CDF-UX-008
+    title: "Case history and access roster keep their audience: no page views, hold status without its details, full roster only for those who manage the team"
+    source: [UX audit 2026-10-10 UX-011, UX-092; ADR-016 D5; DEC-08, DEC-10]
+    external_ids: []
+    linear_issues: [CDF-127]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001830_case_history_and_roster.sql,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/history/page.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/people/page.tsx",
+      ]
+    tests: [tests/security/case-history-roster.spec.ts, tests/e2e/case-workspace.spec.ts]
+    notes: "The audit_event_read table policy still admits every BUSINESS row of a viewable case to direct SQL; the app reads only through api.case_history. Narrowing the policy is a follow-up decision. Packet-bound reviewer evidence (DEC-09, S5) will narrow authz.can_view_evidence, which history already follows."
+
+  - id: CDF-UX-009
+    title: "The reporter conversation belongs to the case: the case manager, owner and lead write, an investigator only when delegated, the GRC Director reads; seeing the case is never enough"
+    source: [UX audit 2026-10-10 UX-026, RC-20; ADR-016 D4; DEC-06]
+    external_ids: []
+    linear_issues: [CDF-128]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001840_reporter_conversation.sql,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/reporter/page.tsx",
+        "apps/investigation-web/src/app/(shell)/intake/[id]/page.tsx",
+      ]
+    tests:
+      [
+        tests/security/reporter-conversation.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+        tests/e2e/case-workspace.spec.ts,
+      ]
+    notes: "Interview invitations to the reporter through the channel are not built yet (S3 interviews). The triage officer stops writing at case creation; DEC-03 ends the TRIAGE grant itself later."
+
+  - id: CDF-UX-010
+    title: "Evidence is need-to-know: the investigation team sees a case's evidence within clearance, the case leads may limit an item to themselves, and seeing the case is never enough"
+    source: [UX audit 2026-10-10 UX-072; ADR-016 D6; DEC-09]
+    external_ids: []
+    linear_issues: [CDF-181]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007001850_evidence_need_to_know.sql,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/evidence/page.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/evidence-panel.tsx",
+      ]
+    tests:
+      [
+        tests/security/evidence-need-to-know.spec.ts,
+        tests/security/evidence-access.spec.ts,
+        tests/security/reporter-attachments.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+        tests/e2e/evidence.spec.ts,
+      ]
+    notes: "Packet-linked evidence for review, committee and decision users is S5; until then they get none. Triage keeps the reporter's files (listing only) through its TRIAGE grant until DEC-03 ends that grant at hand-over (S3)."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
