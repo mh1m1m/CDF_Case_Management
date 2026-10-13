@@ -300,6 +300,11 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
       - Three preliminary-review notices: review requested, approval requested, returned.
       - Deep links go to `/referrals/<id>` and `/preliminary-reviews/<id>`.
     - **Rules asked by user id.** `authz.can_view_referral` and `authz.can_view_preliminary_recommendation` wrap user-id forms (`intake.user_can_view_referral`, `case_mgmt.user_can_view_preliminary_recommendation`), so a notice checks its recipient without changing the request identity. The rule is the same for every caller.
+    - **Coordinator rulings (2026-10-13), recorded with item 17.**
+      - **Alternates.** Only a seat holder the snapshot names decides admissibility. An alternate member decides, and reads as a decider, only if the snapshot seats them.
+      - **Restricted case.** The decider must already be able to view the case. If no seated decider can, nobody is asked and the handling secretary keeps the grievance. Whether the Restricted Case Authority names a decider is SOURCE_REQUIRED (below).
+      - **Rejection.** A secretary's REJECTED on a referral sends no notice. The referral queue carries the status, and a notice is UX follow-on work.
+      - **Import submit.** `may_submit` on an import batch is a hint taken from the stored preview, and `api.submit_bcp_import` decides.
 
 ## Consequences
 
@@ -329,3 +334,4 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
 - The independent conflict authority's appointment.
 - Enabling INTERPRETER, and the acknowledgement wording reference.
 - An approval path for amending a restricted case's snapshot.
+- Whether the Restricted Case Authority names a grievance admissibility decider on a restricted case where no seated decider can view the case. Until a source decides it, nobody is asked (fail closed).
