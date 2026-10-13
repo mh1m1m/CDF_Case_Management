@@ -2806,7 +2806,11 @@ to authenticated;
 --       preliminary-review referral guard (AMB-018). AMB-030 is as built: findings are append-only versions and a
 --       vote item binds one version.
 --   3.9 Conflict taint (AMB-051; DEC-AMB-003, owner, 2026-10-13). An item whose current result came from a closed vote
---       on which someone now conflicted (in the proceeding or the case) had a counted vote is TAINTED_BY_CONFLICT.
+--       on which someone now conflicted had a counted vote is TAINTED_BY_CONFLICT. Conflicted: a meeting conflict in
+--       the proceeding, an upheld concern about them in it even if since reversed (DEC-AMB-010 is prospective; only
+--       the committee's resolution clears a taint), or a case conflict. What counted is frozen when the tally is taken
+--       (decision.vote_tally_entry), as api.close_vote_item counted it: last choice, alternates in, replaced members
+--       and votes that stopped counting out of the recount (a vote that stopped counting still taints, fail safe).
 --       Until the committee resolves it the database refuses adoption, legal review (request and opinion),
 --       submission and every authority decision but a return, on every path; once the package is decided, also what
 --       reads its result as final (opening a corrective action, a decision notice). The secretary running an open
@@ -3142,6 +3146,26 @@ comment on table decision.conflict_taint_resolution is
   'DEC-AMB-003 (owner, 2026-10-13; migration 2030): RE_VOTE or CONFIRM of a vote on which a now-conflicted '
   'participant voted. CONFIRM only when the recount without their votes gives the same result.';
 
+-- DEC-AMB-003: every vote on an item as its tally saw it, frozen when the item leaves OPEN (decision.freeze_vote_tally).
+-- A vote counted when api.close_vote_item counted it: its participant had no conflict, was present and was a counting
+-- voter (an activated alternate counts; the member it replaces, a seat that ended or a user no longer cleared does not),
+-- with its last choice (AMB-081). A member who voted and then declared a conflict before the close has a vote that
+-- did not count. Internal: no policy and no grant (it holds choices, which a secret ballot hides).
+create table decision.vote_tally_entry (
+  vote_item_id   uuid not null references committee.vote_item (id),
+  vote_id        uuid not null unique references committee.vote (id),
+  participant_id uuid not null references committee.meeting_participant (id),
+  user_id        uuid references iam.user_profile (id),
+  choice         text not null,
+  counted        boolean not null,
+  primary key (vote_item_id, participant_id)
+);
+create index vote_tally_entry_participant on decision.vote_tally_entry (participant_id);
+create index vote_tally_entry_user on decision.vote_tally_entry (user_id);
+comment on table decision.vote_tally_entry is
+  'DEC-AMB-003 (migration 2030): each vote on an item with its last choice and whether the tally counted it, frozen '
+  'when the item left OPEN. Read only by the taint functions; not selectable.';
+
 -- -----------------------------------------------------------------------------
 -- 3.6 Purpose access grace (AMB-229)
 -- -----------------------------------------------------------------------------
@@ -3180,7 +3204,8 @@ begin
                            'decision.authority_requirement', 'decision.authority_decision_scope',
                            'decision.authority_decision_source', 'decision.authority_decision_condition',
                            'decision.package_return', 'decision.legal_review_cancellation',
-                           'decision.legal_opinion_revision', 'decision.conflict_taint_resolution'] loop
+                           'decision.legal_opinion_revision', 'decision.conflict_taint_resolution',
+                           'decision.vote_tally_entry'] loop
     execute format('create trigger no_update before update on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
@@ -3265,10 +3290,17 @@ as $$
   from decision.recommendation_item i where i.id = p_item_id;
 $$;
 
--- DEC-AMB-003 (owner, 2026-10-13): the participants whose vote counted on a closed vote item (a substantive vote, an
--- abstention or the casting vote) and who are now conflicted in the proceeding (a declared or upheld meeting conflict)
--- or in the case (a declared or confirmed case conflict), less those a resolution of the vote item already covers.
--- A conflicted member cannot vote, so any such conflict came to light after the vote. Sorted.
+-- DEC-AMB-003 (owner, 2026-10-13): the participants who took part in a closed vote item (a substantive vote or an
+-- abstention, a recusal that counted towards quorum, or the casting vote, the chair's or an acting chair's alike) and
+-- who are now conflicted, less those a resolution of the vote item already covers. Sorted. Conflicted:
+--   * a meeting conflict in the proceeding (authz.has_meeting_conflict);
+--   * an upheld concern about one of their participant rows in the proceeding, reversed or not: DEC-AMB-010 is
+--     prospective, so a reversal never clears a taint; only the committee's resolution does;
+--   * a declared or confirmed case conflict.
+-- Fail safe, a member who voted and then stopped counting before the close (a conflict declared after voting) still
+-- took part, so their vote taints; decision.recount_without leaves it out, as the tally did. A recusal that did not
+-- count (api.recuse_for_conflict) is no participation. A tally frozen before decision.vote_tally_entry existed is read
+-- by every vote's last choice.
 create function decision.vote_item_conflicted(p_vote_item_id uuid)
 returns uuid[]
 language sql stable
@@ -3277,12 +3309,23 @@ as $$
   select coalesce(array_agg(distinct u.user_id order by u.user_id), '{}'::uuid[])
   from committee.vote_item vi
   join committee.meeting m on m.id = vi.meeting_id
-  join lateral (select v.recorded_for as user_id from committee.vote v
-                where v.vote_item_id = vi.id and v.choice in ('APPROVE', 'REJECT', 'ABSTAIN')
+  join lateral (select e.user_id from decision.vote_tally_entry e
+                where e.vote_item_id = vi.id
+                  and (e.choice in ('APPROVE', 'REJECT', 'ABSTAIN') or (e.counted and e.choice = 'RECUSED'))
                 union
-                select c.cast_by from committee.casting_vote c where c.vote_item_id = vi.id) u on true
+                select v.recorded_for from committee.vote v
+                where v.vote_item_id = vi.id
+                  and committee.vote_choice(v.id) in ('APPROVE', 'REJECT', 'ABSTAIN', 'RECUSED')
+                  and not exists (select 1 from decision.vote_tally_entry e where e.vote_item_id = vi.id)
+                union
+                select c.cast_by from committee.casting_vote c where c.vote_item_id = vi.id) u on u.user_id is not null
   where vi.id = p_vote_item_id and vi.status = 'CLOSED'
     and (authz.has_meeting_conflict(u.user_id, m.committee_proceeding_id)
+         or exists (select 1 from committee.meeting_conflict_concern k
+                    join committee.meeting_participant t on t.id = k.participant_id
+                    join committee.meeting km on km.id = k.meeting_id
+                    where km.committee_proceeding_id = m.committee_proceeding_id and t.user_id = u.user_id
+                      and k.status = 'UPHELD')
          or exists (select 1 from case_mgmt.conflict_check cc
                     where cc.case_id = vi.case_id and cc.user_id = u.user_id and cc.is_current
                       and cc.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED')))
@@ -3328,10 +3371,13 @@ as $$
 $$;
 
 -- DEC-AMB-003: the result of a closed vote item recounted without every vote of the given participants, as
--- api.close_vote_item (1890) counted it, on the counts it froze: they leave the eligible and present members, their
--- approvals and rejections leave the tally, quorum is recomputed from the rule snapshot, and a tie stays broken only by
--- a casting vote whose caster is not excluded and whose tie is unchanged (otherwise TIED: nobody may presume how the
--- chair would have cast it). Null when it cannot be recounted (CUSTOM quorum, another decision rule).
+-- api.close_vote_item (2030 section 2) counted it, on the counts it froze and the votes it counted
+-- (decision.vote_tally_entry): each counted participant leaves the eligible and present members, their last choice
+-- leaves the tally (an approval or a rejection; an abstention or a recusal counts neither way, DEC-F01), quorum is
+-- recomputed from the rule snapshot, and a tie stays broken only by a casting vote (the chair's or an acting chair's)
+-- whose caster is not excluded and whose tie is unchanged (otherwise TIED: nobody may presume how it would have been
+-- cast). A vote the tally did not count changes nothing. Null when it cannot be recounted: a CUSTOM quorum, another
+-- decision rule, or a tally frozen before decision.vote_tally_entry existed.
 create function decision.recount_without(p_vote_item_id uuid, p_user_ids uuid[])
 returns text
 language plpgsql stable
@@ -3355,10 +3401,14 @@ begin
      or coalesce(v_rule ->> 'decision_rule', 'SIMPLE_MAJORITY_SUBSTANTIVE') <> 'SIMPLE_MAJORITY_SUBSTANTIVE' then
     return null;
   end if;
-  select count(distinct v.recorded_for) filter (where v.choice in ('APPROVE', 'REJECT', 'ABSTAIN', 'RECUSED')),
-         count(*) filter (where v.choice = 'APPROVE'), count(*) filter (where v.choice = 'REJECT')
+  if exists (select 1 from committee.vote v where v.vote_item_id = v_vi.id)
+     and not exists (select 1 from decision.vote_tally_entry e where e.vote_item_id = v_vi.id) then
+    return null;
+  end if;
+  select count(*), count(*) filter (where e.choice = 'APPROVE'), count(*) filter (where e.choice = 'REJECT')
     into v_removed, v_approve, v_reject
-  from committee.vote v where v.vote_item_id = v_vi.id and v.recorded_for = any (p_user_ids);
+  from decision.vote_tally_entry e
+  where e.vote_item_id = v_vi.id and e.counted and e.user_id = any (p_user_ids);
   v_eligible := v_vi.eligible_count - v_removed;
   v_present := v_vi.present_count - v_removed;
   v_approve := v_vi.approve_count - v_approve;
@@ -3378,6 +3428,23 @@ begin
     return v_vi.result;
   end if;
   return 'TIED';
+end;
+$$;
+
+-- DEC-AMB-003: freezes what the tally counted when an item leaves OPEN (closed, or awaiting the casting vote), in the
+-- statement api.close_vote_item takes it, with the same test: no conflict, present, a counting voter.
+create function decision.freeze_vote_tally()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  insert into decision.vote_tally_entry (vote_item_id, vote_id, participant_id, user_id, choice, counted)
+  select new.id, v.id, mp.id, mp.user_id, committee.vote_choice(v.id),
+         mp.coi_status = 'NO_CONFLICT' and mp.attendance = 'PRESENT' and committee.counts_as_voter(mp.id)
+  from committee.vote v join committee.meeting_participant mp on mp.id = v.participant_id
+  where v.vote_item_id = new.id;
+  return null;
 end;
 $$;
 
@@ -3516,6 +3583,8 @@ create trigger authority_decision_taint_block before insert on decision.authorit
   for each row execute function decision.block_tainted_progress();
 create trigger corrective_action_taint_block before insert on decision.corrective_action
   for each row execute function decision.block_tainted_progress();
+create trigger vote_item_freeze_tally after update of status on committee.vote_item
+  for each row when (old.status = 'OPEN' and new.status <> 'OPEN') execute function decision.freeze_vote_tally();
 create trigger defence_notice_taint_block before insert on grievance.defence_notice
   for each row when (new.kind = 'DECISION') execute function decision.block_tainted_progress();
 
@@ -3666,8 +3735,10 @@ alter table decision.package_return enable row level security;
 alter table decision.legal_review_cancellation enable row level security;
 alter table decision.legal_opinion_revision enable row level security;
 alter table decision.conflict_taint_resolution enable row level security;
+alter table decision.vote_tally_entry enable row level security;
 
 -- decision.sanction_catalogue_version: no policy and no grant; read through decision.sanction_catalogue_entry.
+-- decision.vote_tally_entry: no policy and no grant; read only by the DEC-AMB-003 taint functions.
 create policy item_adoption_read on decision.item_adoption for select to authenticated
   using (authz.can_view_recommendation_package(package_id));
 grant select on decision.item_adoption to authenticated;

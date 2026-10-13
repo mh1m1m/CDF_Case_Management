@@ -1203,8 +1203,18 @@ describe("every state-changing command writes its audit event in the same transa
       {
         fn: "activate_acting_secretary",
         actor: "committeeSecretary",
-        run: (s) =>
-          s.tx`select api.activate_acting_secretary(${ids.meeting2!}, 'Synthetic: handing over for the rest of the meeting.')`,
+        run: async (s) => {
+          const handover = await s.tx`select api.activate_acting_secretary(${ids.meeting2!},
+            'Synthetic: handing over for the rest of the meeting.')`;
+          // DEC-AMB-003: the member whose upheld concern was just reversed voted on the walk package, which the
+          // authority has decided. The reversal does not clear that taint. The acting secretary records the committee's
+          // confirmation (the result stands without the member); the seated secretary raised a concern about the
+          // member earlier, so may not.
+          await s.as("grcDeputy");
+          await s.tx`select api.resolve_conflict_taint(${ids.correctiveItem!}, 'CONFIRM',
+            'Synthetic: the result stands without the member.')`;
+          return handover;
+        },
       },
       {
         fn: "revise_vote",

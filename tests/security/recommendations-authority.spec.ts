@@ -1612,17 +1612,36 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
 
   describe("conflict discovered after a vote or decision (AMB-051; DEC-AMB-003, owner, 2026-10-13)", () => {
     const TAINT = "CDF_CONFLICT:TAINTED_BY_CONFLICT";
-    /** Someone raises a conflict on the lead's participation; the chair upholds it. */
+    /** Someone raises a conflict on the lead's participation; the chair upholds it. Returns the concern. */
     async function upheldOnLead(
       s: Scenario,
       f: PackageFixture,
       raiser: "committeeSecretary" | "legal" = "legal",
-    ) {
+    ): Promise<string> {
       await s.as(raiser);
       const [c] = await s.tx<{ id: string }[]>`
         select api.raise_meeting_conflict(${f.meeting.participant.lead!}, 'Synthetic: the lead is related to the subject.') as id`;
       await s.as("committeeChair");
       await s.tx`select api.decide_meeting_conflict(${c!.id}, 'UPHELD', 'Synthetic: the relationship is confirmed.')`;
+      return c!.id;
+    }
+    /** Submits the package and opens its single package vote; returns the vote item. */
+    async function openPackageVote(s: Scenario, f: PackageFixture): Promise<string> {
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_package_for_vote(${f.pkg})`;
+      await s.tx`select api.open_package_vote(${f.meeting.meeting}, ${f.pkg})`;
+      const [vi] = await s.tx<{ id: string }[]>`
+        select vi.id from committee.vote_item vi
+        join decision.recommendation_package p on p.id = vi.package_id and vi.package_round = p.round_no
+        where p.id = ${f.pkg}`;
+      return vi!.id;
+    }
+    /** What the tally froze for the vote item, read as the table owner. */
+    async function tally(s: OwnerScenario, voteItem: string) {
+      await s.asOwner();
+      return s.tx<{ user_id: string; choice: string; counted: boolean }[]>`
+        select user_id, choice, counted from decision.vote_tally_entry where vote_item_id = ${voteItem}
+        order by user_id::text collate "C"`;
     }
     const resolve = (s: Scenario, item: string, resolution: string, reason: string | null = FIRM) =>
       s.tx<{ id: string }[]>`select api.resolve_conflict_taint(${item}, ${resolution}, ${reason}) as id`;
@@ -1874,6 +1893,138 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           (tx) => tx`select api.request_legal_review(${f.pkg}, ${USERS.legalB}, ${REASON}, null, null)`,
         );
         expect(await packageStatus(s, f.pkg)).toEqual({ status: "ADOPTED", round_no: 1 });
+      });
+    });
+
+    it("T-AMB-028: a reversal of the upheld conflict does not clear the taint; the committee still resolves it", async () => {
+      await ownerScenario(async (s) => {
+        const f = await draftPackage(s, ic, caseB);
+        expect(await voteOnPackage(s, f, decisive)).toBe("ADOPTED");
+        const concern = await upheldOnLead(s, f);
+        await s.as("committeeSecretary");
+        expect(await tainted(s, f)).toEqual(bothTainted(f));
+        // No deputy chair is seated, so the next decider after the chair is the committee's conflict authority.
+        await s.as("platformAdmin");
+        await s.tx`select api.appoint_conflict_authority(${ic}, ${USERS.complianceManager}, now(), null, 'DEMO-CA-28',
+          'SOURCE_REQUIRED', ${REASON})`;
+        await s.as("complianceManager");
+        await s.tx`select api.reverse_meeting_conflict_determination(${concern},
+          'Synthetic: the link was misread; no conflict.')`;
+        // DEC-AMB-010 is prospective: the lead no longer counts as conflicted for the proceeding's later work ...
+        await s.asOwner();
+        expect(
+          await s.tx`select authz.has_meeting_conflict(${USERS.lead}, ${f.meeting.committeeProceeding}) as conflicted`,
+        ).toEqual([{ conflicted: false }]);
+        // ... but the vote taken while the conflict stood stays tainted, and every downstream step stays refused.
+        await s.as("committeeSecretary");
+        expect(await tainted(s, f)).toEqual(bothTainted(f));
+        await s.expectError(
+          TAINT,
+          (tx) => tx`select api.request_legal_review(${f.pkg}, ${USERS.legalB}, ${REASON}, null, null)`,
+        );
+        // Only the committee clears it: the lead's vote decided, so CONFIRM is refused and the vote is taken again.
+        await s.expectError("CDF_CONFLICT:RESULT_MAY_CHANGE", () => resolve(s, f.sanction, "CONFIRM"));
+        await resolve(s, f.sanction, "RE_VOTE");
+        expect(await tainted(s, f)).toEqual([]);
+        expect(await packageStatus(s, f.pkg)).toEqual({ status: "DRAFT", round_no: 1 });
+      });
+    });
+
+    it("T-AMB-028: the recount follows the tally: the alternate who voted counts with their last choice, the member they replaced does not", async () => {
+      await ownerScenario(async (s) => {
+        // The committee user holds an alternate seat; the lead declares a conflict before the vote and is replaced.
+        await seat(s, ic, [["committee", "ALTERNATE_MEMBER"]]);
+        const f = await draftPackage(s, ic, caseB);
+        const alternate = f.meeting.participant.committee!;
+        await s.as("committee");
+        await s.tx`select api.declare_meeting_conflict(${alternate}, 'NO_CONFLICT', null)`;
+        await s.as("committeeSecretary");
+        await s.tx`select api.record_attendance(${alternate}, 'PRESENT')`;
+        await s.as("lead");
+        await s.tx`select api.declare_meeting_conflict(${f.meeting.participant.lead!}, 'CONFLICT_DECLARED',
+          'Synthetic: the lead is related to the subject.')`;
+        await s.as("committeeSecretary");
+        await s.tx`select api.activate_alternate_member(${alternate}, ${f.meeting.participant.lead!},
+          'Synthetic: the member is conflicted today.')`;
+
+        // Chair approves, legal rejects; the alternate rejects, then revises to approve: two to one.
+        const vi = await openPackageVote(s, f);
+        await s.as("committeeChair");
+        await s.tx`select api.cast_vote(${vi}, 'APPROVE', null)`;
+        await s.as("legal");
+        await s.tx`select api.cast_vote(${vi}, 'REJECT', null)`;
+        await s.as("committee");
+        await s.tx`select api.cast_vote(${vi}, 'REJECT', null)`;
+        await s.tx`select api.revise_vote(${vi}, 'APPROVE', null)`;
+        await s.as("committeeSecretary");
+        await s.tx`select api.close_vote_item(${vi}, null)`;
+        expect(await s.tx`select api.record_package_adoption(${f.pkg}) as status`).toEqual([
+          { status: "ADOPTED" },
+        ]);
+        // The lead was conflicted before the vote and cast none: nothing is tainted.
+        expect(await tainted(s, f)).toEqual([]);
+        expect(await tally(s, vi)).toEqual(
+          [
+            { user_id: USERS.committeeChair, choice: "APPROVE", counted: true },
+            { user_id: USERS.legal, choice: "REJECT", counted: true },
+            { user_id: USERS.committee, choice: "APPROVE", counted: true },
+          ].sort((a, b) => (a.user_id < b.user_id ? -1 : 1)),
+        );
+
+        // The alternate's conflict comes to light after the vote. Without their last choice (an approval, not the
+        // rejection they first cast) it is one to one: the result may change.
+        await s.as("committee");
+        await s.tx`select api.declare_meeting_conflict(${alternate}, 'CONFLICT_DECLARED',
+          'Synthetic: the alternate advised the subject.')`;
+        await s.as("committeeSecretary");
+        expect(await tainted(s, f)).toEqual(bothTainted(f));
+        await s.asOwner();
+        expect(await s.tx`select decision.recount_without(${vi}, ${[USERS.committee]}::uuid[]) as r`).toEqual(
+          [{ r: "TIED" }],
+        );
+        await s.as("committeeSecretary");
+        await s.expectError("CDF_CONFLICT:RESULT_MAY_CHANGE", () => resolve(s, f.sanction, "CONFIRM"));
+        await resolve(s, f.sanction, "RE_VOTE");
+        expect(await tainted(s, f)).toEqual([]);
+      });
+    });
+
+    it("T-AMB-028: a vote that stopped counting before the close still taints (fail safe); CONFIRM holds because the tally never counted it", async () => {
+      await ownerScenario(async (s) => {
+        const f = await draftPackage(s, ic, caseB);
+        const vi = await openPackageVote(s, f);
+        await s.as("committeeChair");
+        await s.tx`select api.cast_vote(${vi}, 'APPROVE', null)`;
+        await s.as("legal");
+        await s.tx`select api.cast_vote(${vi}, 'APPROVE', null)`;
+        // The lead votes, then declares a conflict before the close: the vote stops counting.
+        await s.as("lead");
+        await s.tx`select api.cast_vote(${vi}, 'REJECT', null)`;
+        await s.tx`select api.declare_meeting_conflict(${f.meeting.participant.lead!}, 'CONFLICT_DECLARED',
+          'Synthetic: the lead is related to the subject.')`;
+        await s.as("committeeSecretary");
+        await s.tx`select api.close_vote_item(${vi}, null)`;
+        const [closed] = await s.tx<{ result: string; reject_count: number; excluded_count: number }[]>`
+          select result, reject_count, excluded_count from committee.vote_item where id = ${vi}`;
+        expect(closed).toEqual({ result: "APPROVED", reject_count: 0, excluded_count: 1 });
+        expect((await tally(s, vi)).find((e) => e.user_id === USERS.lead)).toEqual({
+          user_id: USERS.lead,
+          choice: "REJECT",
+          counted: false,
+        });
+        // The lead took part, so the result is tainted and not adopted; without a vote the tally never counted, it
+        // stands, so the committee may confirm it.
+        await s.as("committeeSecretary");
+        expect(await tainted(s, f)).toEqual(bothTainted(f));
+        await s.expectError(TAINT, (tx) => tx`select api.record_package_adoption(${f.pkg})`);
+        const [r] = await resolve(s, f.sanction, "CONFIRM");
+        const [row] = await s.tx`
+          select original_result, recount_result from decision.conflict_taint_resolution where id = ${r!.id}`;
+        expect(row).toEqual({ original_result: "APPROVED", recount_result: "APPROVED" });
+        expect(await tainted(s, f)).toEqual([]);
+        expect(await s.tx`select api.record_package_adoption(${f.pkg}) as status`).toEqual([
+          { status: "ADOPTED" },
+        ]);
       });
     });
 

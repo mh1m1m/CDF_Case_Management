@@ -106,7 +106,8 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
       - the member may declare again in later meetings (`PRIOR_CONFLICT_DECLARED` skips a conflict that came only from a reversed determination);
       - `authz.has_meeting_conflict` stops counting that conflict for the proceeding's later work;
       - the conflict row an upheld concern writes names that concern (`committee.meeting_conflict.concern_id`), so reversing one concern clears only the conflict resting on it; a conflict the member declared, the secretary recorded, or another concern upheld still counts, and so does a decision row written before 2030 (AGENT-09 early look, note a);
-      - the meeting in which the conflict was upheld keeps the member conflicted.
+      - the meeting in which the conflict was upheld keeps the member conflicted;
+      - a vote taken while the conflict stood stays TAINTED_BY_CONFLICT until the committee resolves it (§3 item 9): a reversal never clears a taint.
     - DEC-F38 for committees is as built: a conflict declared or upheld in one meeting bars a "no conflict" declaration in the proceeding's later meetings.
 11. **No meeting recording (DEC-AMB-007, AMB-068, T-AMB-040).** No recording command, field or provider integration exists. Approved minutes and the structured meeting records are the official record.
 
@@ -152,7 +153,11 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
    - Dependencies and exclusivity groups are flagged.
    - AMB-030 is as built.
 9. **Conflict taint: DEC-AMB-003 (owner, 2026-10-13), option B (AMB-051).**
-   - **When an item is tainted.** An item whose current result came from a closed vote is TAINTED_BY_CONFLICT if someone now conflicted had a counted vote on it (substantive, abstention or casting). "Conflicted" means a declared or upheld meeting conflict in the proceeding, or a declared or confirmed case conflict.
+   - **When an item is tainted.** An item whose current result came from a closed vote is TAINTED_BY_CONFLICT if someone now conflicted took part in that vote: a substantive vote or abstention, a recusal that counted towards quorum, or the casting vote (the chair's or an acting chair's). "Conflicted" means any of:
+     - a declared or upheld meeting conflict in the proceeding;
+     - an upheld concern about one of their participant rows in the proceeding, **even if since reversed**. DEC-AMB-010 is prospective, so a reversal never clears a taint; only the committee's resolution does (test "T-AMB-028: a reversal of the upheld conflict does not clear the taint; the committee still resolves it");
+     - a declared or confirmed case conflict.
+   - **What the tally counted.** When an item leaves OPEN, `decision.vote_tally_entry` freezes each vote with its last choice (AMB-081) and whether `api.close_vote_item` counted it. A vote counted when its participant had no conflict, was present and was a counting voter: an activated alternate counts, and the member it replaces does not. Fail safe, a member who voted and then declared a conflict before the close still taints, although the tally left the vote out. A recusal that did not count (`api.recuse_for_conflict`) is not participation.
    - **What the database refuses while it is tainted.** Triggers and command checks refuse, on every path:
      - adoption;
      - a legal-review request or opinion;
@@ -165,6 +170,9 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
      - The resolution is stored in `decision.conflict_taint_resolution`, once per taint. The table is append-only and readable wherever the item is.
    - **RE_VOTE.** The package goes back to DRAFT. The next round opens a new vote on the same target, so the tainted result never counts.
    - **CONFIRM.** Allowed only when the recount without every vote of the conflicted participants gives the same result under the snapshot's DEC-F01 rule and quorum. Otherwise it is refused with `RESULT_MAY_CHANGE`.
+     - `decision.recount_without` works from the counts and the votes the tally froze. Each counted conflicted participant leaves the eligible and present members, and their last choice leaves the tally. Approvals and rejections count; abstentions and recusals count neither way (DEC-F01). A vote the tally did not count changes nothing.
+     - A tie stays broken only by a casting vote whose caster (the chair or an acting chair) is not excluded and whose tie is unchanged. Otherwise the recount is TIED.
+     - The recount is null, so CONFIRM is refused, under a CUSTOM quorum, another decision rule, or a tally frozen before `decision.vote_tally_entry` existed.
    - **Who may not resolve it.** A conflicted participant, or anyone who raised a concern about one, gets FORBIDDEN.
    - **Restrictions on RE_VOTE.** It is refused while a review is open, while the package is with the authority, or once it is decided.
    - **The governing test** is `T-AMB-028: a conflict found after a vote or decision taints the item; the database refuses every downstream step until the committee resolves it by RE_VOTE or CONFIRM; CONFIRM needs documented reasoning and a result the conflicted participation could not have changed`, in `tests/security/recommendations-authority.spec.ts`.
