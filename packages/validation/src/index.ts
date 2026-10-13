@@ -10,6 +10,7 @@ import {
   BIRTH_DATE_CALENDARS,
   CITIES,
   CLASSIFICATION_LEVELS,
+  EVIDENCE_RESTRICTIONS,
   EVIDENCE_TYPES,
   FORM_APPROVAL_OUTCOMES,
   FORM_REVIEW_OUTCOMES,
@@ -267,6 +268,18 @@ export const transitionCaseSchema = z.object({
 
 export const replyToReporterSchema = z.object({ reportId: uuid, body: text(1, 4000) });
 
+/** DEC-06: an assigned investigator may write to the reporter on this case (REPORTER_COMMUNICATE). */
+export const delegateReporterCommunicationSchema = z.object({
+  caseId: uuid,
+  userId: uuid,
+  reason: text(10, 500),
+});
+export const endReporterCommunicationSchema = z.object({
+  caseId: uuid,
+  delegationId: uuid,
+  reason: text(10, 500),
+});
+
 const pastDate = z
   .string()
   .optional()
@@ -301,6 +314,14 @@ export const uploadEvidenceSchema = z
     path: ["classification"],
   });
 export type UploadEvidenceInput = z.output<typeof uploadEvidenceSchema>;
+
+// DEC-09: limit an item to the case leads, or open it to the team again, with a reason.
+export const setEvidenceRestrictionSchema = z.object({
+  caseId: uuid,
+  evidenceId: uuid,
+  restriction: z.enum(EVIDENCE_RESTRICTIONS),
+  reason: text(10, 500),
+});
 
 // ---- Forms engine (Phase 8; ADR-011). Field values are checked against the definition by @cdf/domain
 // validateFormData and by forms.validate_data; these schemas cover the command envelope.

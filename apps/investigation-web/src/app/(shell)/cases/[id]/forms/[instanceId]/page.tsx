@@ -2,17 +2,19 @@
 // database allows this user, the immutable version list with hashes and the lifecycle trail.
 // api.open_form_instance audits FORM_VIEWED or a SECURITY denial; invisible and missing instances are alike.
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formDisplayNumber } from "@cdf/domain";
-import { formatDateTime, type MessageKey } from "@cdf/i18n";
+import { formatDateTime, isolate, type MessageKey } from "@cdf/i18n";
 import {
+  CDFAlert,
   CDFBadge,
+  CDFBreadcrumbs,
   CDFCard,
   CDFCommandForm,
   CDFDescriptionList,
   CDFField,
   CDFFieldError,
+  CDFIdentifier,
   CDFPageHeader,
   CDFTimeline,
   classificationTone,
@@ -46,7 +48,7 @@ export default async function FormInstancePage({
 }) {
   const { id, instanceId } = await params;
   if (!UUID.test(id) || !UUID.test(instanceId)) notFound();
-  const { ctx } = await requireActor();
+  const { actor, ctx } = await requireActor();
   const t = await getTranslator();
   const f = await formsService().getInstance(ctx, instanceId);
   if (!f || f.caseId !== id) notFound();
@@ -54,6 +56,11 @@ export default async function FormInstancePage({
   const labels = fieldLabels(f.definition.sections, t.locale);
   const status = (s: string) => t(`formStatus.${s}` as MessageKey);
   const who = (n: string | null, at: string | null) => (n ? `${n} · ${formatDateTime(t.locale, at!)}` : "—");
+  // A draft that was returned says so first, with the reason (UX-086). The return is derived from the events: the
+  // latest RETURNED one while the form is a draft again. It came back to whoever prepared the returned version.
+  const returned = f.status === "DRAFT" ? f.events.findLast((e) => e.eventType === "RETURNED") : undefined;
+  const returnedToMe =
+    returned !== undefined && f.events.findLast((e) => e.eventType === "PREPARED")?.actorId === actor.userId;
   const bind = <
     A extends (caseId: string, instanceId: string, formCode: string, ...rest: never[]) => unknown,
   >(
@@ -62,30 +69,55 @@ export default async function FormInstancePage({
 
   return (
     <>
+      {/* No case header here: a form is reached by its own access check, which from S3 can be purpose-bound
+          rather than case-wide (ADR-016 D2). The breadcrumbs carry the place. */}
+      <CDFBreadcrumbs
+        label={t("shell.breadcrumb")}
+        items={[
+          { label: t("shell.area.CASES"), href: "/cases" },
+          { label: <CDFIdentifier>{f.caseNumber}</CDFIdentifier>, href: `/cases/${f.caseId}` },
+          { label: t("caseWorkspace.tabs.forms"), href: `/cases/${f.caseId}/forms` },
+          { label: <CDFIdentifier>{formDisplayNumber(f.formCode, f.instanceNo)}</CDFIdentifier> },
+        ]}
+      />
+      {/* The form leads, not its codes (UX-123): its name and purpose; the number sits with the status. */}
       <CDFPageHeader
-        title={`${f.caseNumber} · ${formDisplayNumber(f.formCode, f.instanceNo)}`}
-        intro={`${name} — ${t.locale === "ar" ? f.definition.purposeAr : f.definition.purposeEn}`}
+        title={name}
+        intro={t.locale === "ar" ? f.definition.purposeAr : f.definition.purposeEn}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <CDFIdentifier testId="form-number">{formDisplayNumber(f.formCode, f.instanceNo)}</CDFIdentifier>
             <CDFBadge tone={statusTone(f.status)} testId="form-status">
               {status(f.status)}
             </CDFBadge>
             <CDFBadge tone={classificationTone(f.classification)}>
               {t(`classification.${f.classification}` as MessageKey)}
             </CDFBadge>
-            <Link
-              href={`/cases/${f.caseId}/forms`}
-              className="font-semibold underline underline-offset-4"
-              data-testid="back-to-forms"
-            >
-              {t("forms.backToForms")}
-            </Link>
-            <Link href={`/cases/${f.caseId}`} className="font-semibold underline underline-offset-4">
-              {t("forms.backToCase")}
-            </Link>
           </div>
         }
       />
+
+      {returned ? (
+        <CDFAlert
+          tone="warning"
+          title={returnedToMe ? t("forms.tab.returnedToYou") : t("forms.tab.returnedForChanges")}
+          testId="form-returned-banner"
+        >
+          {returned.reason ? (
+            <p>
+              <q className="break-words">
+                <bdi>{returned.reason}</bdi>
+              </q>
+            </p>
+          ) : null}
+          <p className="text-sm">
+            {t("forms.tab.returnedBy", {
+              name: isolate(returned.actorName ?? "—"),
+              date: isolate(formatDateTime(t.locale, returned.occurredAt)),
+            })}
+          </p>
+        </CDFAlert>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div>
@@ -121,21 +153,42 @@ export default async function FormInstancePage({
                     <span className="font-semibold">
                       {t("forms.version")} {v.versionNo}
                     </span>{" "}
-                    · {v.savedByName ?? "—"} · {formatDateTime(t.locale, v.savedAt)}
+                    · <bdi>{v.savedByName ?? "—"}</bdi> · <bdi>{formatDateTime(t.locale, v.savedAt)}</bdi>
                     {f.preparedVersionNo === v.versionNo ? (
                       <>
                         {" "}
                         <CDFBadge tone="info">{status("PREPARED")}</CDFBadge>
                       </>
                     ) : null}
-                    <br />
-                    <code className="break-all text-xs" dir="ltr">
-                      {t("forms.hash")}: {v.contentHash}
-                    </code>
                   </li>
                 ))}
               </ol>
             )}
+            {/* Hashes prove what was saved; they are kept, one step away (UX-123). */}
+            <details className="mt-3 border-t border-cdf-border pt-3" data-testid="integrity-details">
+              <summary className="cursor-pointer font-semibold">{t("forms.integrity")}</summary>
+              <p className="mt-2 text-sm text-cdf-text-secondary">{t("forms.integrityHint")}</p>
+              <dl className="mt-2 grid gap-2 text-sm">
+                <div>
+                  <dt className="font-semibold">
+                    {t("forms.definitionVersion", { no: f.definition.versionNo })}
+                  </dt>
+                  <dd>
+                    <CDFIdentifier variant="hash">{f.definition.schemaHash}</CDFIdentifier>
+                  </dd>
+                </div>
+                {f.versions.map((v) => (
+                  <div key={v.id}>
+                    <dt className="font-semibold">
+                      {t("forms.version")} {v.versionNo} · {t("forms.hash")}
+                    </dt>
+                    <dd data-testid={`form-hash-${v.versionNo}`}>
+                      <CDFIdentifier variant="hash">{v.contentHash}</CDFIdentifier>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
           </CDFCard>
 
           <CDFCard title={t("forms.events")}>
@@ -158,14 +211,6 @@ export default async function FormInstancePage({
               items={[
                 { term: t("forms.status"), value: status(f.status) },
                 { term: t("forms.finalState"), value: status(f.finalStatus) },
-                {
-                  term: t("forms.definitionVersion", { no: f.definition.versionNo }),
-                  value: (
-                    <code className="break-all text-xs" dir="ltr">
-                      {f.definition.schemaHash}
-                    </code>
-                  ),
-                },
                 {
                   term: t("forms.version"),
                   value: f.currentVersionNo ? `v${f.currentVersionNo}` : t("forms.notSet"),

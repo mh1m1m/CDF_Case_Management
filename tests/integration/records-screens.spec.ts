@@ -76,6 +76,7 @@ describe("records screens (CDF-71)", () => {
         applyLegalHold: true,
         releaseLegalHold: false,
         requestLegalHold: true,
+        routeRetention: false, // the shared queue takes this case (ADR-016 D8)
       });
       // Lifecycle metadata only: no title, summary, people or allegations in the record.
       expect(Object.keys(r!)).not.toEqual(expect.arrayContaining(["title"]));

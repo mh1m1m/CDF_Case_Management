@@ -5,20 +5,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { WORK_AREAS, type WorkItem, type WorkView } from "@cdf/contracts";
-import type { MessageKey, Translator } from "@cdf/i18n";
-import {
-  buttonClass,
-  CDFDateTime,
-  CDFEmptyState,
-  CDFIdentifier,
-  CDFPageHeader,
-  CDFViewTabs,
-  CDFWorkItem,
-  CDFWorkList,
-} from "@cdf/ui";
+import type { MessageKey } from "@cdf/i18n";
+import { buttonClass, CDFEmptyState, CDFPageHeader, CDFViewTabs, CDFWorkList } from "@cdf/ui";
 import { investigationService, myShellAreas, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { itemHref, overdueKeys } from "@/server/work-routes";
+import { overdueKeys } from "@/server/work-routes";
+import { WorkItemRow } from "../work-item-row";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -32,20 +24,6 @@ const VIEWS = [
   ["waiting", "WAITING"],
 ] as const satisfies readonly (readonly [string, WorkView])[];
 type ViewKey = (typeof VIEWS)[number][0];
-
-function actionLabel(t: Translator, i: WorkItem): string {
-  if (i.category.startsWith("TASK_"))
-    return t("myWork.task", {
-      task: t.code("records.taskTypeName", i.category.slice(5), "records.taskType"),
-    });
-  return t(`myWork.action.${i.category}` as MessageKey);
-}
-
-function dueLabel(t: Translator, i: WorkItem): string {
-  if (i.dueSource === "WORKFLOW_SLA_PROVISIONAL") return t("myWork.dueProvisional");
-  if (i.dueSource === "SCHEDULE") return t("myWork.scheduled");
-  return t("myWork.due");
-}
 
 export default async function MyWorkPage({
   searchParams,
@@ -64,43 +42,14 @@ export default async function MyWorkPage({
   const overdueSet = overdueKeys(rows);
   const hasProvisional = rows.some((i) => i.dueSource === "WORKFLOW_SLA_PROVISIONAL");
 
-  const renderItem = (i: WorkItem) => {
-    const overdue = overdueSet.has(`${i.category}:${i.targetId}`);
-    return (
-      <CDFWorkItem
-        key={`${i.category}:${i.targetId}`}
-        href={itemHref(i)}
-        action={actionLabel(t, i)}
-        testId={`work-item-${i.category}`}
-        reference={
-          i.caseNumber ? (
-            <>
-              {t("myWork.caseRef")} <CDFIdentifier>{i.caseNumber}</CDFIdentifier>
-            </>
-          ) : i.targetType === "REPORT" ? (
-            t("myWork.reportRef")
-          ) : undefined
-        }
-        overdue={overdue ? t("myWork.overdue") : undefined}
-        due={
-          i.dueAt ? (
-            <>
-              {dueLabel(t, i)}{" "}
-              <CDFDateTime value={i.dueAt} locale={t.locale} dateOnly={i.dueSource === "TASK"} />
-            </>
-          ) : undefined
-        }
-        since={
-          i.sinceAt ? (
-            <>
-              {/* With the time, so items of the same kind received the same day can be told apart. */}
-              {t("myWork.since")} <CDFDateTime value={i.sinceAt} locale={t.locale} />
-            </>
-          ) : undefined
-        }
-      />
-    );
-  };
+  const renderItem = (i: WorkItem) => (
+    <WorkItemRow
+      key={`${i.category}:${i.targetId}`}
+      t={t}
+      item={i}
+      overdue={overdueSet.has(`${i.category}:${i.targetId}`)}
+    />
+  );
 
   // "Needs my action" is grouped by area in the sidebar's order, so a combined role sees each queue separately.
   const groups =

@@ -77,6 +77,14 @@ const NOT_STATE_CHANGING = new Set([
   "vote_item_status",
   // Employee defence (migration 1910): the subject's own notices.
   "my_defence_notices",
+  // S2 read models (migration 1830): a case's history and access roster, read inside an audited case view.
+  "case_history",
+  "case_access_roster",
+  // S2h (migration 1860): the shared retention queue; opening a record from it is audited by open_case_metadata.
+  // The officers a case authority may route a retention review to: names only; the routing itself is
+  // api.create_case_task, audited as CASE_TASK_ASSIGNED.
+  "retention_review_queue",
+  "list_retention_reviewers",
 ]);
 
 interface Step {
@@ -202,6 +210,21 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.reply_to_reporter(${infoReport}, 'Synthetic follow-up question for the reporter.')`,
       },
+      // DEC-06 (migration 1840): the case manager lets case B's investigator write to the reporter, then ends it.
+      {
+        fn: "delegate_reporter_communication",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.delegation = await one(
+            s,
+            s.tx`select api.delegate_reporter_communication(${caseB}, ${USERS.investigatorB}, ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "end_reporter_communication",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.end_reporter_communication(${ids.delegation!}, ${REASON})`,
+      },
       {
         fn: "request_identity_reveal",
         actor: "grcDirector",
@@ -226,9 +249,10 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "register_evidence_version",
         actor: "investigatorB",
         run: async (s) => {
-          const [r] = await s.tx<{ v: string }[]>`
-            select o_version_id as v from api.register_evidence_version(${caseB}, null, 'Audit walk item (synthetic)', null,
+          const [r] = await s.tx<{ v: string; e: string }[]>`
+            select o_version_id as v, o_evidence_id as e from api.register_evidence_version(${caseB}, null, 'Audit walk item (synthetic)', null,
               'DOCUMENT', 'Synthetic source', null, 'CONFIDENTIAL'::core.classification_level, 'walk.pdf', 'application/pdf', 512, ${"1".repeat(64)})`;
+          ids.evidence = r!.e;
           return (ids.version = r!.v);
         },
       },
@@ -236,6 +260,12 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "complete_evidence_version",
         actor: "investigatorB",
         run: (s) => s.tx`select api.complete_evidence_version(${ids.version!}, 'CLEAN', 'walk-scanner')`,
+      },
+      // DEC-09 (migration 1850): the case manager limits the item to the case leads.
+      {
+        fn: "set_evidence_restriction",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.set_evidence_restriction(${ids.evidence!}, 'LEADS', ${REASON})`,
       },
       {
         fn: "reject_evidence_version",
@@ -1510,7 +1540,9 @@ describe("audit internals are not reachable", () => {
       "authz.can_manage_meeting",
       "authz.can_manage_recommendation_package",
       "authz.can_manage_retention",
+      "authz.can_message_reporter",
       "authz.can_prepare_form",
+      "authz.can_read_reporter_conversation",
       "authz.can_record_findings",
       "authz.can_release_legal_hold",
       "authz.can_request_disposition",
@@ -1519,6 +1551,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_review_form",
       "authz.can_review_interviews",
       "authz.can_review_legal_hold",
+      "authz.can_route_retention_review",
       "authz.can_upload_evidence",
       "authz.can_view_case",
       "authz.can_view_case_content",
@@ -1541,6 +1574,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_records_catalogue",
       "authz.can_view_referral",
       "authz.can_view_report",
+      "authz.can_view_report_files",
       "authz.can_view_sector_roster",
       "authz.current_clearance",
       "authz.current_roles",
@@ -1550,7 +1584,10 @@ describe("audit internals are not reachable", () => {
       "authz.has_permission",
       "authz.in_records_catalogue_scope",
       "authz.is_committee_secretary",
+      "authz.is_evidence_lead",
+      "authz.is_evidence_team",
       "authz.is_portal_subject",
+      "authz.is_reporter_correspondent",
       "authz.task_grants",
       "forms.canonical_json",
       "forms.content_hash",

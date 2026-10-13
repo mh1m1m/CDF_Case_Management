@@ -6,6 +6,7 @@ import {
   conductBlockers,
   interviewActionsFrom,
   interviewDisplayNumber,
+  interviewSteps,
   interviewStepsOpen,
   intervieweeLabelAllowed,
   nextInterviewStatus,
@@ -13,6 +14,7 @@ import {
   statementSha256,
   transitionBlockers,
   type InterviewFacts,
+  type InterviewStepFacts,
 } from "./interviews";
 
 const facts = (over: Partial<InterviewFacts> = {}): InterviewFacts => ({
@@ -105,6 +107,79 @@ describe("interview blockers", () => {
     expect(transitionBlockers(reviewed, "APPROVE", "u1")).toEqual(["SEPARATION_OF_DUTIES"]);
     expect(transitionBlockers(reviewed, "APPROVE", "u2")).toEqual(["SEPARATION_OF_DUTIES"]);
     expect(transitionBlockers(reviewed, "APPROVE", "u3")).toEqual([]);
+  });
+});
+
+describe("interview steps (UX-033)", () => {
+  const at = (over: Partial<InterviewStepFacts> = {}): InterviewStepFacts => ({
+    ...facts(),
+    scheduledStart: "2026-10-07T08:00:00Z",
+    conductedStartedAt: "2026-10-07T08:05:00Z",
+    ...over,
+  });
+  const current = (f: InterviewStepFacts) =>
+    interviewSteps(f).find((s) => s.state === "current")?.step ?? null;
+  const states = (f: InterviewStepFacts) =>
+    Object.fromEntries(interviewSteps(f).map((s) => [s.step, s.state]));
+  const planned = at({
+    status: "PLANNED",
+    scheduledStart: null,
+    conductedStartedAt: null,
+    notices: [],
+    rightsAcknowledgedAt: null,
+    currentStatementVersionId: null,
+    statements: [],
+  });
+
+  it("walks the lifecycle one current step at a time", () => {
+    expect(current(planned)).toBe("SCHEDULE");
+    const scheduled = { ...planned, status: "SCHEDULED" as const, scheduledStart: "2026-10-07T08:00:00Z" };
+    expect(current(scheduled)).toBe("INVITE");
+    expect(current({ ...scheduled, notices: [{ noticeType: "INVITATION" }] })).toBe("RIGHTS");
+    expect(
+      current({
+        ...scheduled,
+        notices: [{ noticeType: "INVITATION" }],
+        rightsAcknowledgedAt: "2026-10-07T07:00:00Z",
+      }),
+    ).toBe("CONDUCT");
+    expect(current(at({ currentStatementVersionId: null, statements: [] }))).toBe("STATEMENT");
+    // An acknowledged older version does not cover the current one.
+    expect(current(at({ currentStatementVersionId: "v1" }))).toBe("STATEMENT");
+    expect(current(at())).toBe("PREPARE");
+    expect(current(at({ status: "PREPARED" }))).toBe("REVIEW");
+    expect(current(at({ status: "REVIEWED" }))).toBe("APPROVE");
+    expect(current(at({ status: "APPROVED" }))).toBeNull();
+    expect(Object.values(states(at({ status: "APPROVED" })))).toEqual(Array(8).fill("done"));
+  });
+
+  it("shows what is on record even out of order, and only the first open step as current", () => {
+    const rightsFirst = {
+      ...planned,
+      status: "SCHEDULED" as const,
+      scheduledStart: "2026-10-07T08:00:00Z",
+      rightsAcknowledgedAt: "2026-10-07T07:00:00Z",
+    };
+    expect(states(rightsFirst)).toMatchObject({
+      SCHEDULE: "done",
+      INVITE: "current",
+      RIGHTS: "done",
+      CONDUCT: "upcoming",
+    });
+    expect(interviewSteps(rightsFirst).filter((s) => s.state === "current")).toHaveLength(1);
+  });
+
+  it("returns a prepared interview to the statement or preparation step", () => {
+    // RETURN goes back to CONDUCTED: the acknowledged statement stands, so preparing is next.
+    expect(current(at({ status: "CONDUCTED", preparedBy: "u1" }))).toBe("PREPARE");
+  });
+
+  it("has no current step once cancelled", () => {
+    const cancelled = { ...planned, status: "CANCELLED" as const };
+    expect(current(cancelled)).toBeNull();
+    expect(Object.values(states(cancelled))).toEqual(Array(8).fill("skipped"));
+    const afterSchedule = { ...cancelled, scheduledStart: "2026-10-07T08:00:00Z" };
+    expect(states(afterSchedule)).toMatchObject({ SCHEDULE: "done", INVITE: "skipped" });
   });
 });
 

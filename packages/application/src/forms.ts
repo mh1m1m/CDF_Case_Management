@@ -11,7 +11,7 @@ import type {
   FormDefinitionListItem,
   FormEntitlementAction,
   FormInstanceDetail,
-  FormInstanceSummary,
+  FormInstanceListItem,
   Permission,
 } from "@cdf/contracts";
 import { can } from "@cdf/authorization";
@@ -128,7 +128,7 @@ export function createFormsService(deps: FormsDeps) {
         throw toAppError(cause, ctx.requestId);
       });
     },
-    listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceSummary[]> {
+    listInstances(ctx: UserRequestContext, caseId: string): Promise<FormInstanceListItem[]> {
       return gateway.listInstances(ctx, caseId).catch((cause) => {
         throw toAppError(cause, ctx.requestId);
       });

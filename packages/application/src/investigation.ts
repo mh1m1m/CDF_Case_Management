@@ -14,6 +14,8 @@ import {
   createCaseSchema,
   declareConflictSchema,
   decideConflictSchema,
+  delegateReporterCommunicationSchema,
+  endReporterCommunicationSchema,
   recordsCatalogueSearchSchema,
   replyToReporterSchema,
   transitionCaseSchema,
@@ -95,7 +97,13 @@ export function createInvestigationService(deps: InvestigationDeps) {
     getReport: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.getReport(ctx, id)),
     listCases: (ctx: UserRequestContext) => query(ctx, () => gateway.listCases(ctx)),
     getCase: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.getCase(ctx, id)),
-    caseTimeline: (ctx: UserRequestContext, id: string) => query(ctx, () => gateway.caseTimeline(ctx, id)),
+    caseTimeline: (ctx: UserRequestContext, id: string, limit?: number) =>
+      query(ctx, () => gateway.caseTimeline(ctx, id, limit)),
+    caseAccessRoster: (ctx: UserRequestContext, id: string) =>
+      query(ctx, () => gateway.caseAccessRoster(ctx, id)),
+    // The conversation with the reporter (DEC-06): who may read or write is the database's rule, not a permission.
+    caseReporterView: (ctx: UserRequestContext, id: string) =>
+      query(ctx, () => gateway.caseReporterView(ctx, id)),
     directory: (ctx: UserRequestContext) => query(ctx, () => gateway.directory(ctx)),
     // DEC-01: who a restricted case may be handed to at this classification. The database re-checks the
     // report, CASE_CREATE and the caller's clearance; this pre-check only avoids a pointless round trip.
@@ -127,6 +135,7 @@ export function createInvestigationService(deps: InvestigationDeps) {
     // can already act on, so there is no application pre-check beyond the authenticated session.
     myAreas: (ctx: UserRequestContext) => query(ctx, () => gateway.myAreas(ctx)),
     myWorkItems: (ctx: UserRequestContext) => query(ctx, () => gateway.myWorkItems(ctx)),
+    retentionReviewQueue: (ctx: UserRequestContext) => query(ctx, () => gateway.retentionReviewQueue(ctx)),
     myAccess: (ctx: UserRequestContext) => query(ctx, () => gateway.myAccess(ctx)),
 
     // Oversight (read only): the ledger for AUDIT_VIEW, security events for SECURITY_EVENT_VIEW. Metadata only;
@@ -187,7 +196,7 @@ export function createInvestigationService(deps: InvestigationDeps) {
         "reply_to_reporter",
         replyToReporterSchema,
         raw,
-        "REPORT_MESSAGE_REPLY",
+        null, // DEC-06: intake and triage before the case, its correspondents after it; the database decides
         (i) => gateway.replyToReporter(ctx, i),
         (i) => i.reportId,
       ),
@@ -226,6 +235,31 @@ export function createInvestigationService(deps: InvestigationDeps) {
         raw,
         "CASE_ASSIGN",
         (i) => gateway.assignCase(ctx, i),
+        (i) => i.caseId,
+      ),
+
+    // REPORTER_COMMUNICATE (DEC-06): whoever manages the case team lets an assigned investigator write to the
+    // reporter, and ends it. Audited in the database.
+    delegateReporterCommunication: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "delegate_reporter_communication",
+        delegateReporterCommunicationSchema,
+        raw,
+        "CASE_ASSIGN",
+        (i) => gateway.delegateReporterCommunication(ctx, i),
+        (i) => i.caseId,
+      ),
+    endReporterCommunication: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "end_reporter_communication",
+        endReporterCommunicationSchema,
+        raw,
+        "CASE_ASSIGN",
+        (i) => gateway.endReporterCommunication(ctx, i),
         (i) => i.caseId,
       ),
 

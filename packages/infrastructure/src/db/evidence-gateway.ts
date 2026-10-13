@@ -34,6 +34,35 @@ type EvidenceRow = Omit<
   createdAt: Date;
 };
 
+// RLS (authz.can_view_report_files, DEC-09) filters; object_key and request_id are not selectable.
+async function attachments(
+  tx: Tx,
+  by: { reportId: string } | { caseId: string },
+): Promise<ReportAttachmentItem[]> {
+  const reportId = "reportId" in by ? by.reportId : null;
+  const caseId = "caseId" in by ? by.caseId : null;
+  const rows = await tx<
+    (Omit<ReportAttachmentItem, "displayName" | "sizeBytes" | "receivedAt"> & {
+      fileExtension: string;
+      sizeBytes: string | number;
+      receivedAt: Date;
+    })[]
+  >`
+    select a.id, a.report_id as "reportId", a.sequence_no as "sequenceNo", a.source,
+           a.file_extension as "fileExtension", a.content_type as "contentType", a.size_bytes as "sizeBytes",
+           a.sha256, a.status, a.received_at as "receivedAt"
+    from intake.report_attachment a
+    where (${reportId}::uuid is null or a.report_id = ${reportId}::uuid)
+      and (${caseId}::uuid is null or a.report_id in (select r.id from intake.report r where r.case_id = ${caseId}::uuid))
+    order by a.received_at, a.sequence_no`;
+  return rows.map(({ fileExtension, ...r }) => ({
+    ...r,
+    displayName: attachmentDisplayName(r.sequenceNo, fileExtension),
+    sizeBytes: Number(r.sizeBytes),
+    receivedAt: new Date(r.receivedAt).toISOString(),
+  }));
+}
+
 export class PostgresEvidenceGateway implements EvidenceGateway {
   constructor(private readonly sql: Sql) {}
 
@@ -46,7 +75,7 @@ export class PostgresEvidenceGateway implements EvidenceGateway {
       const items = await tx<EvidenceRow[]>`
         select e.id, e.case_id as "caseId", e.sequence_no as "sequenceNo", e.title, e.description,
                e.evidence_type as "evidenceType", e.source_description as "sourceDescription",
-               e.collected_at::text as "collectedAt", e.classification, e.status, e.created_by as "createdBy",
+               e.collected_at::text as "collectedAt", e.classification, e.status, e.restriction, e.created_by as "createdBy",
                u.display_name as "createdByName", e.created_at as "createdAt", e.current_version_id as "currentVersionId"
         from evidence.evidence e left join iam.user_profile u on u.id = e.created_by
         where e.case_id = ${caseId} order by e.sequence_no`;
@@ -94,6 +123,7 @@ export class PostgresEvidenceGateway implements EvidenceGateway {
           collectedAt: e.collectedAt,
           classification: e.classification,
           status: e.status,
+          restriction: e.restriction,
           createdBy: e.createdBy,
           createdByName: e.createdByName,
           createdAt: iso(e.createdAt)!,
@@ -158,27 +188,21 @@ export class PostgresEvidenceGateway implements EvidenceGateway {
     });
   }
 
-  listReportAttachments(ctx: UserRequestContext, reportId: string): Promise<ReportAttachmentItem[]> {
+  setRestriction(
+    ctx: UserRequestContext,
+    i: Parameters<EvidenceGateway["setRestriction"]>[1],
+  ): Promise<void> {
     return this.run(ctx, async (tx) => {
-      // RLS (authz.can_view_report) filters; object_key and request_id are not selectable.
-      const rows = await tx<
-        (Omit<ReportAttachmentItem, "displayName" | "sizeBytes" | "receivedAt"> & {
-          fileExtension: string;
-          sizeBytes: string | number;
-          receivedAt: Date;
-        })[]
-      >`
-        select a.id, a.sequence_no as "sequenceNo", a.source, a.file_extension as "fileExtension",
-               a.content_type as "contentType", a.size_bytes as "sizeBytes", a.sha256, a.status,
-               a.received_at as "receivedAt"
-        from intake.report_attachment a where a.report_id = ${reportId} order by a.sequence_no`;
-      return rows.map(({ fileExtension, ...r }) => ({
-        ...r,
-        displayName: attachmentDisplayName(r.sequenceNo, fileExtension),
-        sizeBytes: Number(r.sizeBytes),
-        receivedAt: new Date(r.receivedAt).toISOString(),
-      }));
+      await tx`select api.set_evidence_restriction(${i.evidenceId}, ${i.restriction}, ${i.reason})`;
     });
+  }
+
+  listReportAttachments(ctx: UserRequestContext, reportId: string): Promise<ReportAttachmentItem[]> {
+    return this.run(ctx, (tx) => attachments(tx, { reportId }));
+  }
+
+  listCaseReportAttachments(ctx: UserRequestContext, caseId: string): Promise<ReportAttachmentItem[]> {
+    return this.run(ctx, (tx) => attachments(tx, { caseId }));
   }
 
   openReportAttachment(

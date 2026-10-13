@@ -18,6 +18,8 @@ export interface CDFConfirmation {
   cancelLabel: string;
   /** Row labels for the three statements. */
   labels: { whatHappens: string; undo: string; affected: string };
+  /** The confirm button's weight: "danger" (default) for an act that closes, removes or ends something. */
+  tone?: "primary" | "danger";
 }
 
 /**
@@ -111,7 +113,7 @@ export function CDFConfirmDialog({
         <button
           type="button"
           data-testid="confirm-submit"
-          className={buttonClass("danger")}
+          className={buttonClass(c.tone ?? "danger")}
           onClick={onConfirm}
         >
           {c.confirmLabel}

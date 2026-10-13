@@ -38,6 +38,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "FORM_VIEW",
     "FORM_PREPARE",
     "FORM_REVIEW",
+    "REPORTER_CONVERSATION_HOLD",
   ],
   LEAD_INVESTIGATOR: [
     "CASE_ASSIGN",
@@ -103,6 +104,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "COMMITTEE_ADMIN",
     "PRELIMINARY_PREPARE",
     "PRELIMINARY_REVIEW",
+    "REPORTER_CONVERSATION_OVERSEE",
   ],
   PRIVACY_DPO: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
   INTERNAL_AUDIT: ["AUDIT_VIEW", "ARCHIVE_RECORD_VIEW"],

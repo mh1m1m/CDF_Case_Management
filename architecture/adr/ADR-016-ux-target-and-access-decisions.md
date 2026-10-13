@@ -1,6 +1,6 @@
 # ADR-016: UX Target Architecture and Approved Access Decisions
 
-- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`; D2 to D6 are approved and not yet implemented (their phase is named in each decision).
+- **Status:** Accepted (2026-10-11). D1 is implemented in `20261007001810_restricted_case_authority.sql`. D4, D5 and D6 are implemented on the S2 branch (migrations 1840, 1830 and 1850), D6 up to the S5 packets. D2 and D3 are approved and not yet implemented (their phase is named in each decision). D8 (DEC-37, decided 2026-10-12) is implemented on the S2 branch (migration 1860), with routing for cases the shared queue cannot take, up to the S4 work item.
 - **Decision owner:** Fady, 2026-10-11 12:11 UTC, in the UI/UX audit thread: "IMPLEMENT THE UX REDESIGN", with the decision package recorded here.
 - **Source:** CDF-UX-AUDIT v1.0, run 2026-10-10/11 on synthetic data (report `UIUX_AUDIT_2026-10-10.md` and its summary, held in the project files, not in this repository). Decision IDs `DEC-nn`, debt IDs `UX-nnn` and step IDs `S0`–`S6` are the audit's. Its decision register is O17 §17.7; its gates are O28 §28.10.
 - **Extends:** ADR-014 (purpose-bound authorization). **Amends:** ADR-013 and ADR-014 on case-history audience (D5). **Unchanged:** ADR-003 (PostgreSQL/RLS, command-only writes), ADR-004 (identity vault), ADR-005 (append-only audit), ADR-006 and ADR-015 (evidence and reporter attachments).
@@ -220,6 +220,8 @@ Also: the IDOR probe and audit-coverage lists, and the policy snapshot.
 - No conversation path returns identity fields.
 - An invitation sent through the channel carries no identity.
 
+**Implementation (S2, migration 1840).** Two permissions: `REPORTER_CONVERSATION_HOLD` (Case Manager) and `REPORTER_CONVERSATION_OVERSEE` (GRC Director). `authz.is_reporter_correspondent(case)` is case visibility plus one of: the HOLD permission, an active CASE_OWNER or LEAD_INVESTIGATOR assignment, or an active INVESTIGATOR assignment with an active delegation in `case_mgmt.reporter_communication_delegation`. `authz.can_message_reporter(report)` and `authz.can_read_reporter_conversation(report)` apply it once the report has a case and keep the intake rule before it; the `report_message_read` policy, `api.reply_to_reporter`, the message events of `api.case_history` and My Work's "the reporter replied" all use them. The case owner is a correspondent as well as the lead: a restricted case's owner is its named authority (D1), whom the Case Manager cannot see, so without it a restricted case's reporter would have nobody to write to. `api.delegate_reporter_communication` and `api.end_reporter_communication` are for `authz.can_assign_case` holders and are audited; an investigator's delegation ends, audited, in the transaction that ends its assignment, so a later assignment never revives it. Delegations are never deleted and none is added after archiving. The case's Reporter tab is shown only to the conversation's readers, and the intake page tells everyone else that the conversation moved to the case team. Tests: `tests/security/reporter-conversation.spec.ts`; `tests/e2e/case-workspace.spec.ts`. Not yet built: interview invitations to the reporter through the channel, which arrive with the interview work in S3.
+
 ### D5. History audience, access roster and legal-hold indicator (DEC-08 + DEC-10 / HD-S6, HD-S16). Effective at S2.
 
 **Decision.**
@@ -252,6 +254,8 @@ Also: the IDOR probe and audit-coverage lists, and the policy snapshot.
 - The hold indicator shows without the hold's details.
 - Oversight still reads the full ledger under its own permission.
 
+**Implementation (S2, migration 1830).** `api.case_history(case, limit)` and `api.case_access_roster(case)`; the action-audience catalogue is an allowlist inside `api.case_history`, so an action not in it never reaches history. The full-roster audience is `authz.can_assign_case` (Case Manager and GRC Director with access to the case, or its assigned lead or owner). Purpose tasks are left out of the roster: a legal task would reveal a hold request to people outside the hold audience. Tests: `tests/security/case-history-roster.spec.ts`. Known gap: the `audit_event_read` table policy is unchanged, so direct SQL by the case team still reads every `BUSINESS` row of a case it can view; the application reads history only through `api.case_history`, and narrowing the policy is a follow-up decision.
+
 ### D6. Evidence need-to-know (DEC-09). Effective at S2.
 
 **Decision.**
@@ -278,6 +282,8 @@ Also: the IDOR probe and audit-coverage lists, and the policy snapshot.
 - Records gets metadata but `NOT_FOUND` on content and download.
 - An unlinked item is invisible from a packet.
 
+**Implementation (S2, migration 1850).** `evidence.evidence.restriction` is `TEAM` (the default) or `LEADS`. `authz.is_evidence_team(case)` is case visibility plus one of: `CASE_EDIT_ALL` (Case Manager), an active CASE_OWNER, LEAD_INVESTIGATOR or INVESTIGATOR assignment, an active CASE-scope grant, or an active break-glass. `authz.is_evidence_lead(case)` is case visibility plus `CASE_EDIT_ALL` or an active CASE_OWNER or LEAD_INVESTIGATOR assignment; break-glass never reaches a `LEADS` item. `authz.can_view_evidence(item)` keeps the clearance check and adds the item's restriction, so every evidence policy, `api.open_evidence_version` and the evidence events of `api.case_history` follow it, and `api.register_evidence_version` now refuses a new version of an item the caller cannot see. Seeing the case is not enough: TRIAGE, COMMITTEE, REVIEW and AUDIT grants, a REVIEWER assignment and `CASE_VIEW_ALL` alone give no evidence. `api.set_evidence_restriction(item, restriction, reason)` is for the leads, needs a reason, is audited (`EVIDENCE_RESTRICTION_CHANGED`) and refuses to open an item on an archived case. Reporter attachments follow `authz.can_view_report_files(report)`: the intake rule before a case, then the team or an active TRIAGE grant holder (listing only, since download needs `EVIDENCE_DOWNLOAD` once a case exists); D3 ends the TRIAGE grant at hand-over in S3, which ends that last triage path. Records keeps its metadata (disposition manifests, evidence-scoped holds) through the records functions and gets nothing from the evidence tables. The case's Evidence tab shows the register only to the team, reporter files to their readers, and is hidden from everyone else. Tests: `tests/security/evidence-need-to-know.spec.ts`, `tests/security/evidence-access.spec.ts`, `tests/security/reporter-attachments.spec.ts`; `tests/e2e/evidence.spec.ts`. Not yet built: packet links for review, committee and decision users (S5), which today get no evidence at all.
+
 ### D7. CDF-87 / UX-002 stays open until verified (editorial clarification 2; DEC-59)
 
 The POST fix is verified on a running build, covering:
@@ -294,6 +300,58 @@ UX-002 is re-rated only after that.
 
 - the hosted check is not done (the deployment URL was unreachable from the build environment);
 - without JavaScript a report or follow-up sign-in is dropped silently, with no message to the reporter.
+
+**Update 2026-10-11, `main` at `0034f47` (after #51).** On a local production build of `main`, a report and a follow-up sign-in without JavaScript now answer in the POST response with the receipt and the status page, in Arabic and English. All five points pass again (the repository's no-JS and portal specs, 15 of 15, and a request and log scan). Two items remain:
+
+- UX-002 stays open for the hosted check, which still could not be reached from the build environment;
+- reloading the receipt page re-submits the report, which is CDF-146.
+
+### D8. Archive triggers retention review in a shared Records queue (DEC-37, in part). Effective at S2; durable work item at S4.
+
+**Decision owner.** Fady, 2026-10-12 03:54 UTC, in the UI/UX audit thread, answering the DEC-37 card ("Other: queue now, durable shared-pool task at S4").
+
+**Decision.** Archive triggers retention review; routing is to the Records shared pool, not a fixed individual. Retention periods remain source-required. DEC-37 is separated into five parts:
+
+| Part                                                                    | Status                                                                                  |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 1. Trigger: archiving creates a retention-review obligation             | APPROVED                                                                                |
+| 2. Routing: the shared Records queue (pool)                             | APPROVED                                                                                |
+| 3. Named assignee: only by claim or assignment after the item is queued | APPROVED                                                                                |
+| 4. Retention classes and periods                                        | SOURCE_REQUIRED until the governing CDF policy is confirmed (ADR-013 D2)                |
+| 5. Who may archive                                                      | OPEN. Today: `WORKFLOW_ADVANCE` on the case (Case Manager or Lead), a prototype default |
+
+- **Now (S2).** When a case enters `ARCHIVED`, it appears in Records work as "Retention classification required" «بانتظار تصنيف مدة الحفظ». The item is derived from the case's state. It creates no individual assignment, no routing rule and no implied owner, and any authorised records officer may pick it up.
+- **S4.** A durable `RETENTION_REVIEW` work item in the pool `RECORDS_RETENTION_POOL` replaces the derived entry: archive, item created, an authorised officer claims it or is assigned it, classification, item completed. No hard-coded rule chooses an officer. Individual ownership comes only from a claim or from an approved workload rule.
+- **Legal hold.** A hold overrides destruction and disposition, not classification. A held case may be classified, but no disposition eligibility may mature into execution while the hold is active.
+- **What Records sees.** Case number, classification, archived date, retention class status, the legal-hold indicator where the viewer may see it, the age in the queue, and one action: "Review retention classification". The item grants only the records purpose needed to classify: never `CASE_VIEW_FULL`, evidence, interviews or findings.
+
+**Implementation (S2, migration 1860).**
+
+- **The obligation.** `records_state = 'ARCHIVED'`. The case is archived and its class is not yet confirmed; the shipped default class is `UNASSIGNED`, which stands for "no class". Confirming a class (`api.assign_retention_class`) moves the case to `RETENTION`, which ends the obligation. A legal hold never stops that command.
+- **The pool.** `api.retention_review_queue()` returns the case to anyone who may classify it from the records catalogue: the catalogue scope (closed, not restricted, within clearance, no conflict) together with `ARCHIVE_RECORD_ADMINISTER` and `RETENTION_CLASS_ASSIGN`. That is the shared branch of `authz.can_manage_retention`. The rows carry lifecycle metadata only.
+- **My Work.** `api.my_work_items()` adds one `RETENTION_CLASSIFICATION` item per queued case in the Records area. The item links to the record's retention form, which re-checks the purpose.
+- **An existing task.** A `RETENTION_REVIEW` case task (ADR-014) is an individual assignment, so its holder sees the task instead of the queue item.
+- **Cases the pool cannot take.** A restricted case never enters the shared queue (ADR-014 §9), and a case above every records officer's clearance, or one every officer is conflicted on, has nobody in the pool. So that no archived case waits unseen (the security review's follow-up to D8), such a case goes to the person who may create records tasks on it (`case_mgmt.may_manage_tasks`; for a restricted case, its DEC-01 Restricted Case Authority):
+  - `authz.can_route_retention_review(case)`: the case is `ARCHIVED`, the caller may create records tasks on it, `records.retention_pool_can_take(case)` is false, and nobody holds a `RETENTION_REVIEW` task on it that they can still use;
+  - `api.my_work_items()` gives that person one `RETENTION_TO_ROUTE` item in the Cases area, linked to the record's routing form;
+  - `api.list_retention_reviewers(case)` lists the officers `api.create_case_task` would accept (eligible role, active, cleared, no conflict, no open task of this type on the case), names only; an empty list says that no officer can take the case yet, and the item stays until one can;
+  - the person chooses one officer, and `api.create_case_task(case, 'RETENTION_REVIEW', officer, purpose)` gives the task (audited `CASE_TASK_ASSIGNED`). A person routes; no rule chooses the officer, as part 3 requires;
+  - a cancelled or lapsed task brings the item back.
+- **Completing the review.** Classifying is the outcome of a retention review, so `api.assign_retention_class` also completes the caller's own open `RETENTION_REVIEW` task on the case (audited `CASE_TASK_COMPLETED`). The task leaves their work and its access ends with it; the record page then returns them to Records with a notice.
+- **Tests.** `tests/security/retention-review-queue.spec.ts` (RRQ-01 to RRQ-15) covers:
+  - archiving creates exactly one item, the same for every officer;
+  - archiving twice creates no second item;
+  - nobody else gets it, and clearance, restricted cases and another officer's task are respected;
+  - lifecycle metadata only, no case content;
+  - a hold keeps the item and classification still works;
+  - disposition stays blocked under the hold;
+  - classifying records the class and closes the item for everyone, audited;
+  - a restricted case goes to its authority, who routes it to one eligible officer; the task stands for the item, opens no content, and completes with the class, audited;
+  - a case the pool can take is never routed;
+  - above every officer's clearance, the authorities are told no officer is eligible, and the task command refuses one;
+  - the reviewer list refuses everyone else, and a cancelled or lapsed task brings the item back;
+  - classifying completes only the classifier's own task; another officer's task on the case stays open;
+  - a task whose holder has lost the role or the clearance no longer stands for the obligation, so the item comes back.
 
 ## Delivery governance
 
@@ -315,7 +373,7 @@ UX-002 is re-rated only after that.
 - **Still OPEN.** These decisions are not made here. Each is raised when its gate is reached (audit O28 §28.10):
   - DEC-22 (My Work row fields, S1);
   - DEC-47, DEC-20, DEC-16, DEC-14, DEC-29 and DEC-32 (S1);
-  - DEC-54, DEC-37, DEC-38, DEC-40, DEC-41 and DEC-25 (S2);
+  - DEC-54, DEC-38, DEC-40, DEC-41 and DEC-25 (S2), and the open parts of DEC-37 (D8);
   - DEC-04, DEC-05, DEC-19, DEC-31, DEC-35, DEC-49 and DEC-50 (S3);
   - the S4–S6 and portal-track decisions;
   - DEC-59 and DEC-60 (verification).

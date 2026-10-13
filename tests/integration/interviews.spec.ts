@@ -166,6 +166,10 @@ describe("interview slice", () => {
       preparedBy: USERS.investigatorA,
       reviewedBy: USERS.lead,
       approvedBy: USERS.caseManager,
+      // Named for the review record, including an approver who is neither on the panel nor assigned.
+      preparedByName: "Investigator Alpha",
+      reviewedByName: "Lead Investigator Delta",
+      approvedByName: "Case Manager Gamma",
       currentStatementVersionId: recorded.versionId,
     });
     expect(final!.statements).toHaveLength(1);
