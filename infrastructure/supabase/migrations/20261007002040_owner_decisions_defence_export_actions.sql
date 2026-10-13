@@ -1536,10 +1536,57 @@ $$;
 create trigger outcome_substitution_guard before insert on grievance.outcome_substitution
   for each row execute function grievance.guard_outcome_substitution();
 
+-- >>>>> TEMPORARY STUB: DROP THIS BLOCK AT MERGE (coordinator, 2026-10-13) >>>>>
+-- decision.package_tainted(p_package_id uuid) returns boolean is defined by migration 2035
+-- (20261007002035_owner_decisions_authority_part.sql, DEC-AMB-003, branch local/pra-2030-decisions), which is not in
+-- this tree. Until both are in one tree this stub stands in for it with the same name, signature and meaning, less the
+-- committee's resolution of a taint (decision.conflict_taint_resolution exists only in 2035): a package is tainted
+-- while an active item's result was carried by a closed vote item of its current round on which someone now
+-- conflicted (a declared or upheld meeting conflict, or a declared or confirmed case conflict) cast a counted vote.
+-- It is created only when the function does not exist, so in the merged tree (2035 runs first) it does nothing.
+do $stub$
+begin
+  if to_regprocedure('decision.package_tainted(uuid)') is null then
+    execute $f$
+      create function decision.package_tainted(p_package_id uuid)
+      returns boolean
+      language sql stable
+      set search_path = ''
+      as $b$
+        select exists (
+          select 1
+          from decision.recommendation_item i
+          join decision.recommendation_package p on p.id = i.package_id
+          cross join lateral (select vi.id, vi.case_id, vi.meeting_id from committee.vote_item vi
+                              where vi.package_id = p.id and vi.package_round = p.round_no and vi.status = 'CLOSED'
+                                and (vi.recommendation_item_id = i.id or vi.recommendation_item_id is null)
+                              order by vi.sequence_no desc limit 1) vi
+          join committee.meeting m on m.id = vi.meeting_id
+          where i.package_id = p_package_id and i.status = 'ACTIVE'
+            and exists (select 1
+                        from (select v.recorded_for as user_id from committee.vote v
+                              where v.vote_item_id = vi.id and v.choice in ('APPROVE', 'REJECT', 'ABSTAIN')
+                              union
+                              select c.cast_by from committee.casting_vote c where c.vote_item_id = vi.id) u
+                        where authz.has_meeting_conflict(u.user_id, m.committee_proceeding_id)
+                           or exists (select 1 from case_mgmt.conflict_check cc
+                                      where cc.case_id = vi.case_id and cc.user_id = u.user_id and cc.is_current
+                                        and cc.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED'))));
+      $b$
+    $f$;
+    revoke all on function decision.package_tainted(uuid) from public, anon, authenticated;
+  end if;
+end;
+$stub$;
+-- <<<<< END OF TEMPORARY STUB <<<<<
+
 -- Why a decided sanction may not be executed on a subject now, as a code; null when it may. The one source for the
--- execution guard and the executability read, in order: delivery (AMB-109, T-AMB-062); employment (DEC-AMB-009,
--- T-AMB-013); a grievance that cancelled the item or returned it for reinvestigation (DEC-AMB-011); the suspension of
--- the sanction in effect (DEC-AMB-004, T-AMB-063). A grievance whose decision is unknown matches (fail-safe).
+-- execution guard and the executability read, in order: delivery (AMB-109, T-AMB-062); a package tainted by a
+-- conflict (DEC-AMB-003, owner 2026-10-13: an unresolved TAINTED_BY_CONFLICT item blocks every downstream step, so the
+-- execution of any sanction of that package waits until the committee resolves it; fail closed); employment
+-- (DEC-AMB-009, T-AMB-013); a grievance that cancelled the item or returned it for reinvestigation (DEC-AMB-011); the
+-- suspension of the sanction in effect (DEC-AMB-004, T-AMB-063). A grievance whose decision is unknown matches
+-- (fail-safe).
 create function decision.execution_block(p_item_id uuid, p_subject_id uuid, p_authority_decision_id uuid)
 returns text
 language plpgsql stable
@@ -1555,6 +1602,9 @@ begin
     and n.status <> 'WITHDRAWN'
   order by n.issued_at desc, n.id desc limit 1;
   if v_n.id is null or v_n.delivered_at is null then return 'DECISION_NOT_DELIVERED'; end if;
+  if decision.package_tainted((select i.package_id from decision.recommendation_item i where i.id = p_item_id)) then
+    return 'TAINTED_BY_CONFLICT';
+  end if;
   if exists (select 1 from case_mgmt.subject_employment_event e
              where e.subject_id = p_subject_id and e.event_type = 'LEFT_EMPLOYMENT')
      and not exists (select 1 from decision.employment_execution_statement x

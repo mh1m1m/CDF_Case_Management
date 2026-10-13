@@ -837,6 +837,37 @@ describe("DEC-AMB-004, DEC-AMB-001, DEC-AMB-011 (owner, 2026-10-13)", () => {
     });
   });
 
+  it("T-AMB-063, DEC-AMB-003 (owner, 2026-10-13): a sanction of a package tainted by a conflict is not executable, whatever its rule", async () => {
+    await ownerScenario(async (s) => {
+      const f = await decidedForSubjects(s, ic, caseB);
+      const n = await decisionNotice(s, f.sigma, f.decision);
+      await recordDelivery(s, n);
+      // Reversible and configured to proceed: nothing else holds it.
+      await setSanctionRule(s, "WARNING", null, false, "PROCEED");
+      expect(await executability(s)).toEqual([{ item_id: f.sanction, blocked_by: null, executable: true }]);
+      // A conflict of a member whose vote counted comes to light after the decision: the package is tainted. (Owner
+      // fixture: the case conflict as api.declare_conflict writes it; the committee member does not open the case.)
+      await s.asOwner();
+      await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
+                 values (${caseB}, ${USERS.legal}, 'CONFLICT_DECLARED', 'Synthetic: came to light after the vote.')`;
+      expect(await executability(s)).toEqual([
+        { item_id: f.sanction, blocked_by: "TAINTED_BY_CONFLICT", executable: false },
+      ]);
+      await s.expectError("CDF_CONFLICT:TAINTED_BY_CONFLICT", () => executeSanction(s, f.sanction, f.sigma));
+      // The guard is on the table: the owner connection is refused too.
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:TAINTED_BY_CONFLICT",
+        (
+          tx,
+        ) => tx`insert into decision.sanction_execution (item_id, subject_id, case_id, authority_decision_id,
+                     effective_from, execution_reference, recorded_by)
+                   values (${f.sanction}, ${f.sigma}, ${caseB}, ${f.decision}, now(), 'HR-DEMO-2040',
+                           ${USERS.caseManager})`,
+      );
+    });
+  });
+
   it("T-AMB-085: exactly one reconsideration through the portal, on new evidence confirmed at admissibility; no third grievance", async () => {
     await ownerScenario(async (s) => {
       await seat(s, gc, GRIEVANCE_SEATS);
