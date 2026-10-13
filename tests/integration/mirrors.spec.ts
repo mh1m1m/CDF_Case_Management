@@ -2,7 +2,17 @@
 // which are authoritative (ADR-006, ADR-007).
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
-import { CASE_TASK_TYPES, PERMISSIONS, STATUS_CODES } from "@cdf/contracts";
+import {
+  ATTENDANCE_STATUSES,
+  CASE_TASK_TYPES,
+  CONFLICT_DECIDERS,
+  EMPLOYEE_NOTICE_KINDS,
+  MEETING_CONFLICT_CONCERN_STATUSES,
+  NOTIFICATION_TEMPLATES,
+  PERMISSIONS,
+  PRELIMINARY_OUTCOMES,
+  STATUS_CODES,
+} from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES, FORM_DEFINITIONS, FORM_ENTITLEMENTS } from "@cdf/domain";
 import { messagesFor, type Messages } from "@cdf/i18n";
 import { STATES, TRANSITIONS } from "@cdf/workflow";
@@ -75,6 +85,52 @@ describe("mirrors", () => {
       .map(([dimension, codes]) => ({ dimension, codes: [...codes].sort() }))
       .sort((a, b) => (a.dimension < b.dimension ? -1 : 1));
     expect(rows).toEqual(fromTs);
+  });
+
+  it("preliminary outcomes match the recommendation's check and are all active outcome codes (1880, 1980)", async () => {
+    const [row] = await admin<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conname = 'preliminary_recommendation_recommended_outcome_check'
+        and conrelid = 'case_mgmt.preliminary_recommendation'::regclass`;
+    const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+    expect(fromCheck).toEqual([...PRELIMINARY_OUTCOMES].sort());
+    for (const code of PRELIMINARY_OUTCOMES) expect(STATUS_CODES.OUTCOME_CODE, code).toContain(code);
+  });
+
+  it("employee notice kinds match the notice's kind check (1990)", async () => {
+    const [row] = await admin<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conname = 'defence_notice_kind_check' and conrelid = 'grievance.defence_notice'::regclass`;
+    const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+    expect(fromCheck).toEqual([...EMPLOYEE_NOTICE_KINDS].sort());
+  });
+
+  it("meeting attendance, raised-conflict statuses and conflict deciders match their checks (1890, 2000)", async () => {
+    const checks: [string, string, readonly string[]][] = [
+      ["meeting_participant_attendance_check", "committee.meeting_participant", ATTENDANCE_STATUSES],
+      [
+        "meeting_conflict_concern_status_check",
+        "committee.meeting_conflict_concern",
+        MEETING_CONFLICT_CONCERN_STATUSES,
+      ],
+      ["rule_set_conflict_decider_check", "committee.rule_set", CONFLICT_DECIDERS],
+    ];
+    for (const [name, table, mirror] of checks) {
+      const [row] = await admin<{ def: string }[]>`
+        select pg_get_constraintdef(oid) as def from pg_constraint
+        where conname = ${name} and conrelid = ${table}::regclass`;
+      const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+      expect(fromCheck, name).toEqual([...mirror].sort());
+    }
+  });
+
+  it("notification templates match notify.template, and each has wording in both languages (ADR-025)", async () => {
+    const rows = await admin<{ code: string }[]>`select code from notify.template order by code collate "C"`;
+    expect(rows.map((r) => r.code)).toEqual([...NOTIFICATION_TEMPLATES].sort());
+    for (const locale of ["en", "ar"] as const) {
+      const wording = messagesFor(locale).notificationTemplate as Record<string, string>;
+      for (const code of NOTIFICATION_TEMPLATES) expect(wording[code], `${locale} ${code}`).toBeTruthy();
+    }
   });
 
   it("permission codes match iam.permission", async () => {

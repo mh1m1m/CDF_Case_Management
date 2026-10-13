@@ -13,6 +13,7 @@
     "@cdf/domain": "workspace:*",
     "@cdf/i18n": "workspace:*",
     "@cdf/infrastructure": "workspace:*",
+    "@cdf/validation": "workspace:*",
     "@cdf/workflow": "workspace:*",
     "postgres": "3.4.9"
   },

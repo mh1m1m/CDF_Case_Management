@@ -1,6 +1,6 @@
 # ADR-017: Case and Proceeding model, intake paths, direct referral and preliminary review
 
-- **Status:** Proposed (2026-10-12). Linear CDF-186, CDF-187.
+- **Status:** Proposed (2026-10-12). Linear CDF-186, CDF-187. Decision 5 amended by [ADR-036](ADR-036-preliminary-closure-outcomes.md): the preliminary recommendation also accepts five closure outcomes (migration 1980).
 - **Protocol:** §10–§14, §18–§22, §29, §65, §87; owner Q&A Q1–Q20, Q31–Q34, Q88–Q91; ADR-007, ADR-014, ADR-016.
 
 ## Context

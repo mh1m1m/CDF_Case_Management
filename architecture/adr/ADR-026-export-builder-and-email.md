@@ -1,6 +1,6 @@
 # ADR-026: Export Builder and external email
 
-- **Status:** Proposed (2026-10-12). Linear CDF-196. Security-sensitive.
+- **Status:** Proposed (2026-10-12); implemented in migration 1930 pending review (ADR-032). Linear CDF-196. Security-sensitive.
 - **Protocol:** §19, §29, §40, §46, §82–§83, §87; owner Q&A Q99.
 
 ## Decision
@@ -14,3 +14,7 @@
 ## Requirements
 
 Q99; negative tests N16, N19.
+
+## Implementation
+
+Migration 1930 (Phase 9). How approvals stay bound to the approved content, how rules are versioned, separation of duties and the generation step are recorded in [ADR-032](ADR-032-export-approval-binding.md).

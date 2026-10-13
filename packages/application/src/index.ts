@@ -20,3 +20,19 @@ export { createRecordsService } from "./records";
 export type { RecordsDeps, RecordsGateway, RecordsService } from "./records";
 export { composeNotificationEmail, createNotificationService } from "./notifications";
 export type { DispatchResult, NotificationDeps, NotificationService } from "./notifications";
+export { createExportService } from "./exports";
+export type { ExportDeps, ExportGateway, ExportService, GenerateResult } from "./exports";
+export { createCorrectiveActionService } from "./corrective-actions";
+export type {
+  CorrectiveActionDeps,
+  CorrectiveActionGateway,
+  CorrectiveActionService,
+} from "./corrective-actions";
+export { createBcpImportService } from "./bcp-import";
+export type {
+  BcpImportDeps,
+  BcpImportGateway,
+  BcpImportService,
+  BcpWorkbookFile,
+  StagedBcpImport,
+} from "./bcp-import";

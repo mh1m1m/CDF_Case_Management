@@ -4,6 +4,7 @@
 import type {
   Actor,
   AttachmentSource,
+  BcpWorkbook,
   AuditTimelineEntry,
   CaseAccessRosterEntry,
   CaseDetail,
@@ -13,6 +14,8 @@ import type {
   EvidenceItem,
   EvidenceRejectionCode,
   EvidenceRestriction,
+  ExportDelivery,
+  ExportDocument,
   FormApprovalOutcome,
   FormData,
   FormDefinitionListItem,
@@ -25,16 +28,16 @@ import type {
   MyArea,
   MyCaseTask,
   MyWorkSummary,
-  PendingConflict,
   OutgoingNotification,
+  PendingConflict,
   PublicReportStatus,
   RecordsCatalogueEntry,
   RetentionQueueEntry,
   ReportAttachmentItem,
   ReportDetail,
-  RestrictedCaseAuthority,
   ReportMessage,
   ReporterMode,
+  RestrictedCaseAuthority,
   UserDirectoryEntry,
   UserRegisterEntry,
   WorkItem,
@@ -114,6 +117,19 @@ export interface ScanResult {
 export interface MalwareScanner {
   readonly name: string;
   scan(content: Uint8Array, hint: { contentType: string; objectKey: string }): Promise<ScanResult>;
+}
+
+export type WorkbookReadResult = { ok: true; workbook: BcpWorkbook } | { ok: false; code: string };
+
+/**
+ * Reads an uploaded continuity workbook (ADR-034 D3). The upload is untrusted: an implementation checks sizes and
+ * entry counts before inflating, refuses DTDs, external entities, macros and embedded content, and returns every
+ * cell as a string. A refusal carries a stable code, never file content.
+ * PRODUCTION_SUBSTITUTION_REQUIRED: a vetted workbook reader in the CDF runtime.
+ */
+export interface WorkbookReader {
+  readonly name: string;
+  read(bytes: Uint8Array): WorkbookReadResult;
 }
 
 export interface RegisteredEvidenceVersion {
@@ -416,4 +432,41 @@ export interface NotificationOutbox {
 export interface NotificationSender {
   readonly kind: "stub-email";
   send(notification: OutgoingNotification): Promise<boolean>;
+}
+
+// ---- Export builder (ADR-026, migration 1930) ---------------------------------------------------
+/** A rendered export file. */
+export interface RenderedExport {
+  body: Uint8Array;
+  contentType: string;
+  fileName: string;
+}
+
+/**
+ * Turns an approved export document into a file. PRODUCTION_SUBSTITUTION_REQUIRED: the prototype renderer writes
+ * canonical JSON; CDF document rendering (PDF/XLSX with classification banners) is a human decision.
+ */
+export interface ExportRenderer {
+  readonly kind: "stub-json";
+  render(document: ExportDocument): Promise<RenderedExport>;
+}
+
+/**
+ * Private storage for generated exports, keyed by the database's random key (exports/<uuid>); never overwritten.
+ * PRODUCTION_SUBSTITUTION_REQUIRED: a private Alibaba OSS export bucket with KMS encryption; the prototype keeps
+ * files in memory.
+ */
+export interface ExportStore {
+  readonly kind: "memory";
+  put(storageKey: string, file: RenderedExport): Promise<void>;
+}
+
+/**
+ * Delivers an EMAIL export. PRODUCTION_SUBSTITUTION_REQUIRED: the CDF mail relay with approved external domains;
+ * the prototype stub delivers to synthetic @example.test addresses only and sends nothing.
+ */
+export interface ExportMailer {
+  readonly kind: "stub-email";
+  /** Internal recipients arrive by user id: resolving their address is the adapter's job (directory lookup). */
+  send(to: readonly ExportDelivery[], file: RenderedExport): Promise<boolean>;
 }

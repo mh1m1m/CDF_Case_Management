@@ -544,14 +544,16 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
   },
 ];
 
-// Committee meeting commands (migration 1890) take a committee proceeding, a meeting, a participant, a vote item or
-// minutes; never a case.
+// Committee meeting commands (migration 1890) take a committee proceeding, a meeting, a participant, a vote item,
+// minutes or a raised conflict (2000); never a case.
 interface MeetingTargets {
   committeeProceeding: string;
   meeting: string;
   participant: string;
   voteItem: string;
   minutes: string;
+  concern: string;
+  witness: string;
 }
 
 const MEETING_PROBES: Probe<MeetingTargets>[] = [
@@ -582,6 +584,26 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     fn: "record_attendance",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.record_attendance(${t.participant}, 'PRESENT')`,
+  },
+  {
+    fn: "record_excused_absence",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_excused_absence(${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "raise_meeting_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.raise_meeting_conflict(${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "decide_meeting_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_meeting_conflict(${t.concern}, 'UPHELD', ${REASON})`,
+  },
+  {
+    fn: "exclude_meeting_witness",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.exclude_meeting_witness(${t.witness}, ${REASON})`,
   },
   {
     fn: "close_meeting",
@@ -825,6 +847,25 @@ const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
     call: (tx, t) =>
       tx`select api.record_defence_response(${t.notice}, 'EMAIL', now(), 'Probe response text.', 'EMAIL-PROBE-0001')`,
   },
+  // Kinds of employee notice (migration 1990, ADR-037): a rights or decision notice to a subject, and the subject's
+  // grievance on a decision notice.
+  {
+    fn: "issue_rights_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.issue_rights_notice(${t.subject}, 'Probe notice text.', null)`,
+  },
+  {
+    fn: "issue_decision_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.issue_decision_notice(${t.subject}, ${randomUUID()}, 'Probe notice text.')`,
+  },
+  {
+    fn: "file_grievance_on_decision_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.file_grievance_on_decision_notice(${t.notice}, 'Probe grievance grounds.')`,
+  },
   // AGENT-09 G2b (migration 1910): the Restricted Case Authority names a secretary to handle a received grievance.
   {
     fn: "approve_restricted_grievance_handling",
@@ -871,6 +912,170 @@ const NOTIFICATION_PROBES: Probe<NotificationTargets>[] = [
   },
 ];
 
+// Export builder commands (migration 1930) take a case (creation) or an export request; never content.
+interface ExportTargets {
+  case: string;
+  request: string;
+}
+
+const EXPORT_PROBES: Probe<ExportTargets>[] = [
+  {
+    fn: "create_export_request",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'AUDIT', null, null)`,
+  },
+  {
+    fn: "add_export_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.add_export_item(${t.request}, 'CASE_SUMMARY', ${t.case})`,
+  },
+  {
+    fn: "add_export_recipient",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.add_export_recipient(${t.request}, 'INTERNAL', ${self}, null)`,
+  },
+  {
+    fn: "preview_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.preview_export(${t.request})`,
+  },
+  {
+    fn: "submit_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.submit_export(${t.request}, ${SHA}, 'RESTRICTED'::core.classification_level)`,
+  },
+  {
+    fn: "decide_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_export(${t.request}, 'APPROVE', ${REASON}, ${SHA})`,
+  },
+  {
+    fn: "decide_restricted_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_restricted_export(${t.request}, 'APPROVE', ${REASON}, ${SHA})`,
+  },
+  {
+    fn: "generate_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.generate_export(${t.request})`,
+  },
+  {
+    fn: "record_export_sent",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_export_sent(${t.request})`,
+  },
+  {
+    fn: "cancel_export",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_export(${t.request}, ${REASON})`,
+  },
+];
+
+// Corrective-action commands (migration 1940) take an approved recommendation item or an action; never a case.
+interface CorrectiveActionTargets {
+  item: string;
+  action: string;
+}
+
+const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
+  {
+    fn: "open_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.open_corrective_action(${t.item}, 'Probe corrective action', 'Probe corrective action text.',
+        ${self}, current_date + 30)`,
+  },
+  {
+    fn: "assign_corrective_action_owner",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.assign_corrective_action_owner(${t.action}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "change_corrective_action_due_date",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.change_corrective_action_due_date(${t.action}, current_date + 60, ${REASON})`,
+  },
+  {
+    fn: "record_corrective_action_progress",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_corrective_action_progress(${t.action}, 50, ${REASON})`,
+  },
+  {
+    fn: "submit_corrective_action_completion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_corrective_action_completion(${t.action}, ${REASON}, 'PROBE-REF')`,
+  },
+  {
+    fn: "verify_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.verify_corrective_action(${t.action}, 'VERIFIED', null)`,
+  },
+  {
+    fn: "reopen_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.reopen_corrective_action(${t.action}, ${REASON})`,
+  },
+  {
+    fn: "waive_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.waive_corrective_action(${t.action}, 'MEMO-PROBE-0001', ${REASON})`,
+  },
+];
+
+// Continuity workbook import (migration 1960): staging names a case in the workbook's control sheet; every other
+// command takes a batch or one of its rows.
+interface BcpTargets {
+  case: string;
+  caseNumber: string;
+  batch: string;
+  row: string;
+}
+
+const BCP_PROBES: Probe<BcpTargets>[] = [
+  {
+    fn: "stage_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.stage_bcp_import(
+        jsonb_build_object('TEMPLATE_VERSION', 'BCP-1', 'WORKBOOK_ID', 'BCP-PROBE-1', 'CASE_ID', ${t.case}::text,
+                           'CASE_NUMBER', ${t.caseNumber}::text, 'OFFLINE_FROM', '2026-01-01T00:00:00Z',
+                           'PREPARED_BY', 'lead@example.test'),
+        ${SHA}, '[]'::jsonb)`,
+  },
+  {
+    fn: "resolve_bcp_row",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resolve_bcp_row(${t.row}, 'SKIP', ${REASON})`,
+  },
+  {
+    fn: "preview_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.preview_bcp_import(${t.batch})`,
+  },
+  {
+    fn: "submit_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_bcp_import(${t.batch}, ${SHA})`,
+  },
+  {
+    fn: "decide_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_bcp_import(${t.batch}, 'APPROVE', ${REASON}, ${SHA})`,
+  },
+  {
+    fn: "apply_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.apply_bcp_import(${t.batch}, ${SHA})`,
+  },
+  {
+    fn: "cancel_bcp_import",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_bcp_import(${t.batch}, ${REASON})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -884,6 +1089,10 @@ const ADMIN_COMMANDS = [
   "set_action_authority_rule",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
   "set_notification_rule",
+  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case.
+  "set_export_rule",
+  // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case.
+  "set_corrective_action_policy",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
@@ -1131,6 +1340,9 @@ describe("catalog guard", () => {
       ...DECISION_PROBES.map((p) => p.fn),
       ...GRIEVANCE_PROBES.map((p) => p.fn),
       ...NOTIFICATION_PROBES.map((p) => p.fn),
+      ...EXPORT_PROBES.map((p) => p.fn),
+      ...CORRECTIVE_ACTION_PROBES.map((p) => p.fn),
+      ...BCP_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -1470,6 +1682,16 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         select api.schedule_meeting(${cp!.id}, 'HEARING', 'TEAMS', null, 'https://meet.example.test/probe',
           now() + interval '2 days', now() + interval '2 days 1 hour', ${REASON}) as id`;
       await s.tx`select api.open_meeting(${m2!.id}, ${REASON})`;
+      // A justified absence and a raised conflict there (migration 2000), left open.
+      const m2Seats = await s.tx<{ id: string; user_id: string }[]>`
+        select id, user_id from committee.meeting_participant where meeting_id = ${m2!.id}`;
+      await s.tx`select api.record_excused_absence(${m2Seats.find((r) => r.user_id === USERS.committeeChair)!.id}, ${REASON})`;
+      const [k] = await s.tx<{ id: string }[]>`
+        select api.raise_meeting_conflict(${m2Seats.find((r) => r.user_id === USERS.legal)!.id}, ${REASON}) as id`;
+      // An excluded witness there (migration 2010).
+      const [w] = await s.tx<{ id: string }[]>`
+        select api.invite_to_meeting(${m2!.id}, 'WITNESS', ${USERS.employeeB}, null, false, ${REASON}) as id`;
+      await s.tx`select api.exclude_meeting_witness(${w!.id}, ${REASON})`;
       await s.tx`select api.close_meeting(${m2!.id}, ${REASON})`;
       const [mi] = await s.tx<
         { id: string }[]
@@ -1482,6 +1704,8 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         participant: p!.id,
         voteItem: v!.id,
         minutes: mi!.id,
+        concern: k!.id,
+        witness: w!.id,
       };
       const random: MeetingTargets = {
         committeeProceeding: randomUUID(),
@@ -1489,6 +1713,8 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         participant: randomUUID(),
         voteItem: randomUUID(),
         minutes: randomUUID(),
+        concern: randomUUID(),
+        witness: randomUUID(),
       };
       const mismatches: string[] = [];
       for (const probe of MEETING_PROBES) {
@@ -1505,6 +1731,9 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "vote_item",
         "minutes",
         "minutes_review",
+        "attendance_excuse",
+        "meeting_conflict_concern",
+        "witness_exclusion",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
       }
@@ -1667,6 +1896,169 @@ describe("IDOR: notifications (migration 1920)", () => {
       }
       expect(mismatches).toEqual([]);
       expect(await s.tx`select id from notify.outbox where recipient_id = ${USERS.legal}`).toEqual([]);
+    });
+  });
+});
+
+describe("IDOR: export requests (migration 1930)", () => {
+  // case manager's submitted external export of case 0002 (RESTRICTED). None of these can see case 0002 with an
+  // approval permission; investigatorA, the committee member and intake also lack EXPORT_* entirely.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "lead",
+    "committee",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "legal",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST', 'Regulator Alpha (synthetic)',
+          'Synthetic: the regulator asked for the case summary.') as id`;
+      await s.tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${caseB})`;
+      await s.tx`select api.add_export_recipient(${r!.id}, 'EXTERNAL', null, 'officer.alpha@example.test')`;
+      const [p] = await s.tx<{ h: string }[]>`select api.preview_export(${r!.id}) ->> 'hash' as h`;
+      await s.tx`select api.submit_export(${r!.id}, ${p!.h}, 'RESTRICTED'::core.classification_level)`;
+      await s.as(actor);
+      const real: ExportTargets = { case: caseB, request: r!.id };
+      const random: ExportTargets = { case: randomUUID(), request: randomUUID() };
+      const mismatches: string[] = [];
+      for (const probe of EXPORT_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "export_request",
+        "export_item",
+        "export_recipient",
+        "export_approval",
+        "restricted_export_approval",
+      ]) {
+        expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: corrective actions (migration 1940)", () => {
+  // An action on case 0002 owned by financeEmployee. None of these can see case 0002 or owns the action; employeeB
+  // holds IMPLEMENTATION_OWNER too, and the committee secretary prepared the package the action comes from.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "committeeSecretary",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "legal",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("platformAdmin");
+      for (const u of [USERS.financeEmployee, USERS.employeeB]) {
+        await s.tx`select api.grant_role(${u}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner probe')`;
+      }
+      const { ic } = await committeeIds();
+      const f = await draftPackage(s, ic, caseB);
+      await s.as("committeeSecretary");
+      await s.tx`select api.withdraw_recommendation_item(${f.sanction}, ${REASON})`;
+      await voteOnPackage(s, f);
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${f.pkg})`;
+      await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(),
+        'Chief Executive (synthetic)', 'MEMO-PROBE-0002', null, null)`;
+      await s.as("caseManager");
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.open_corrective_action(${f.corrective}, 'Synthetic: strengthen controls',
+          'Synthetic: add a second approver.', ${USERS.financeEmployee}, current_date + 30) as id`;
+      await s.as(actor);
+      const real: CorrectiveActionTargets = { item: f.corrective, action: a!.id };
+      const random: CorrectiveActionTargets = { item: randomUUID(), action: randomUUID() };
+      const mismatches: string[] = [];
+      for (const probe of CORRECTIVE_ACTION_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of ["corrective_action", "corrective_action_event"]) {
+        expect(await s.tx`select id from ${s.tx("decision." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: continuity workbook imports (migration 1960)", () => {
+  // A submitted batch on case 0002 staged by the case manager, prepared and recorded offline by investigator B. None of
+  // these can see case 0002; the committee secretary and platform administrator hold other governance roles.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "committeeSecretary",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "legal",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      const [b] = await s.tx<{ id: string; number: string }[]>`
+        with c as (
+          select id, case_number, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at
+          from case_mgmt.case_record where id = ${caseB}
+        )
+        select api.stage_bcp_import(
+          jsonb_build_object('TEMPLATE_VERSION', 'BCP-1', 'WORKBOOK_ID', 'BCP-PROBE-2', 'CASE_ID', c.id::text,
+                             'CASE_NUMBER', c.case_number, 'OFFLINE_FROM', c.at, 'PREPARED_BY', 'investigator.b@example.test'),
+          ${SHA},
+          jsonb_build_array(jsonb_build_object('sheet', '05_SUBJECTS', 'row_number', 3, 'has_formula', false, 'cells',
+            jsonb_build_object('ROW_ID', 'BCP-PS1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'investigator.b@example.test',
+                               'DISPLAY_LABEL', 'Employee Probe (synthetic)', 'SUBJECT_CATEGORY', 'EMPLOYEE')))) as id,
+          c.case_number as number
+        from c`;
+      const [row] = await s.tx<
+        { id: string }[]
+      >`select id from exchange.bcp_import_row where batch_id = ${b!.id}`;
+      const [p] = await s.tx<{ h: string }[]>`select api.preview_bcp_import(${b!.id}) ->> 'hash' as h`;
+      await s.tx`select api.submit_bcp_import(${b!.id}, ${p!.h})`;
+      await s.as(actor);
+      const real: BcpTargets = { case: caseB, caseNumber: b!.number, batch: b!.id, row: row!.id };
+      const random: BcpTargets = {
+        case: randomUUID(),
+        caseNumber: "CDF-DEMO-2026-9999",
+        batch: randomUUID(),
+        row: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of BCP_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of ["bcp_import_batch", "bcp_import_row", "bcp_provenance"]) {
+        expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
+      }
     });
   });
 });

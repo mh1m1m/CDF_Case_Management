@@ -5,6 +5,7 @@
 
 import type { RelationshipToFund, ReporterMode } from "./intake";
 export * from "./intake";
+export * from "./bcp";
 
 export const CLASSIFICATION_LEVELS = ["INTERNAL", "RESTRICTED", "CONFIDENTIAL", "SECRET"] as const;
 export type Classification = (typeof CLASSIFICATION_LEVELS)[number];
@@ -116,6 +117,19 @@ export const PERMISSIONS = [
   "LEGAL_OPINION_GIVE",
   // Notification rules (migration 1920, ADR-025): event rules and committee defaults, never recipients or content.
   "NOTIFICATION_ADMIN",
+  // Export builder (migration 1930, ADR-026, Q99). OWNER_DEFAULT, SOURCE_REQUIRED: the Delegation of Authority.
+  "EXPORT_REQUEST",
+  "EXPORT_APPROVE",
+  "EXPORT_SECOND_APPROVE",
+  "EXPORT_POLICY_ADMIN",
+  // Corrective actions (migration 1940, ADR-033): OWNER_DEFAULT, SOURCE_REQUIRED (Delegation of Authority).
+  "CORRECTIVE_ACTION_MANAGE",
+  "CORRECTIVE_ACTION_OWN",
+  "CORRECTIVE_ACTION_WAIVE",
+  "CORRECTIVE_ACTION_POLICY_ADMIN",
+  // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED ("authorized continuity users").
+  "BCP_IMPORT",
+  "BCP_IMPORT_APPROVE",
   // Reporter conversation (ADR-016 D4, DEC-06)
   "REPORTER_CONVERSATION_HOLD",
   "REPORTER_CONVERSATION_OVERSEE",
@@ -976,7 +990,9 @@ export const STATUS_CODES = {
     "EXPERT_OPINION",
     "EXTERNAL_INFO",
     "GRIEVANCE_COMPLETION",
+    "HEARING",
     "INFO_FROM_SOURCE",
+    "INVESTIGATOR_ASSIGNMENT",
     "LEGAL_OPINION",
     "NON_COOPERATION",
     "PARTY_ATTENDANCE",
@@ -985,6 +1001,7 @@ export const STATUS_CODES = {
     "REGULATOR_REPORT",
     "SCOPE_DEFINITION",
     "STAKEHOLDER_NOTIFICATION",
+    "SUBJECT_STATEMENT",
     "TIE_BREAK",
     "WITNESS",
   ],
@@ -992,8 +1009,11 @@ export const STATUS_CODES = {
     "CONFLICT_OF_INTEREST",
     "FULL",
     "GENERAL",
+    "INVESTIGATOR_CHANGE",
     "LAWYER_REQUEST",
     "LEAVE_OR_ILLNESS",
+    "NON_COOPERATION",
+    "RESOURCE_SHORTAGE",
     "SOVEREIGN_AUTHORITY",
     "SYSTEM_MANDATED",
   ],
@@ -1087,7 +1107,7 @@ export type ReferralAction = (typeof REFERRAL_ACTIONS)[number];
 export const SECTOR_POSITIONS = ["HEAD", "MEMBER"] as const;
 export type SectorPosition = (typeof SECTOR_POSITIONS)[number];
 
-/** Outcomes a preliminary review may recommend; each is also an OUTCOME_CODE. */
+/** Outcomes a preliminary review may recommend; each is also an OUTCOME_CODE (closures from migration 1980, ADR-036). */
 export const PRELIMINARY_OUTCOMES = [
   "NO_ACTION",
   "OUT_OF_SCOPE",
@@ -1096,6 +1116,11 @@ export const PRELIMINARY_OUTCOMES = [
   "NON_PROCESSABLE",
   "INVESTIGATION_WARRANTED",
   "REFERRED_TO_COMMITTEE",
+  "NOT_SERIOUS",
+  "NOT_SUBSTANTIATED",
+  "CHANNEL_ABUSE",
+  "NOT_FEASIBLE",
+  "NO_PERSONAL_JURISDICTION",
 ] as const;
 export type PreliminaryOutcome = (typeof PRELIMINARY_OUTCOMES)[number];
 
@@ -1138,8 +1163,21 @@ export const FIREWALL_INVITEE_ROLES: readonly MeetingInviteeRole[] = [
 ];
 export const COI_STATUSES = ["PENDING", "NO_CONFLICT", "CONFLICT_DECLARED", "NOT_REQUIRED"] as const;
 export type CoiStatus = (typeof COI_STATUSES)[number];
-export const ATTENDANCE_STATUSES = ["NOT_RECORDED", "PRESENT", "ABSENT", "EXCUSED_CONFLICT"] as const;
+/** EXCUSED (a justified absence with a reason) since migration 2000; only PRESENT counts for quorum and votes. */
+export const ATTENDANCE_STATUSES = [
+  "NOT_RECORDED",
+  "PRESENT",
+  "ABSENT",
+  "EXCUSED_CONFLICT",
+  "EXCUSED",
+] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+/** A conflict raised about a meeting participant by another member or the secretary (migration 2000, ADR-038). */
+export const MEETING_CONFLICT_CONCERN_STATUSES = ["OPEN", "UPHELD", "DISMISSED"] as const;
+export type MeetingConflictConcernStatus = (typeof MEETING_CONFLICT_CONCERN_STATUSES)[number];
+/** Who decides a raised conflict, per rule set (DEC-30; SOURCE_REQUIRED, CHAIR by default). */
+export const CONFLICT_DECIDERS = ["CHAIR", "SECRETARY"] as const;
+export type ConflictDecider = (typeof CONFLICT_DECIDERS)[number];
 export const VOTE_TARGET_TYPES = [
   "FINDING",
   "RECOMMENDATION_ITEM",
@@ -1223,6 +1261,10 @@ export const SUBMISSION_CHANNELS = [
 export type SubmissionChannel = (typeof SUBMISSION_CHANNELS)[number];
 export const DEFENCE_NOTICE_STATUSES = ["ISSUED", "ACKNOWLEDGED", "RESPONDED", "WITHDRAWN"] as const;
 export type DefenceNoticeStatus = (typeof DEFENCE_NOTICE_STATUSES)[number];
+// Kinds of employee notice (migration 1990, ADR-037): only a DEFENCE notice has a due date and takes a response; a
+// DECISION notice starts the grievance window (Q94).
+export const EMPLOYEE_NOTICE_KINDS = ["RIGHTS", "DEFENCE", "DECISION"] as const;
+export type EmployeeNoticeKind = (typeof EMPLOYEE_NOTICE_KINDS)[number];
 export const GRIEVANCE_KINDS = ["LINKED", "STANDALONE"] as const;
 export type GrievanceKind = (typeof GRIEVANCE_KINDS)[number];
 export const GRIEVANCE_STATUSES = [
@@ -1275,12 +1317,116 @@ export const NOTIFICATION_TEMPLATES = [
   "GRIEVANCE_OUTCOME_RECORDED",
   "GRIEVANCE_AUTHORITY_APPROVAL_NEEDED",
   "GRIEVANCE_HANDLING_APPROVED",
+  // Export builder (migration 1930, ADR-026)
+  "EXPORT_APPROVAL_REQUESTED",
+  "EXPORT_AUTHORITY_APPROVAL_REQUESTED",
+  "EXPORT_DECIDED",
+  // Corrective actions (migration 1940, ADR-033)
+  "CORRECTIVE_ACTION_ASSIGNED",
+  "CORRECTIVE_ACTION_RETURNED",
+  "CORRECTIVE_ACTION_CHANGED",
+  "CORRECTIVE_ACTION_SUBMITTED",
+  "CORRECTIVE_ACTION_DUE",
+  "CORRECTIVE_ACTION_OVERDUE",
+  // Continuity workbook import (migration 1960, ADR-034)
+  "BCP_IMPORT_APPROVAL_REQUESTED",
+  "BCP_IMPORT_DECIDED",
+  // Kinds of employee notice (migration 1990, ADR-037)
+  "RIGHTS_NOTICE_ISSUED",
+  "DECISION_NOTICE_ISSUED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
 export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
+
+// ---- Export builder (ADR-026, migration 1930, Q99) ----------------------------------------------------------
+export const EXPORT_FORMATS = ["PDF", "XLSX", "EMAIL"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+export const EXPORT_AUDIENCES = ["INTERNAL", "EXTERNAL"] as const;
+export type ExportAudience = (typeof EXPORT_AUDIENCES)[number];
+/** SOURCE_REQUIRED: the approved list of export purposes. */
+export const EXPORT_PURPOSES = [
+  "AUTHORITY_SUBMISSION",
+  "REGULATOR_REQUEST",
+  "LEGAL_COUNSEL",
+  "INTERNAL_REPORTING",
+  "AUDIT",
+  "OTHER",
+] as const;
+export type ExportPurpose = (typeof EXPORT_PURPOSES)[number];
+/** Exportable content. Evidence is not exportable until UX S2 merges; protected identity never is (N19). */
+export const EXPORT_OBJECT_TYPES = [
+  "CASE_SUMMARY",
+  "FINDING",
+  "RECOMMENDATION_PACKAGE",
+  "AUTHORITY_DECISION",
+  "MINUTES",
+] as const;
+export type ExportObjectType = (typeof EXPORT_OBJECT_TYPES)[number];
+export const EXPORT_STATUSES = [
+  "DRAFT",
+  "SUBMITTED",
+  "APPROVED",
+  "GENERATED",
+  "SENT",
+  "REJECTED",
+  "CANCELLED",
+] as const;
+export type ExportStatus = (typeof EXPORT_STATUSES)[number];
+
+/** One item as the viewer may see it; `content` is null when the item is withheld (N16). */
+export interface ExportDocumentItem {
+  position: number;
+  objectType: ExportObjectType;
+  objectId: string;
+  included: boolean;
+  content: Record<string, unknown> | null;
+}
+
+/** The rendered export: what a preview shows, what approvers approve and what generation renders. */
+export interface ExportDocument {
+  requestId: string;
+  caseId: string;
+  caseNumber: string;
+  classification: Classification;
+  format: ExportFormat;
+  audience: ExportAudience;
+  purpose: ExportPurpose;
+  externalParty: string | null;
+  items: ExportDocumentItem[];
+}
+
+/** What a rule in force does to a matching export (SOURCE_REQUIRED rules; NONE switches a code off). */
+export const EXPORT_RULE_ACTIONS = [
+  "REQUIRE_SECOND_APPROVAL",
+  "REQUIRE_AUTHORITY_APPROVAL",
+  "REFUSE",
+  "NONE",
+] as const;
+export type ExportRuleAction = (typeof EXPORT_RULE_ACTIONS)[number];
+
+export interface ExportPreview {
+  document: ExportDocument;
+  hash: string;
+  withheld: number;
+  approvalsRequired: number;
+  /** A restricted case's export also needs its Restricted Case Authority's decision (DEC-61/62 precedent). */
+  authorityApprovalRequired: boolean;
+  matchedRules: { code: string; action: Exclude<ExportRuleAction, "NONE"> }[];
+}
+
+/** Who an EMAIL export goes to: internal users by id (the mail adapter resolves the address), external addresses. */
+export type ExportDelivery = { kind: "INTERNAL"; userId: string } | { kind: "EXTERNAL"; email: string };
+
+/** What generation hands to rendering and delivery: the document, its hash, the private key and the recipients. */
+export interface GeneratedExport {
+  storageKey: string;
+  hash: string;
+  document: ExportDocument;
+  deliverTo: ExportDelivery[];
+}
 
 /** What the NotificationSender receives: recipient, template and link. Never case content (§39, N18). */
 export interface OutgoingNotification {
@@ -1289,4 +1435,49 @@ export interface OutgoingNotification {
   template: NotificationTemplate;
   deepLink: string;
   attempts: number;
+}
+
+// ---- Corrective actions (ADR-033, migration 1940, Q72) -----------------------------------------------------
+export const CORRECTIVE_ACTION_TYPES = ["CORRECTIVE_ACTION", "GOVERNANCE_REMEDIATION"] as const;
+export type CorrectiveActionType = (typeof CORRECTIVE_ACTION_TYPES)[number];
+export const CORRECTIVE_ACTION_STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "PENDING_VERIFICATION",
+  "COMPLETED",
+  "WAIVED",
+] as const;
+export type CorrectiveActionStatus = (typeof CORRECTIVE_ACTION_STATUSES)[number];
+export const VERIFICATION_DECISIONS = ["VERIFIED", "RETURNED"] as const;
+export type VerificationDecision = (typeof VERIFICATION_DECISIONS)[number];
+/** What completion must carry; SOURCE_REQUIRED, seeded REFERENCE_REQUIRED (the strictest). */
+export const COMPLETION_EVIDENCE_RULES = ["REFERENCE_REQUIRED", "NOTE_ONLY"] as const;
+export type CompletionEvidenceRule = (typeof COMPLETION_EVIDENCE_RULES)[number];
+export const CORRECTIVE_ACTION_POLICY_SOURCES = ["SOURCE_REQUIRED", "APPROVED"] as const;
+export type CorrectiveActionPolicySource = (typeof CORRECTIVE_ACTION_POLICY_SOURCES)[number];
+/** The case's execution state, derived from its approved items and their actions; never stored. */
+export const EXECUTION_STATES = [
+  "NOT_STARTED",
+  "IN_PROGRESS",
+  "FOLLOW_UP",
+  "PARTIALLY_EXECUTED",
+  "EXECUTED",
+  "OVERDUE",
+] as const;
+export type ExecutionState = (typeof EXECUTION_STATES)[number];
+
+/** An action as its owner or the case team reads it. The owner never reaches the case behind `caseId`. */
+export interface CorrectiveAction {
+  id: string;
+  caseId: string;
+  recommendationItemId: string;
+  actionType: CorrectiveActionType;
+  sequenceNo: number;
+  title: string;
+  description: string;
+  ownerId: string;
+  /** Calendar date in Riyadh, YYYY-MM-DD. */
+  dueDate: string;
+  status: CorrectiveActionStatus;
+  percentComplete: number;
 }

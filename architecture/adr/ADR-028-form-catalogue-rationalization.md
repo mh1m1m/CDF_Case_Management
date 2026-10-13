@@ -1,6 +1,6 @@
 # ADR-028: Form catalogue rationalization
 
-- **Status:** Proposed (2026-10-12). Linear CDF-198.
+- **Status:** Proposed (2026-10-12). Linear CDF-198. Amended by [ADR-035](ADR-035-form-status-catalogue-reference-data.md): all three sources, 462 rows including the 274-item catalogue, are rationalized and held in `config.legacy_form_map` (migration 1970).
 - **Protocol:** §42, §45; ADR-011.
 
 ## Decision

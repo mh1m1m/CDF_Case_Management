@@ -4,18 +4,22 @@
 
 ## 1. Principle: status is multi-dimensional
 
-The CRM catalogue's 150 statuses mix stages, waits, suspensions, outcomes, flags and events in one list. The target keeps **one current value per dimension** (see `CRM_STATUS_RATIONALIZATION.md`):
+The CRM catalogues' statuses (150 in the Drive list, 140 in the owner's control catalogue) mix stages, waits, suspensions, outcomes, flags and events in one list. The target keeps **one current value per dimension**. Migration 1970 holds the vocabulary in `config.status_dimension` and `config.status_dimension_value`, and tests keep it equal to the schema (ADR-035). Every legacy status is mapped in `CRM_STATUS_RATIONALIZATION.md`.
 
-| Dimension         | Held on                                        | Example values                                                                                       |
-| ----------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Case stage        | derived from open proceedings                  | INTAKE, PRELIMINARY, INVESTIGATION, COMMITTEE, DECISION, IMPLEMENTATION, GRIEVANCE, CLOSED, ARCHIVED |
-| Proceeding status | `proceeding.status`                            | OPEN, IN_PROGRESS, AWAITING_REVIEW, AWAITING_APPROVAL, RETURNED, SUSPENDED, CONCLUDED, CANCELLED     |
-| Waiting reason    | `proceeding.waiting_reason`                    | AWAITING_EMPLOYEE_DEFENCE, AWAITING_LEGAL_OPINION, AWAITING_AUTHORITY_DECISION, AWAITING_QUORUM …    |
-| Suspension reason | `proceeding.suspension_reason`                 | EXTERNAL_INVESTIGATION, LEGAL_HOLD_REQUEST, SUBJECT_LEAVE …                                          |
-| Flags             | derived / dedicated columns                    | RESTRICTED, LEGAL_HOLD_ACTIVE, LATE_GRIEVANCE, RECORDED_OFFLINE                                      |
-| Outcome           | `proceeding.outcome_code`, findings, decisions | SUBSTANTIATED, NO_VIOLATION, APPROVE_AS_RECOMMENDED …                                                |
-| Records state     | `records.*`                                    | ACTIVE, CLOSED_RETAINED, DISPOSITION_PENDING                                                         |
-| Events            | audit ledger only                              | MEETING_HELD, VOTE_CLOSED — never a status                                                           |
+| Dimension                                                          | Held on                                                                                    | Values (implemented)                                                                                                 |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Case stage                                                         | derived from the CDF_CASE_V1 state and the open proceedings                                | INTAKE, PRELIMINARY_REVIEW, INVESTIGATION, COMMITTEE, LEGAL_REVIEW, DECISION, EXECUTION, GRIEVANCE, CLOSURE, RECORDS |
+| Proceeding status                                                  | `proceeding.status`                                                                        | OPEN, IN_PROGRESS, AWAITING_REVIEW, AWAITING_APPROVAL, RETURNED, SUSPENDED, CONCLUDED, CANCELLED                     |
+| Waiting reason                                                     | `proceeding.waiting_reason` (`config.status_code`)                                         | 28 codes, e.g. EMPLOYEE_DEFENCE, LEGAL_OPINION, AUTHORITY_DECISION, QUORUM, HEARING                                  |
+| Suspension reason                                                  | `proceeding.suspension_reason` (`config.status_code`)                                      | 10 codes, e.g. CONFLICT_OF_INTEREST, LEAVE_OR_ILLNESS, INVESTIGATOR_CHANGE, SOVEREIGN_AUTHORITY                      |
+| Outcome                                                            | `proceeding.outcome_code` (`config.status_code`)                                           | 23 codes, e.g. SUBSTANTIATED, NOT_SUBSTANTIATED, OUT_OF_SCOPE, REFERRED_TO_COMMITTEE                                 |
+| Decision outcomes                                                  | preliminary recommendation, vote item, legal opinion, authority decision                   | e.g. INVESTIGATION_WARRANTED; APPROVED, NO_DECISION; CONCURS; APPROVE_AS_RECOMMENDED, RETURN_TO_COMMITTEE            |
+| Object status                                                      | package, legal review request, grievance, corrective action, conflict check                | e.g. VOTING, AWAITING_AUTHORITY; ASSIGNED; AWAITING_ADMISSIBILITY_DECISION; PENDING_VERIFICATION; CONFLICT_DECLARED  |
+| Flags                                                              | `case_record.legal_hold_status`, `case_record.priority`; restricted via the classification | LEGAL_HOLD ACTIVE or NONE; LOW … CRITICAL                                                                            |
+| Execution state, grievance finality                                | derived                                                                                    | NOT_STARTED … EXECUTED, OVERDUE; FINAL_NOT_GRIEVABLE                                                                 |
+| Records state                                                      | `case_record.records_state`                                                                | ACTIVE, CLOSED, RETENTION, ARCHIVED, DISPOSITION_ELIGIBLE, DISPOSITION_PENDING, DISPOSED                             |
+| Escalation, quality review, reporter protection, external referral | not modelled (PLANNED)                                                                     | named in `config.status_dimension_value` with state PLANNED                                                          |
+| Events                                                             | audit ledger only                                                                          | MEETING_SCHEDULED, VOTE_CLOSED … never a status                                                                      |
 
 ## 2. Case lifecycle (paths)
 
@@ -56,6 +60,8 @@ GRIEVANCE (LINKED to a decision, or STANDALONE / DIRECT_GRIEVANCE) ─▶ admiss
 | AWAITING_REVIEW   | `api.review_preliminary_recommendation`  | AWAITING_APPROVAL / RETURNED | GRC_DIRECTOR                                             | reviewer ≠ preparer; skipped if Director prepared |
 | AWAITING_APPROVAL | `api.approve_preliminary_recommendation` | CONCLUDED / RETURNED         | GRC_SECTOR_HEAD                                          | approver ≠ preparer                               |
 | RETURNED          | `api.prepare_preliminary_recommendation` | AWAITING_REVIEW              | preparer                                                 | return reasons from a structured list             |
+
+Approval concludes the proceeding with the recommended outcome: INVESTIGATION_WARRANTED or REFERRED_TO_COMMITTEE to go on, or a closure (NO_ACTION, OUT_OF_SCOPE, DUPLICATE, TRANSFERRED, NON_PROCESSABLE, and since migration 1980 NOT_SERIOUS, NOT_SUBSTANTIATED, CHANNEL_ABUSE, NOT_FEASIBLE, NO_PERSONAL_JURISDICTION; ADR-036).
 
 ### 3.3 Committee proceeding
 

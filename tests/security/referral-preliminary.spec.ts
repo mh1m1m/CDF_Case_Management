@@ -684,3 +684,162 @@ describe("referral objection and delegation edges (AGENT-09 P2, required tests 4
     });
   });
 });
+
+describe("preliminary closure outcomes (migration 1980, P11-G1, ADR-036)", () => {
+  const CLOSURES = [
+    "NOT_SERIOUS",
+    "NOT_SUBSTANTIATED",
+    "CHANNEL_ABUSE",
+    "NOT_FEASIBLE",
+    "NO_PERSONAL_JURISDICTION",
+  ] as const;
+  const MARKER = "unique-rationale-marker-5519";
+
+  it("each closure goes through the same prepare and approve path and concludes the review with that outcome", async () => {
+    await scenario(async (s) => {
+      const ids: string[] = [];
+      for (const outcome of CLOSURES) {
+        await s.as("grcDirector");
+        const [r] = await s.tx<{ id: string }[]>`
+          select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, ${`Synthetic: ${MARKER} ${outcome}.`}) as id`;
+        ids.push(r!.id);
+        await s.as("grcSectorHead");
+        await s.tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`;
+        await s.as("caseManager");
+        const [p] = await s.tx<{ status: string; outcome_code: string; recommended_outcome: string }[]>`
+          select p.status, p.outcome_code, r.recommended_outcome from case_mgmt.proceeding p
+          join case_mgmt.preliminary_recommendation r on r.proceeding_id = p.id where r.id = ${r!.id}`;
+        expect(p, outcome).toEqual({
+          status: "CONCLUDED",
+          outcome_code: outcome,
+          recommended_outcome: outcome,
+        });
+      }
+      // The case itself stays open: closing it is still the CDF_CASE_V1 path (P11-G2).
+      const [c] = await s.tx<{ records_state: string }[]>`
+        select records_state from case_mgmt.case_record where id = ${caseA}`;
+      expect(c!.records_state).toBe("ACTIVE");
+      // Audit carries the outcome code, never the rationale.
+      await s.as("dpo");
+      const events = await s.tx<{ action: string; outcome: string; metadata: unknown }[]>`
+        select action, metadata->>'recommended_outcome' as outcome, metadata from audit.audit_event
+        where object_type = 'preliminary_recommendation' and object_id = any(${ids}::text[]) order by occurred_at, action`;
+      expect(
+        events.filter((e) => e.action === "PRELIMINARY_RECOMMENDATION_APPROVED").map((e) => e.outcome),
+      ).toEqual([...CLOSURES]);
+      expect(
+        events.filter((e) => e.action === "PRELIMINARY_RECOMMENDATION_PREPARED").map((e) => e.outcome),
+      ).toEqual([...CLOSURES]);
+      expect(JSON.stringify(events)).not.toContain(MARKER);
+    });
+  });
+
+  it("a closure prepared by an investigator still needs the Director's review and a different approver", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("investigatorA");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseA}, 'CHANNEL_ABUSE', 'Synthetic: the report appears malicious.') as id`;
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.review_preliminary_recommendation(${r!.id}, 'ENDORSE', null, null)`,
+      );
+      await s.as("grcSectorHead");
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`,
+      );
+      await s.as("grcDirector");
+      await s.tx`select api.review_preliminary_recommendation(${r!.id}, 'ENDORSE', null, null)`;
+      // The reviewer, even holding approval authority too, cannot approve what they endorsed.
+      await s.asOwner();
+      await s.tx`
+        insert into iam.user_role_assignment (user_id, role_code, justification, source_reference)
+        values (${USERS.grcDirector}, 'GRC_SECTOR_HEAD', 'Synthetic: dual role for the test', 'TEST')`;
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:SEPARATION_OF_DUTIES",
+        (tx) => tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`,
+      );
+    });
+  });
+
+  it("outcomes outside the list are still refused, and an outsider learns nothing from the outcome", async () => {
+    await scenario(async (s) => {
+      await s.as("grcDirector");
+      for (const outcome of [
+        "SUBSTANTIATED",
+        "CORRECTIVE_ACTION",
+        "EMERGENCY_CLOSURE",
+        "WITHDRAWN",
+        "not_serious",
+        "NOT_SERIOUS ",
+        "",
+      ]) {
+        await s.expectError(
+          "CDF_INVALID:recommended_outcome",
+          (tx) =>
+            tx`select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, 'Synthetic: refused outcome.')`,
+        );
+      }
+      await s.expectError(
+        "CDF_INVALID:recommended_outcome",
+        (tx) => tx`select api.prepare_preliminary_recommendation(${caseA}, null, 'Synthetic: no outcome.')`,
+      );
+      // No case access: NOT_FOUND whatever the outcome, valid or not.
+      for (const user of ["complianceManager", "platformAdmin", "employee"] as const) {
+        await s.as(user);
+        for (const outcome of ["NOT_SERIOUS", "SUBSTANTIATED"]) {
+          await s.expectError(
+            "CDF_NOT_FOUND",
+            (tx) =>
+              tx`select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, 'Synthetic: outsider attempt.')`,
+          );
+        }
+      }
+    });
+  });
+
+  it("the catalogue records where each closure comes from: Q12, or SOURCE_REQUIRED", async () => {
+    const rows = await admin<{ value: string; state: string; source_status: string }[]>`
+      select value, state, source_status from config.status_dimension_value
+      where dimension = 'PRELIMINARY_OUTCOME' and value = any(${[...CLOSURES]}) order by value collate "C"`;
+    expect(rows).toEqual([
+      { value: "CHANNEL_ABUSE", state: "ACTIVE", source_status: "OWNER_DEFAULT" },
+      { value: "NOT_FEASIBLE", state: "ACTIVE", source_status: "SOURCE_REQUIRED" },
+      { value: "NOT_SERIOUS", state: "ACTIVE", source_status: "OWNER_DEFAULT" },
+      { value: "NOT_SUBSTANTIATED", state: "ACTIVE", source_status: "OWNER_DEFAULT" },
+      { value: "NO_PERSONAL_JURISDICTION", state: "ACTIVE", source_status: "SOURCE_REQUIRED" },
+    ]);
+    const [module] = await admin<{ delivered_in: string[] }[]>`
+      select delivered_in from config.target_module where code = 'PRELIM_CLOSE_OUTCOME'`;
+    expect(module!.delivered_in).toEqual(["1880", "1980"]);
+  });
+
+  it("case access alone does not let anyone prepare a closure: PRELIMINARY_PREPARE is still required", async () => {
+    await scenario(async (s) => {
+      await s.as("caseManager"); // sees case 0001, holds no PRELIMINARY_PREPARE
+      expect((await s.tx`select id from case_mgmt.case_record where id = ${caseA}`).length).toBe(1);
+      for (const outcome of CLOSURES) {
+        await s.expectError(
+          "CDF_FORBIDDEN",
+          (tx) =>
+            tx`select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, 'Synthetic: not entitled to prepare.')`,
+        );
+      }
+    });
+  });
+
+  it("on a restricted case the GRC Sector Head gets nothing for a closure either (fail safe)", async () => {
+    await scenario(async (s) => {
+      await s.as("grcDirector");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseExec}, 'NO_PERSONAL_JURISDICTION', 'Synthetic: outside personal jurisdiction.') as id`;
+      await s.as("grcSectorHead");
+      expect(await s.tx`select * from api.preliminary_approval_queue()`).toEqual([]);
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`,
+      );
+    });
+  });
+});
