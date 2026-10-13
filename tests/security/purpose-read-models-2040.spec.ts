@@ -1461,7 +1461,11 @@ describe("api.corrective_action_view (authz.can_view_corrective_action; R2, R3)"
       expect(card.case).toEqual({ case_id: null, case_number: null });
       expect(await s.tx`select id from case_mgmt.case_record where id = ${caseB}`).toEqual([]);
       const team = (await read(s, ACTION, "caseManager", action))!;
-      expect(team.origin).toEqual({ recommendation_item_id: item, authority_decision_id: decision });
+      expect(team.origin).toEqual({
+        recommendation_item_id: item,
+        authority_decision_id: decision,
+        decision_block: null,
+      });
       await s.as("financeEmployee");
       await s.tx`select api.record_corrective_action_progress(${action}, 50, 'Synthetic: progress note.')`;
       await s.tx`select api.submit_corrective_action_completion(${action}, 'Synthetic: done.', 'SOP-DEMO-2040')`;

@@ -933,8 +933,11 @@ $$;
 
 -- Quorum of a meeting now, from its proceeding's rule snapshot (Q51, DEC-F01): eligible = counting seats with no
 -- conflict, present = those recorded present. CUSTOM quorum has no number (the secretary attests it at close).
+-- For a vote on a package round (p_package_id, p_package_round), the participants that round's re-vote excludes
+-- (DEC-AMB-013, decision.revote_excluded in section 3) count neither as eligible nor as present.
 create function committee.quorum_state(p_meeting_id uuid, out eligible int, out present int, out required int,
-                                       out quorum_type text)
+                                       out quorum_type text, p_package_id uuid default null,
+                                       p_package_round int default null)
 language plpgsql stable
 set search_path = ''
 as $$
@@ -948,7 +951,8 @@ begin
          count(*) filter (where mp.coi_status = 'NO_CONFLICT' and mp.attendance = 'PRESENT')
     into eligible, present
   from committee.meeting_participant mp
-  where mp.meeting_id = p_meeting_id and committee.counts_as_voter(mp.id);
+  where mp.meeting_id = p_meeting_id and committee.counts_as_voter(mp.id)
+    and not decision.revote_excluded(p_package_id, p_package_round, mp.user_id);
   quorum_type := v_rule ->> 'quorum_type';
   required := case quorum_type
                 when 'MAJORITY_ELIGIBLE' then eligible / 2 + 1
@@ -1922,7 +1926,7 @@ as $$
 declare
   v_q record;
 begin
-  select * into v_q from committee.quorum_state(new.meeting_id);
+  select * into v_q from committee.quorum_state(new.meeting_id, new.package_id, new.package_round);
   if v_q.eligible = 0 or v_q.present = 0 or (v_q.required is not null and v_q.present < v_q.required) then
     perform api._fail('CONFLICT', 'NO_QUORUM');
   end if;
@@ -2149,7 +2153,7 @@ begin
   select cp.rule_snapshot into v_rule
   from committee.meeting m join committee.committee_proceeding cp on cp.id = m.committee_proceeding_id
   where m.id = v_item.meeting_id;
-  select * into v_q from committee.quorum_state(v_item.meeting_id);
+  select * into v_q from committee.quorum_state(v_item.meeting_id, v_item.package_id, v_item.package_round);
 
   if v_q.quorum_type = 'CUSTOM' then
     if p_custom_quorum_attested is not true then perform api._fail('INVALID', 'custom_quorum_attested'); end if;
@@ -2162,6 +2166,7 @@ begin
   if exists (select 1 from committee.meeting_participant mp
              where mp.meeting_id = v_item.meeting_id and mp.coi_status = 'NO_CONFLICT' and mp.attendance = 'PRESENT'
                and committee.counts_as_voter(mp.id)
+               and not decision.revote_excluded(v_item.package_id, v_item.package_round, mp.user_id)
                and not exists (select 1 from committee.vote v where v.vote_item_id = v_item.id and v.participant_id = mp.id)) then
     perform api._fail('CONFLICT', 'VOTES_OUTSTANDING');
   end if;
@@ -2789,7 +2794,7 @@ to authenticated;
 -- =============================================================================
 -- Section 3. Recommendation packages, legal review and authority decisions
 -- =============================================================================
--- DEC-F11, DEC-F12, DEC-F13, DEC-F19, DEC-F20 and the ambiguity register rows routed here (AMB-018, AMB-026, AMB-030,
+-- DEC-F11, DEC-F12, DEC-F13, DEC-F19, DEC-F20, DEC-AMB-003, DEC-AMB-013 and the ambiguity register rows routed here (AMB-018, AMB-026, AMB-030,
 -- AMB-036, AMB-051, AMB-100–AMB-102, AMB-108, AMB-113, AMB-115, AMB-117, AMB-119, AMB-120, AMB-123, AMB-125–AMB-127,
 -- AMB-129–AMB-133, AMB-135, AMB-229); contradictions CON-017 and CON-018.
 --
@@ -2840,8 +2845,23 @@ to authenticated;
 --       RE_VOTE (the package goes back to the committee, whose next round opens a new vote on the same target, so the
 --       tainted result never counts) or CONFIRM, allowed only when the recount without every vote of the conflicted
 --       participants gives the same result under the snapshot's DEC-F01 rule and quorum (else RESULT_MAY_CHANGE).
---       A package with the authority or decided is not sent back by RE_VOTE (the authority returns it first; a decided
---       package stays blocked unless CONFIRM holds).
+--       A package with the authority is not sent back by RE_VOTE (the authority returns it first).
+--   3.10 Conflict found after the authority decided (DEC-AMB-013, owner, 2026-10-13, option A; AMB-051). A decided
+--       package whose tainted vote could have changed the result (the recount differs, or cannot be made) is remediated,
+--       never reopened as a closed case (not DEC-AMB-002). The taint already blocks every downstream step. RE_VOTE,
+--       recorded by the committee as under 3.9 and only on that validated taint, opens decision.conflict_remediation and
+--       puts the package straight back to the committee for a new round (VOTING): the same items, a new vote. Every
+--       participant whose vote tainted the decided round takes no part in any later vote on the package: no vote row,
+--       not eligible, not present, quorum recalculated without them. The original votes, recommendation and authority
+--       decisions stay as recorded. The new round goes the usual way (adoption, legal review where required,
+--       submission); the authority decides again. When that decision makes the package DECIDED, the remediation closes
+--       with its lineage (conflict events, conflicted members, original and recounted result, new result, replacement
+--       decision) and each decision of the earlier round is marked SUPERSEDED in decision.authority_decision_supersession;
+--       the decision row itself is never edited. While the remediation is open, and for good once a decision is
+--       superseded, nothing proceeds from that decision: no corrective action is opened or progresses (a waiver is still
+--       possible), no decision notice is issued or delivered (2040), no sanction is executed (2040), and the case does
+--       not close. Where the recount gives the same result, the DEC-AMB-003 CONFIRM path stays and RE_VOTE is refused on
+--       a decided package (RESULT_UNCHANGED).
 --
 -- Existing functions replaced (create or replace: same signature, owner, SECURITY DEFINER and search_path; no check
 -- weakened):
@@ -2861,6 +2881,9 @@ to authenticated;
 --   api.give_legal_opinion(uuid, text, text)    a cancelled request is no longer the reviewer's; taint guard.
 --   api.submit_to_authority(uuid)               taint guard, fail closed on a missing rule, requirement snapshot.
 --   api.record_authority_decision(8 args)       delegates to the new overload (per-authority scope).
+--   decision.protect_records()                  as in 1900, except that a DECIDED package may go back to VOTING in
+--                                               the next round, once, when an open conflict remediation names that
+--                                               round (DEC-AMB-013); nothing else of a decided package changes.
 -- One index is recreated under its name with a wider key: restricted_legal_review_approval_open is unique per package
 -- round instead of per package (an unused approval of an earlier round no longer blocks the next one).
 -- =============================================================================
@@ -3189,6 +3212,78 @@ comment on table decision.vote_tally_entry is
   'DEC-AMB-003 (migration 2030): each vote on an item with its last choice and whether the tally counted it, frozen '
   'when the item left OPEN. Read only by the taint functions; not selectable.';
 
+-- DEC-AMB-013 (owner, 2026-10-13, option A): the remediation of a decided package whose tainted vote could have changed
+-- the result. Opened by the committee's RE_VOTE resolution of that taint (resolution_id), closed by the authority's
+-- new decision. The reason stays in the resolution row; this row carries the lineage. Conflicted members, conflict
+-- events and results are read by the same people as the resolution (AGENT-09 R1); the ledger gets ids and counts.
+create table decision.conflict_remediation (
+  id                      uuid primary key default gen_random_uuid(),
+  package_id              uuid not null references decision.recommendation_package (id),
+  case_id                 uuid not null references case_mgmt.case_record (id),
+  resolution_id           uuid not null unique references decision.conflict_taint_resolution (id),
+  -- The tainted vote item of the decided round that the resolution names.
+  vote_item_id            uuid not null references committee.vote_item (id),
+  decided_round           int not null check (decided_round >= 1),
+  revote_round            int not null,
+  original_decided_at     timestamptz not null,
+  -- Everyone whose vote tainted a vote item of the decided round, sorted: none of them votes on the package again.
+  conflicted_user_ids     uuid[] not null check (cardinality(conflicted_user_ids) >= 1),
+  -- What made each of them conflicted when the remediation opened: [{user_id, source, id}], source MEETING_CONFLICT
+  -- (committee.meeting_conflict), UPHELD_CONCERN (committee.meeting_conflict_concern) or CASE_CONFLICT
+  -- (case_mgmt.conflict_check).
+  conflict_events         jsonb not null check (jsonb_typeof(conflict_events) = 'array'),
+  original_result         text not null,
+  recount_result          text not null,
+  status                  text not null default 'OPEN' check (status in ('OPEN', 'REDECIDED')),
+  opened_by               uuid not null references iam.user_profile (id),
+  opened_at               timestamptz not null default now(),
+  redecided_round         int,
+  -- The closed vote on the same target in the re-decided round and its result (null when the target was not voted
+  -- again: an item withdrawn while the package was back in draft).
+  new_vote_item_id        uuid references committee.vote_item (id),
+  new_result              text,
+  replacement_decision_id uuid references decision.authority_decision (id),
+  redecided_at            timestamptz,
+  check (revote_round = decided_round + 1),
+  check (recount_result <> original_result),
+  check ((status = 'REDECIDED') = (redecided_round is not null)),
+  check ((status = 'REDECIDED') = (replacement_decision_id is not null)),
+  check ((status = 'REDECIDED') = (redecided_at is not null)),
+  check (redecided_round is null or redecided_round >= revote_round),
+  check (new_vote_item_id is null or status = 'REDECIDED')
+);
+-- One open remediation per package.
+create unique index conflict_remediation_open on decision.conflict_remediation (package_id) where status = 'OPEN';
+create index conflict_remediation_package on decision.conflict_remediation (package_id);
+create index conflict_remediation_case on decision.conflict_remediation (case_id);
+create index conflict_remediation_vote_item on decision.conflict_remediation (vote_item_id);
+create index conflict_remediation_new_vote_item on decision.conflict_remediation (new_vote_item_id);
+create index conflict_remediation_replacement on decision.conflict_remediation (replacement_decision_id);
+create index conflict_remediation_opened_by on decision.conflict_remediation (opened_by);
+comment on table decision.conflict_remediation is
+  'DEC-AMB-013 (owner, 2026-10-13, option A; migration 2030): a decided package re-voted without the conflicted '
+  'members and re-decided by the authority. OPEN from the committee''s RE_VOTE on a decisive taint until the '
+  'authority''s new decision; then REDECIDED with its lineage. Read like decision.conflict_taint_resolution.';
+
+-- DEC-AMB-013: an authority decision replaced through a conflict remediation. The decision row is never edited: this
+-- row marks it SUPERSEDED, written only once the replacement decision made the package DECIDED again. Append-only.
+create table decision.authority_decision_supersession (
+  decision_id    uuid primary key references decision.authority_decision (id),
+  package_id     uuid not null references decision.recommendation_package (id),
+  case_id        uuid not null references case_mgmt.case_record (id),
+  remediation_id uuid not null references decision.conflict_remediation (id),
+  superseded_by  uuid not null references decision.authority_decision (id),
+  superseded_at  timestamptz not null default now(),
+  check (superseded_by <> decision_id)
+);
+create index authority_decision_supersession_package on decision.authority_decision_supersession (package_id);
+create index authority_decision_supersession_case on decision.authority_decision_supersession (case_id);
+create index authority_decision_supersession_remediation on decision.authority_decision_supersession (remediation_id);
+create index authority_decision_supersession_by on decision.authority_decision_supersession (superseded_by);
+comment on table decision.authority_decision_supersession is
+  'DEC-AMB-013 (migration 2030): an authority decision SUPERSEDED by the authority''s decision on a conflict '
+  'remediation''s re-vote. Written only after that replacement decision; the superseded decision is never edited.';
+
 -- -----------------------------------------------------------------------------
 -- 3.6 Purpose access grace (AMB-229)
 -- -----------------------------------------------------------------------------
@@ -3228,12 +3323,13 @@ begin
                            'decision.authority_decision_source', 'decision.authority_decision_condition',
                            'decision.package_return', 'decision.legal_review_cancellation',
                            'decision.legal_opinion_revision', 'decision.conflict_taint_resolution',
-                           'decision.vote_tally_entry'] loop
+                           'decision.vote_tally_entry', 'decision.authority_decision_supersession'] loop
     execute format('create trigger no_update before update on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
   end loop;
-  foreach t in array array['decision.sanction_catalogue_version', 'decision.legal_review_rule'] loop
+  foreach t in array array['decision.sanction_catalogue_version', 'decision.legal_review_rule',
+                           'decision.conflict_remediation'] loop
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
   end loop;
@@ -3474,7 +3570,8 @@ $$;
 -- DEC-AMB-003: the database refuses progression of a tainted package on every path: adoption, a legal review request
 -- or opinion, submission, a decided package and any authority decision but a return to the committee; and what reads a
 -- decided package's result as final: opening a corrective action on one of its items or a decision notice on its
--- decision.
+-- decision. DEC-AMB-013: those two are also refused on a decision under conflict remediation or superseded
+-- (decision.decision_block, defined below).
 create function decision.block_tainted_progress()
 returns trigger
 language plpgsql
@@ -3482,6 +3579,7 @@ set search_path = ''
 as $$
 declare
   v_package uuid;
+  v_block text;
 begin
   if tg_table_name = 'recommendation_package' then
     if new.status is distinct from old.status
@@ -3499,13 +3597,296 @@ begin
     if new.outcome <> 'RETURN_TO_COMMITTEE' then v_package := new.package_id; end if;
   elsif tg_table_name = 'corrective_action' then
     select i.package_id into v_package from decision.recommendation_item i where i.id = new.recommendation_item_id;
+    v_block := decision.decision_block(new.authority_decision_id);
   elsif tg_table_name = 'defence_notice' then
     select d.package_id into v_package from decision.authority_decision d where d.id = new.authority_decision_id;
+    v_block := decision.decision_block(new.authority_decision_id);
   end if;
+  if v_block is not null then perform api._fail('CONFLICT', v_block); end if;
   if v_package is not null and decision.package_tainted(v_package) then
     perform api._fail('CONFLICT', 'TAINTED_BY_CONFLICT');
   end if;
   return new;
+end;
+$$;
+
+-- DEC-AMB-013 (owner, 2026-10-13, option A): whether a participant takes no part in a vote on a package round.
+-- Whoever's vote tainted the decided round of a conflict remediation of the package votes in no later round of it:
+-- no vote row (decision.refuse_excluded_vote), neither eligible nor present (committee.quorum_state), never awaited at
+-- the close. False outside package votes.
+create function decision.revote_excluded(p_package_id uuid, p_package_round int, p_user_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select p_package_id is not null and p_user_id is not null and exists (
+    select 1 from decision.conflict_remediation r
+    where r.package_id = p_package_id and p_package_round >= r.revote_round and p_user_id = any (r.conflicted_user_ids));
+$$;
+
+-- DEC-AMB-003, DEC-AMB-013: why nothing may proceed from an authority decision now, as a code, or null when it may:
+-- DECISION_SUPERSEDED (for good), CONFLICT_REMEDIATION_OPEN (its package is being re-voted and re-decided) or
+-- TAINTED_BY_CONFLICT (an unresolved taint on its package). The one source for every downstream guard and read.
+create function decision.decision_block(p_authority_decision_id uuid)
+returns text
+language sql stable
+set search_path = ''
+as $$
+  select case
+           when exists (select 1 from decision.authority_decision_supersession x where x.decision_id = d.id)
+             then 'DECISION_SUPERSEDED'
+           when exists (select 1 from decision.conflict_remediation r
+                        where r.package_id = d.package_id and r.status = 'OPEN')
+             then 'CONFLICT_REMEDIATION_OPEN'
+           when decision.package_tainted(d.package_id) then 'TAINTED_BY_CONFLICT'
+         end
+  from decision.authority_decision d
+  where d.id = p_authority_decision_id;
+$$;
+
+-- DEC-AMB-013: everyone whose vote taints a closed vote item of a package round now, sorted.
+create function decision.round_conflicted(p_package_id uuid, p_package_round int)
+returns uuid[]
+language sql stable
+set search_path = ''
+as $$
+  select coalesce(array_agg(distinct u.user_id order by u.user_id), '{}'::uuid[])
+  from committee.vote_item vi
+  cross join lateral unnest(decision.vote_item_conflicted(vi.id)) as u(user_id)
+  where vi.package_id = p_package_id and vi.package_round = p_package_round and vi.status = 'CLOSED';
+$$;
+
+-- DEC-AMB-013: what makes each of the given participants conflicted in the package's proceeding or case, as
+-- [{user_id, source, id}] in a fixed order: MEETING_CONFLICT (a declaration in a meeting of the proceeding),
+-- UPHELD_CONCERN (an upheld concern about them there, reversed or not: DEC-AMB-010 is prospective) or CASE_CONFLICT
+-- (a declared or confirmed case conflict).
+create function decision.conflict_events(p_package_id uuid, p_user_ids uuid[])
+returns jsonb
+language sql stable
+set search_path = ''
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object('user_id', e.user_id, 'source', e.source, 'id', e.id)
+                            order by e.user_id::text collate "C", e.source collate "C", e.id::text collate "C"),
+                  '[]'::jsonb)
+  from decision.recommendation_package p
+  cross join lateral (
+    select mp.user_id, 'MEETING_CONFLICT'::text as source, mc.id
+    from committee.meeting_conflict mc
+    join committee.meeting_participant mp on mp.id = mc.participant_id
+    join committee.meeting m on m.id = mc.meeting_id
+    where m.committee_proceeding_id = p.committee_proceeding_id and mp.user_id = any (p_user_ids)
+      and mc.status = 'CONFLICT_DECLARED'
+    union all
+    select t.user_id, 'UPHELD_CONCERN', k.id
+    from committee.meeting_conflict_concern k
+    join committee.meeting_participant t on t.id = k.participant_id
+    join committee.meeting km on km.id = k.meeting_id
+    where km.committee_proceeding_id = p.committee_proceeding_id and t.user_id = any (p_user_ids) and k.status = 'UPHELD'
+    union all
+    select cc.user_id, 'CASE_CONFLICT', cc.id
+    from case_mgmt.conflict_check cc
+    where cc.case_id = p.case_id and cc.user_id = any (p_user_ids) and cc.is_current
+      and cc.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED')) e
+  where p.id = p_package_id;
+$$;
+
+-- DEC-AMB-013: a remediation opens only from the committee's RE_VOTE on a validated, decisive taint of the decided
+-- round, on every path: the resolution is RE_VOTE on this package's decided round with a recount that differs; the
+-- package is DECIDED in that round; every conflicted member took part in a vote of the round and has a recorded
+-- conflict (the conflict events are taken here, never from the writer). It closes once, as REDECIDED, only when the
+-- authority's decision on a later round made the package DECIDED again; nothing else in it changes.
+create function decision.guard_conflict_remediation()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_r decision.conflict_taint_resolution;
+  v_p decision.recommendation_package;
+begin
+  if tg_op = 'INSERT' then
+    select * into v_r from decision.conflict_taint_resolution r where r.id = new.resolution_id;
+    select * into v_p from decision.recommendation_package p where p.id = new.package_id;
+    new.conflict_events := decision.conflict_events(new.package_id, new.conflicted_user_ids);
+    if v_r.id is null or v_r.package_id <> new.package_id or v_r.resolution <> 'RE_VOTE'
+       or v_r.package_round <> new.decided_round or v_r.vote_item_id <> new.vote_item_id
+       or v_r.recount_result = v_r.original_result
+       or new.original_result <> v_r.original_result or new.recount_result <> v_r.recount_result
+       or not (v_r.conflicted_user_ids <@ new.conflicted_user_ids)
+       or v_p.id is null or v_p.status <> 'DECIDED' or v_p.round_no <> new.decided_round or v_p.case_id <> new.case_id
+       or new.original_decided_at is distinct from v_p.decided_at
+       or new.status <> 'OPEN' or new.redecided_round is not null
+       or exists (select 1 from unnest(new.conflicted_user_ids) u(user_id)
+                  where not exists (select 1 from jsonb_array_elements(new.conflict_events) e
+                                    where (e ->> 'user_id')::uuid = u.user_id)
+                     or not exists (select 1 from committee.vote_item vi
+                                    where vi.package_id = new.package_id and vi.package_round = new.decided_round
+                                      and vi.status = 'CLOSED'
+                                      and (exists (select 1 from decision.vote_tally_entry e
+                                                   where e.vote_item_id = vi.id and e.user_id = u.user_id)
+                                           or exists (select 1 from committee.vote v
+                                                      where v.vote_item_id = vi.id and v.recorded_for = u.user_id)
+                                           or exists (select 1 from committee.casting_vote c
+                                                      where c.vote_item_id = vi.id and c.cast_by = u.user_id)))) then
+      perform api._fail('CONFLICT', 'NO_VALIDATED_CONFLICT');
+    end if;
+    return new;
+  end if;
+  if old.status <> 'OPEN' or new.status <> 'REDECIDED'
+     or (to_jsonb(new) - array['status', 'redecided_round', 'new_vote_item_id', 'new_result', 'replacement_decision_id',
+                               'redecided_at'])
+        <> (to_jsonb(old) - array['status', 'redecided_round', 'new_vote_item_id', 'new_result', 'replacement_decision_id',
+                                  'redecided_at'])
+     or not exists (select 1 from decision.authority_decision d
+                    join decision.recommendation_package p on p.id = d.package_id
+                    where d.id = new.replacement_decision_id and d.package_id = old.package_id
+                      and d.package_round = new.redecided_round
+                      and p.status = 'DECIDED' and p.round_no = new.redecided_round) then
+    raise exception 'conflict remediation % closes once, on the authority''s decision of a later round', old.id
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end;
+$$;
+create trigger conflict_remediation_guard before insert or update on decision.conflict_remediation
+  for each row execute function decision.guard_conflict_remediation();
+
+-- DEC-AMB-013: a decision is marked SUPERSEDED only by the closed remediation of its package and round, naming the
+-- replacement decision that made the package DECIDED again in the re-decided round.
+create function decision.guard_decision_supersession()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_r decision.conflict_remediation;
+begin
+  select * into v_r from decision.conflict_remediation r where r.id = new.remediation_id;
+  if v_r.id is null or v_r.status <> 'REDECIDED' or v_r.replacement_decision_id <> new.superseded_by
+     or new.package_id <> v_r.package_id or new.case_id <> v_r.case_id
+     or not exists (select 1 from decision.authority_decision d
+                    where d.id = new.decision_id and d.package_id = v_r.package_id
+                      and d.package_round = v_r.decided_round)
+     or not exists (select 1 from decision.recommendation_package p
+                    where p.id = v_r.package_id and p.status = 'DECIDED' and p.round_no = v_r.redecided_round) then
+    perform api._fail('CONFLICT', 'REPLACEMENT_DECISION_REQUIRED');
+  end if;
+  return new;
+end;
+$$;
+create trigger authority_decision_supersession_guard before insert on decision.authority_decision_supersession
+  for each row execute function decision.guard_decision_supersession();
+
+-- DEC-AMB-013: a member a re-vote excludes casts no vote on it, on any path (their own, a recusal, or one the
+-- secretary records for them).
+create function decision.refuse_excluded_vote()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if exists (select 1 from committee.vote_item vi
+             join committee.meeting_participant mp on mp.id = new.participant_id
+             where vi.id = new.vote_item_id and decision.revote_excluded(vi.package_id, vi.package_round, mp.user_id)) then
+    perform api._fail('CONFLICT', 'EXCLUDED_BY_CONFLICT');
+  end if;
+  return new;
+end;
+$$;
+create trigger vote_revote_exclusion before insert on committee.vote
+  for each row execute function decision.refuse_excluded_vote();
+
+-- DEC-AMB-003, DEC-AMB-013: a corrective action whose decision is tainted, under remediation or superseded makes no
+-- progress (status or percentage) on any path. Its owner and due date may still change, and the authority may still
+-- waive it.
+create function decision.freeze_blocked_action()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_block text;
+begin
+  if (new.status is distinct from old.status or new.percent_complete is distinct from old.percent_complete)
+     and new.status <> 'WAIVED' then
+    v_block := decision.decision_block(old.authority_decision_id);
+    if v_block is not null then perform api._fail('CONFLICT', v_block); end if;
+  end if;
+  return new;
+end;
+$$;
+create trigger corrective_action_decision_block before update on decision.corrective_action
+  for each row execute function decision.freeze_blocked_action();
+
+-- DEC-AMB-003, DEC-AMB-013: a case does not close while one of its packages is under conflict remediation, or decided
+-- and tainted.
+create function decision.guard_case_closure_conflict()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if exists (select 1 from decision.conflict_remediation r where r.case_id = new.id and r.status = 'OPEN') then
+    perform api._fail('CONFLICT', 'CONFLICT_REMEDIATION_OPEN');
+  end if;
+  if exists (select 1 from decision.recommendation_package p
+             where p.case_id = new.id and p.status = 'DECIDED' and decision.package_tainted(p.id)) then
+    perform api._fail('CONFLICT', 'TAINTED_BY_CONFLICT');
+  end if;
+  return new;
+end;
+$$;
+create trigger case_record_conflict_remediation before update of records_state on case_mgmt.case_record
+  for each row when (old.records_state = 'ACTIVE' and new.records_state = 'CLOSED')
+  execute function decision.guard_case_closure_conflict();
+
+-- DEC-AMB-013: called by api.record_authority_decision when its decision makes a package DECIDED. An open remediation
+-- of the package closes with its lineage (the new vote on the tainted target and its result, the replacement
+-- decision), and every decision of the remediated round is marked SUPERSEDED, after the replacement, never edited.
+-- The ledger gets ids and counts, never a result.
+create function decision.close_conflict_remediation(p_package_id uuid, p_decision_id uuid)
+returns void
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_r decision.conflict_remediation;
+  v_p decision.recommendation_package;
+  v_target committee.vote_item;
+  v_new committee.vote_item;
+  v_d record;
+  v_count int := 0;
+begin
+  select * into v_r from decision.conflict_remediation r where r.package_id = p_package_id and r.status = 'OPEN' for update;
+  if v_r.id is null then return; end if;
+  select * into v_p from decision.recommendation_package p where p.id = p_package_id;
+  select * into v_target from committee.vote_item vi where vi.id = v_r.vote_item_id;
+  select * into v_new from committee.vote_item vi
+  where vi.package_id = p_package_id and vi.package_round = v_p.round_no and vi.status = 'CLOSED'
+    and vi.target_type = v_target.target_type
+    and vi.recommendation_item_id is not distinct from v_target.recommendation_item_id
+  order by vi.sequence_no desc
+  limit 1;
+  update decision.conflict_remediation
+     set status = 'REDECIDED', redecided_round = v_p.round_no, new_vote_item_id = v_new.id, new_result = v_new.result,
+         replacement_decision_id = p_decision_id, redecided_at = now()
+   where id = v_r.id;
+  for v_d in select d.id, d.package_round from decision.authority_decision d
+             where d.package_id = p_package_id and d.package_round = v_r.decided_round
+             order by d.recorded_at, d.id loop
+    insert into decision.authority_decision_supersession (decision_id, package_id, case_id, remediation_id, superseded_by)
+    values (v_d.id, p_package_id, v_p.case_id, v_r.id, p_decision_id);
+    perform audit.record_event('AUTHORITY_DECISION_SUPERSEDED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'authority_decision',
+      v_d.id::text, null,
+      jsonb_build_object('package_id', p_package_id, 'round_no', v_d.package_round, 'remediation_id', v_r.id,
+                         'superseded_by', p_decision_id, 'superseded_by_round', v_p.round_no));
+    v_count := v_count + 1;
+  end loop;
+  perform audit.record_event('CONFLICT_REMEDIATION_CLOSED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'conflict_remediation',
+    v_r.id::text, null,
+    jsonb_build_object('package_id', p_package_id, 'resolution_id', v_r.resolution_id, 'decided_round', v_r.decided_round,
+                       'redecided_round', v_p.round_no, 'new_vote_item_id', v_new.id,
+                       'replacement_decision_id', p_decision_id, 'superseded', v_count));
 end;
 $$;
 
@@ -3641,6 +4022,53 @@ create trigger committee_proceeding_preliminary_referral before insert on commit
 -- -----------------------------------------------------------------------------
 -- Replaced predicates and helpers
 -- -----------------------------------------------------------------------------
+-- As in 1900, except that a DECIDED package may go back to the committee once per conflict remediation (DEC-AMB-013):
+-- to VOTING, in the round right after the decided one, with no decision date, when an open remediation of that round
+-- exists. Its identity never changes and nothing else of a decided package does.
+create or replace function decision.protect_records()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_table_name = 'recommendation_package' then
+    if (old.status = 'DECIDED'
+        and not (new.status = 'VOTING' and new.round_no = old.round_no + 1 and new.decided_at is null
+                 and exists (select 1 from decision.conflict_remediation r
+                             where r.package_id = old.id and r.status = 'OPEN' and r.decided_round = old.round_no
+                               and r.revote_round = new.round_no)))
+       or (to_jsonb(new) - array['status', 'round_no', 'adopted_at', 'decided_at', 'updated_at', 'row_version'])
+          <> (to_jsonb(old) - array['status', 'round_no', 'adopted_at', 'decided_at', 'updated_at', 'row_version'])
+       or new.round_no < old.round_no then
+      raise exception 'recommendation package % is decided or its identity is immutable', old.id using errcode = 'insufficient_privilege';
+    end if;
+  elsif tg_table_name = 'recommendation_item' then
+    if old.status = 'WITHDRAWN'
+       or (to_jsonb(new) - array['status', 'committee_result', 'withdrawn_by', 'withdrawn_at'])
+          <> (to_jsonb(old) - array['status', 'committee_result', 'withdrawn_by', 'withdrawn_at']) then
+      raise exception 'recommendation item % content is immutable', old.id using errcode = 'insufficient_privilege';
+    end if;
+  elsif tg_table_name = 'legal_review_request' then
+    if old.status <> 'ASSIGNED'
+       or (to_jsonb(new) - array['status', 'opinion', 'opinion_text', 'opinion_at'])
+          <> (to_jsonb(old) - array['status', 'opinion', 'opinion_text', 'opinion_at']) then
+      raise exception 'legal review request % is answered or its identity is immutable', old.id using errcode = 'insufficient_privilege';
+    end if;
+  elsif tg_table_name = 'restricted_legal_review_approval' then
+    if old.legal_review_request_id is not null
+       or (to_jsonb(new) - array['legal_review_request_id', 'used_at'])
+          <> (to_jsonb(old) - array['legal_review_request_id', 'used_at']) then
+      raise exception 'approval % is used or immutable', old.id using errcode = 'insufficient_privilege';
+    end if;
+  elsif tg_table_name = 'action_authority_rule' then
+    if (to_jsonb(new) - 'effective_to') <> (to_jsonb(old) - 'effective_to') or old.effective_to is not null then
+      raise exception 'authority rule % can only be given an end, once', old.id using errcode = 'insufficient_privilege';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
 -- DEC-F12 (CON-017): required by a rule in force for the committee's kind (by item type, or by the item's
 -- legal-justification flag), or by the item's catalogue version. A NOT_REQUIRED rule never cancels another source.
 create or replace function decision.legal_review_required(p_package_id uuid)
@@ -3759,6 +4187,8 @@ alter table decision.legal_review_cancellation enable row level security;
 alter table decision.legal_opinion_revision enable row level security;
 alter table decision.conflict_taint_resolution enable row level security;
 alter table decision.vote_tally_entry enable row level security;
+alter table decision.conflict_remediation enable row level security;
+alter table decision.authority_decision_supersession enable row level security;
 
 -- decision.sanction_catalogue_version: no policy and no grant; read through decision.sanction_catalogue_entry.
 -- decision.vote_tally_entry: no policy and no grant; read only by the DEC-AMB-003 taint functions.
@@ -3818,6 +4248,16 @@ create policy conflict_taint_resolution_read on decision.conflict_taint_resoluti
                  where rm.id = conflict_taint_resolution.meeting_id and authz.can_manage_meeting(m.id))
          or (authz.has_permission('CONFLICT_MANAGE') and authz.can_view_case(case_id)));
 grant select on decision.conflict_taint_resolution to authenticated;
+-- DEC-AMB-013: a remediation names the conflicted members and carries results, so it is read by whoever reads the
+-- resolution that opened it, and by conflict managers who can view the case.
+create policy conflict_remediation_read on decision.conflict_remediation for select to authenticated
+  using (exists (select 1 from decision.conflict_taint_resolution r where r.id = conflict_remediation.resolution_id)
+         or (authz.has_permission('CONFLICT_MANAGE') and authz.can_view_case(case_id)));
+grant select on decision.conflict_remediation to authenticated;
+-- A supersession names decisions only: read with the package, as the decisions are.
+create policy authority_decision_supersession_read on decision.authority_decision_supersession for select to authenticated
+  using (authz.can_view_recommendation_package(package_id));
+grant select on decision.authority_decision_supersession to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Read models
@@ -3871,11 +4311,14 @@ select d.id as decision_id, d.package_id, d.case_id, d.package_round, d.authorit
          case when d.source_signature is null then 'SIGNATURE_NOT_RECORDED' end,
          case when exists (select 1 from decision.authority_decision_condition c
                            where c.decision_id = d.id and c.kind = 'FREE_TEXT') then 'FREE_TEXT_CONDITION' end,
-         case when d.delegation_reference is not null then 'DELEGATED' end], null)::text[] as flags
+         case when d.delegation_reference is not null then 'DELEGATED' end,
+         -- DEC-AMB-013: replaced through a conflict remediation; the decision itself is unchanged.
+         case when exists (select 1 from decision.authority_decision_supersession x where x.decision_id = d.id)
+              then 'SUPERSEDED' end], null)::text[] as flags
 from decision.authority_decision d;
 comment on view decision.authority_decision_overview is
-  'AMB-125, AMB-129, AMB-133 (migration 2030): authority decisions with UNSIGNED_SOURCE, SIGNATURE_NOT_RECORDED, '
-  'FREE_TEXT_CONDITION and DELEGATED flags. Rows follow authority_decision''s policy.';
+  'AMB-125, AMB-129, AMB-133, DEC-AMB-013 (migration 2030): authority decisions with UNSIGNED_SOURCE, '
+  'SIGNATURE_NOT_RECORDED, FREE_TEXT_CONDITION, DELEGATED and SUPERSEDED flags. Rows follow authority_decision''s policy.';
 grant select on decision.authority_decision_overview to authenticated;
 
 -- -----------------------------------------------------------------------------
@@ -4333,7 +4776,8 @@ begin
 end;
 $$;
 
--- AMB-100, AMB-051, Q87, DEC-F11: what the committee should see on each active item of a package. Read-only.
+-- AMB-100, AMB-051, Q87, DEC-F11, DEC-AMB-013: what the committee should see on each active item of a package.
+-- Read-only.
 create function api.recommendation_item_flags(p_package_id uuid)
 returns table (item_id uuid, flag text)
 language plpgsql stable security definer
@@ -4357,6 +4801,12 @@ begin
     select i.id, 'TAINTED_BY_CONFLICT'
     from decision.recommendation_item i
     where i.package_id = p_package_id and i.status = 'ACTIVE' and decision.item_tainted(i.id)
+    union all
+    -- DEC-AMB-013: the package is back with the committee and the authority until its new decision. Names nobody.
+    select i.id, 'CONFLICT_REMEDIATION'
+    from decision.recommendation_item i
+    where i.package_id = p_package_id and i.status = 'ACTIVE'
+      and exists (select 1 from decision.conflict_remediation r where r.package_id = i.package_id and r.status = 'OPEN')
     union all
     -- A dependency withdrawn, rejected by the committee, or not approved by an authority in the current round.
     select i.id, 'DEPENDENCY_NOT_APPROVED'
@@ -4716,6 +5166,11 @@ $$;
 -- have changed the result: the recount without every vote of theirs gives the same result (RESULT_MAY_CHANGE
 -- otherwise). RE_VOTE returns the package to the committee before it leaves it (not with Legal or the authority):
 -- the next round opens a new vote item on the same target and the tainted result no longer counts. Once per taint.
+-- DEC-AMB-013 (option A): on a DECIDED package, RE_VOTE is the committee's re-vote of a decisive taint (refused as
+-- RESULT_UNCHANGED where the recount gives the same result: CONFIRM applies). It opens decision.conflict_remediation
+-- and puts the package straight to VOTING in the next round, the same items; everyone whose vote tainted the decided
+-- round is excluded from every later vote on it. The authority decisions stay as recorded until the authority decides
+-- the new round (decision.close_conflict_remediation).
 create function api.resolve_conflict_taint(p_item_id uuid, p_resolution text, p_reason text)
 returns uuid
 language plpgsql security definer
@@ -4731,6 +5186,9 @@ declare
   v_reason text;
   v_recount text;
   v_status text;
+  v_round int;
+  v_excluded uuid[];
+  v_remediation uuid;
   v_id uuid;
 begin
   select * into v_i from decision.recommendation_item i where i.id = p_item_id;
@@ -4759,12 +5217,20 @@ begin
   if v_meeting is null then perform api._fail('CONFLICT', 'MEETING_NOT_OPEN'); end if;
   v_recount := decision.recount_without(v_vi.id, v_conflicted);
   v_status := v_p.status;
+  v_round := v_p.round_no;
   if p_resolution = 'CONFIRM' then
     if v_recount is null or v_recount <> v_vi.result then perform api._fail('CONFLICT', 'RESULT_MAY_CHANGE'); end if;
+  elsif v_p.status = 'DECIDED' then
+    -- DEC-AMB-013: only a taint that could have changed the result reopens a decided package; otherwise CONFIRM.
+    if v_recount is not null and v_recount = v_vi.result then perform api._fail('CONFLICT', 'RESULT_UNCHANGED'); end if;
+    -- Everyone whose vote taints the decided round, taken before this resolution covers some of them.
+    v_excluded := decision.round_conflicted(v_p.id, v_p.round_no);
+    if v_actor = any (v_excluded) then perform api._fail('FORBIDDEN'); end if;
+    v_status := 'VOTING';
+    v_round := v_p.round_no + 1;
   else
     if v_p.status = 'IN_LEGAL_REVIEW' then perform api._fail('CONFLICT', 'LEGAL_REVIEW_OPEN'); end if;
     if v_p.status = 'AWAITING_AUTHORITY' then perform api._fail('CONFLICT', 'PACKAGE_WITH_AUTHORITY'); end if;
-    if v_p.status = 'DECIDED' then perform api._fail('CONFLICT', 'PACKAGE_DECIDED'); end if;
     if exists (select 1 from committee.vote_item vi
                where vi.package_id = v_p.id and vi.package_round = v_p.round_no and vi.status <> 'CLOSED') then
       perform api._fail('CONFLICT', 'VOTE_IN_PROGRESS');
@@ -4778,7 +5244,19 @@ begin
   values (v_i.id, v_p.id, v_p.case_id, v_p.round_no, v_vi.id, v_meeting, p_resolution, v_conflicted, v_vi.result,
           coalesce(v_recount, 'NOT_RECOUNTABLE'), v_reason, v_actor)
   returning id into v_id;
-  if v_status <> v_p.status then
+  if v_p.status = 'DECIDED' and p_resolution = 'RE_VOTE' then
+    insert into decision.conflict_remediation (package_id, case_id, resolution_id, vote_item_id, decided_round,
+                                               revote_round, original_decided_at, conflicted_user_ids, conflict_events,
+                                               original_result, recount_result, opened_by)
+    values (v_p.id, v_p.case_id, v_id, v_vi.id, v_p.round_no, v_round, v_p.decided_at, v_excluded, '[]'::jsonb,
+            v_vi.result, coalesce(v_recount, 'NOT_RECOUNTABLE'), v_actor)
+    returning id into v_remediation;
+    update decision.recommendation_package
+       set status = v_status, round_no = v_round, adopted_at = null, decided_at = null, updated_at = now(),
+           row_version = row_version + 1
+     where id = v_p.id;
+    update decision.recommendation_item set committee_result = null where package_id = v_p.id and status = 'ACTIVE';
+  elsif v_status <> v_p.status then
     update decision.recommendation_package
        set status = v_status, adopted_at = null, updated_at = now(), row_version = row_version + 1
      where id = v_p.id;
@@ -4790,6 +5268,14 @@ begin
     jsonb_build_object('item_id', v_i.id, 'package_id', v_p.id, 'round_no', v_p.round_no, 'vote_item_id', v_vi.id,
                        'meeting_id', v_meeting, 'resolution', p_resolution, 'conflicted', cardinality(v_conflicted),
                        'package_status', v_status));
+  if v_remediation is not null then
+    perform audit.record_event('CONFLICT_REMEDIATION_OPENED', 'BUSINESS', 'SUCCESS', v_p.case_id, 'conflict_remediation',
+      v_remediation::text, null,
+      jsonb_build_object('package_id', v_p.id, 'resolution_id', v_id, 'decided_round', v_p.round_no,
+                         'revote_round', v_round, 'excluded', cardinality(v_excluded),
+                         'decisions_held', (select count(*) from decision.authority_decision d
+                                            where d.package_id = v_p.id and d.package_round = v_p.round_no)));
+  end if;
   return v_id;
 end;
 $$;
@@ -4907,7 +5393,9 @@ $$;
 
 -- Q80–Q83 as in 1900, per authority (AMB-126, AMB-127): one decision per authority type covers the items its
 -- submission requires of that authority. The package is DECIDED once every requirement of the round is decided;
--- joint authorities that disagree on an item, or RETURN_TO_COMMITTEE, return it. The decision records the delegation
+-- joint authorities that disagree on an item, or RETURN_TO_COMMITTEE, return it. On a package under conflict
+-- remediation, the decision that makes it DECIDED closes the remediation and supersedes the earlier round's decisions
+-- (DEC-AMB-013). The decision records the delegation
 -- reference (AMB-125), whether its source is signed (AMB-129: unsigned only with the secretary's attestation), further
 -- source documents beside the primary one (AMB-130) and structured conditions (AMB-133). decided_at is the authority's
 -- date and may not fall on a day before adoption (AMB-131, Asia/Riyadh).
@@ -5098,6 +5586,8 @@ begin
                              'has_delegation_reference', p_delegation_reference is not null,
                              'sources', 1 + cardinality(v_sources),
                              'conditions', coalesce(jsonb_array_length(p_conditions), 0)));
+  -- DEC-AMB-013: the decision that makes a remediated package DECIDED again replaces the earlier round's decisions.
+  if v_status = 'DECIDED' then perform decision.close_conflict_remediation(v_p.id, v_id); end if;
   return v_id;
 end;
 $$;
@@ -5373,6 +5863,8 @@ begin
                                and committee.member_seat_current(v_own.id)
                                and v_own.coi_status = 'NO_CONFLICT' and v_own.attendance = 'PRESENT'
                                and vi.status = 'OPEN'
+                               -- DEC-AMB-013: never on a re-vote that excludes the caller (decision.refuse_excluded_vote).
+                               and not decision.revote_excluded(vi.package_id, vi.package_round, v_me)
                                and not exists (select 1 from committee.vote v
                                                where v.vote_item_id = vi.id and v.participant_id = v_own.id),
                    -- api.close_vote_item: running the meeting, the item OPEN, no counting member present without a vote.
@@ -5380,6 +5872,8 @@ begin
                                 and not exists (select 1 from committee.meeting_participant mp
                                                 where mp.meeting_id = v_m.id and mp.coi_status = 'NO_CONFLICT'
                                                   and mp.attendance = 'PRESENT' and committee.counts_as_voter(mp.id)
+                                                  and not decision.revote_excluded(vi.package_id, vi.package_round,
+                                                                                   mp.user_id)
                                                   and not exists (select 1 from committee.vote v
                                                                   where v.vote_item_id = vi.id and v.participant_id = mp.id)),
                    -- api.cast_casting_vote: only the item's casting voter, on a tie the rule lets them break.

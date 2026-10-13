@@ -3,7 +3,9 @@
 - **Status:** Proposed (2026-10-13). Linear CDF-196 (rebase decision application; stays In Progress until hosted validation). Implemented in migrations 2030 and 2040 (local, pending security review). Amends ADR-019, ADR-020, ADR-024, ADR-038 and ADR-039.
 - **Owner decisions:**
   - the Finalization Set DEC-F01 to DEC-F41 (2026-10-13 02:54 UTC), recorded in `docs/business-architecture/OWNER_DECISIONS_FINALIZATION.md`;
-  - the ambiguity decisions DEC-AMB-001 to DEC-AMB-012 (2026-10-13 10:01 UTC), recorded in the same file, section 16.
+  - the ambiguity decisions DEC-AMB-001 to DEC-AMB-012 (2026-10-13 10:01 UTC), recorded in the same file, section 16;
+  - DEC-AMB-013, option A (2026-10-13 14:40 UTC, confirmed final 14:43), recorded in section 16 and applied in section 3 item 10 below;
+  - the Phase 12 owner pack (DEC-04, 05, 11, 12, 13, 18, 19, 22, 36, 48, 49, 51; 2026-10-13 14:43 UTC), recorded in section 17. PR-A builds none of it: the screens and migrations 2150 (ADR-052) and 2160 (ADR-053) belong to the UX thread. PR-A was checked against DEC-05, DEC-12, DEC-13, DEC-19 and DEC-49 (Consequences).
 - **Protocol:** §12–§14, §18–§22, §29, §65, §68, §87, §88.
 
 ## Context
@@ -170,14 +172,51 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
      - The resolution is stored in `decision.conflict_taint_resolution`, once per taint. The table is append-only.
      - It is read only by whoever runs a meeting of the proceeding and by conflict managers (CONFLICT_MANAGE) who can view the case (AGENT-09 early look, R1). It names the conflicted members, including case-level conflicts that only conflict managers read, and its recount would reveal a member's vote under a secret ballot. Every other viewer of the package sees only the TAINTED_BY_CONFLICT flag (`api.recommendation_item_flags`), which names nobody.
      - The ledger event `CONFLICT_TAINT_RESOLVED` carries ids, the resolution code, the count of conflicted members and the package status. It carries no reason, no member and no result, as `VOTE_REVISED` records no choice.
-   - **RE_VOTE.** The package goes back to DRAFT. The next round opens a new vote on the same target, so the tainted result never counts.
+   - **RE_VOTE.** Before the authority decides, the package goes back to DRAFT. The next round opens a new vote on the same target, so the tainted result never counts. On a decided package, RE_VOTE opens the remediation of item 10.
    - **CONFIRM.** Allowed only when the recount without every vote of the conflicted participants gives the same result under the snapshot's DEC-F01 rule and quorum. Otherwise it is refused with `RESULT_MAY_CHANGE`. That refusal tells the secretary that the conflicted votes were decisive; this disclosure, to the secretary only, is inherent in DEC-AMB-003 option B and is accepted (AGENT-09 early look, note a on pack 2).
      - `decision.recount_without` works from the counts and the votes the tally froze. Each counted conflicted participant leaves the eligible and present members, and their last choice leaves the tally. Approvals and rejections count; abstentions and recusals count neither way (DEC-F01). A vote the tally did not count changes nothing.
      - A tie stays broken only by a casting vote whose caster (the chair or an acting chair) is not excluded and whose tie is unchanged. Otherwise the recount is TIED.
      - The recount is null, so CONFIRM is refused, under a CUSTOM quorum, another decision rule, or a tally frozen before `decision.vote_tally_entry` existed.
    - **Who may not resolve it.** A conflicted participant, or anyone who raised a concern about one, gets FORBIDDEN.
-   - **Restrictions on RE_VOTE.** It is refused while a review is open, while the package is with the authority, or once it is decided.
+   - **Restrictions on RE_VOTE.** It is refused while a review is open or while the package is with the authority (the authority returns it first). On a decided package it is the DEC-AMB-013 path (item 10).
    - **The governing test** is `T-AMB-028: a conflict found after a vote or decision taints the item; the database refuses every downstream step until the committee resolves it by RE_VOTE or CONFIRM; CONFIRM needs documented reasoning and a result the conflicted participation could not have changed`, in `tests/security/recommendations-authority.spec.ts`.
+10. **Conflict found after the authority decided: DEC-AMB-013 (owner, 2026-10-13), option A (AMB-051).** This replaces the earlier fail-closed default ("a decided package stays blocked unless CONFIRM holds"), with its negative tests in the same migration. It is remediation of a tainted decision chain, never the closed-case reopening of DEC-AMB-002 (2060).
+
+- **Entry, only on a validated, decisive conflict.** The taint of item 9 already blocks everything downstream. The secretary records the committee's RE_VOTE with `api.resolve_conflict_taint` as before. On a DECIDED package it is accepted only when the recount without the conflicted votes differs from the result, or cannot be made. Where the recount gives the same result it is refused with `RESULT_UNCHANGED`, and the DEC-AMB-003 CONFIRM path applies.
+- **The remediation record.** RE_VOTE opens one `decision.conflict_remediation` per package, holding the lineage Fady listed:
+  - the resolution (whose row keeps the reason), the tainted vote item and the decided round;
+  - every member whose vote tainted any closed vote of that round, and each one's conflict events (meeting declaration, upheld concern, case conflict), taken by the database, never from the writer;
+  - the original result and the recount;
+  - once the authority decides again: the new round, the new vote on the same target, its result and the replacement decision.
+
+  A trigger refuses any remediation not backed by such a RE_VOTE on a decided package (`NO_VALIDATED_CONFLICT`), on every path. A remediation closes once, only on the authority's decision of a later round. It is never deleted.
+
+- **Back to the committee.** The package goes straight to VOTING in the next round with the same items. `decision.protect_records` lets a decided package change only this way, once per open remediation.
+- **Excluded from the re-vote.** `decision.revote_excluded` keeps every conflicted member of the decided round out of every later vote on the package:
+  - no vote row of any kind (their own vote, a recusal, or one the secretary records), refused with `EXCLUDED_BY_CONFLICT` by a trigger on `committee.vote`;
+  - not eligible and not present for quorum (`committee.quorum_state` with the package round), at opening and at the close;
+  - never awaited at the close;
+  - `api.meeting_view` offers them no vote.
+
+  A casting vote needs the caster's own counted vote, so an excluded chair never casts. A DEC-AMB-010 reversal of the conflict does not lift the exclusion: the remediation exists because of that conflict (fail closed).
+
+- **Preserved, then superseded.** The original votes, tally, resolution and authority decisions are not edited. When the authority's decision makes the package DECIDED again, `decision.close_conflict_remediation` closes the remediation and marks each decision of the remediated round SUPERSEDED in `decision.authority_decision_supersession`, naming the replacement. A trigger refuses a supersession before that replacement exists (`REPLACEMENT_DECISION_REQUIRED`). The table is append-only. `decision.authority_decision_overview` flags a superseded decision `SUPERSEDED`.
+- **Downstream blocked.** `decision.decision_block(decision)` gives `TAINTED_BY_CONFLICT`, `CONFLICT_REMEDIATION_OPEN` (while the package is being re-voted and re-decided) or `DECISION_SUPERSEDED` (for good). Every downstream guard reads it:
+  - opening a corrective action;
+  - progress on one (status or percentage; the due date, the owner and a waiver are not progress);
+  - issuing a decision notice, and delivering one (2040), so no grievance window starts on such a decision;
+  - executing a sanction (2040, `decision.execution_block`);
+  - case closure (a trigger on `case_record`).
+
+  Reminders skip actions of a blocked decision, and `api.corrective_action_view` shows the code to the case team with the progress capabilities off. The package's items carry the flag `CONFLICT_REMEDIATION` while the remediation is open.
+
+- **Reads and audit.** A remediation names the conflicted members and carries results, so it is read like the resolution: by whoever runs a meeting of the proceeding, and by conflict managers who can view the case. A supersession names decisions only and is read with the package. The ledger gets `CONFLICT_REMEDIATION_OPENED`, `AUTHORITY_DECISION_SUPERSEDED` and `CONFLICT_REMEDIATION_CLOSED` with ids, rounds and counts: no member, no result, no reason.
+- **Tests** (`tests/security/recommendations-authority.spec.ts`, "found after the authority decided (DEC-AMB-013 …)"), one per negative Fady named:
+  - a decisive tainted vote is never confirmed (command and table);
+  - only the committee's RE_VOTE on a validated conflict sends a decided package back (untainted, non-decisive, a CONFIRM resolution, a direct status change and a forged remediation are all refused);
+  - the conflicted member takes no part, even after a reversal;
+  - the earlier decision stays unchanged and is superseded only after the replacement;
+  - downstream execution stays blocked until the new decision.
 
 ### 4. Purpose read models, meeting notices and demo seats (2030, section 4)
 
@@ -253,6 +292,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
     - `decision.execution_block` is the single source for the execution guard trigger and for `api.sanction_executability`.
     - It refuses on undelivered notices (AMB-109), on the employment rule (DEC-AMB-009), on a grievance that cancelled the item or returned it for reinvestigation (DEC-AMB-011), and on the suspension rule (DEC-AMB-004).
     - It also refuses while the package carries an unresolved TAINTED_BY_CONFLICT item (DEC-AMB-003). That item stays blocked even if the taint arises after the decision notice.
+    - It refuses a decision under conflict remediation or superseded (DEC-AMB-013, section 3 item 10). While the package is back with the committee, `api.record_sanction_execution` says `CONFLICT_REMEDIATION_OPEN`, and `api.sanction_executability` keeps listing the sanction under its earlier decision, blocked. After the new decision the sanction is executed under the new decision, once its own notice is delivered.
 11. **A failed mandatory email notice (AMB-175).** It opens a delivery task for the issuer.
 12. **Corrective actions (DEC-F26, F27, F28; CON-009).**
     - Escalation steps, evidence types and owner kinds, including pools. Pools are acted for through `decision.acts_for_action`.
@@ -320,6 +360,13 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
   - **Widened by owner decision:**
     - `authz.can_view_meeting_concern`: an eligible reverser and the reverser can read the concern (DEC-AMB-010);
     - `authz.has_meeting_conflict`: a conflict that came only from a reversed determination no longer counts (DEC-AMB-010).
+  - **DEC-AMB-013 (section 3 item 10):** two new tables, select-only, with RLS. `decision.conflict_remediation` is read like `decision.conflict_taint_resolution`; `decision.authority_decision_supersession` is read with the package. `decision.protect_records` admits one new transition (DECIDED back to VOTING, only under an open remediation). Quorum, the close check and `may_vote` are narrowed by the re-vote exclusion. Nothing is widened.
+- **Phase 12 owner pack (section 17), checked against PR-A without widening it:**
+  - DEC-19 (snapshot for decision-relevant data): satisfied. Rule snapshots, frozen tallies, packets, authority requirements and decisions are snapshots; DEC-AMB-013 keeps the superseded decision unchanged.
+  - DEC-49 (workflow follows the object): satisfied. Every 2030/2040 command keys on the case, proceeding, package, action, notice or grievance; catalogue rows own nothing.
+  - DEC-05 (S3 rules kept): nothing in PR-A changes them.
+  - DEC-13 (clearance): PR-A adds no clearance command; the 2015 refusal (null keeps, true to false refused) stands.
+  - DEC-12 (dual control): three PR-A grants that can widen access are single-approver today and are listed for 2160 (ADR-053): `api.appoint_conflict_authority` (2030), `api.add_export_approver` and `api.authorize_continuity_operator` (2040). Each refuses self-grant; none has a second approver yet. Separately, `api.set_corrective_action_pool_member` (2040) lets the corrective-action policy administrator add themselves to a pool. Revocations stay immediate, as DEC-12 allows.
 - Screen impacts for Phase 12 (UX) are listed in `rebase/review/` with the early-look pack:
   - the acting chair, acting secretary and alternate activations;
   - emergency scheduling;
@@ -336,3 +383,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
 - Enabling INTERPRETER, and the acknowledgement wording reference.
 - An approval path for amending a restricted case's snapshot.
 - Whether the Restricted Case Authority names a grievance admissibility decider on a restricted case where no seated decider can view the case. Until a source decides it, nobody is asked (fail closed).
+- After DEC-AMB-013 supersedes a decision (fail closed until decided):
+  - a corrective action opened under it stays frozen, and the case cannot close until it is waived;
+  - a sanction already executed under it stays recorded and is not executed again;
+  - a grievance already filed on it is left as it is.

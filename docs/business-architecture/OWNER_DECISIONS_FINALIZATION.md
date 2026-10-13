@@ -96,7 +96,7 @@ The decision text below is the owner's, lightly reformatted.
 
 - **DEC-F41: corrective action from preliminary review.** The architecture may let a corrective action originate from preliminary Compliance review, but not automatically for every preliminary case: only where the configured business rule permits. The preliminary team may recommend a corrective action without escalating to the Investigation Committee where the matter needs no committee investigation or disciplinary action. Any authority or approval requirement for the action follows its corrective-action type. Configurable and auditable.
 
-## 16. Ambiguity register: owner decisions DEC-AMB-001 to DEC-AMB-012
+## 16. Ambiguity register: owner decisions DEC-AMB-001 to DEC-AMB-013
 
 Given on 2026-10-13 (10:01 UTC, project timeline) on `OWNER_PACK.md` of the ambiguity register (PR #60). Every item takes the recommended option, and these decisions supersede the temporary fail-safe defaults. Fail-safes stay in place until the replacement rule and its negative tests are in the same migration. For DEC-AMB-012, the CDF-206 prohibition on lifting restriction stays until the two-person path is built and security-cleared. Placement: ADR-040 (2030, 2040), ADR-041 (2050), ADR-042 (2060), ADR-048 (2120), ADR-049 (2130).
 
@@ -112,6 +112,70 @@ Given on 2026-10-13 (10:01 UTC, project timeline) on `OWNER_PACK.md` of the ambi
 - **DEC-AMB-010 → B.** An upheld conflict determination may be reversed by the next eligible decider in the DEC-F04 hierarchy, with documented reason and audit. Reversal applies prospectively to future meetings and actions only and does not retroactively validate participation in meetings from which the member was excluded.
 - **DEC-AMB-011 → A.** A grievance outcome never makes the challenged disciplinary sanction more severe. It may uphold, reduce, modify in a non-more-severe manner, or cancel it. If genuinely new facts justify a potentially more severe sanction, that proceeds through the appropriate reinvestigation or new decision process with full due-process protections, not through the grievance.
 - **DEC-AMB-012 → C.** Restricted status may be lifted only through two-person control: the case's Restricted Case Authority plus an independent second authorized approver. Require reason, audit, and a preview of the access population and permissions that would become available after declassification. No user may approve their own second approval.
+
+DEC-AMB-013 was given on 2026-10-13 (14:40 UTC, project timeline) and confirmed as final at 14:43 ("remove it from future owner packs"). Placement: ADR-040 section 3 item 10, migration 2030 §3.10, with the downstream guards in 2040.
+
+- **DEC-AMB-013 → A.** If a conflict of interest is discovered after the competent authority has already decided, and the conflicted member's participation could have changed the substantive voting result:
+  1. Mark the affected vote/recommendation package `TAINTED_BY_CONFLICT`.
+  2. Immediately block any further downstream action based on that decision.
+  3. Reopen the affected committee decision round for a new vote excluding the conflicted member.
+  4. Recalculate quorum and eligibility for the new round.
+  5. Preserve the original vote, recommendation and authority decision as immutable historical records.
+  6. After the committee completes the valid re-vote, submit the resulting recommendation/package to the competent authority for a new decision.
+  7. The earlier authority decision is never edited or deleted; it is marked `SUPERSEDED`.
+  8. Record the reason, conflict event, affected member, original result, new result, authority re-decision and complete audit lineage.
+  9. No corrective action, sanction execution, decision notice or closure may proceed from the tainted decision while this remediation path is open.
+  10. If the conflicted vote could not have changed the result, retain the existing DEC-AMB-003 confirmation path instead; do not force a re-vote unnecessarily.
+
+  Do not route this through the ordinary closed-case reopening mechanism under DEC-AMB-002. This is remediation of a procedurally tainted decision chain, not a new-evidence reopening. Implement under migration 2030 with negative tests ensuring: a decisive tainted vote cannot be confirmed; a decided package can enter this controlled re-vote path only because of the validated conflict event; the conflicted member cannot participate; the prior authority decision remains immutable and is marked superseded only after the replacement decision; downstream execution remains blocked until the new authority decision is recorded.
+
+  The three values that stay `SOURCE_REQUIRED` need governing sources, not design decisions: the sanction types suspended during a grievance, the sanction severity ranking, and the identity of the second approver for lifting restriction.
+
+## 17. Phase 12 owner pack: DEC-04, DEC-05, DEC-11, DEC-12, DEC-13, DEC-18, DEC-19, DEC-22, DEC-36, DEC-48, DEC-49, DEC-51
+
+Given on 2026-10-13 (14:43 UTC, project timeline) as "Approved owner decisions for the Phase 12 screens. Treat these as final owner decisions and remove them from the open-decision register once recorded." They replace the defaults the Phase 12 plan ran on. Placement: the UX thread's Phase 12 slices, migration 2150 (ADR-052: DEC-18, DEC-48, DEC-04 withdrawal) and migration 2160 (ADR-053: DEC-11, DEC-12, DEC-13, DEC-36); DEC-05, DEC-19, DEC-22, DEC-49 and DEC-51 apply to the screens and read models as built.
+
+### S3
+
+- **DEC-04: form RACI and withdrawal.** Preserve capability-based RACI rather than tying forms to generic job titles. For withdrawal:
+  - `DRAFT` / not yet submitted: the authorized creator may withdraw/delete the draft according to normal draft handling.
+  - Once formally submitted: do not hard-delete or erase the submission.
+  - The originating authorized actor may submit a withdrawal request.
+  - The system records: requested by; requested at; reason; current workflow state; approving/accepting authority where required.
+  - Withdrawal does not erase prior audit history, submissions, approvals or evidence.
+  - If a downstream governance proceeding has already materially begun, withdrawal of the source does not automatically terminate the proceeding.
+
+  Keep access capability-driven and auditable.
+
+- **DEC-05: four remaining S3 items.** Keep the four current rules/defaults already implemented unless one of them directly conflicts with a later confirmed owner decision, DEC-F decision, DEC-AMB decision, security invariant or purpose-bound access rule. Do not reopen them simply for Phase 12 UI work. If a genuine contradiction is discovered, raise only that specific contradiction rather than reopening DEC-05 as a whole.
+
+- **DEC-19: snapshot vs reference in forms.** Use a hybrid model, with snapshot as the rule for decision-relevant data. At a material workflow event such as submission, approval, committee referral, vote opening, recommendation adoption, authority submission or final issuance, snapshot the data necessary to establish what the actor actually saw/approved at that moment. Live reference may remain for non-material current metadata where historical mutation cannot change the meaning of the completed action. Therefore `DECISION_RELEVANT_DATA = SNAPSHOT` and `NON_MATERIAL_REFERENCE_DATA = LIVE_REFERENCE_WHERE_SAFE`. Never allow later edits to silently rewrite the factual basis of a completed decision.
+
+- **DEC-49: form gating and plan ownership.** Preserve today's workflow gates as the baseline, but ownership follows the business object/work item, not the legacy form. A form/component must not become an independent workflow owner simply because it exists in the catalogue. Use `CASE / PROCEEDING / TASK / ACTION OWNER → controls workflow`, not `FORM OWNER → controls workflow`. The 274-form catalogue remains a control catalogue, not a workflow-ownership model. Existing gates stay until explicitly replaced by a confirmed business rule.
+
+### S4
+
+- **DEC-22: My Work row fields.** Approve the proposed privacy-minimised design. A My Work row may show: action label; object/reference ID; non-sensitive code/type; status; received/created/due dates where authorized/configured; priority where configured. The case number is displayed only if the user has case-metadata visibility. Do not expose subject name, allegation text, reporter identity, sensitive case title or restricted-case existence unless independently authorized. A purpose-route user should be able to act without receiving additional case discovery.
+
+- **DEC-18: server-side drafts.** Enable controlled server-side drafts for authenticated internal users, but not as an unrestricted global feature. Requirements: purpose-bound authorization; encrypted normal application storage; user-specific or authorized collaborative ownership; no browser/local-storage persistence; explicit draft status; configurable TTL/retention; automatic deletion/expiry where permitted; stale-version protection; audit of create/update/delete; drafts never count as official submissions; draft content must not appear in reporting, notifications or search as submitted content. Keep server drafts disabled for: anonymous whistleblowing submissions unless separately designed and approved; unauthenticated flows; evidence binaries; workflows where an approved security rule prohibits draft persistence. For restricted cases, the normal restricted-case authorization gates apply to drafts as well.
+
+### S5
+
+- **DEC-48: finding vocabularies.** Findings use governed, configurable and effective-dated vocabularies. Do not hard-code a speculative CDF finding catalogue. The vocabulary must support: code; Arabic name; English name; definition; applicable allegation/category; effective dates; active/inactive status; outcome semantics. Where no authoritative vocabulary exists: `SOURCE_REQUIRED`. Allow an authorized `OTHER` / exceptional finding only with mandatory rationale, without automatically creating new master-data vocabulary. The rebase Q&A and approved business architecture take precedence over legacy catalogue terminology.
+
+- **DEC-51: Hijri dates on generated records.** Use dual-date presentation on formal generated records: Gregorian primary + Hijri secondary where the generated document benefits from an official/date-record presentation. Canonical system storage remains an unambiguous machine date/time representation; do not store the Hijri rendering as the authoritative underlying timestamp. UI operational screens may remain Gregorian-first unless a user display preference is later introduced. Example presentation: `13 October 2026 (2 Jumada I 1448H)`. Use an approved date-conversion implementation and do not manually hard-code conversions.
+
+### S6: governance and reporting
+
+- **DEC-11: oversight free text.** Do not provide unrestricted free-text case commentary in Oversight. Oversight should primarily use structured, governed information. Where narrative context is genuinely necessary, implement a separate controlled `OVERSIGHT_NOTE` with author, timestamp, purpose, classification, audit and appropriate access control. It must not become a shadow case file or a place to copy allegations/evidence. Default general free-text field remains hidden.
+
+- **DEC-12: dual control on role grants.** Introduce risk-based dual control for privileged/sensitive access grants. Dual control is mandatory for grants that can materially expand access, including at least: role administration; clearance administration; restricted-case authorities; export-policy administration; second-approval authorities; committee administration where it can grant access; other privileged security/business-administration capabilities. Requirements: `REQUESTER ≠ APPROVER`; no self-approval. Routine low-risk business assignments may remain single-approver where configured. Revocation/lowering of access must not be delayed merely to satisfy dual control when immediate removal is required for security. All grant changes are audited and effective-dated.
+
+- **DEC-13: clearance command and owner.** Build an explicit clearance-management capability, but keep the exact organizational owner configurable until confirmed by the governing authority/DoA. Do not let generic `ROLE_ADMIN`, technical admin or committee administration change clearance. Introduce a dedicated authority such as `CLEARANCE_ADMIN` with controlled commands for assign, increase, reduce, expire and revoke. Rules: clearance elevation requires authorized approval and full audit; lowering/revocation takes effect immediately; no self-approval; historical clearance state is retained; changing clearance immediately changes restricted-object eligibility; technical administrators receive no case-content rights from administering the platform. Exact named organizational owner: `SOURCE_REQUIRED`. Until an authorized holder is configured, the command remains fail closed.
+
+- **DEC-36: reporting role and KPIs.** Build governed reporting capability. Do not implement a broad global `REPORTING_ROLE` that automatically grants case access. Use explicit reporting permissions and purpose-bound aggregate/read models. Reporting must support configurable KPIs such as: intake volume; source/channel; preliminary-review aging; referral turnaround; committee workload; meeting/voting/minutes timeliness; grievance volumes and outcomes; corrective-action status; overdue actions; closure aging; repeat issues/patterns; compliance with configured SLAs. Security requirements: no reporter identity in ordinary reporting; no unrestricted allegation/evidence text; restricted cases visible only according to clearance; suppression/aggregation rules remain `SOURCE_REQUIRED` where policy is missing; dashboard counts must not leak existence of hidden cases; drill-down requires the underlying authorization independently. Navigation: do not automatically create a sixth primary navigation area. For users who already have `Oversight`, surface Reporting inside Oversight. A standalone `Reporting` primary area may be shown only to users whose responsibilities are principally reporting and where the ≤5-primary-area rule remains satisfied.
+
+Implementation direction (owner): these decisions unblock the Phase 12 governance/reporting design. Update `PHASE12_PLAN.md`, the owner-decision register, the relevant ADRs, the read-model requirements, the authorization matrix, the Phase 12 tests and the UX debt crosswalk, then proceed according to the existing Phase 12 slice order. Do not wait on `SOURCE_REQUIRED` values where a safe configurable architecture can already be built. The Phase 12 UI remains: work-led · case-homed · purpose-bound · guided-by-design.
 
 ## Implementation instruction (owner)
 

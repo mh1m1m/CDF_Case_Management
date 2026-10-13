@@ -17,6 +17,7 @@ import {
 } from "../support/db";
 import { REASON, committeeIds, preliminaryReferral, seat } from "../support/committee";
 import {
+  DECISION_VOTERS,
   authorityRuleFor,
   closePackageVotes,
   draftPackage,
@@ -2177,6 +2178,601 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
         await s.as("committeeSecretary");
         await s.tx`select api.close_meeting(${f.meeting.meeting}, ${REASON})`;
         await s.expectError("CDF_CONFLICT:MEETING_NOT_OPEN", () => resolve(s, f.sanction, "CONFIRM"));
+      });
+    });
+
+    describe("found after the authority decided (DEC-AMB-013, owner, 2026-10-13, option A)", () => {
+      const REMEDIATION = "CDF_CONFLICT:CONFLICT_REMEDIATION_OPEN";
+      const SUPERSEDED = "CDF_CONFLICT:DECISION_SUPERSEDED";
+      const NOTICE = "Synthetic: the decision on your case.";
+
+      /** Chair and lead approve, legal rejects (the lead's vote decides); after legal review the CEO decides round one. */
+      async function decidedByLead(s: Scenario): Promise<{ f: PackageFixture; d1: string; vi1: string }> {
+        const f = await draftPackage(s, ic, caseB);
+        expect(await voteOnPackage(s, f, decisive)).toBe("ADOPTED");
+        await toAuthority(s, f);
+        await s.as("committeeSecretary");
+        const [d] = await decideWith(s, f, "CEO", "APPROVE_AS_RECOMMENDED");
+        const [vi] = await s.tx<{ id: string }[]>`
+          select id from committee.vote_item where package_id = ${f.pkg} and package_round = 1`;
+        return { f, d1: d!.id, vi1: vi!.id };
+      }
+      /** The current round's package vote in `meeting`: each voter approves, then the secretary closes it. */
+      async function revote(
+        s: Scenario,
+        f: PackageFixture,
+        meeting: string,
+        voters: UserKey[],
+      ): Promise<string> {
+        await s.as("committeeSecretary");
+        await s.tx`select api.open_package_vote(${meeting}, ${f.pkg})`;
+        const [vi] = await s.tx<{ id: string }[]>`
+          select vi.id from committee.vote_item vi
+          join decision.recommendation_package p on p.id = vi.package_id and vi.package_round = p.round_no
+          where p.id = ${f.pkg}`;
+        for (const u of voters) {
+          await s.as(u);
+          await s.tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`;
+        }
+        await s.as("committeeSecretary");
+        await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+        return vi!.id;
+      }
+      /** The package's remediations, read as the table owner. */
+      async function remediation(s: OwnerScenario, pkg: string) {
+        await s.asOwner();
+        return s.tx<Record<string, unknown>[]>`
+          select status, decided_round, revote_round, conflicted_user_ids, conflict_events, original_result,
+                 recount_result, redecided_round, new_vote_item_id, new_result, replacement_decision_id
+          from decision.conflict_remediation where package_id = ${pkg}`;
+      }
+      async function superseded(s: OwnerScenario, pkg: string) {
+        await s.asOwner();
+        return s.tx<{ decision_id: string; superseded_by: string }[]>`
+          select decision_id, superseded_by from decision.authority_decision_supersession where package_id = ${pkg}`;
+      }
+      /** The case manager opens the corrective item's action, owned by the implementation owner. */
+      const openAction = (s: Scenario, f: PackageFixture) =>
+        s.tx<{ id: string }[]>`
+          select api.open_corrective_action(${f.corrective}, 'Synthetic: strengthen approval controls',
+            'Synthetic: add a second approver to payments above the threshold.', ${USERS.financeEmployee},
+            (now() at time zone 'Asia/Riyadh')::date + 5) as id`;
+      const implementationOwner = async (s: Scenario) => {
+        await s.as("platformAdmin");
+        await s.tx`select api.grant_role(${USERS.financeEmployee}, 'IMPLEMENTATION_OWNER',
+          'Synthetic: implementation owner for the test')`;
+      };
+      const closeCase = (s: Scenario) =>
+        s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', 'Synthetic: closing after the decision.')`;
+
+      it("T-AMB-028: a decisive tainted vote is never confirmed; the committee votes again without the conflicted member, the authority decides again, and only then is the earlier decision marked SUPERSEDED, never edited", async () => {
+        await ownerScenario(async (s) => {
+          await implementationOwner(s);
+          const { f, d1, vi1 } = await decidedByLead(s);
+          await s.asOwner();
+          const [before] =
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`;
+          const concern = await upheldOnLead(s, f);
+          await s.as("committeeSecretary");
+          expect(await tainted(s, f)).toEqual(bothTainted(f));
+
+          // 1. The lead's vote decided (two to one; one to one without it): CONFIRM is refused by the command, and a
+          //    confirmation that records a different recount is refused at the table.
+          await s.expectError("CDF_CONFLICT:RESULT_MAY_CHANGE", () => resolve(s, f.sanction, "CONFIRM"));
+          await s.asOwner();
+          await s.expectError(
+            'new row for relation "conflict_taint_resolution" violates check constraint "conflict_taint_resolution_check"',
+            (tx) =>
+              tx`insert into decision.conflict_taint_resolution (item_id, package_id, case_id, package_round, vote_item_id,
+                   meeting_id, resolution, conflicted_user_ids, original_result, recount_result, reason, resolved_by)
+                 values (${f.sanction}, ${f.pkg}, ${caseB}, 1, ${vi1}, ${f.meeting.meeting}, 'CONFIRM',
+                   ${[USERS.lead]}::uuid[], 'APPROVED', 'TIED', ${FIRM}, ${USERS.committeeSecretary})`,
+          );
+          // Nothing proceeds from the tainted decision.
+          await s.as("caseManager");
+          await s.expectError(
+            TAINT,
+            (tx) => tx`select api.issue_decision_notice(${f.subject}, ${d1}, ${NOTICE})`,
+          );
+          await s.expectError(TAINT, () => openAction(s, f));
+
+          // 2. RE_VOTE on the validated conflict opens the remediation: the package goes straight back to the committee
+          //    for a new vote in round two, with the same items.
+          await s.as("committeeSecretary");
+          await resolve(s, f.sanction, "RE_VOTE");
+          expect(await packageStatus(s, f.pkg)).toEqual({ status: "VOTING", round_no: 2 });
+          expect(await tainted(s, f)).toEqual([]);
+          expect((await flags(s, f.pkg)).filter((x) => x.endsWith(":CONFLICT_REMEDIATION")).sort()).toEqual(
+            [`${f.sanction}:CONFLICT_REMEDIATION`, `${f.corrective}:CONFLICT_REMEDIATION`].sort(),
+          );
+          await s.asOwner();
+          const [mc] = await s.tx<{ id: string }[]>`
+            select id from committee.meeting_conflict
+            where participant_id = ${f.meeting.participant.lead!} and status = 'CONFLICT_DECLARED'`;
+          const lineage = {
+            decided_round: 1,
+            revote_round: 2,
+            conflicted_user_ids: [USERS.lead],
+            conflict_events: [
+              { user_id: USERS.lead, source: "MEETING_CONFLICT", id: mc!.id },
+              { user_id: USERS.lead, source: "UPHELD_CONCERN", id: concern },
+            ],
+            original_result: "APPROVED",
+            recount_result: "TIED",
+          };
+          expect(await remediation(s, f.pkg)).toEqual([
+            {
+              ...lineage,
+              status: "OPEN",
+              redecided_round: null,
+              new_vote_item_id: null,
+              new_result: null,
+              replacement_decision_id: null,
+            },
+          ]);
+          // The earlier decision stands as recorded: it is not superseded before the replacement exists.
+          expect(await superseded(s, f.pkg)).toEqual([]);
+          const [r] = await s.tx<
+            { id: string }[]
+          >`select id from decision.conflict_remediation where package_id = ${f.pkg}`;
+          await s.expectError(
+            "CDF_CONFLICT:REPLACEMENT_DECISION_REQUIRED",
+            (tx) =>
+              tx`insert into decision.authority_decision_supersession (decision_id, package_id, case_id, remediation_id,
+                   superseded_by) values (${d1}, ${f.pkg}, ${caseB}, ${r!.id}, ${randomUUID()})`,
+          );
+
+          // 3. While the remediation is open nothing proceeds from the earlier decision, on any path: no notice, no
+          //    corrective action, no closure of the case.
+          await s.as("caseManager");
+          await s.expectError(
+            "CDF_CONFLICT:SUBJECT_NOT_IN_DECISION",
+            (tx) => tx`select api.issue_decision_notice(${f.subject}, ${d1}, ${NOTICE})`,
+          );
+          await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () => openAction(s, f));
+          await s.expectError(REMEDIATION, () => closeCase(s));
+          await s.asOwner();
+          await s.expectError(
+            REMEDIATION,
+            (tx) =>
+              tx`insert into grievance.defence_notice (case_id, subject_id, sequence_no, notice_text, issued_by, issued_at,
+                   kind, authority_decision_id, grievance_rule_set_id, grievance_window_days, window_start_basis)
+                 select ${caseB}, ${f.subject}, 9, ${NOTICE}, ${USERS.caseManager}, now(), 'DECISION', ${d1}, r.id, 30,
+                   'DELIVERY'
+                 from committee.rule_set r where r.committee_id = ${gc} and r.effective_to is null`,
+          );
+          await s.expectError(
+            REMEDIATION,
+            (tx) =>
+              tx`insert into decision.corrective_action (case_id, recommendation_item_id, authority_decision_id,
+                   action_type, sequence_no, title, description, owner_id, due_date, created_by)
+                 values (${caseB}, ${f.corrective}, ${d1}, 'CORRECTIVE_ACTION', 1, 'Synthetic: approval controls',
+                   'Synthetic: add a second approver.', ${USERS.financeEmployee}, current_date + 30, ${USERS.caseManager})`,
+          );
+
+          // 4. The re-vote in the meeting still open, without the lead; chair and legal approve, two of two.
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_package_vote(${f.meeting.meeting}, ${f.pkg})`;
+          const [open] = await s.tx<{ id: string }[]>`
+            select id from committee.vote_item where package_id = ${f.pkg} and package_round = 2`;
+          await s.as("lead"); // conflicted in this meeting, the lead does not even reach the item (W1)
+          await s.expectError(
+            "CDF_NOT_FOUND",
+            (tx) => tx`select api.cast_vote(${open!.id}, 'APPROVE', null)`,
+          );
+          for (const u of ["committeeChair", "legal"] as const) {
+            await s.as(u);
+            await s.tx`select api.cast_vote(${open!.id}, 'APPROVE', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.close_vote_item(${open!.id}, null)`;
+          const vi2 = open!.id;
+          await s.asOwner();
+          expect(
+            await s.tx`select result, eligible_count, present_count from committee.vote_item where id = ${vi2}`,
+          ).toEqual([{ result: "APPROVED", eligible_count: 2, present_count: 2 }]);
+          await s.as("committeeSecretary");
+          expect(await s.tx`select api.record_package_adoption(${f.pkg}) as status`).toEqual([
+            { status: "ADOPTED" },
+          ]);
+          await toAuthority(s, f);
+          // Adopted again and with the authority: still open, nothing superseded yet.
+          expect((await remediation(s, f.pkg))[0]).toMatchObject({ status: "OPEN" });
+          expect(await superseded(s, f.pkg)).toEqual([]);
+
+          // 5. The authority decides round two: the remediation closes with its lineage, and only now is the round-one
+          //    decision marked SUPERSEDED. Its row is unchanged.
+          await s.as("committeeSecretary");
+          const [d2] = await decideWith(s, f, "CEO", "APPROVE_AS_RECOMMENDED");
+          expect(await packageStatus(s, f.pkg)).toEqual({ status: "DECIDED", round_no: 2 });
+          expect(await superseded(s, f.pkg)).toEqual([{ decision_id: d1, superseded_by: d2!.id }]);
+          expect(await remediation(s, f.pkg)).toEqual([
+            {
+              ...lineage,
+              status: "REDECIDED",
+              redecided_round: 2,
+              new_vote_item_id: vi2,
+              new_result: "APPROVED",
+              replacement_decision_id: d2!.id,
+            },
+          ]);
+          await s.asOwner();
+          expect(
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`,
+          ).toEqual([before]);
+          await s.as("committeeSecretary");
+          expect(
+            await s.tx`select decision_id, 'SUPERSEDED' = any (flags) as superseded
+                       from decision.authority_decision_overview where package_id = ${f.pkg}
+                       order by package_round`,
+          ).toEqual([
+            { decision_id: d1, superseded: true },
+            { decision_id: d2!.id, superseded: false },
+          ]);
+          expect((await flags(s, f.pkg)).filter((x) => x.endsWith(":CONFLICT_REMEDIATION"))).toEqual([]);
+
+          // 6. Nothing proceeds from the superseded decision, for good; the new decision goes ahead.
+          await s.as("caseManager");
+          await s.expectError(
+            SUPERSEDED,
+            (tx) => tx`select api.issue_decision_notice(${f.subject}, ${d1}, ${NOTICE})`,
+          );
+          await s.tx`select api.issue_decision_notice(${f.subject}, ${d2!.id}, ${NOTICE})`;
+          const [a] = await openAction(s, f);
+          await s.asOwner();
+          expect(
+            await s.tx`select authority_decision_id from decision.corrective_action where id = ${a!.id}`,
+          ).toEqual([{ authority_decision_id: d2!.id }]);
+
+          // 7. The records are immutable: the supersession and the remediation are kept, and a closed remediation does
+          //    not open again.
+          await s.expectError(
+            "decision.authority_decision_supersession is append-only",
+            (tx) => tx`update decision.authority_decision_supersession set superseded_by = decision_id`,
+          );
+          await s.expectError(
+            "decision.authority_decision_supersession is append-only",
+            (tx) => tx`delete from decision.authority_decision_supersession`,
+          );
+          await s.expectError(
+            "decision.conflict_remediation is append-only",
+            (tx) => tx`delete from decision.conflict_remediation`,
+          );
+          await s.expectError(
+            "conflict remediation",
+            (tx) => tx`update decision.conflict_remediation set status = 'OPEN', redecided_round = null,
+                         new_vote_item_id = null, new_result = null, replacement_decision_id = null, redecided_at = null`,
+          );
+          await s.expectError(
+            "conflict remediation",
+            (tx) =>
+              tx`update decision.conflict_remediation set conflicted_user_ids = ${[USERS.legal]}::uuid[]`,
+          );
+
+          // 8. Read by whoever reads the resolution (the meeting secretary, a conflict manager on the case); the other
+          //    members and the legal reviewer read neither. The supersession names decisions only: read with the package.
+          for (const u of ["committeeSecretary", "caseManager"] as const) {
+            await s.as(u);
+            expect(await s.tx`select id from decision.conflict_remediation`, u).toHaveLength(1);
+          }
+          for (const u of ["committeeChair", "legal", "legalB", "committee", "investigatorA"] as const) {
+            await s.as(u);
+            expect(await s.tx`select id from decision.conflict_remediation`, u).toEqual([]);
+          }
+          await s.as("committeeChair");
+          expect(await s.tx`select decision_id from decision.authority_decision_supersession`).toEqual([
+            { decision_id: d1 },
+          ]);
+          await s.as("investigatorA");
+          expect(await s.tx`select decision_id from decision.authority_decision_supersession`).toEqual([]);
+
+          // 9. The ledger has ids, rounds and counts: no conflicted member, no result, no reason.
+          await s.as("dpo");
+          const events = await s.tx<{ action: string; metadata: Record<string, unknown> }[]>`
+            select action, metadata from audit.audit_event
+            where action in ('CONFLICT_REMEDIATION_OPENED', 'AUTHORITY_DECISION_SUPERSEDED', 'CONFLICT_REMEDIATION_CLOSED')
+            order by seq`;
+          expect(events.map((e) => [e.action, Object.keys(e.metadata).sort()])).toEqual([
+            [
+              "CONFLICT_REMEDIATION_OPENED",
+              ["decided_round", "decisions_held", "excluded", "package_id", "resolution_id", "revote_round"],
+            ],
+            [
+              "AUTHORITY_DECISION_SUPERSEDED",
+              ["package_id", "remediation_id", "round_no", "superseded_by", "superseded_by_round"],
+            ],
+            [
+              "CONFLICT_REMEDIATION_CLOSED",
+              [
+                "decided_round",
+                "new_vote_item_id",
+                "package_id",
+                "redecided_round",
+                "replacement_decision_id",
+                "resolution_id",
+                "superseded",
+              ],
+            ],
+          ]);
+          expect(events[0]!.metadata).toMatchObject({
+            decided_round: 1,
+            revote_round: 2,
+            excluded: 1,
+            decisions_held: 1,
+          });
+          expect(events[2]!.metadata).toMatchObject({ redecided_round: 2, superseded: 1 });
+          expect(JSON.stringify(events)).not.toContain(USERS.lead);
+          expect(JSON.stringify(events)).not.toContain(FIRM);
+          expect(JSON.stringify(events)).not.toMatch(/APPROVED|TIED|_result/);
+        });
+      });
+
+      it("T-AMB-028: a decided package goes back to the committee only through the committee's RE_VOTE on a validated conflict that could have changed the result", async () => {
+        await ownerScenario(async (s) => {
+          // Everyone approves; the authority decides; nobody is conflicted.
+          const f = await draftPackage(s, ic, caseB);
+          expect(await voteOnPackage(s, f)).toBe("ADOPTED");
+          await toAuthority(s, f);
+          await s.as("committeeSecretary");
+          const [d] = await decideWith(s, f, "CEO", "APPROVE_AS_RECOMMENDED");
+          const [vi] = await s.tx<{ id: string }[]>`
+            select id from committee.vote_item where package_id = ${f.pkg} and package_round = 1`;
+          const remediate = (tx: typeof s.tx, resolution: string) =>
+            tx`insert into decision.conflict_remediation (package_id, case_id, resolution_id, vote_item_id, decided_round,
+                 revote_round, original_decided_at, conflicted_user_ids, conflict_events, original_result, recount_result,
+                 opened_by)
+               select ${f.pkg}, ${caseB}, ${resolution}, ${vi!.id}, 1, 2, p.decided_at, ${[USERS.lead]}::uuid[],
+                 '[]'::jsonb, 'APPROVED', 'TIED', ${USERS.committeeSecretary}
+               from decision.recommendation_package p where p.id = ${f.pkg}`;
+
+          // Without a conflict there is nothing to re-vote, and nothing else sends a decided package back.
+          await s.expectError("CDF_CONFLICT:NOT_TAINTED", () => resolve(s, f.sanction, "RE_VOTE"));
+          await s.expectError("permission denied", (tx) => remediate(tx, randomUUID()));
+          await s.asOwner();
+          await s.expectError(
+            `recommendation package ${f.pkg} is decided or its identity is immutable`,
+            (
+              tx,
+            ) => tx`update decision.recommendation_package set status = 'VOTING', round_no = 2, decided_at = null
+                       where id = ${f.pkg}`,
+          );
+          await s.expectError("CDF_CONFLICT:NO_VALIDATED_CONFLICT", (tx) => remediate(tx, randomUUID()));
+
+          // A conflict that could not have changed the result (two approvals of two without the lead) keeps the
+          // DEC-AMB-003 confirmation: RE_VOTE is refused and the package stays decided.
+          await upheldOnLead(s, f);
+          await s.as("committeeSecretary");
+          expect(await tainted(s, f)).toEqual(bothTainted(f));
+          await s.expectError("CDF_CONFLICT:RESULT_UNCHANGED", () => resolve(s, f.sanction, "RE_VOTE"));
+          expect(await packageStatus(s, f.pkg)).toEqual({ status: "DECIDED", round_no: 1 });
+          const [confirmed] = await resolve(s, f.sanction, "CONFIRM");
+          // A confirmation is no validated conflict for a remediation either.
+          await s.asOwner();
+          await s.expectError("CDF_CONFLICT:NO_VALIDATED_CONFLICT", (tx) => remediate(tx, confirmed!.id));
+          expect(await s.tx`select id from decision.conflict_remediation`).toEqual([]);
+          // The confirmed decision goes ahead.
+          await s.as("caseManager");
+          await s.tx`select api.issue_decision_notice(${f.subject}, ${d!.id}, ${NOTICE})`;
+        });
+      });
+
+      it("T-AMB-028: the conflicted member takes no part in the re-vote on any path, even after the upheld conflict is reversed; quorum and eligibility are counted without them", async () => {
+        await ownerScenario(async (s) => {
+          const { f } = await decidedByLead(s);
+          const concern = await upheldOnLead(s, f);
+          await s.as("committeeSecretary");
+          await resolve(s, f.sanction, "RE_VOTE");
+          await s.tx`select api.close_meeting(${f.meeting.meeting}, ${REASON})`;
+          // DEC-AMB-010: the next decider reverses the upheld conflict. It no longer counts for the proceeding's later
+          // work, so the lead declares no conflict in the next meeting; the re-vote still excludes them.
+          await s.as("platformAdmin");
+          await s.tx`select api.appoint_conflict_authority(${ic}, ${USERS.complianceManager}, now(), null, 'DEMO-CA-28',
+            'SOURCE_REQUIRED', ${REASON})`;
+          await s.as("complianceManager");
+          await s.tx`select api.reverse_meeting_conflict_determination(${concern},
+            'Synthetic: the link was misread; no conflict.')`;
+          await s.as("committeeSecretary");
+          const [m] = await s.tx<{ id: string }[]>`
+            select api.schedule_meeting(${f.meeting.committeeProceeding}, 'DELIBERATION', 'IN_PERSON',
+              'Meeting room (synthetic)', null, now() + interval '2 days', now() + interval '2 days 2 hours', ${REASON}) as id`;
+          const parts = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${m!.id}`;
+          const p = (u: UserKey) => parts.find((r) => r.user_id === USERS[u])!.id;
+          for (const u of DECISION_VOTERS) {
+            await s.as(u);
+            await s.tx`select api.declare_meeting_conflict(${p(u)}, 'NO_CONFLICT', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+          for (const u of DECISION_VOTERS) await s.tx`select api.record_attendance(${p(u)}, 'PRESENT')`;
+          await s.tx`select api.open_package_vote(${m!.id}, ${f.pkg})`;
+          const [vi] = await s.tx<{ id: string }[]>`
+            select id from committee.vote_item where package_id = ${f.pkg} and package_round = 2`;
+
+          // Quorum and eligibility: three in the meeting, two for the re-vote.
+          await s.asOwner();
+          expect(await s.tx`select eligible, present from committee.quorum_state(${m!.id})`).toEqual([
+            { eligible: 3, present: 3 },
+          ]);
+          expect(
+            await s.tx`select eligible, present from committee.quorum_state(${m!.id}, ${f.pkg}, 2)`,
+          ).toEqual([{ eligible: 2, present: 2 }]);
+          // The lead is offered no vote and casts none: not their own, not a recusal, not one written for them.
+          const mayVote = async (u: UserKey) => {
+            await s.as(u);
+            const [r] = await s.tx<
+              {
+                v: {
+                  deliberation: {
+                    vote_items: { vote_item_id: string; capabilities: { may_vote: boolean } }[];
+                  };
+                };
+              }[]
+            >`select api.meeting_view(${m!.id}) as v`;
+            return r!.v.deliberation.vote_items.find((i) => i.vote_item_id === vi!.id)!.capabilities.may_vote;
+          };
+          expect(await mayVote("lead")).toBe(false);
+          expect(await mayVote("legal")).toBe(true);
+          await s.as("lead");
+          await s.expectError(
+            "CDF_CONFLICT:EXCLUDED_BY_CONFLICT",
+            (tx) => tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`,
+          );
+          await s.expectError(
+            "CDF_CONFLICT:EXCLUDED_BY_CONFLICT",
+            (tx) => tx`select api.recuse_for_conflict(${vi!.id}, 'Synthetic: stepping aside.')`,
+          );
+          await s.asOwner();
+          await s.expectError(
+            "CDF_CONFLICT:EXCLUDED_BY_CONFLICT",
+            (tx) =>
+              tx`insert into committee.vote (vote_item_id, participant_id, recorded_for, recorded_by, source, choice, reason,
+                   original_event_at)
+                 values (${vi!.id}, ${p("lead")}, ${USERS.lead}, ${USERS.committeeSecretary}, 'SECRETARY', 'ABSENT',
+                   'Synthetic: recorded for the member.', now())`,
+          );
+          // The others do not wait on the lead: the vote closes on their two votes.
+          for (const u of ["committeeChair", "legal"] as const) {
+            await s.as(u);
+            await s.tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+          await s.asOwner();
+          expect(
+            await s.tx`select result, eligible_count, present_count, approve_count from committee.vote_item
+                       where id = ${vi!.id}`,
+          ).toEqual([{ result: "APPROVED", eligible_count: 2, present_count: 2, approve_count: 2 }]);
+          // The exclusion is the package's only: the lead votes on other business of the meeting.
+          await s.as("committeeSecretary");
+          const [other] = await s.tx<{ id: string }[]>`
+            select api.open_vote_item(${m!.id}, 'OTHER', null, 'Other business (synthetic)') as id`;
+          await s.as("lead");
+          await s.tx`select api.cast_vote(${other!.id}, 'APPROVE', null)`;
+        });
+      });
+
+      it("T-AMB-028: downstream execution stays blocked until the authority's new decision is recorded; nothing proceeds from the superseded one", async () => {
+        await ownerScenario(async (s) => {
+          await implementationOwner(s);
+          await s.as("grcDirector");
+          await s.tx`select api.set_corrective_action_policy('CORRECTIVE_ACTION', 30, 7, 3, 'NOTE_ONLY', now(), 'APPROVED',
+            ${REASON}) as id`;
+          await setSanctionRule(s, "WARNING", null, false, "PROCEED");
+          const { f, d1 } = await decidedByLead(s);
+          // Before the conflict comes to light: Sigma's decision notice is delivered, the corrective action opened; a
+          // notice to Tau (the corrective item is case-wide) is issued but not yet delivered.
+          await s.as("caseManager");
+          const [tau] = await s.tx<{ id: string }[]>`
+            select api.add_case_subject(${caseB}, 'Employee Tau (synthetic)', 'EMPLOYEE', null) as id`;
+          await s.tx`select api.link_subject_portal_account(${f.subject}, ${USERS.employee}, ${REASON})`;
+          await s.tx`select api.link_subject_portal_account(${tau!.id}, ${USERS.employeeB}, ${REASON})`;
+          await recordDelivery(s, await decisionNotice(s, f.subject, d1));
+          const tauNotice = await decisionNotice(s, tau!.id, d1);
+          await s.as("caseManager");
+          const [a1] = await openAction(s, f);
+          const blocked = async () => {
+            await s.as("caseManager");
+            const [x] = await s.tx<{ v: { blocked_by: string | null; authority_decision_id: string }[] }[]>`
+              select api.sanction_executability(${caseB}) as v`;
+            const [view] = await s.tx<
+              { v: { origin: { decision_block: string | null }; capabilities: Record<string, boolean> } }[]
+            >`select api.corrective_action_view(${a1!.id}) as v`;
+            return {
+              sanction: x!.v.map((r) => [r.authority_decision_id, r.blocked_by]),
+              action: view!.v.origin.decision_block,
+            };
+          };
+          const tryAll = async (code: string) => {
+            await s.as("financeEmployee");
+            await s.expectError(
+              code,
+              (tx) =>
+                tx`select api.record_corrective_action_progress(${a1!.id}, 40, 'Synthetic: progress note.')`,
+            );
+            await s.as("caseManager");
+            await s.expectError(code, () => executeSanction(s, f.sanction, f.subject));
+            await s.expectError(code, () => recordDelivery(s, tauNotice));
+            await s.as("caseManager");
+            await s.expectError(code, () => closeCase(s));
+          };
+          expect(await blocked()).toEqual({ sanction: [[d1, null]], action: null });
+
+          // The conflict on the decisive vote: everything that would execute the decision is refused.
+          await upheldOnLead(s, f);
+          await tryAll(TAINT);
+          expect(await blocked()).toEqual({
+            sanction: [[d1, "TAINTED_BY_CONFLICT"]],
+            action: "TAINTED_BY_CONFLICT",
+          });
+          // No reminder chases an action that may not progress.
+          await s.asOwner();
+          expect(await s.tx`select notify.emit_due_reminders() as n`).toEqual([{ n: 0 }]);
+
+          // Remediation open: still refused, now as CONFLICT_REMEDIATION_OPEN; the action shows no progress command.
+          await s.as("committeeSecretary");
+          await resolve(s, f.sanction, "RE_VOTE");
+          await tryAll(REMEDIATION);
+          expect(await blocked()).toEqual({
+            sanction: [[d1, "CONFLICT_REMEDIATION_OPEN"]],
+            action: "CONFLICT_REMEDIATION_OPEN",
+          });
+          await s.as("financeEmployee");
+          const [card] = await s.tx<{ v: { capabilities: Record<string, boolean> } }[]>`
+            select api.corrective_action_view(${a1!.id}) as v`;
+          expect(card!.v.capabilities).toMatchObject({
+            may_record_progress: false,
+            may_submit_completion: false,
+          });
+          // The waiver and the owner's due date are not progress: the case manager may still move the due date.
+          await s.as("caseManager");
+          await s.tx`select api.change_corrective_action_due_date(${a1!.id},
+            (now() at time zone 'Asia/Riyadh')::date + 20, ${REASON})`;
+
+          // The re-vote, adoption and legal review: still blocked until the authority decides.
+          await revote(s, f, f.meeting.meeting, ["committeeChair", "legal"]);
+          await s.as("committeeSecretary");
+          await s.tx`select api.record_package_adoption(${f.pkg})`;
+          await toAuthority(s, f);
+          await tryAll(REMEDIATION);
+
+          // The authority's new decision: the earlier one is superseded and stays blocked for good; the new one proceeds
+          // once it is notified, like any decision.
+          await s.as("committeeSecretary");
+          const [d2] = await decideWith(s, f, "CEO", "APPROVE_AS_RECOMMENDED");
+          expect(await blocked()).toEqual({
+            sanction: [[d2!.id, "DECISION_NOT_DELIVERED"]],
+            action: "DECISION_SUPERSEDED",
+          });
+          await s.as("financeEmployee");
+          await s.expectError(
+            SUPERSEDED,
+            (tx) =>
+              tx`select api.record_corrective_action_progress(${a1!.id}, 40, 'Synthetic: progress note.')`,
+          );
+          await s.as("caseManager");
+          await s.expectError(SUPERSEDED, () => recordDelivery(s, tauNotice));
+          await s.expectError("CDF_CONFLICT:DECISION_NOT_DELIVERED", () =>
+            executeSanction(s, f.sanction, f.subject),
+          );
+          await recordDelivery(s, await decisionNotice(s, f.subject, d2!.id));
+          await s.as("caseManager");
+          await executeSanction(s, f.sanction, f.subject);
+          await s.asOwner();
+          expect(
+            await s.tx`select authority_decision_id from decision.sanction_execution where item_id = ${f.sanction}`,
+          ).toEqual([{ authority_decision_id: d2!.id }]);
+          // The superseded decision's action stays frozen, so the case does not close until it is waived; the new
+          // decision's action is opened and reminded as usual.
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:CORRECTIVE_ACTIONS_OUTSTANDING", () => closeCase(s));
+          const [a2] = await openAction(s, f);
+          await s.asOwner();
+          expect(await s.tx`select notify.emit_due_reminders() as n`).toEqual([{ n: 1 }]);
+          expect(
+            await s.tx`select object_id from notify.outbox where template_code = 'CORRECTIVE_ACTION_DUE'`,
+          ).toEqual([{ object_id: a2!.id }]);
+        });
       });
     });
   });

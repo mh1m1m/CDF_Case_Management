@@ -3,7 +3,7 @@
 -- actions, export, continuity workbook, catalogue governance and referral escalation (CDF-196)
 -- Requirements: §18–§22, §29, §39, §45, §53, §68, §87; owner decisions DEC-F08–F10, DEC-F15–F18, DEC-F21–F24,
 -- DEC-F26–F28, DEC-F30–F34 (OWNER_DECISIONS_FINALIZATION.md, 2026-10-13) and DEC-AMB-001, -003, -004, -009, -011
--- (owner, 2026-10-13); ambiguity rows AMB-009, -031, -109, -110, -137, -139–-141, -143, -145, -148, -149, -151, -152,
+-- (owner, 2026-10-13), DEC-AMB-013's downstream guards; ambiguity rows AMB-009, -031, -109, -110, -137, -139–-141, -143, -145, -148, -149, -151, -152,
 -- -154, -175, -180, -186, -193, -195, -198, -206; contradictions CON-001–-004, -008–-010, -013, -019; ADR-040 (draft)
 --
 -- Migration 2030 recorded the owner's Finalization Set and applied it to committees and decisions. This migration
@@ -26,9 +26,10 @@
 --   * Sanctions (item 6). Catalogue columns severity_rank, is_irreversible, grievance_execution_rule (seeded
 --     SOURCE_REQUIRED; TERMINATION irreversible) set by api.set_sanction_rule (DEC-AMB-004, -011); the employment flag
 --     and execution statements (DEC-AMB-009, T-AMB-013); an append-only sanction-execution record whose guard and read
---     (api.sanction_executability) share decision.execution_block: delivery (T-AMB-062), a package tainted by a
---     conflict (DEC-AMB-003), employment, a grievance outcome, and the suspension rule (T-AMB-063); grievance outcome
---     substitutions never more severe (T-AMB-088).
+--     (api.sanction_executability) share decision.execution_block: delivery (T-AMB-062), a decision under conflict
+--     remediation or superseded (DEC-AMB-013), a package tainted by a conflict (DEC-AMB-003), employment, a grievance
+--     outcome, and the suspension rule (T-AMB-063); grievance outcome substitutions never more severe (T-AMB-088).
+--     A DECISION notice is not delivered while its decision is tainted, under remediation or superseded (DEC-AMB-013).
 --   * Corrective actions (item 8). Reminder repeat, overdue threshold and escalation steps (DEC-F26, seeded off, every
 --     recipient under the case gate); completion evidence types (DEC-F27); owner kinds USER, ORG_UNIT, SHARED_POOL,
 --     EXTERNAL_PARTY with the accountable owner kept and the case gate for every person acting (DEC-F28).
@@ -58,7 +59,8 @@
 --   * api.submit_defence_response (2 args), api.record_defence_response (5 args): delegate (DECLINED, late reason).
 --   * authz.can_view_corrective_action, decision.require_owner: unit and pool members act (DEC-F28).
 --   * api.set_corrective_action_policy (8 args), api.submit_corrective_action_completion (3 args): delegate.
---   * notify.emit_due_reminders: suspended notices skipped (DEC-F18); the DEC-F26 loops added.
+--   * notify.emit_due_reminders: suspended notices skipped (DEC-F18); the DEC-F26 loops added; no reminder for an
+--     action whose decision is blocked (DEC-AMB-013).
 --   * exchange.authority_approval_required: a restricted case always needs its authority (DEC-F23).
 --   * exchange.eligible_approvers: approver pools (DEC-F24).
 --   * api.set_export_rule: EXPORT_POLICY_ADMIN that approves no export (DEC-F24).
@@ -425,6 +427,26 @@ begin
 end;
 $$;
 grant execute on function api.record_notice_delivery(uuid, text, timestamptz, text) to authenticated;
+
+-- DEC-AMB-003, DEC-AMB-013 (owner, 2026-10-13): a DECISION notice is not delivered, on any path, while its decision is
+-- tainted or under conflict remediation, nor once the decision is superseded; its grievance window never starts on
+-- such a decision (decision.decision_block, 2030). The new decision gets its own notice.
+create function grievance.guard_decision_notice_delivery()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_block text;
+begin
+  v_block := decision.decision_block(new.authority_decision_id);
+  if v_block is not null then perform api._fail('CONFLICT', v_block); end if;
+  return new;
+end;
+$$;
+create trigger defence_notice_decision_delivery before update of delivered_at on grievance.defence_notice
+  for each row when (new.kind = 'DECISION' and old.delivered_at is null and new.delivered_at is not null)
+  execute function grievance.guard_decision_notice_delivery();
 
 -- Replaced from 1990: the subject also sees when the notice was delivered, how its window starts, and whether a
 -- defence period is suspended. Same signature, SECURITY DEFINER and filter.
@@ -1623,7 +1645,8 @@ create trigger outcome_substitution_guard before insert on grievance.outcome_sub
   for each row execute function grievance.guard_outcome_substitution();
 
 -- Why a decided sanction may not be executed on a subject now, as a code; null when it may. The one source for the
--- execution guard and the executability read, in order: delivery (AMB-109, T-AMB-062); a package tainted by a
+-- execution guard and the executability read, in order: delivery (AMB-109, T-AMB-062); a decision under conflict
+-- remediation or superseded (DEC-AMB-013, owner 2026-10-13); a package tainted by a
 -- conflict (DEC-AMB-003, owner 2026-10-13: an unresolved TAINTED_BY_CONFLICT item blocks every downstream step, so the
 -- execution of any sanction of that package waits until the committee resolves it; fail closed); employment
 -- (DEC-AMB-009, T-AMB-013); a grievance that cancelled the item or returned it for reinvestigation (DEC-AMB-011); the
@@ -1636,6 +1659,7 @@ set search_path = ''
 as $$
 declare
   v_n grievance.defence_notice;
+  v_block text;
   v_c decision.sanction_catalogue;
   v_code text := decision.effective_sanction_code(p_item_id, p_subject_id);
 begin
@@ -1644,6 +1668,9 @@ begin
     and n.status <> 'WITHDRAWN'
   order by n.issued_at desc, n.id desc limit 1;
   if v_n.id is null or v_n.delivered_at is null then return 'DECISION_NOT_DELIVERED'; end if;
+  -- DEC-AMB-013: never from a decision under conflict remediation or superseded (decision.decision_block, 2030).
+  v_block := decision.decision_block(p_authority_decision_id);
+  if v_block is not null then return v_block; end if;
   if decision.package_tainted((select i.package_id from decision.recommendation_item i where i.id = p_item_id)) then
     return 'TAINTED_BY_CONFLICT';
   end if;
@@ -1850,7 +1877,8 @@ end;
 $$;
 grant execute on function api.record_employment_execution_statement(uuid, text, text, text) to authenticated;
 
--- The sanction item a subject may be executed under, with its latest effective authority decision.
+-- The sanction item a subject may be executed under, with its latest effective authority decision. While the package
+-- is back with the committee under a conflict remediation (DEC-AMB-013), nothing is executable and the code says why.
 create function decision.executable_sanction(p_item_id uuid, p_subject_id uuid)
 returns decision.authority_decision
 language plpgsql stable
@@ -1861,10 +1889,14 @@ declare
   v_d decision.authority_decision;
 begin
   select * into v_i from decision.recommendation_item i where i.id = p_item_id;
-  if v_i.item_type <> 'DISCIPLINARY_SANCTION' or v_i.status <> 'ACTIVE' or v_i.committee_result is distinct from 'APPROVED'
+  if v_i.item_type <> 'DISCIPLINARY_SANCTION' or v_i.status <> 'ACTIVE'
      or not exists (select 1 from decision.recommendation_item_subject x where x.item_id = v_i.id and x.subject_id = p_subject_id) then
     perform api._fail('INVALID', 'item_id');
   end if;
+  if exists (select 1 from decision.conflict_remediation r where r.package_id = v_i.package_id and r.status = 'OPEN') then
+    perform api._fail('CONFLICT', 'CONFLICT_REMEDIATION_OPEN');
+  end if;
+  if v_i.committee_result is distinct from 'APPROVED' then perform api._fail('INVALID', 'item_id'); end if;
   select d.* into v_d from decision.authority_decision d
   where d.package_id = v_i.package_id
   order by d.package_round desc, d.recorded_at desc, d.id desc limit 1;
@@ -1917,7 +1949,8 @@ $$;
 grant execute on function api.record_sanction_execution(uuid, uuid, timestamptz, text) to authenticated;
 
 -- What a case viewer is shown about executing each decided sanction (DEC-AMB-009: never shown as executable where the
--- guard would refuse it). Read-only; codes and ids only.
+-- guard would refuse it). A sanction of a package under conflict remediation (DEC-AMB-013) stays listed under its
+-- earlier decision, blocked. Read-only; codes and ids only.
 create function api.sanction_executability(p_case_id uuid)
 returns jsonb
 language plpgsql stable security definer
@@ -1942,7 +1975,10 @@ begin
           cross join lateral (select ad.* from decision.authority_decision ad where ad.package_id = i.package_id
                               order by ad.package_round desc, ad.recorded_at desc, ad.id desc limit 1) d
           where i.case_id = p_case_id and i.item_type = 'DISCIPLINARY_SANCTION' and i.status = 'ACTIVE'
-            and i.committee_result = 'APPROVED' and d.outcome not in ('RETURN_TO_COMMITTEE', 'REJECT')
+            and (i.committee_result = 'APPROVED'
+                 or exists (select 1 from decision.conflict_remediation r
+                            where r.package_id = i.package_id and r.status = 'OPEN'))
+            and d.outcome not in ('RETURN_TO_COMMITTEE', 'REJECT')
             and not exists (select 1 from decision.authority_item_decision a
                             where a.decision_id = d.id and a.item_id = i.id and a.outcome = 'REJECTED')) x),
     '[]'::jsonb);
@@ -2528,7 +2564,9 @@ $$;
 grant execute on function api.set_corrective_action_owner_kind(uuid, text, uuid, uuid, text, text) to authenticated;
 
 -- Replaced from 1940: the three 1940 loops are kept as they were, except that a suspended defence period is not
--- reminded (DEC-F18); the 2040 cadence, overdue and escalation-step loops follow, each off until configured.
+-- reminded (DEC-F18); the 2040 cadence, overdue and escalation-step loops follow, each off until configured. No action
+-- loop reminds about an action whose decision is tainted, under conflict remediation or superseded (DEC-AMB-003,
+-- DEC-AMB-013: it cannot progress, decision.freeze_blocked_action).
 create or replace function notify.emit_due_reminders()
 returns integer
 language plpgsql security definer
@@ -2552,7 +2590,7 @@ begin
   -- Due soon: the owner, once per due date, while the owner may still see the action.
   for r in select a.id, a.owner_id, a.due_date from decision.corrective_action a
            cross join lateral decision.current_corrective_policy(a.action_type) p
-           where a.status in ('OPEN', 'IN_PROGRESS') and p.reminder_days_before is not null
+           where a.status in ('OPEN', 'IN_PROGRESS') and decision.decision_block(a.authority_decision_id) is null and p.reminder_days_before is not null
              and a.due_date >= v_today and a.due_date - p.reminder_days_before <= v_today
              and decision.owner_eligible(a.owner_id, a.case_id)
              and not exists (select 1 from notify.outbox o
@@ -2563,7 +2601,7 @@ begin
   -- Escalation: the owner and the managers who can see the case, once per due date.
   for r in select a.id, a.owner_id, a.case_id, a.due_date from decision.corrective_action a
            cross join lateral decision.current_corrective_policy(a.action_type) p
-           where a.status in ('OPEN', 'IN_PROGRESS') and p.escalate_after_days is not null
+           where a.status in ('OPEN', 'IN_PROGRESS') and decision.decision_block(a.authority_decision_id) is null and p.escalate_after_days is not null
              and v_today > a.due_date + p.escalate_after_days
              and not exists (select 1 from notify.outbox o
                              where o.dedupe_key like 'action-overdue:' || a.id || ':' || a.due_date || ':%') loop
@@ -2580,7 +2618,7 @@ begin
   -- 2040 cadence (DEC-F26): the due-soon reminder repeats every N days until the due date.
   for r in select a.id, a.owner_id, a.due_date from decision.corrective_action a
            cross join lateral decision.current_corrective_policy(a.action_type) p
-           where a.status in ('OPEN', 'IN_PROGRESS') and p.reminder_days_before is not null
+           where a.status in ('OPEN', 'IN_PROGRESS') and decision.decision_block(a.authority_decision_id) is null and p.reminder_days_before is not null
              and p.reminder_repeat_days is not null
              and a.due_date >= v_today and a.due_date - p.reminder_days_before <= v_today
              and decision.owner_eligible(a.owner_id, a.case_id)
@@ -2596,7 +2634,7 @@ begin
   -- 2040 overdue threshold (DEC-F26): the owner, once per due date.
   for r in select a.id, a.owner_id, a.due_date from decision.corrective_action a
            cross join lateral decision.current_corrective_policy(a.action_type) p
-           where a.status in ('OPEN', 'IN_PROGRESS') and p.overdue_after_days is not null
+           where a.status in ('OPEN', 'IN_PROGRESS') and decision.decision_block(a.authority_decision_id) is null and p.overdue_after_days is not null
              and v_today > a.due_date + p.overdue_after_days
              and decision.owner_eligible(a.owner_id, a.case_id)
              and not exists (select 1 from notify.outbox o
@@ -2610,7 +2648,7 @@ begin
            from decision.corrective_action a
            cross join lateral decision.current_corrective_policy(a.action_type) p
            join decision.corrective_action_escalation_step s on s.policy_id = p.id
-           where a.status in ('OPEN', 'IN_PROGRESS') and v_today > a.due_date + s.after_days_overdue
+           where a.status in ('OPEN', 'IN_PROGRESS') and decision.decision_block(a.authority_decision_id) is null and v_today > a.due_date + s.after_days_overdue
              and not exists (select 1 from notify.outbox o
                              where o.dedupe_key like 'action-step:' || a.id || ':' || a.due_date || ':' || s.step_no || ':%') loop
     if r.recipient_kind = 'OWNER' then
@@ -4952,6 +4990,8 @@ declare
   v_naming boolean;
   v_open boolean;
   v_metadata boolean;
+  v_block text;
+  v_moves boolean;
 begin
   if p_action_id is null or not authz.can_view_corrective_action(p_action_id) then perform api._fail('NOT_FOUND'); end if;
   select * into v from decision.corrective_action a where a.id = p_action_id;
@@ -4970,6 +5010,9 @@ begin
                    or (v_case.owner_id = v_me and authz.is_restricted_case_authority(v_me, v_case.classification)));
   v_open := v.status in ('OPEN', 'IN_PROGRESS');
   v_metadata := authz.can_view_case_metadata(v.case_id);
+  -- decision.freeze_blocked_action (2030, DEC-AMB-003, DEC-AMB-013): no progress while the decision is blocked.
+  v_block := decision.decision_block(v.authority_decision_id);
+  v_moves := v_block is null;
   return jsonb_build_object(
     'action_id', v.id, 'action_type', v.action_type, 'sequence_no', v.sequence_no, 'title', v.title,
     'description', v.description, 'status', v.status, 'due_date', v.due_date, 'percent_complete', v.percent_complete,
@@ -4985,8 +5028,10 @@ begin
                from decision.corrective_action_pool p where p.id = v.owner_pool_id),
       'external_party_label', v.external_party_label),
     -- The decision the action executes, to whoever sees the case only: an owner sees the card, never the case.
+    -- Why it cannot progress (DEC-AMB-013): to the case team only, with the origin.
     'origin', case when v_team then jsonb_build_object('recommendation_item_id', v.recommendation_item_id,
-                                                       'authority_decision_id', v.authority_decision_id) end,
+                                                       'authority_decision_id', v.authority_decision_id,
+                                                       'decision_block', v_block) end,
     -- corrective_action_policy_read: the evidence the policy in force asks for.
     'policy', jsonb_build_object('completion_evidence', v_policy.completion_evidence,
                                  'allowed_evidence_types', to_jsonb(v_policy.allowed_evidence_types)),
@@ -5004,15 +5049,17 @@ begin
       'case_number', case when v_metadata then v_case.case_number end),
     'capabilities', jsonb_build_object(
       -- api.record_corrective_action_progress and api.submit_corrective_action_completion.
-      'may_record_progress', coalesce(v_acts and v_open, false),
-      'may_submit_completion', coalesce(v_acts and v_open, false),
+      'may_record_progress', coalesce(v_acts and v_open and v_moves, false),
+      'may_submit_completion', coalesce(v_acts and v_open and v_moves, false),
       -- api.verify_corrective_action: never its owner or whoever submitted the completion.
       'may_verify', coalesce(v_manager and v.status = 'PENDING_VERIFICATION' and v.owner_id is distinct from v_me
+                             and v_moves
                              and not exists (select 1 from decision.corrective_action_event e
                                              where e.action_id = v.id and e.event_type = 'COMPLETION_SUBMITTED'
                                                and e.actor_id = v_me), false),
       -- api.reopen_corrective_action.
-      'may_reopen', coalesce(v_manager and v.status = 'COMPLETED' and v_case.records_state = 'ACTIVE', false),
+      'may_reopen', coalesce(v_manager and v.status = 'COMPLETED' and v_case.records_state = 'ACTIVE' and v_moves,
+                             false),
       -- api.waive_corrective_action.
       'may_waive', coalesce(authz.has_permission('CORRECTIVE_ACTION_WAIVE') and v_team
                             and v.status not in ('COMPLETED', 'WAIVED') and v_case.records_state = 'ACTIVE', false),
