@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario } from "../support/db";
-import { DEMO_SEAT_REFERENCE, unseatDemoSeats } from "../support/committee";
+import { DEMO_SEAT_REFERENCE, preliminaryReferral, unseatDemoSeats } from "../support/committee";
 
 const REASON = "Synthetic: committee registry test.";
 let caseA: string, caseB: string, ic: string, gc: string;
@@ -31,6 +31,8 @@ async function constitute(s: Scenario, committeeId: string, member: keyof typeof
 }
 
 async function refer(s: Scenario, committeeId: string, target = caseB): Promise<string> {
+  // AMB-018 (migration 2030): the Investigation Committee needs the case's preliminary referral first.
+  if (committeeId === ic) await preliminaryReferral(s, target);
   await s.as("caseManager");
   const [cp] = await s.tx<{ id: string }[]>`
     select api.refer_case_to_committee(${target}, ${committeeId}, null, ${REASON}) as id`;

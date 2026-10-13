@@ -5,7 +5,7 @@
 // sees only what awaits their approval. Nobody outside those paths sees a referral or a recommendation.
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
-import { unseatDemoSeats } from "../support/committee";
+import { preliminaryReferral, seat, unseatDemoSeats } from "../support/committee";
 
 const REASON = "Synthetic: referral and preliminary review test.";
 const OPS = "b0000000-0000-4000-8000-000000000001";
@@ -843,6 +843,81 @@ describe("preliminary closure outcomes (migration 1980, P11-G1, ADR-036)", () =>
         "CDF_NOT_FOUND",
         (tx) => tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`,
       );
+    });
+  });
+});
+
+describe("preliminary review before the Investigation Committee (AMB-018, migration 2030)", () => {
+  const refer = (s: Scenario, caseId: string, committeeId: string) =>
+    s.tx<
+      { id: string }[]
+    >`select api.refer_case_to_committee(${caseId}, ${committeeId}, null, ${REASON}) as id`;
+  const prepare = async (s: Scenario, outcome: string) => {
+    await s.as("grcDirector");
+    const [r] = await s.tx<{ id: string }[]>`
+      select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, 'Synthetic: preliminary review rationale.') as id`;
+    return r!.id;
+  };
+  const approve = async (s: Scenario, id: string) => {
+    await s.as("grcSectorHead");
+    await s.tx`select api.approve_preliminary_recommendation(${id}, 'APPROVE', null, null)`;
+  };
+
+  it("T-AMB-008: a whistleblowing case without an approved REFERRED_TO_COMMITTEE review is not referred to the Investigation Committee", async () => {
+    await ownerScenario(async (s) => {
+      await constitute(s);
+      const [gc] = await admin<{ id: string }[]>`select id from committee.committee where code = 'GC'`;
+      await seat(s, gc!.id, [
+        ["committeeChair", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"],
+        ["legal", "MEMBER"],
+        ["investigatorA", "MEMBER"],
+      ]);
+      // No preliminary recommendation at all.
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseA, ic));
+      // Another approved outcome does not refer the case.
+      await approve(s, await prepare(s, "NOT_SERIOUS"));
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseA, ic));
+      // A referral recommendation that awaits approval does not either.
+      const pending = await prepare(s, "REFERRED_TO_COMMITTEE");
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseA, ic));
+      // A trigger, so every path is covered: even the table owner inserting the proceeding directly is refused.
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED",
+        (tx) =>
+          tx`insert into committee.committee_proceeding (proceeding_id, committee_id, case_id, rule_set_id, rule_snapshot,
+               referred_by)
+             select gen_random_uuid(), ${ic}, ${caseA}, r.id, '{}'::jsonb, ${USERS.caseManager}
+             from committee.rule_set r where r.committee_id = ${ic} and r.effective_to is null`,
+      );
+      // The Grievance Committee path is not a preliminary-review outcome and is unaffected.
+      await s.as("caseManager");
+      expect(await refer(s, caseA, gc!.id)).toHaveLength(1);
+      // Approved: the case reaches the Investigation Committee.
+      await approve(s, pending);
+      await s.as("caseManager");
+      const [cp] = await refer(s, caseA, ic);
+      expect(cp!.id).toBeDefined();
+    });
+  });
+
+  it("T-AMB-008 (DEC-F19): a restricted case still needs its authority's approval first, then the preliminary referral", async () => {
+    await ownerScenario(async (s) => {
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'SECRET'
+                 where id in (${USERS.committeeChair}, ${USERS.committeeSecretary}, ${USERS.committee})`;
+      await constitute(s);
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:AUTHORITY_APPROVAL_REQUIRED", () => refer(s, caseExec, ic));
+      await s.tx`select api.approve_restricted_committee_referral(${caseExec}, ${ic}, ${REASON})`;
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseExec, ic));
+      await preliminaryReferral(s, caseExec);
+      await s.as("grcDirector");
+      expect(await refer(s, caseExec, ic)).toHaveLength(1);
     });
   });
 });

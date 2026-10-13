@@ -25,6 +25,7 @@ import {
   committeeIds,
   openItem,
   openWithPresent,
+  preliminaryReferral,
   scheduleMeeting,
   seat,
   unseatDemoSeats,
@@ -1042,8 +1043,10 @@ describe("synthetic committee seats (seed 30)", () => {
     const testUsers = new Set<string>(Object.values(USERS));
     expect(rows.filter((r) => testUsers.has(r.user_id))).toEqual([]);
 
-    // Seated as seeded, the Investigation Committee takes a referral (the demo needs no appointment first).
+    // Seated as seeded, the Investigation Committee takes a referral (the demo needs no appointment first), once the
+    // case's preliminary review referred it (AMB-018).
     await scenario(async (s) => {
+      await preliminaryReferral(s, caseB);
       await s.as("caseManager");
       const [cp] = await s.tx<{ id: string }[]>`
         select api.refer_case_to_committee(${caseB}, ${ic}, null, ${REASON}) as id`;
@@ -1051,6 +1054,7 @@ describe("synthetic committee seats (seed 30)", () => {
     });
     // The fixture ends every demo seat inside the test's transaction; nothing of it outlives the test.
     await scenario(async (s) => {
+      await preliminaryReferral(s, caseB);
       await unseatDemoSeats(s);
       expect(
         await s.tx`select id from committee.membership

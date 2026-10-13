@@ -24,7 +24,7 @@ import {
   placeHold,
   requestDisposition,
 } from "../support/records";
-import { committeeIds, unseatDemoSeats } from "../support/committee";
+import { committeeIds, preliminaryReferral, unseatDemoSeats } from "../support/committee";
 import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
 
 interface Targets {
@@ -880,6 +880,33 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
       tx`select api.record_authority_decision(${t.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(), 'Probe authority',
         'MEMO-PROBE-0001', null, null)`,
   },
+  // Migration 2030: return before submission, item flags, cancelling a request, a superseding opinion.
+  {
+    fn: "return_package_to_committee",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.return_package_to_committee(${t.pkg}, ${REASON})`,
+  },
+  {
+    fn: "recommendation_item_flags",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select * from api.recommendation_item_flags(${t.pkg})`,
+  },
+  {
+    fn: "cancel_legal_review_request",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_legal_review_request(${t.request}, ${REASON})`,
+  },
+  {
+    fn: "give_superseding_legal_opinion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.give_superseding_legal_opinion(${t.request}, 'CONCURS', null)`,
+  },
+  // DEC-AMB-003 (owner, 2026-10-13): the committee's resolution of a tainted item.
+  {
+    fn: "resolve_conflict_taint",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resolve_conflict_taint(${t.item}, 'CONFIRM', 'Probe resolution reason.')`,
+  },
 ];
 
 // Employee defence and grievance commands (migration 1910) take a subject, a portal link, a defence notice or a
@@ -1167,6 +1194,11 @@ const ADMIN_COMMANDS = [
   "revise_committee_rule_set",
   // Recommendation authority rules (migration 1900): COMMITTEE_ADMIN only, no case.
   "set_action_authority_rule",
+  // Sanction catalogue versions, legal-review rules and authority-rule coverage (migration 2030): COMMITTEE_ADMIN
+  // only, no case (recommendations-authority.spec.ts).
+  "set_sanction_catalogue_entry",
+  "set_legal_review_rule",
+  "authority_rule_coverage",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
   "set_notification_rule",
   // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case.
@@ -1749,6 +1781,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
       ] as const) {
         await s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS[user]}, ${seatCode}, now() - interval '1 day', null, 'DEMO-APPT')`;
       }
+      await preliminaryReferral(s, caseB); // AMB-018 (migration 2030)
       await s.as("caseManager");
       const [cp] = await s.tx<{ id: string }[]>`
         select api.refer_case_to_committee(${caseB}, ${ic!.id}, null, ${REASON}) as id`;

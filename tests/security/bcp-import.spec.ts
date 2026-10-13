@@ -814,7 +814,7 @@ describe("BCP import: who may stage, see, approve and apply", () => {
       await voteOnPackage(s, f);
       await s.as("committeeSecretary");
       await s.tx`select api.submit_to_authority(${f.pkg})`;
-      await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now() - interval '1 hour',
+      await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(),
         'Chief Executive (synthetic)', 'MEMO-DEMO-0101', null, ${REASON})`;
       // An item that is not this case's answers NOT_FOUND in the dry run, an unknown owner INVALID.
       const action = (n: number, key: string, item: string, owner: string) =>
