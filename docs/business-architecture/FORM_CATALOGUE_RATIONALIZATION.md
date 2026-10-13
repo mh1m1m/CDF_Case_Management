@@ -1,20 +1,20 @@
 # Form Catalogue Rationalization «ترشيد كتالوج النماذج»
 
-- **Status:** Rationalized for every form the available sources name; the full 274-item catalogue is **SOURCE_REQUIRED** (see §1).
+- **Status:** Rationalized for every form sources A and C name. The 274-item catalogue (source D) was supplied on 2026-10-12; its dispositions are mapped in Phase 11 (see §1).
 - **Rule (playbook §11–§15; owner answers G1–G5):** the catalogue is a proposed Business Control Catalogue, not a list of screens. No form number or name is kept for parity. Each item maps to exactly one primary target class. Ask once → derive → generate → convert to workflow → convert to component → merge → retire.
 - **Taxonomy:** USER_FORM, GUIDED_TASK, WORKFLOW_DECISION, GENERATED_RECORD, GENERATED_DOCUMENT, CHECKLIST, MEETING_MODULE, EVIDENCE_ACTION, NOTIFICATION, APPROVAL_ACTION, SYSTEM_EVENT, REFERENCE_DATA, BCP_ARTIFACT, MERGED_COMPONENT, RETIRED.
 - **Tracks** (T01–T09 below) are a control taxonomy for audit and reporting, never sidebar areas (playbook §16). They are this document's working grouping; the catalogue's own 12 tracks will replace them when the catalogue is supplied.
 
 ## 1. Sources and coverage
 
-| Source                                                                                                             | Items                                               | Status                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A. CRM status document, §9 transition table (Drive, owner-authored) — forms named per transition as «… – نموذج #N» | 169 references, 157 distinct names, numbers #1–#157 | Rationalized below (§3). The document reuses some numbers for different forms (for example #75, #78, #87–#109); each (number, name) pair is kept as its own row.                                 |
-| B. Drive «نماذج إبلاغ عن مخالفة والتحقيق» — detailed field specs for 21 forms (#1–#14, #16–#21)                    | 21                                                  | Field-level dispositions feed the target modules; same items as source A                                                                                                                         |
-| C. Repository `WB-FRM-01..19` (baseline v5.2.0, migration 001110)                                                  | 19                                                  | Rationalized below (§4)                                                                                                                                                                          |
-| D. The 274-item catalogue with 12 control tracks                                                                   | 274                                                 | **SOURCE_REQUIRED.** Not found in Drive, the project files or the repository on 2026-10-12. When supplied it is mapped with the same rules; items that match a row here inherit its disposition. |
+| Source                                                                                                             | Items                                               | Status                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A. CRM status document, §9 transition table (Drive, owner-authored) — forms named per transition as «… – نموذج #N» | 169 references, 157 distinct names, numbers #1–#157 | Rationalized below (§3). The document reuses some numbers for different forms (for example #75, #78, #87–#109); each (number, name) pair is kept as its own row.                                                                                                                                                                                                                                     |
+| B. Drive «نماذج إبلاغ عن مخالفة والتحقيق» — detailed field specs for 21 forms (#1–#14, #16–#21)                    | 21                                                  | Field-level dispositions feed the target modules; same items as source A                                                                                                                                                                                                                                                                                                                             |
+| C. Repository `WB-FRM-01..19` (baseline v5.2.0, migration 001110)                                                  | 19                                                  | Rationalized below (§4)                                                                                                                                                                                                                                                                                                                                                                              |
+| D. The 274-item catalogue with 12 control tracks                                                                   | 274                                                 | **Supplied by the owner on 2026-10-12** (project thread, 08:54). The form-to-status table is in the project files at `rebase/crm-mapping/CRM_FORM_STATUS_MAP.csv` (274 rows: form, node, track, allowed statuses, primary and resulting status, fit). Dispositions for these rows are mapped with the same rules in rebase Phase 11; until then items that match a row here inherit its disposition. |
 
-**Coverage:** 169 + 19 = 188 legacy items rationalized; 274-catalogue rows not covered by source A: unknown until supplied.
+**Coverage:** 169 + 19 = 188 legacy items rationalized. Source D's 274 rows have allowed statuses mapped (`CRM_FORM_STATUS_MAP.csv`); their target-class dispositions follow in Phase 11.
 
 ## 2. What the 188 items become
 
@@ -34,7 +34,12 @@
 | SYSTEM_EVENT       | 1       |
 | **Total**          | **188** |
 
-Only **2** of 169 catalogue items remain user-entered forms (the portal report and the grievance submission). Everything else becomes a guided action on an object that already holds the data, a meeting component, a generated record or document, or is retired.
+Of the 188 rows, **4 are USER_FORM**, and together they are **2 distinct user-entered forms**:
+
+- the portal report: CRM-F001 in source A and WB-FRM-01 (its portal part) in source C;
+- the grievance submission: CRM-F133 in source A and WB-FRM-18 in source C.
+
+Everything else becomes a guided action on an object that already holds the data, a meeting component, a generated record or document, or is retired. The 7 RETIRED rows are the per-case committee formation forms: CRM-F044, F076, F100 (two rows), F107 and F108, and WB-FRM-13.
 
 ### Target modules (where the catalogue lands)
 

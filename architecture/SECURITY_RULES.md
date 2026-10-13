@@ -244,3 +244,61 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 | IV-7 | Conducting needs an invitation and a recorded rights acknowledgement; preparing needs an acknowledged current statement.                                                                                                                                   | `api.record_interview_conducted()`, `api.transition_interview()`                                                        | `security/interviews-integrity.spec.ts` "cannot be conducted without…"                                                                                                        |
 | IV-8 | Every state change writes exactly one `BUSINESS` audit event without statement text; opening writes `INTERVIEW_VIEWED`; a denied or missing target writes `INTERVIEW_ACCESS_DENIED` (`SECURITY`).                                                          | `audit.record_event()` calls in each command; `api.open_interview()`                                                    | `security/interviews-integrity.spec.ts` "records exactly one business event…"; `security/interviews-access.spec.ts` "records views…"                                          |
 | IV-9 | Recordings are evidence items: linking needs an `AVAILABLE` audio, video or document item on the same case, and reading the link also needs `can_view_evidence`.                                                                                           | `api.link_interview_recording()`; `interview_recording_read` policy                                                     | None beyond the policy snapshot (follow-up)                                                                                                                                   |
+
+## 14. Committee access (ADR-018, ADR-019; migration 1870)
+
+- A global `COMMITTEE_*` role gives no committee access. An effective seat shows that committee's membership and rules; a place in a proceeding's snapshot (or the committee's current secretary seat) shows that proceeding. Neither gives case content (DEC-02). Predicates: `authz.can_view_committee_registry`, `authz.can_view_committee_proceeding`, `authz.can_view_proceeding`, `authz.is_committee_secretary`.
+- `COMMITTEE_ADMIN` (PLATFORM_ADMIN, GRC_DIRECTOR; Q28) maintains seats and rule sets and sees no proceeding or case (§21). An administrator cannot seat themselves.
+- Snapshots, memberships and rule sets are protected by triggers: snapshots never change, memberships can only be ended earlier, rule sets only gain an end date, and nothing is deleted.
+- Grievance firewall (Q45–Q46): anyone who voted in an Investigation Committee proceeding of the case is snapshotted into that case's Grievance Committee proceeding as non-voting.
+- Tests: `tests/security/committee-registry.spec.ts`, IDOR probes and the audit walk.
+
+## 15. Direct referral and preliminary review (migration 1880; Q1–Q20)
+
+- A referral is visible to its preparer, to the sector's head and active delegate once submitted, to the Investigation Committee's current secretaries once it has reached them, and to whoever can see the case it became; every viewer also needs clearance for its classification (`authz.can_view_referral`). Other sector members, `SECTOR_ADMIN`, `COMMITTEE_ADMIN`, `PLATFORM_ADMIN` and `CASE_VIEW_ALL` see nothing.
+- Preparing needs `REFERRAL_PREPARE` and a current sector position. Sector approval needs the HEAD position with `REFERRAL_SECTOR_APPROVE`, or an unrevoked delegation in its window whose delegator is still head and whose delegate is still a member. Delegations are forward-dated only, need an end and an evidence reference, and may be revoked by the delegator or `SECTOR_ADMIN`.
+- Separation of duties: the preparer never approves their own referral (even as head); the secretary cannot decide a referral they prepared or approved for the sector; a preliminary reviewer is never the preparer; the approver is neither.
+- Returns and rejections need one to ten structured `RETURN_REASON` codes; `OTHER` needs a comment. A rejection may be objected to once; the rejection that answers an objection cannot be objected to again (escalation: SOURCE_REQUIRED).
+- Acceptance names an eligible case owner (the same rule as every owner assignment) and needs a constituted committee; otherwise nothing is created. The preparer, head and secretary gain no case access from it.
+- The GRC Sector Head has no case access. `authz.can_view_preliminary_recommendation` shows them, purpose-bound (ADR-031), a recommendation awaiting their approval or one they decided, on a non-restricted, undisposed case within clearance and without conflict; `api.preliminary_approval_queue` lists case numbers only. A restricted case needs an explicit grant first.
+- Audit metadata for referral and preliminary-review events carries ids, statuses and codes, never comments or rationale. History rows, closed referrals and decided recommendations are protected by triggers.
+- Tests: `tests/security/referral-preliminary.spec.ts`, referral IDOR probes, preliminary IDOR probes and the audit walk.
+
+## 16. Committee meetings, conflict of interest and voting (migration 1890; ADR-020; DEC-61)
+
+- Committee participation always passes `authz.user_case_gate` (clearance, no declared case conflict). Uncleared or conflicted seat holders are snapshotted as excluded and see nothing; a conflict declared later removes access at once. A restricted case reaches a committee only with its Restricted Case Authority's recorded, single-use approval (DEC-61).
+- A meeting member who is PENDING or CONFLICT_DECLARED cannot be recorded present, cannot vote, sees no deliberation and is not eligible for quorum (N4, N5). Check constraints repeat the rule.
+- The secretary records only ABSENT, UNABLE_TO_VOTE or RECUSED for another member, with a reason (N6); a check constraint repeats it.
+- `committee.vote` and `committee.casting_vote` have no SELECT grant. `api.vote_item_status` shows who voted and when while open; choices and totals only after close. Vote audit events carry no choice (N7).
+- The casting vote exists only on a tie, when the rule snapshot enables it, cast by the present and cleared chair (N8).
+- Minutes are reviewed by attending, cleared, non-secretary members; a change request supersedes the version; deemed approval needs the window to pass and a recorded reminder, and is idempotent. Minutes in review are visible to the meeting's deliberation only; approved minutes join the case.
+- Meetings, participants, vote items and minutes cannot be deleted; votes, conflict declarations, casting votes and minute reviews are append-only; closed meetings and items are frozen by triggers.
+- PRODUCTION_SUBSTITUTION_REQUIRED: the manual meeting provider (pasted link) stands in for Microsoft Teams; the reminder and the deemed-approval run stand in for the notification engine and scheduler.
+- Tests: `tests/security/committee-meetings.spec.ts`, `tests/security/committee-access.spec.ts`, meeting IDOR probes and the audit walk.
+
+## 17. Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023, ADR-031)
+
+- Packages are written only by the committee's seated, cleared secretary; adoption happens only through committee votes bound to the package and its round. Members and the case team read packages; nobody else does.
+- A free-text sanction is PROPOSED_UNVERIFIED and stays so (check constraint and trigger).
+- The legal reviewer is assigned explicitly, holds `LEGAL_OPINION_GIVE`, passes the case gate and reaches only the LEGAL_REVIEW packet and their own request (N14). Packet reads are audited.
+- Packets are immutable snapshots without evidence or reporter identity (N19).
+- A member who declared a conflict in any meeting of the proceeding sees no package, item, packet or opinion (AGENT-09 W1). On a restricted case each legal review needs the Restricted Case Authority's single-use approval naming the reviewer (AGENT-09 W2).
+- An authority decision needs a source document reference (N15) and the authority type the effective-dated rule names; decided packages are frozen; decisions and item outcomes are append-only.
+- Tests: `tests/security/recommendations-authority.spec.ts`, decision IDOR probes and the audit walk.
+
+## 18. Employee defence and grievances (migration 1910; ADR-024)
+
+- A subject reaches only their own defence notices, the allegations snapshotted for them and their own responses, through an active portal link the case team created. A link is never given to a case-team member. The subject never gains case access.
+- Grievances are received by the Grievance Committee's seated, cleared secretary. A grievant sees their own grievance and outcome, never the internal admissibility assessment. Unknown and uncleared case numbers answer alike.
+- Admission opens the GRIEVANCE committee proceeding through the shared referral path: the case gate and the N9 firewall apply, so no Investigation Committee voter of the case votes on its grievance.
+- Outcomes are bound to a closed, approved vote of the grievance proceeding and used once.
+- A linked subject and a grievant count as conflicted on their case (`authz.has_conflict`): no case access, assignment, committee seat, meeting or packet for it. A GC chair who sat on the case's Investigation Committee does not decide admissibility. A linked grievance on a restricted case needs the Restricted Case Authority's approval naming the recorder (AGENT-09 G1–G3).
+- Tests: `tests/security/grievance-defence.spec.ts`, grievance IDOR probes and the audit walk.
+
+## 19. Notifications (migration 1920; ADR-025)
+
+- A notification carries a template code, object type and id, and a deep link of ids only; never a case number, name, allegation, narrative or evidence (§39, N18). Outbox facts are immutable.
+- Recipients read only their own in-app notifications. Email rows are invisible to every application user.
+- Email delivery and reminders run only through `notify.*` functions granted to the BFF login role, never to `authenticated` or `anon`.
+- Mandatory notifications (meeting invitations, minutes review, legal review assignment, defence notices, grievance decisions) cannot be muted. Rules are maintained only with `NOTIFICATION_ADMIN`.
+- Tests: `tests/security/notifications.spec.ts`, notification IDOR probes and the audit walk.

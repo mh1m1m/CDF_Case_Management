@@ -103,6 +103,19 @@ export const PERMISSIONS = [
   "RECORDS_LIFECYCLE_ADMIN",
   "BREAK_GLASS_REQUEST",
   "BREAK_GLASS_APPROVE",
+  // Committee registry (ADR-018, ADR-019): maintains seats and rules, never proceedings or case content.
+  "COMMITTEE_ADMIN",
+  // Direct referral and preliminary review (migration 1880).
+  "SECTOR_ADMIN",
+  "REFERRAL_PREPARE",
+  "REFERRAL_SECTOR_APPROVE",
+  "PRELIMINARY_PREPARE",
+  "PRELIMINARY_REVIEW",
+  "PRELIMINARY_APPROVE",
+  // Legal review of recommendation packages (migration 1900, ADR-022): the assigned reviewer's opinion.
+  "LEGAL_OPINION_GIVE",
+  // Notification rules (migration 1920, ADR-025): event rules and committee defaults, never recipients or content.
+  "NOTIFICATION_ADMIN",
   // Reporter conversation (ADR-016 D4, DEC-06)
   "REPORTER_CONVERSATION_HOLD",
   "REPORTER_CONVERSATION_OVERSEE",
@@ -461,6 +474,9 @@ export const ROLES = [
   "DECISION_AUTHORITY",
   "IMPLEMENTATION_OWNER",
   "REFERRER",
+  "SECTOR_HEAD",
+  "COMPLIANCE_SECTION_MANAGER",
+  "GRC_SECTOR_HEAD",
 ] as const;
 export type Role = (typeof ROLES)[number];
 
@@ -877,4 +893,400 @@ export interface PendingConflict {
   displayNameAr: string;
   declaration: string | null;
   declaredAt: string;
+}
+
+// ---- Business architecture rebase: case structure and committees (ADR-017 to ADR-019) ----------------
+/** Intake path of a case (case_mgmt.case_record.source_type). */
+export const CASE_SOURCE_TYPES = [
+  "WHISTLEBLOWING",
+  "DIRECT_REFERRAL",
+  "DIRECT_GRIEVANCE",
+  "OTHER_AUTHORIZED_SOURCE",
+] as const;
+export type CaseSourceType = (typeof CASE_SOURCE_TYPES)[number];
+
+export const PROCEEDING_TYPES = [
+  "PRELIMINARY_REVIEW",
+  "INVESTIGATION",
+  "COMMITTEE_INVESTIGATION",
+  "LEGAL_REVIEW",
+  "AUTHORITY_DECISION",
+  "CORRECTIVE_ACTION",
+  "GRIEVANCE",
+  "REINVESTIGATION",
+] as const;
+export type ProceedingType = (typeof PROCEEDING_TYPES)[number];
+
+export const PROCEEDING_STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "AWAITING_REVIEW",
+  "AWAITING_APPROVAL",
+  "RETURNED",
+  "SUSPENDED",
+  "CONCLUDED",
+  "CANCELLED",
+] as const;
+export type ProceedingStatus = (typeof PROCEEDING_STATUSES)[number];
+
+export const SUBJECT_CATEGORIES = ["EMPLOYEE", "CONTRACTOR", "OTHER_AUTHORIZED"] as const;
+export type SubjectCategory = (typeof SUBJECT_CATEGORIES)[number];
+
+export const FINDING_RESULTS = [
+  "SUBSTANTIATED",
+  "PARTIALLY_SUBSTANTIATED",
+  "NOT_SUBSTANTIATED",
+  "INCONCLUSIVE",
+] as const;
+export type FindingResult = (typeof FINDING_RESULTS)[number];
+
+export const COMMITTEE_KINDS = ["INVESTIGATION", "GRIEVANCE"] as const;
+export type CommitteeKind = (typeof COMMITTEE_KINDS)[number];
+
+export const COMMITTEE_SEATS = [
+  "CHAIR",
+  "DEPUTY_CHAIR",
+  "SECRETARY",
+  "ALTERNATE_SECRETARY",
+  "MEMBER",
+  "ALTERNATE_MEMBER",
+] as const;
+export type CommitteeSeat = (typeof COMMITTEE_SEATS)[number];
+
+export const QUORUM_TYPES = ["MAJORITY_ELIGIBLE", "FIXED_NUMBER", "PERCENTAGE", "CUSTOM"] as const;
+export type QuorumType = (typeof QUORUM_TYPES)[number];
+
+export const ADMISSIBILITY_DECIDERS = ["SECRETARY", "CHAIR", "COMMITTEE"] as const;
+export type AdmissibilityDecider = (typeof ADMISSIBILITY_DECIDERS)[number];
+
+/** Mirror of config.status_code (ADR-029), asserted by tests/integration/mirrors.spec.ts. Labels live in i18n. */
+export const STATUS_CODES = {
+  WAITING_REASON: [
+    "ALTERNATE_INVESTIGATOR",
+    "AUTHORITY_DECISION",
+    "BUDGET_APPROVAL",
+    "BUSINESS_EXECUTION",
+    "COI_REVIEW",
+    "CONFIDENTIALITY_CLASSIFICATION",
+    "DIGITAL_FORENSICS",
+    "DOCUMENTS",
+    "DUPLICATION_CHECK",
+    "EMPLOYEE_DEFENCE",
+    "EMPLOYEE_NOTIFICATION",
+    "EXPERT_OPINION",
+    "EXTERNAL_INFO",
+    "GRIEVANCE_COMPLETION",
+    "INFO_FROM_SOURCE",
+    "LEGAL_OPINION",
+    "NON_COOPERATION",
+    "PARTY_ATTENDANCE",
+    "PARTY_DOCUMENTS",
+    "QUORUM",
+    "REGULATOR_REPORT",
+    "SCOPE_DEFINITION",
+    "STAKEHOLDER_NOTIFICATION",
+    "TIE_BREAK",
+    "WITNESS",
+  ],
+  SUSPENSION_REASON: [
+    "CONFLICT_OF_INTEREST",
+    "FULL",
+    "GENERAL",
+    "LAWYER_REQUEST",
+    "LEAVE_OR_ILLNESS",
+    "SOVEREIGN_AUTHORITY",
+    "SYSTEM_MANDATED",
+  ],
+  OUTCOME_CODE: [
+    "ADMINISTRATIVE_TRACK",
+    "CHANNEL_ABUSE",
+    "CORRECTIVE_ACTION",
+    "DECISION_RECORDED",
+    "DUPLICATE",
+    "EMERGENCY_CLOSURE",
+    "INCONCLUSIVE",
+    "INCIDENT_LOGGED",
+    "INVESTIGATION_WARRANTED",
+    "NON_PROCESSABLE",
+    "NOT_FEASIBLE",
+    "NOT_SERIOUS",
+    "NOT_SUBSTANTIATED",
+    "NO_ACTION",
+    "NO_PERSONAL_JURISDICTION",
+    "OUT_OF_SCOPE",
+    "PARTIALLY_SUBSTANTIATED",
+    "RECOMMENDATION_ADOPTED",
+    "REFERRED_TO_COMMITTEE",
+    "REGULATORY_ACTION",
+    "SUBSTANTIATED",
+    "TRANSFERRED",
+    "WITHDRAWN",
+  ],
+  RETURN_REASON: [
+    "APPROVAL_MISSING",
+    "INSUFFICIENT_EVIDENCE",
+    "MISSING_DOCUMENTS",
+    "MISSING_INFORMATION",
+    "OTHER",
+    "OUT_OF_SCOPE",
+    "RECOMMENDATION_INCOMPLETE",
+    "SUBJECT_NOT_IDENTIFIED",
+    "UNCLEAR_ALLEGATION",
+    "WRONG_CHANNEL",
+  ],
+} as const satisfies Record<string, readonly string[]>;
+export type StatusCodeDimension = keyof typeof STATUS_CODES;
+
+// ---- Direct referral and preliminary review (migration 1880; Q1–Q20) ------------------------------
+/** Status of a direct referral (intake.referral.status). */
+export const REFERRAL_STATUSES = [
+  "DRAFT",
+  "SUBMITTED_TO_HEAD",
+  "SUBMITTED_TO_SECRETARY",
+  "RETURNED_FOR_COMPLETION",
+  "REJECTED",
+  "OBJECTED",
+  "ACCEPTED",
+  "WITHDRAWN",
+] as const;
+export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
+
+/** History rows of a referral (intake.referral_event.event_type). */
+export const REFERRAL_EVENT_TYPES = [
+  "CREATED",
+  "UPDATED",
+  "SUBMITTED",
+  "SECTOR_APPROVED",
+  "SECTOR_RETURNED",
+  "ACCEPTED",
+  "RETURNED_FOR_COMPLETION",
+  "REJECTED",
+  "RESUBMITTED",
+  "OBJECTED",
+  "WITHDRAWN",
+  "COMMENTED",
+] as const;
+export type ReferralEventType = (typeof REFERRAL_EVENT_TYPES)[number];
+
+/** Next actions api.referral_available_actions can offer the caller. */
+export const REFERRAL_ACTIONS = [
+  "UPDATE",
+  "SUBMIT",
+  "SECTOR_APPROVE",
+  "SECTOR_RETURN",
+  "ACCEPT",
+  "RETURN_FOR_COMPLETION",
+  "REJECT",
+  "RESUBMIT",
+  "OBJECT",
+  "WITHDRAW",
+  "COMMENT",
+] as const;
+export type ReferralAction = (typeof REFERRAL_ACTIONS)[number];
+
+export const SECTOR_POSITIONS = ["HEAD", "MEMBER"] as const;
+export type SectorPosition = (typeof SECTOR_POSITIONS)[number];
+
+/** Outcomes a preliminary review may recommend; each is also an OUTCOME_CODE. */
+export const PRELIMINARY_OUTCOMES = [
+  "NO_ACTION",
+  "OUT_OF_SCOPE",
+  "DUPLICATE",
+  "TRANSFERRED",
+  "NON_PROCESSABLE",
+  "INVESTIGATION_WARRANTED",
+  "REFERRED_TO_COMMITTEE",
+] as const;
+export type PreliminaryOutcome = (typeof PRELIMINARY_OUTCOMES)[number];
+
+export const PRELIMINARY_RECOMMENDATION_STATUSES = [
+  "AWAITING_REVIEW",
+  "AWAITING_APPROVAL",
+  "RETURNED",
+  "APPROVED",
+] as const;
+export type PreliminaryRecommendationStatus = (typeof PRELIMINARY_RECOMMENDATION_STATUSES)[number];
+
+export const PRELIMINARY_PREPARER_ROLES = [
+  "INVESTIGATOR",
+  "LEAD_INVESTIGATOR",
+  "COMPLIANCE_SECTION_MANAGER",
+  "GRC_DIRECTOR",
+] as const;
+
+// ---- Committee meetings, voting and minutes (migration 1890, ADR-020) -----------------------------------
+export const MEETING_PURPOSES = ["DELIBERATION", "HEARING"] as const;
+export type MeetingPurpose = (typeof MEETING_PURPOSES)[number];
+/** TEAMS links come from the manual provider for now (PRODUCTION_SUBSTITUTION_REQUIRED: M365 Teams provider). */
+export const MEETING_MODES = ["IN_PERSON", "TEAMS", "HYBRID"] as const;
+export type MeetingMode = (typeof MEETING_MODES)[number];
+export const MEETING_STATUSES = ["SCHEDULED", "OPEN", "CLOSED", "CANCELLED"] as const;
+export type MeetingStatus = (typeof MEETING_STATUSES)[number];
+export const MEETING_INVITEE_ROLES = [
+  "WITNESS",
+  "EXPERT",
+  "LEGAL",
+  "INFORMATION_PROVIDER",
+  "SUBJECT",
+] as const;
+export type MeetingInviteeRole = (typeof MEETING_INVITEE_ROLES)[number];
+/** What a grievance-firewalled member may be invited as (Q46). */
+export const FIREWALL_INVITEE_ROLES: readonly MeetingInviteeRole[] = [
+  "WITNESS",
+  "EXPERT",
+  "INFORMATION_PROVIDER",
+];
+export const COI_STATUSES = ["PENDING", "NO_CONFLICT", "CONFLICT_DECLARED", "NOT_REQUIRED"] as const;
+export type CoiStatus = (typeof COI_STATUSES)[number];
+export const ATTENDANCE_STATUSES = ["NOT_RECORDED", "PRESENT", "ABSENT", "EXCUSED_CONFLICT"] as const;
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+export const VOTE_TARGET_TYPES = [
+  "FINDING",
+  "RECOMMENDATION_ITEM",
+  "SANCTION",
+  "CORRECTIVE_ACTION",
+  "PACKAGE",
+  "FINAL_PACKAGE",
+  "OTHER",
+] as const;
+export type VoteTargetType = (typeof VOTE_TARGET_TYPES)[number];
+export const VOTE_CHOICES = ["APPROVE", "REJECT", "ABSTAIN", "RECUSED", "ABSENT", "UNABLE_TO_VOTE"] as const;
+export type VoteChoice = (typeof VOTE_CHOICES)[number];
+/** A member's own choices; the secretary records only the non-substantive ones (Q60, N6). */
+export const SELF_VOTE_CHOICES: readonly VoteChoice[] = ["APPROVE", "REJECT", "ABSTAIN", "RECUSED"];
+export const SECRETARY_RECORDABLE_CHOICES: readonly VoteChoice[] = ["ABSENT", "UNABLE_TO_VOTE", "RECUSED"];
+export const VOTE_ITEM_STATUSES = ["OPEN", "AWAITING_CASTING_VOTE", "CLOSED"] as const;
+export type VoteItemStatus = (typeof VOTE_ITEM_STATUSES)[number];
+export const VOTE_RESULTS = ["APPROVED", "REJECTED", "TIED", "NO_DECISION", "NO_QUORUM"] as const;
+export type VoteResult = (typeof VOTE_RESULTS)[number];
+export const MINUTES_STATUSES = [
+  "IN_REVIEW",
+  "CHANGES_REQUESTED",
+  "APPROVED",
+  "DEEMED_APPROVED",
+  "SUPERSEDED",
+] as const;
+export type MinutesStatus = (typeof MINUTES_STATUSES)[number];
+
+// ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
+export const RECOMMENDATION_ITEM_TYPES = [
+  "FINDING",
+  "DISCIPLINARY_SANCTION",
+  "CORRECTIVE_ACTION",
+  "GOVERNANCE_REMEDIATION",
+  "EXTERNAL_REFERRAL",
+  "NO_VIOLATION",
+  "CLOSE_WITHOUT_SANCTION",
+  "LEGAL_ACTION",
+  "OTHER",
+] as const;
+export type RecommendationItemType = (typeof RECOMMENDATION_ITEM_TYPES)[number];
+export const RECOMMENDATION_PACKAGE_STATUSES = [
+  "DRAFT",
+  "VOTING",
+  "ADOPTED",
+  "IN_LEGAL_REVIEW",
+  "RETURNED_BY_LEGAL",
+  "AWAITING_AUTHORITY",
+  "RETURNED_BY_AUTHORITY",
+  "DECIDED",
+] as const;
+export type RecommendationPackageStatus = (typeof RECOMMENDATION_PACKAGE_STATUSES)[number];
+/** Q87: a free-text sanction is flagged in every view and export. */
+export const SANCTION_VERIFICATION_STATUSES = ["CATALOGUE", "PROPOSED_UNVERIFIED", "NOT_APPLICABLE"] as const;
+export type SanctionVerificationStatus = (typeof SANCTION_VERIFICATION_STATUSES)[number];
+export const LEGAL_OPINIONS = ["CONCURS", "CONCURS_WITH_COMMENTS", "CONFLICTS"] as const;
+export type LegalOpinion = (typeof LEGAL_OPINIONS)[number];
+export const AUTHORITY_TYPES = ["CEO", "BOARD", "DELEGATED_EXECUTIVE", "OTHER"] as const;
+export type AuthorityType = (typeof AUTHORITY_TYPES)[number];
+export const AUTHORITY_OUTCOMES = [
+  "APPROVE_AS_RECOMMENDED",
+  "MODIFY",
+  "REJECT",
+  "RETURN_TO_COMMITTEE",
+  "APPROVE_PARTIALLY",
+  "OTHER",
+] as const;
+export type AuthorityOutcome = (typeof AUTHORITY_OUTCOMES)[number];
+export const PACKET_PURPOSES = ["LEGAL_REVIEW", "AUTHORITY_DECISION"] as const;
+export type PacketPurpose = (typeof PACKET_PURPOSES)[number];
+
+// ---- Employee defence and grievances (ADR-024, migration 1910) -------------------------------------------
+export const SUBMISSION_CHANNELS = [
+  "EMPLOYEE_PORTAL",
+  "EMAIL",
+  "PHYSICAL_SUBMISSION",
+  "SECRETARY_ENTRY",
+  "BCP_IMPORT",
+  "OTHER_AUTHORIZED_CHANNEL",
+] as const;
+export type SubmissionChannel = (typeof SUBMISSION_CHANNELS)[number];
+export const DEFENCE_NOTICE_STATUSES = ["ISSUED", "ACKNOWLEDGED", "RESPONDED", "WITHDRAWN"] as const;
+export type DefenceNoticeStatus = (typeof DEFENCE_NOTICE_STATUSES)[number];
+export const GRIEVANCE_KINDS = ["LINKED", "STANDALONE"] as const;
+export type GrievanceKind = (typeof GRIEVANCE_KINDS)[number];
+export const GRIEVANCE_STATUSES = [
+  "RECEIVED",
+  "AWAITING_ADMISSIBILITY_DECISION",
+  "ADMITTED",
+  "INADMISSIBLE",
+  "DECIDED",
+  "WITHDRAWN",
+] as const;
+export type GrievanceStatus = (typeof GRIEVANCE_STATUSES)[number];
+export const GRIEVANCE_OUTCOMES = [
+  "UPHOLD",
+  "MODIFY",
+  "CANCEL",
+  "RETURN_FOR_REINVESTIGATION",
+  "REQUEST_COMPLETION",
+  "INADMISSIBLE",
+  "REJECT_ON_MERITS",
+  "PARTIALLY_ACCEPT",
+  "CORRECTIVE_ACTION",
+  "DISCIPLINARY_ACTION",
+  "OTHER_AUTHORIZED_OUTCOME",
+] as const;
+export type GrievanceOutcome = (typeof GRIEVANCE_OUTCOMES)[number];
+export const REINVESTIGATION_PATHS = [
+  "SAME_INVESTIGATION_COMMITTEE",
+  "NEW_INTERNAL_TEAM",
+  "NEW_INVESTIGATOR",
+  "EXTERNAL_INVESTIGATOR",
+  "TECHNICAL_INVESTIGATION",
+  "GRIEVANCE_COMMITTEE_FACT_FINDING",
+  "OTHER",
+] as const;
+export type ReinvestigationPath = (typeof REINVESTIGATION_PATHS)[number];
+
+// ---- Notifications (ADR-025, migration 1920) -------------------------------------------------------------
+export const NOTIFICATION_TEMPLATES = [
+  "COMMITTEE_SEAT_ASSIGNED",
+  "COMMITTEE_SEAT_ENDED",
+  "MEETING_INVITATION",
+  "MEETING_CANCELLED",
+  "MINUTES_REVIEW_REQUESTED",
+  "MINUTES_REVIEW_REMINDER",
+  "LEGAL_REVIEW_ASSIGNED",
+  "DEFENCE_NOTICE_ISSUED",
+  "DEFENCE_DUE_REMINDER",
+  "GRIEVANCE_RECEIVED",
+  "GRIEVANCE_ADMISSIBILITY_DECIDED",
+  "GRIEVANCE_OUTCOME_RECORDED",
+  "GRIEVANCE_AUTHORITY_APPROVAL_NEEDED",
+  "GRIEVANCE_HANDLING_APPROVED",
+] as const;
+export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
+export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
+export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
+
+/** What the NotificationSender receives: recipient, template and link. Never case content (§39, N18). */
+export interface OutgoingNotification {
+  id: string;
+  recipientId: string;
+  template: NotificationTemplate;
+  deepLink: string;
+  attempts: number;
 }

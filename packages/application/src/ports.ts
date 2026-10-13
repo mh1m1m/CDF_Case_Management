@@ -26,6 +26,7 @@ import type {
   MyCaseTask,
   MyWorkSummary,
   PendingConflict,
+  OutgoingNotification,
   PublicReportStatus,
   RecordsCatalogueEntry,
   RetentionQueueEntry,
@@ -394,4 +395,25 @@ export interface PortalGateway {
     reasonCode: EvidenceRejectionCode,
     scan?: { status: "INFECTED" | "UNSCANNED"; scanner: string },
   ): Promise<boolean>;
+}
+
+// ---- Notifications (ADR-025, migration 1920) --------------------------------------------------
+/**
+ * Server-only access to the notification outbox, at the BFF login role (never `authenticated`). It sees recipient,
+ * template and link only; never case content (§39, N18).
+ */
+export interface NotificationOutbox {
+  claimEmailBatch(limit: number): Promise<OutgoingNotification[]>;
+  recordEmailDelivery(id: string, delivered: boolean): Promise<"SENT" | "FAILED" | "PENDING">;
+  /** Deadline reminders (defence responses due soon); idempotent. Returns how many were queued. */
+  emitDueReminders(): Promise<number>;
+}
+
+/**
+ * Delivers one email notification. PRODUCTION_SUBSTITUTION_REQUIRED: the prototype adapter is a stub; the CDF mail
+ * relay and the corporate directory lookup of the recipient's address are a human decision (ADR-025).
+ */
+export interface NotificationSender {
+  readonly kind: "stub-email";
+  send(notification: OutgoingNotification): Promise<boolean>;
 }

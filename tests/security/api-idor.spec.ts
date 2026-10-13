@@ -24,6 +24,8 @@ import {
   placeHold,
   requestDisposition,
 } from "../support/records";
+import { committeeIds } from "../support/committee";
+import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
 
 interface Targets {
   case: string;
@@ -42,6 +44,12 @@ interface Targets {
   statementVersion: string;
   formInstance: string;
   attachment: string;
+  // Business architecture rebase (ADR-017)
+  allegation: string;
+  proceeding: string;
+  finding: string;
+  // Preliminary review (migration 1880)
+  recommendation: string;
   // Reporter conversation (DEC-06, migration 1840)
   reporterDelegation: string;
 }
@@ -383,10 +391,258 @@ const PROBES: Probe[] = [
     outcome: "FALSE",
     call: (tx, t) => tx`select api.open_interview(${t.interview}) as v`,
   },
+  // Business architecture rebase (ADR-017, ADR-018): case structure and referral to a committee.
+  {
+    fn: "open_proceeding",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_proceeding(${t.case}, 'INVESTIGATION', null, ${REASON})`,
+  },
+  {
+    fn: "update_proceeding_state",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.update_proceeding_state(${t.proceeding}, 'IN_PROGRESS', null, null, ${REASON})`,
+  },
+  {
+    fn: "close_proceeding",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_proceeding(${t.proceeding}, 'CANCELLED', null, ${REASON})`,
+  },
+  {
+    fn: "add_case_subject",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.add_case_subject(${t.case}, 'Probe Subject (synthetic)', 'EMPLOYEE', null)`,
+  },
+  {
+    fn: "add_allegation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.add_allegation(${t.case}, 'FRAUD', 'Synthetic: probe allegation text.', null, null, null)`,
+  },
+  {
+    fn: "link_allegation_subject",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.link_allegation_subject(${t.allegation}, ${randomUUID()}, null, null)`,
+  },
+  {
+    fn: "record_finding",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_finding(${t.allegation}, null, ${t.proceeding}, 'INCONCLUSIVE', 'Synthetic: probe rationale.')`,
+  },
+  {
+    fn: "link_supporting_material",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.link_supporting_material(${t.evidence}, ${t.allegation}, null)`,
+  },
+  {
+    fn: "refer_case_to_committee",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.refer_case_to_committee(${t.case}, (select id from committee.committee where code = 'IC'), null, ${REASON})`,
+  },
   {
     fn: "withdraw_form",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.withdraw_form(${t.formInstance}, ${REASON})`,
+  },
+  // DEC-61: the Restricted Case Authority's approval to refer a restricted case.
+  {
+    fn: "approve_restricted_committee_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.approve_restricted_committee_referral(${t.case}, (select id from committee.committee where code = 'IC'), ${REASON})`,
+  },
+  // AGENT-09 G2 (migration 1910): the Restricted Case Authority's approval to record a linked grievance.
+  {
+    fn: "approve_restricted_grievance_recording",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.approve_restricted_grievance_recording(${t.case}, ${self}, ${REASON})`,
+  },
+  // Preliminary review (migration 1880).
+  {
+    fn: "prepare_preliminary_recommendation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.prepare_preliminary_recommendation(${t.case}, 'NO_ACTION', 'Synthetic: probe rationale text.')`,
+  },
+  {
+    fn: "review_preliminary_recommendation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.review_preliminary_recommendation(${t.recommendation}, 'RETURN', array['OTHER'], 'Probe.')`,
+  },
+  {
+    fn: "approve_preliminary_recommendation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.approve_preliminary_recommendation(${t.recommendation}, 'APPROVE', null, null)`,
+  },
+];
+
+// Direct referral commands (migration 1880) take a referral or a delegation, never a case.
+interface ReferralTargets {
+  referral: string;
+  delegation: string;
+}
+
+const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
+  {
+    fn: "update_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.update_referral(${t.referral}, 'Probe title', 'Synthetic: probe summary.', 'FRAUD', 'INTERNAL'::core.classification_level)`,
+  },
+  {
+    fn: "submit_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_referral(${t.referral}, null)`,
+  },
+  {
+    fn: "sector_decide_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.sector_decide_referral(${t.referral}, 'APPROVE', null, null)`,
+  },
+  {
+    fn: "secretary_decide_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.secretary_decide_referral(${t.referral}, 'ACCEPT', null, null, ${self})`,
+  },
+  {
+    fn: "resubmit_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resubmit_referral(${t.referral}, null)`,
+  },
+  {
+    fn: "object_to_referral_rejection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.object_to_referral_rejection(${t.referral}, 'Synthetic: probe objection.')`,
+  },
+  {
+    fn: "withdraw_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_referral(${t.referral}, ${REASON})`,
+  },
+  {
+    fn: "comment_on_referral",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.comment_on_referral(${t.referral}, 'Probe comment.')`,
+  },
+  {
+    fn: "referral_available_actions",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.referral_available_actions(${t.referral})`,
+  },
+  {
+    fn: "revoke_referral_delegation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revoke_referral_delegation(${t.delegation}, ${REASON})`,
+  },
+];
+
+// Committee meeting commands (migration 1890) take a committee proceeding, a meeting, a participant, a vote item or
+// minutes; never a case.
+interface MeetingTargets {
+  committeeProceeding: string;
+  meeting: string;
+  participant: string;
+  voteItem: string;
+  minutes: string;
+}
+
+const MEETING_PROBES: Probe<MeetingTargets>[] = [
+  {
+    fn: "schedule_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.schedule_meeting(${t.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+        now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON})`,
+  },
+  {
+    fn: "invite_to_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.invite_to_meeting(${t.meeting}, 'EXPERT', ${self}, null, true, ${REASON})`,
+  },
+  {
+    fn: "declare_meeting_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.declare_meeting_conflict(${t.participant}, 'NO_CONFLICT', null)`,
+  },
+  {
+    fn: "open_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_meeting(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "record_attendance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_attendance(${t.participant}, 'PRESENT')`,
+  },
+  {
+    fn: "close_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_meeting(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "cancel_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_meeting(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "open_vote_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_vote_item(${t.meeting}, 'OTHER', null, 'Probe item')`,
+  },
+  {
+    fn: "cast_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cast_vote(${t.voteItem}, 'APPROVE', null)`,
+  },
+  {
+    fn: "record_vote_for_member",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_vote_for_member(${t.voteItem}, ${t.participant}, 'ABSENT', 'Synthetic: probe.', null)`,
+  },
+  {
+    fn: "close_vote_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_vote_item(${t.voteItem}, null)`,
+  },
+  {
+    fn: "cast_casting_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cast_casting_vote(${t.voteItem}, 'APPROVE', null)`,
+  },
+  {
+    fn: "vote_item_status",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.vote_item_status(${t.voteItem})`,
+  },
+  {
+    fn: "generate_minutes",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.generate_minutes(${t.meeting}, 'Synthetic probe narrative.')`,
+  },
+  {
+    fn: "review_minutes",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.review_minutes(${t.minutes}, 'APPROVE', null)`,
+  },
+  {
+    fn: "record_minutes_reminder",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_minutes_reminder(${t.minutes})`,
+  },
+  {
+    fn: "apply_minutes_deemed_approval",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.apply_minutes_deemed_approval(${t.minutes})`,
   },
 ];
 
@@ -449,8 +705,193 @@ const RECORDS_PROBES: Probe<RecordsTargets>[] = [
   },
 ];
 
+// Recommendation, legal review and authority commands (migration 1900) take a committee proceeding, a meeting, a
+// package, an item, a legal review request or a packet; never a case.
+interface DecisionTargets {
+  committeeProceeding: string;
+  meeting: string;
+  pkg: string;
+  item: string;
+  request: string;
+  packet: string;
+}
+
+const DECISION_PROBES: Probe<DecisionTargets>[] = [
+  {
+    fn: "create_recommendation_package",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.create_recommendation_package(${t.committeeProceeding}, 'PACKAGE')`,
+  },
+  {
+    fn: "add_recommendation_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.add_recommendation_item(${t.pkg}, 'OTHER', null, null, 'Probe recommendation text.', null, null)`,
+  },
+  {
+    fn: "withdraw_recommendation_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_recommendation_item(${t.item}, ${REASON})`,
+  },
+  {
+    fn: "submit_package_for_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_package_for_vote(${t.pkg})`,
+  },
+  {
+    fn: "open_package_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_package_vote(${t.meeting}, ${t.pkg})`,
+  },
+  {
+    fn: "record_package_adoption",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_package_adoption(${t.pkg})`,
+  },
+  {
+    fn: "request_legal_review",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.request_legal_review(${t.pkg}, ${self}, ${REASON}, null, null)`,
+  },
+  {
+    fn: "approve_restricted_legal_review",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.approve_restricted_legal_review(${t.pkg}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "open_packet",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_packet(${t.packet})`,
+  },
+  {
+    fn: "give_legal_opinion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.give_legal_opinion(${t.request}, 'CONCURS', null)`,
+  },
+  {
+    fn: "submit_to_authority",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_to_authority(${t.pkg})`,
+  },
+  {
+    fn: "record_authority_decision",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_authority_decision(${t.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(), 'Probe authority',
+        'MEMO-PROBE-0001', null, null)`,
+  },
+];
+
+// Employee defence and grievance commands (migration 1910) take a subject, a portal link, a defence notice or a
+// grievance; never a case.
+interface GrievanceTargets {
+  subject: string;
+  link: string;
+  notice: string;
+  grievance: string;
+}
+
+const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
+  {
+    fn: "link_subject_portal_account",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) => tx`select api.link_subject_portal_account(${t.subject}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "revoke_subject_portal_link",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revoke_subject_portal_link(${t.link}, ${REASON})`,
+  },
+  {
+    fn: "issue_defence_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.issue_defence_notice(${t.subject}, 'Probe notice text.', ${[randomUUID()]}::uuid[],
+        now() + interval '10 days')`,
+  },
+  {
+    fn: "acknowledge_defence_notice",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.acknowledge_defence_notice(${t.notice})`,
+  },
+  {
+    fn: "submit_defence_response",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_defence_response(${t.notice}, 'Probe response text.')`,
+  },
+  {
+    fn: "record_defence_response",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_defence_response(${t.notice}, 'EMAIL', now(), 'Probe response text.', 'EMAIL-PROBE-0001')`,
+  },
+  // AGENT-09 G2b (migration 1910): the Restricted Case Authority names a secretary to handle a received grievance.
+  {
+    fn: "approve_restricted_grievance_handling",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.approve_restricted_grievance_handling(${t.grievance}, ${self}, ${REASON})`,
+  },
+  {
+    fn: "file_grievance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.file_grievance(${t.link}, now() - interval '1 day', 'Probe grievance grounds.')`,
+  },
+  {
+    fn: "assess_grievance_admissibility",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.assess_grievance_admissibility(${t.grievance}, 'ADMISSIBLE', null, ${REASON})`,
+  },
+  {
+    fn: "decide_grievance_admissibility",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.decide_grievance_admissibility(${t.grievance}, 'ADMISSIBLE', null, ${REASON})`,
+  },
+  {
+    fn: "record_grievance_outcome",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_grievance_outcome(${t.grievance}, ${["UPHOLD"]}::text[], null, ${randomUUID()}, 'Probe summary.')`,
+  },
+];
+
+// Notification commands (migration 1920) take the caller's own notification; nobody else's is reachable.
+interface NotificationTargets {
+  notification: string;
+}
+
+const NOTIFICATION_PROBES: Probe<NotificationTargets>[] = [
+  {
+    fn: "mark_notification_read",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.mark_notification_read(${t.notification})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
-const ADMIN_COMMANDS = ["grant_role", "revoke_role", "set_user_status"];
+// Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
+const ADMIN_COMMANDS = [
+  "grant_role",
+  "revoke_role",
+  "set_user_status",
+  "appoint_committee_member",
+  "end_committee_membership",
+  "set_committee_rule_set",
+  // Recommendation authority rules (migration 1900): COMMITTEE_ADMIN only, no case.
+  "set_action_authority_rule",
+  // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
+  "set_notification_rule",
+  // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
+  "create_sector",
+  "appoint_sector_member",
+  "end_sector_membership",
+];
+// Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
+// Covered in referral-preliminary.spec.ts.
+const SECTOR_COMMANDS = ["create_referral", "delegate_referral_approval"];
 // The caller's own tasks and counts, the authorised catalogue search, the exact-number lookup (a case number,
 // never a UUID; PBA-T16 to T18) and task housekeeping take no object id (CDF-73).
 const GLOBAL_COMMANDS = [
@@ -468,6 +909,15 @@ const GLOBAL_COMMANDS = [
   "retention_review_queue",
   "request_case_for_legal_hold",
   "search_records_catalogue",
+  // Migration 1880: the caller's purpose-bound approval queue.
+  "preliminary_approval_queue",
+  // Migration 1910: the caller's own defence notices; a grievance recorded by case number (never a UUID), refused
+  // unless the caller is the Grievance Committee Secretary and answering an unknown and an uncleared number alike
+  // (grievance-defence.spec.ts).
+  "my_defence_notices",
+  "record_grievance",
+  // Migration 1920: the caller's own notification preferences.
+  "set_notification_preference",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -593,6 +1043,29 @@ async function purposeObjects(
 }
 
 /**
+ * Rebase objects on the target (ADR-017): an investigation proceeding, an allegation and a finding, made by
+ * someone who may edit the case. Created before the insider objects, whose conflict declaration ends access.
+ */
+async function domainObjects(
+  s: Scenario,
+  target: string,
+  editor: UserKey,
+  preparer: UserKey,
+): Promise<Pick<Targets, "allegation" | "proceeding" | "finding" | "recommendation">> {
+  await s.as(editor);
+  const [p] = await s.tx<{ id: string }[]>`
+    select api.open_proceeding(${target}, 'INVESTIGATION', null, 'Synthetic: probe proceeding.') as id`;
+  const [a] = await s.tx<{ id: string }[]>`
+    select api.add_allegation(${target}, 'FRAUD', 'Synthetic: probe allegation text.', null, null, null) as id`;
+  const [f] = await s.tx<{ id: string }[]>`
+    select api.record_finding(${a!.id}, null, ${p!.id}, 'INCONCLUSIVE', 'Synthetic: probe finding rationale.') as id`;
+  await s.as(preparer);
+  const [r] = await s.tx<{ id: string }[]>`
+    select api.prepare_preliminary_recommendation(${target}, 'NO_ACTION', 'Synthetic: probe recommendation.') as id`;
+  return { allegation: a!.id, proceeding: p!.id, finding: f!.id, recommendation: r!.id };
+}
+
+/**
  * A REPORTER_COMMUNICATE delegation (DEC-06) on case B: the case manager lets the assigned investigator write to
  * the reporter. The executive case has no investigator to delegate to, so its probe gets a random id.
  */
@@ -637,6 +1110,10 @@ const randomTargets = (): Targets => ({
   statementVersion: randomUUID(),
   formInstance: randomUUID(),
   attachment: randomUUID(),
+  allegation: randomUUID(),
+  proceeding: randomUUID(),
+  finding: randomUUID(),
+  recommendation: randomUUID(),
   reporterDelegation: randomUUID(),
 });
 
@@ -649,7 +1126,13 @@ describe("catalog guard", () => {
     const covered = new Set([
       ...PROBES.map((p) => p.fn),
       ...RECORDS_PROBES.map((p) => p.fn),
+      ...REFERRAL_PROBES.map((p) => p.fn),
+      ...MEETING_PROBES.map((p) => p.fn),
+      ...DECISION_PROBES.map((p) => p.fn),
+      ...GRIEVANCE_PROBES.map((p) => p.fn),
+      ...NOTIFICATION_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
+      ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
     ]);
     expect(rows.map((r) => r.name).filter((n) => !covered.has(n))).toEqual([]);
@@ -683,6 +1166,10 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
         which === "B"
           ? await purposeObjects(s, target, "caseManager", "legal", true)
           : await purposeObjects(s, target, "grcDirector", "grcDirector", false);
+      const domain =
+        which === "B"
+          ? await domainObjects(s, target, "caseManager", "investigatorB")
+          : await domainObjects(s, target, "grcDirector", "grcDirector");
       // Before the insider objects too: the investigator's conflict declaration removes its case access.
       const delegation = await reporterDelegation(s, which, target);
       const inside =
@@ -703,6 +1190,7 @@ describe("IDOR: outsiders get the same answer for real objects as for random UUI
         ...seeded,
         ...inside,
         ...purpose,
+        ...domain,
         attachment,
         reporterDelegation: delegation,
       };
@@ -888,6 +1376,301 @@ describe("IDOR: records commands give outsiders the same answer for real objects
   });
 });
 
+describe("IDOR: referral commands give outsiders the same answer for real objects as for random UUIDs", () => {
+  // A referral submitted to the Operations head and a delegation from the head to the preparer. Outsiders: another
+  // Operations member, a Finance member, case staff, committee people without a seat, oversight roles and the
+  // preliminary-review roles. (SECTOR_ADMIN may revoke delegations, so the platform admin is tested apart.)
+  const OUTSIDERS: UserKey[] = [
+    "employeeB",
+    "financeEmployee",
+    "investigatorA",
+    "caseManager",
+    "grcDirector",
+    "committee",
+    "committeeSecretary",
+    "internalAudit",
+    "dpo",
+    "complianceManager",
+    "grcSectorHead",
+  ];
+  const OPS = "b0000000-0000-4000-8000-000000000001";
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("sectorHead");
+      const [d] = await s.tx<{ id: string }[]>`
+        select api.delegate_referral_approval(${OPS}, ${USERS.employee}, now(), now() + interval '7 days',
+          'DEMO-DELEGATION-PROBE', 'Synthetic: probe delegation.') as id`;
+      await s.as("employee");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.create_referral(${OPS}, 'Probe referral (synthetic)', 'Synthetic: probe referral summary.', 'FRAUD',
+          'RESTRICTED'::core.classification_level) as id`;
+      await s.tx`select api.submit_referral(${r!.id}, null)`;
+      await s.as(actor);
+      const real: ReferralTargets = { referral: r!.id, delegation: d!.id };
+      const random: ReferralTargets = { referral: randomUUID(), delegation: randomUUID() };
+      const mismatches: string[] = [];
+      for (const probe of REFERRAL_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select id from intake.referral`).toEqual([]);
+      expect(await s.tx`select id from intake.referral_event`).toEqual([]);
+    });
+  });
+});
+
+describe("IDOR: committee meeting objects (migration 1890)", () => {
+  // Nobody here holds a seat on the proceeding or a place in the meeting. The case team (case manager) sees the
+  // meeting's logistics but not its deliberation, so it is covered by the meeting spec, not listed here.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee", // a global COMMITTEE_MEMBER role, no seat
+    "intake",
+    "platformAdmin", // COMMITTEE_ADMIN maintains the registry, sees no proceeding
+    "internalAudit",
+    "soc",
+    "dpo",
+    "grcSectorHead",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("platformAdmin");
+      const [ic] = await s.tx<{ id: string }[]>`select id from committee.committee where code = 'IC'`;
+      for (const [user, seatCode] of [
+        ["committeeChair", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"],
+        ["legal", "MEMBER"],
+      ] as const) {
+        await s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS[user]}, ${seatCode}, now() - interval '1 day', null, 'DEMO-APPT')`;
+      }
+      await s.as("caseManager");
+      const [cp] = await s.tx<{ id: string }[]>`
+        select api.refer_case_to_committee(${caseB}, ${ic!.id}, null, ${REASON}) as id`;
+      await s.as("committeeSecretary");
+      const [m] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${cp!.id}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`;
+      const [p] = await s.tx<{ id: string }[]>`
+        select id from committee.meeting_participant where meeting_id = ${m!.id} and user_id = ${USERS.legal}`;
+      await s.as("legal");
+      await s.tx`select api.declare_meeting_conflict(${p!.id}, 'NO_CONFLICT', null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+      await s.tx`select api.record_attendance(${p!.id}, 'PRESENT')`;
+      const [v] = await s.tx<
+        { id: string }[]
+      >`select api.open_vote_item(${m!.id}, 'OTHER', null, 'Probe item') as id`;
+      // A second meeting, closed with nobody present, so its minutes are final at once.
+      const [m2] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${cp!.id}, 'HEARING', 'TEAMS', null, 'https://meet.example.test/probe',
+          now() + interval '2 days', now() + interval '2 days 1 hour', ${REASON}) as id`;
+      await s.tx`select api.open_meeting(${m2!.id}, ${REASON})`;
+      await s.tx`select api.close_meeting(${m2!.id}, ${REASON})`;
+      const [mi] = await s.tx<
+        { id: string }[]
+      >`select api.generate_minutes(${m2!.id}, 'Synthetic probe minutes.') as id`;
+
+      await s.as(actor);
+      const real: MeetingTargets = {
+        committeeProceeding: cp!.id,
+        meeting: m!.id,
+        participant: p!.id,
+        voteItem: v!.id,
+        minutes: mi!.id,
+      };
+      const random: MeetingTargets = {
+        committeeProceeding: randomUUID(),
+        meeting: randomUUID(),
+        participant: randomUUID(),
+        voteItem: randomUUID(),
+        minutes: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of MEETING_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "meeting",
+        "meeting_participant",
+        "meeting_conflict",
+        "vote_item",
+        "minutes",
+        "minutes_review",
+      ]) {
+        expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: recommendation, legal review and authority objects (migration 1900)", () => {
+  // Nobody here sits on the proceeding, is assigned the legal review or works the case. legalB (the assigned
+  // reviewer) and the case team are covered by recommendations-authority.spec.ts.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "grcSectorHead",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      const { ic } = await committeeIds();
+      const f = await draftPackage(s, ic, await caseId("0002"));
+      await voteOnPackage(s, f);
+      const { request, packet } = await requestLegalReview(s, f);
+      await s.as(actor);
+      const real: DecisionTargets = {
+        committeeProceeding: f.meeting.committeeProceeding,
+        meeting: f.meeting.meeting,
+        pkg: f.pkg,
+        item: f.sanction,
+        request,
+        packet,
+      };
+      const random: DecisionTargets = {
+        committeeProceeding: randomUUID(),
+        meeting: randomUUID(),
+        pkg: randomUUID(),
+        item: randomUUID(),
+        request: randomUUID(),
+        packet: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of DECISION_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "recommendation_package",
+        "recommendation_item",
+        "legal_review_request",
+        "packet",
+        "packet_item",
+        "authority_decision",
+      ]) {
+        expect(await s.tx`select id from ${s.tx("decision." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: employee defence and grievance objects (migration 1910)", () => {
+  // None of these works case 0002, sits on the Grievance Committee, is the linked subject or filed the grievance.
+  // The case team, the subject and the secretary are covered by grievance-defence.spec.ts.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "grcSectorHead",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [link] = await s.tx<{ id: string }[]>`
+        select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON}) as id`;
+      const [allegation] = await s.tx<{ id: string }[]>`
+        select api.add_allegation(${caseB}, 'FRAUD', 'Synthetic: allegation against Employee Sigma.', ${subj!.id},
+          null, null) as id`;
+      const [notice] = await s.tx<{ id: string }[]>`
+        select api.issue_defence_notice(${subj!.id}, 'Synthetic: you are invited to respond.',
+          ${[allegation!.id]}::uuid[], now() + interval '10 days') as id`;
+      await s.as("employee");
+      const [grievance] = await s.tx<{ id: string }[]>`
+        select api.file_grievance(${link!.id}, now() - interval '1 day', 'Synthetic: grievance grounds.') as id`;
+      await s.as(actor);
+      const real: GrievanceTargets = {
+        subject: subj!.id,
+        link: link!.id,
+        notice: notice!.id,
+        grievance: grievance!.id,
+      };
+      const random: GrievanceTargets = {
+        subject: randomUUID(),
+        link: randomUUID(),
+        notice: randomUUID(),
+        grievance: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of GRIEVANCE_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select * from api.my_defence_notices()`).toEqual([{ my_defence_notices: [] }]);
+      for (const table of [
+        "subject_portal_link",
+        "defence_notice",
+        "defence_notice_item",
+        "defence_response",
+        "grievance",
+        "admissibility_assessment",
+        "grievance_outcome",
+      ]) {
+        expect(await s.tx`select id from ${s.tx("grievance." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: notifications (migration 1920)", () => {
+  // legal's seat notification; every other user is an outsider to it.
+  const OUTSIDERS: UserKey[] = [
+    "committeeChair",
+    "committeeSecretary",
+    "platformAdmin",
+    "dpo",
+    "internalAudit",
+    "soc",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      const { ic } = await committeeIds();
+      await s.as("platformAdmin");
+      await s.tx`select api.appoint_committee_member(${ic}, ${USERS.legal}, 'MEMBER', now(), null, 'DEMO-APPT')`;
+      await s.as("legal");
+      const [n] = await s.tx<{ id: string }[]>`select id from notify.outbox limit 1`;
+      await s.as(actor);
+      const mismatches: string[] = [];
+      for (const probe of NOTIFICATION_PROBES) {
+        const onReal = await outcomeOf(s, probe, { notification: n!.id }, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, { notification: randomUUID() }, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select id from notify.outbox where recipient_id = ${USERS.legal}`).toEqual([]);
+    });
+  });
+});
+
 describe("cross-case object substitution", () => {
   it("an insider on case A cannot act on case B's objects by passing them to commands", async () => {
     const seeded = await seedObjects("0002");
@@ -989,6 +1772,7 @@ describe("non-object commands", () => {
     const seeded = await seedObjects("0002");
     await scenario(async (s) => {
       const purpose = await purposeObjects(s, caseB, "caseManager", "legal", true);
+      const domain = await domainObjects(s, caseB, "caseManager", "investigatorB");
       const delegation = await reporterDelegation(s, "B", caseB);
       const inside = await insiderObjects(
         s,
@@ -1006,7 +1790,15 @@ describe("non-object commands", () => {
         const got = await outcomeOf(
           s,
           probe,
-          { case: caseB, ...seeded, ...inside, ...purpose, attachment, reporterDelegation: delegation },
+          {
+            case: caseB,
+            ...seeded,
+            ...inside,
+            ...purpose,
+            ...domain,
+            attachment,
+            reporterDelegation: delegation,
+          },
           USERS.revoked,
         );
         if (!["EMPTY", "FALSE", "NOT_FOUND"].includes(got) && !got.startsWith("ERROR CDF_UNAUTHENTICATED"))

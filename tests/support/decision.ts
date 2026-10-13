@@ -1,0 +1,112 @@
+// Recommendation package fixtures for the rebase security tests (migration 1900). Every call runs through the api.*
+// commands as the acting user; nothing is inserted directly.
+import { USERS, type Scenario, type UserKey } from "./db";
+import { REASON, openWithPresent, scheduleMeeting, seat, type MeetingFixture } from "./committee";
+
+/** Chair, secretary and two voting members. legalB holds LEGAL_REVIEWER and no seat: the legal reviewer. */
+export const DECISION_SEATS: [UserKey, string][] = [
+  ["committeeChair", "CHAIR"],
+  ["committeeSecretary", "SECRETARY"],
+  ["legal", "MEMBER"],
+  ["lead", "MEMBER"],
+];
+export const DECISION_VOTERS: UserKey[] = ["committeeChair", "legal", "lead"];
+
+export interface CaseFacts {
+  proceeding: string;
+  subject: string;
+  allegation: string;
+  finding: string;
+}
+
+/** An investigation proceeding with one subject, one allegation against them and a substantiated finding. */
+export async function caseFacts(s: Scenario, caseId: string): Promise<CaseFacts> {
+  await s.as("caseManager");
+  const [p] = await s.tx<{ id: string }[]>`
+    select api.open_proceeding(${caseId}, 'INVESTIGATION', null, ${REASON}) as id`;
+  const [subj] = await s.tx<{ id: string }[]>`
+    select api.add_case_subject(${caseId}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+  const [a] = await s.tx<{ id: string }[]>`
+    select api.add_allegation(${caseId}, 'FRAUD', 'Synthetic: allegation against Employee Sigma.', ${subj!.id}, null, null) as id`;
+  await s.as("investigatorB");
+  const [f] = await s.tx<{ id: string }[]>`
+    select api.record_finding(${a!.id}, null, ${p!.id}, 'SUBSTANTIATED', 'Synthetic: finding rationale text.') as id`;
+  return { proceeding: p!.id, subject: subj!.id, allegation: a!.id, finding: f!.id };
+}
+
+export interface PackageFixture extends CaseFacts {
+  meeting: MeetingFixture;
+  pkg: string;
+  sanction: string;
+  corrective: string;
+}
+
+/** Seats the committee, refers the case, opens a meeting with the voters present and drafts a package holding a
+ *  catalogue sanction on the subject and a case-wide corrective action. */
+export async function draftPackage(
+  s: Scenario,
+  committeeId: string,
+  caseId: string,
+  granularity: "PACKAGE" | "ITEM" = "PACKAGE",
+): Promise<PackageFixture> {
+  await seat(s, committeeId, DECISION_SEATS);
+  const facts = await caseFacts(s, caseId);
+  const meeting = await scheduleMeeting(s, committeeId, caseId);
+  await openWithPresent(s, meeting, DECISION_VOTERS);
+  await s.as("committeeSecretary");
+  const [pkg] = await s.tx<{ id: string }[]>`
+    select api.create_recommendation_package(${meeting.committeeProceeding}, ${granularity}) as id`;
+  const [sanction] = await s.tx<{ id: string }[]>`
+    select api.add_recommendation_item(${pkg!.id}, 'DISCIPLINARY_SANCTION', 'WARNING', null,
+      'Synthetic: written warning for Employee Sigma.', ${[facts.subject]}::uuid[], ${[facts.allegation]}::uuid[]) as id`;
+  const [corrective] = await s.tx<{ id: string }[]>`
+    select api.add_recommendation_item(${pkg!.id}, 'CORRECTIVE_ACTION', null, null,
+      'Synthetic: strengthen the approval controls.', null, null) as id`;
+  return { ...facts, meeting, pkg: pkg!.id, sanction: sanction!.id, corrective: corrective!.id };
+}
+
+/** Submits the package, opens its votes and has every voter cast the choice for each vote item (by item id, or
+ *  'PACKAGE'), then closes the items and records adoption. Returns the package status. */
+export async function voteOnPackage(
+  s: Scenario,
+  f: PackageFixture,
+  choiceFor: (target: string) => string = () => "APPROVE",
+): Promise<string> {
+  await s.as("committeeSecretary");
+  await s.tx`select api.submit_package_for_vote(${f.pkg})`;
+  await s.tx`select api.open_package_vote(${f.meeting.meeting}, ${f.pkg})`;
+  const items = await s.tx<{ id: string; recommendation_item_id: string | null }[]>`
+    select vi.id, vi.recommendation_item_id from committee.vote_item vi
+    join decision.recommendation_package p on p.id = vi.package_id and vi.package_round = p.round_no
+    where p.id = ${f.pkg} order by vi.sequence_no`;
+  for (const item of items) {
+    for (const user of DECISION_VOTERS) {
+      await s.as(user);
+      await s.tx`select api.cast_vote(${item.id}, ${choiceFor(item.recommendation_item_id ?? "PACKAGE")}, null)`;
+    }
+    await s.as("committeeSecretary");
+    await s.tx`select api.close_vote_item(${item.id}, null)`;
+  }
+  const [r] = await s.tx<{ status: string }[]>`select api.record_package_adoption(${f.pkg}) as status`;
+  return r!.status;
+}
+
+export async function packageStatus(s: Scenario, pkg: string): Promise<{ status: string; round_no: number }> {
+  await s.as("committeeSecretary");
+  const [r] = await s.tx<{ status: string; round_no: number }[]>`
+    select status, round_no from decision.recommendation_package where id = ${pkg}`;
+  return r!;
+}
+
+/** The secretary sends the adopted package to legalB with the finding; returns the request and packet ids. */
+export async function requestLegalReview(
+  s: Scenario,
+  f: PackageFixture,
+): Promise<{ request: string; packet: string }> {
+  await s.as("committeeSecretary");
+  const [r] = await s.tx<{ id: string }[]>`
+    select api.request_legal_review(${f.pkg}, ${USERS.legalB}, ${REASON}, ${[f.finding]}::uuid[], null) as id`;
+  const [k] = await s.tx<{ id: string }[]>`
+    select id from decision.packet where legal_review_request_id = ${r!.id}`;
+  return { request: r!.id, packet: k!.id };
+}

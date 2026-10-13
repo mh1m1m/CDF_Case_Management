@@ -101,15 +101,15 @@
 
 ## 8. Policy and source gaps
 
-| Item                                    | Class             | Default used                                        |
-| --------------------------------------- | ----------------- | --------------------------------------------------- |
-| 274-item form catalogue (12 tracks)     | SOURCE_REQUIRED   | Rationalization covers the 188 items available.     |
-| Quorum rule per committee               | BLOCKED_BY_POLICY | MAJORITY_ELIGIBLE (owner default from Q&A).         |
-| Business-day calendar (minutes window)  | SOURCE_REQUIRED   | Sun–Thu, no holiday table; configurable.            |
-| Sanction legal basis per catalogue item | SOURCE_REQUIRED   | Codes seeded, `legal_basis` null and flagged.       |
-| Competent authority per action type     | BLOCKED_BY_POLICY | DISCIPLINARY_SANCTION → CEO, flagged OWNER_DEFAULT. |
-| Grievance window                        | OWNER_DEFAULT     | 30 days, effective-dated.                           |
-| Retention periods                       | BLOCKED_BY_POLICY | ADR-016 D8; unchanged.                              |
+| Item                                    | Class               | Default used                                                                                                             |
+| --------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 274-item form catalogue (12 tracks)     | SUPPLIED 2026-10-12 | Statuses mapped per form (project files `rebase/crm-mapping/`); dispositions in Phase 11. 188 legacy items rationalized. |
+| Quorum rule per committee               | BLOCKED_BY_POLICY   | MAJORITY_ELIGIBLE (owner default from Q&A).                                                                              |
+| Business-day calendar (minutes window)  | SOURCE_REQUIRED     | Sun–Thu, no holiday table; configurable.                                                                                 |
+| Sanction legal basis per catalogue item | SOURCE_REQUIRED     | Codes seeded, `legal_basis` null and flagged.                                                                            |
+| Competent authority per action type     | BLOCKED_BY_POLICY   | DISCIPLINARY_SANCTION → CEO, flagged OWNER_DEFAULT.                                                                      |
+| Grievance window                        | OWNER_DEFAULT       | 30 days, effective-dated.                                                                                                |
+| Retention periods                       | BLOCKED_BY_POLICY   | ADR-016 D8; unchanged.                                                                                                   |
 
 ## 9. What is not touched
 
