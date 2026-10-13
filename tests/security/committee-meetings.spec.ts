@@ -11,6 +11,7 @@ import {
   REASON,
   committeeIds,
   openItem,
+  preliminaryReferral,
   openWithPresent,
   scheduleMeeting,
   seat,
@@ -149,6 +150,7 @@ describe("meetings: scheduling and visibility", () => {
         ["legal", "MEMBER"],
         ["investigatorA", "MEMBER"],
       ]);
+      await preliminaryReferral(s, caseB); // AMB-018 (migration 2030)
       await s.as("caseManager");
       const [icp] = await s.tx<
         { id: string }[]

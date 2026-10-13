@@ -5,7 +5,7 @@
 // needs its source document and the authority the rules name; packets never carry the reporter's identity.
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario } from "../support/db";
-import { REASON, committeeIds } from "../support/committee";
+import { REASON, committeeIds, preliminaryReferral } from "../support/committee";
 import {
   draftPackage,
   packageStatus,
@@ -29,7 +29,7 @@ const decide = (
   source: string | null,
   itemOutcomes: unknown = null,
 ) =>
-  s.tx`select api.record_authority_decision(${f.pkg}, ${authority}, ${outcome}, now() - interval '1 hour',
+  s.tx`select api.record_authority_decision(${f.pkg}, ${authority}, ${outcome}, now(),
     'Chief Executive (synthetic)', ${source}, ${itemOutcomes === null ? null : s.tx.json(itemOutcomes as never)}::jsonb,
     ${REASON}) as id`;
 
@@ -496,6 +496,7 @@ describe("AGENT-09 review of 1900 (W1, W2, reviewer eligibility)", () => {
         ["committeeSecretary", "SECRETARY"],
         ["grcDeputy", "MEMBER"],
       ]);
+      await preliminaryReferral(s, caseExec); // AMB-018 (migration 2030)
       await s.as("grcDirector");
       await s.tx`select api.approve_restricted_committee_referral(${caseExec}, ${ic}, ${REASON})`;
       const [cp] = await s.tx<{ id: string }[]>`

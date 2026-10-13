@@ -4,7 +4,15 @@
 // after the snapshot removes access at once. Required negative tests 1, 2, 3 and 6.
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
-import { IC_SEATS, REASON, committeeIds, refer, scheduleMeeting, seat } from "../support/committee";
+import {
+  IC_SEATS,
+  REASON,
+  committeeIds,
+  preliminaryReferral,
+  refer,
+  scheduleMeeting,
+  seat,
+} from "../support/committee";
 
 let caseB: string, caseExec: string, ic: string, gc: string;
 
@@ -136,6 +144,9 @@ describe("restricted cases and uncleared seats (required test 3, DEC-61)", () =>
         "CDF_CONFLICT:CASE_NOT_RESTRICTED",
         (tx) => tx`select api.approve_restricted_committee_referral(${caseB}, ${ic}, ${REASON})`,
       );
+      // AMB-018 (migration 2030): the preliminary review referred the case.
+      await preliminaryReferral(s, caseExec);
+      await s.as("grcDirector");
       const [a] = await s.tx<{ id: string }[]>`
         select api.approve_restricted_committee_referral(${caseExec}, ${ic}, ${REASON}) as id`;
       const [cp] = await s.tx<{ id: string }[]>`
