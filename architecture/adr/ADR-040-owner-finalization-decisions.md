@@ -209,7 +209,70 @@ The UX thread's Phase 12 asks (coordinator, 2026-10-13): the web BFF does not re
 
 ### 5. Notices, grievances, sanctions, corrective actions, export, continuity and catalogue (2040)
 
-To be completed with migration 2040: DEC-F09, F14–F18, F21–F36; and DEC-AMB-001, 004, 009 and 011; the CDF-207 guard; CON-009.
+Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either refuses (`CONFLICT:<CODE>`) or keeps the behaviour off until it is configured. Everything is additive. Replaced functions keep their signature, owner and grants.
+
+1. **Delivery and the grievance window (DEC-F15, AMB-137, CON-002).**
+   - A notice records its delivery (`api.record_notice_delivery`).
+   - The window starts from the basis the rule snapshot names: issue, delivery or acknowledgement.
+2. **The rule in force at the contested decision (DEC-F16).** A grievance takes the rule set in force when the contested decision was made.
+3. **Non-admission (DEC-F17, AMB-148, CON-004).**
+   - The admissibility decider and the non-admission decider are snapshotted; the default is COMMITTEE.
+   - EXTERNAL is recorded with a reference only.
+4. **The defence response period (DEC-F18, AMB-151/152/154, CON-019).**
+   - The period is SOURCE_REQUIRED.
+   - Deadline changes are recorded with a reason.
+   - A subject may decline to respond. A late response carries its reason.
+   - Reminders skip a suspended notice.
+5. **The grievance lifecycle (AMB-139/140/141/143, CDF-207).**
+   - One open grievance per decision.
+   - The grievant withdraws before the outcome (`api.withdraw_grievance`); the window is not reopened.
+   - Completion is requested and supplied.
+   - The contested items are named.
+6. **One reconsideration (DEC-AMB-001, owner, option B; AMB-145, T-AMB-085).**
+   - After a grievance is decided, the grievant may file one reconsideration of the same decision, only on genuinely new evidence stated with a description and a reference. It is filed through the portal (`api.file_grievance_reconsideration`) or recorded by the secretary (`api.record_grievance_reconsideration`).
+   - Admissibility confirms that the evidence is new.
+   - A further grievance on the same decision is always refused (`RECONSIDERATION_USED`).
+   - New facts otherwise go through reinvestigation.
+7. **Suspension by sanction type (DEC-AMB-004, option C; AMB-110, T-AMB-063).** Configured as `SANCTION_GRIEVANCE_SUSPENSION` through `api.set_sanction_rule` (COMMITTEE_ADMIN), recorded in `sanction_rule_change`.
+   - An irreversible or materially difficult-to-reverse type is not executable during the grievance window, nor, once a grievance is filed, until it is resolved.
+   - A reversible type follows its rule: SUSPEND_UNTIL_RESOLVED or PROCEED.
+   - Every seeded value is SOURCE_REQUIRED. A type with no rule, or a sanction outside the catalogue, is held as irreversible (fail closed). TERMINATION is marked irreversible as the fail-safe default.
+8. **Leaving employment (DEC-AMB-009, option A; AMB-031, T-AMB-013).**
+   - The investigation continues through findings and recommendations.
+   - A sanction may be recorded and decided, but it is not executable, and not shown as executable, unless a recorded statement with its source document says the employment relationship still permits that type. There is no authority override.
+   - Governance and corrective actions stay actionable.
+9. **Never more severe (DEC-AMB-011, option A; AMB-149, T-AMB-088).** Configured as `SANCTION_SEVERITY_RANK`, seeded unranked. Null means "not comparable", never "equal".
+   - A grievance outcome upholds, reduces, modifies to no more severe a sanction, or cancels.
+   - A change between types needs both ranks and a substitute no more severe (`grievance.outcome_substitution`). A change involving an unranked type is refused.
+   - Within one type the outcome declares REDUCE or NONE; INCREASE is refused.
+   - New facts go through reinvestigation, never through the grievance.
+10. **Execution.**
+    - `decision.execution_block` is the single source for the execution guard trigger and for `api.sanction_executability`.
+    - It refuses on undelivered notices (AMB-109), on the employment rule (DEC-AMB-009), on a grievance that cancelled the item or returned it for reinvestigation (DEC-AMB-011), and on the suspension rule (DEC-AMB-004).
+    - It also refuses while the package carries an unresolved TAINTED_BY_CONFLICT item (DEC-AMB-003). That item stays blocked even if the taint arises after the decision notice.
+11. **A failed mandatory email notice (AMB-175).** It opens a delivery task for the issuer.
+12. **Corrective actions (DEC-F26, F27, F28; CON-009).**
+    - Escalation steps, evidence types and owner kinds, including pools. Pools are acted for through `decision.acts_for_action`.
+    - The policy is set by its administrator.
+    - DEC-F29 is unchanged.
+13. **Export (DEC-F21–F24).**
+    - A purpose catalogue (`exchange.export_purpose`); OTHER needs a justification.
+    - Approved external domains are SOURCE_REQUIRED and not enforced (PRODUCTION_SUBSTITUTION_REQUIRED).
+    - Approver pools.
+    - The restricted case authority's consent is required for a restricted external export (DEC-F23).
+    - The requester is never the second approver, and configuration warnings flag a pool that could deadlock (DEC-F24).
+    - Policy is administered by EXPORT_POLICY_ADMIN only.
+14. **The continuity workbook (DEC-F30, F31).**
+    - Named continuity operators (`exchange.bcp_continuity_operator`).
+    - Staging rows are purged after `BCP_STAGING_RETENTION_DAYS`. The batch control data, counts, hashes and audit are kept.
+15. **Statuses and forms (DEC-F32–F34).**
+    - The ten status-code conflicts are registered; S099 is LEGAL_HOLD.
+    - Retiring a form needs its criteria met.
+16. **Referral and preliminary outcomes (DEC-F08, F09, F10).**
+    - **DEC-F08.** The delegation maximum is SOURCE_REQUIRED (null enforces none; an end date is always required).
+    - **DEC-F09, escalation.** After repeated rejection the sector approver may escalate to a configurable target, by default the IC chair seat. A vacant or involved target refuses (fail closed); no deputy stands in. The target accepts, which creates the case, or upholds. A chair who accepted may still vote, since acceptance is an admission decision.
+    - **DEC-F09, objection.** An objection is refused once an escalation is decided.
+    - **DEC-F10.** NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are INACTIVE. They are refused on insert and on endorsement or approval; an existing one can only be returned.
 
 ## Consequences
 
