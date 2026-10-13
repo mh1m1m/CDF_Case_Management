@@ -71,7 +71,8 @@ describe("decision-notice delivery and the grievance window (DEC-F15, DEC-F16, A
       // The subject sees no window yet, and may still file: accepted, and not late.
       await s.as("employee");
       const [mine] = await s.tx<{ n: Record<string, unknown>[] }[]>`select api.my_defence_notices() as n`;
-      expect(mine!.n[0]).toMatchObject({
+      // The package fixture also issued the subject a DEFENCE notice (AMB-026, 2030): pick the DECISION notice by id.
+      expect(mine!.n.find((x) => x.notice_id === n)).toMatchObject({
         notice_id: n,
         delivered_at: null,
         window_start_basis: "DELIVERY",

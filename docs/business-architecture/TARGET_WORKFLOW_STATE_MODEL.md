@@ -75,7 +75,7 @@ SCHEDULED → OPEN (secretary opens; COI declarations required from all eligible
 
 ### 3.5 Vote item
 
-OPEN → CLOSED (result APPROVED / REJECTED / TIED / NO_QUORUM). Quorum = count of PRESENT, NO_CONFLICT eligible voting members ≥ rule threshold. Tie with casting vote enabled → chair's casting vote decides, stored separately.
+OPEN → CLOSED (result APPROVED / REJECTED / TIED / NO_QUORUM / NO_DECISION; NO_DECISION when every vote abstains, ADR-020, CON-016). Quorum = count of PRESENT, NO_CONFLICT eligible voting members ≥ rule threshold; no item opens without it (ADR-040). Simple majority of substantive votes; abstentions count neither way (DEC-F01). Tie with casting vote enabled → the chair's casting vote decides, or the activated acting chair's where the rule grants it, stored separately; otherwise the tie stands (DEC-F03, ADR-040).
 
 ### 3.6 Legal review
 
@@ -87,7 +87,7 @@ AWAITING → RECORDED (secretary, source document) → EFFECTIVE (requires sourc
 
 ### 3.8 Grievance
 
-RECEIVED (channel, original date) → ADMISSIBILITY_PENDING → ADMISSIBLE / INADMISSIBLE (decider per rule set: SECRETARY / CHAIR / COMMITTEE) → IN_DELIBERATION → CONCLUDED (outcomes[]: UPHOLD, AMEND_SANCTION, CANCEL_SANCTION, REINVESTIGATE, REFER_TO_AUTHORITY, OTHER) → REINVESTIGATION proceeding if routed.
+RECEIVED (channel, original date) → ADMISSIBILITY_PENDING → ADMISSIBLE / INADMISSIBLE (decider per rule set: SECRETARY / CHAIR / COMMITTEE) → IN_DELIBERATION → CONCLUDED (outcomes[], the Q95 list, CON-014: UPHOLD, MODIFY, CANCEL, RETURN_FOR_REINVESTIGATION, REQUEST_COMPLETION, INADMISSIBLE, REJECT_ON_MERITS, PARTIALLY_ACCEPT, CORRECTIVE_ACTION, DISCIPLINARY_ACTION, OTHER_AUTHORIZED_OUTCOME; never more severe than the challenged sanction, DEC-AMB-011) → REINVESTIGATION proceeding if routed.
 
 ## 4. Mapping from CDF_CASE_V1
 
@@ -107,12 +107,12 @@ Existing cases are not re-pathed. V1 keeps running for them; new proceedings att
 
 ## 5. Time rules
 
-| Rule                        | Default              | Status          | Where                     |
-| --------------------------- | -------------------- | --------------- | ------------------------- |
-| Minutes review window       | 3 business days      | OWNER_DEFAULT   | `committee.rule_set`      |
-| Deemed approval             | enabled              | OWNER_DEFAULT   | `committee.rule_set`      |
-| Grievance window            | 30 days              | OWNER_DEFAULT   | `committee.rule_set` (GC) |
-| Business-day calendar       | Sun–Thu, no holidays | SOURCE_REQUIRED | `config.setting`          |
-| Defence submission deadline | configurable         | SOURCE_REQUIRED | `config.setting`          |
+| Rule                        | Default                                                              | Status                                                               | Where                                                                                    |
+| --------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Minutes review window       | 3 business days                                                      | OWNER_DEFAULT                                                        | `committee.rule_set`                                                                     |
+| Deemed approval             | enabled                                                              | OWNER_DEFAULT                                                        | `committee.rule_set`                                                                     |
+| Grievance window            | 30 days                                                              | OWNER_DEFAULT                                                        | `committee.rule_set` (GC)                                                                |
+| Business-day calendar       | Sun–Thu working week; holidays entered by the calendar administrator | OWNER_DECIDED (DEC-F02); the holidays themselves are SOURCE_REQUIRED | `config.business_week_pattern`, `config.business_calendar_day` (migration 2030, CON-005) |
+| Defence submission deadline | per notice, set by the issuer                                        | SOURCE_REQUIRED (default period)                                     | `grievance.defence_notice.due_at`                                                        |
 
 Deemed approval is applied by an idempotent command (`api.apply_minutes_deemed_approval`) invoked by a scheduler port; prototype runs it on read and from a cron route (PRODUCTION_SUBSTITUTION_REQUIRED: CDF scheduler).

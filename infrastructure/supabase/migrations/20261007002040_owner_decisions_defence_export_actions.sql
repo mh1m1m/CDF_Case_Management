@@ -67,8 +67,8 @@
 -- corrective_action_event_event_type_check, export_request_purpose_check (the catalogue FK carries the list),
 -- referral_status_check, referral_event_event_type_check, status_dimension_value_state_check (adds INACTIVE).
 --
--- TEMPORARY STUB (item 6): decision.package_tainted(uuid) belongs to migration 2035 (DEC-AMB-003), not in this tree.
--- A clearly marked block creates it only when absent (to_regprocedure); drop the block at merge.
+-- decision.package_tainted(uuid) (item 6, DEC-AMB-003) is migration 2030's (section 3); the temporary stub that stood in
+-- for it before the merge was dropped at the merge.
 --
 -- Controls:
 --   * Additive: no table, column, row, catalogue code, status or option code is dropped, renamed or deleted. Every new
@@ -1612,50 +1612,6 @@ end;
 $$;
 create trigger outcome_substitution_guard before insert on grievance.outcome_substitution
   for each row execute function grievance.guard_outcome_substitution();
-
--- >>>>> TEMPORARY STUB: DROP THIS BLOCK AT MERGE (coordinator, 2026-10-13) >>>>>
--- decision.package_tainted(p_package_id uuid) returns boolean is defined by migration 2035
--- (20261007002035_owner_decisions_authority_part.sql, DEC-AMB-003, branch local/pra-2030-decisions), which is not in
--- this tree. Until both are in one tree this stub stands in for it with the same name, signature and meaning, less the
--- committee's resolution of a taint (decision.conflict_taint_resolution exists only in 2035): a package is tainted
--- while an active item's result was carried by a closed vote item of its current round on which someone now
--- conflicted (a declared or upheld meeting conflict, or a declared or confirmed case conflict) cast a counted vote.
--- It is created only when the function does not exist, so in the merged tree (2035 runs first) it does nothing.
-do $stub$
-begin
-  if to_regprocedure('decision.package_tainted(uuid)') is null then
-    execute $f$
-      create function decision.package_tainted(p_package_id uuid)
-      returns boolean
-      language sql stable
-      set search_path = ''
-      as $b$
-        select exists (
-          select 1
-          from decision.recommendation_item i
-          join decision.recommendation_package p on p.id = i.package_id
-          cross join lateral (select vi.id, vi.case_id, vi.meeting_id from committee.vote_item vi
-                              where vi.package_id = p.id and vi.package_round = p.round_no and vi.status = 'CLOSED'
-                                and (vi.recommendation_item_id = i.id or vi.recommendation_item_id is null)
-                              order by vi.sequence_no desc limit 1) vi
-          join committee.meeting m on m.id = vi.meeting_id
-          where i.package_id = p_package_id and i.status = 'ACTIVE'
-            and exists (select 1
-                        from (select v.recorded_for as user_id from committee.vote v
-                              where v.vote_item_id = vi.id and v.choice in ('APPROVE', 'REJECT', 'ABSTAIN')
-                              union
-                              select c.cast_by from committee.casting_vote c where c.vote_item_id = vi.id) u
-                        where authz.has_meeting_conflict(u.user_id, m.committee_proceeding_id)
-                           or exists (select 1 from case_mgmt.conflict_check cc
-                                      where cc.case_id = vi.case_id and cc.user_id = u.user_id and cc.is_current
-                                        and cc.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED'))));
-      $b$
-    $f$;
-    revoke all on function decision.package_tainted(uuid) from public, anon, authenticated;
-  end if;
-end;
-$stub$;
--- <<<<< END OF TEMPORARY STUB <<<<<
 
 -- Why a decided sanction may not be executed on a subject now, as a code; null when it may. The one source for the
 -- execution guard and the executability read, in order: delivery (AMB-109, T-AMB-062); a package tainted by a

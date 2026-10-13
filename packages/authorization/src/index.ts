@@ -132,6 +132,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   // COMMITTEE_ADMIN maintains committee seats and rules only (ADR-019, Q28); it opens no proceeding or case.
   // SECTOR_ADMIN maintains sectors and positions only; it shows no referral or case (migration 1880).
   // NOTIFICATION_ADMIN maintains notification rules only; notifications carry no content (migration 1920).
+  // BUSINESS_CALENDAR_ADMIN maintains the working week and holidays only (migration 2030, DEC-F02).
   // EXPORT_POLICY_ADMIN maintains export rules, purposes and approver pools only (migration 2040, DEC-F24); a holder
   // of an export approval permission cannot use it (GRC_DIRECTOR keeps the 1930 grant, inert: see canAdministerExportPolicy).
   PLATFORM_ADMIN: [
@@ -140,6 +141,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "COMMITTEE_ADMIN",
     "SECTOR_ADMIN",
     "NOTIFICATION_ADMIN",
+    "BUSINESS_CALENDAR_ADMIN",
     "EXPORT_POLICY_ADMIN",
     // Authorizes continuity-workbook operators only (migration 2040, DEC-F30); no import or case content.
     "BCP_CONTINUITY_ADMIN",

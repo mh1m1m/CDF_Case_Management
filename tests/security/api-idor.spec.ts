@@ -24,7 +24,7 @@ import {
   placeHold,
   requestDisposition,
 } from "../support/records";
-import { committeeIds } from "../support/committee";
+import { committeeIds, preliminaryReferral, unseatDemoSeats } from "../support/committee";
 import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
 
 interface Targets {
@@ -665,6 +665,17 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.vote_item_status(${t.voteItem})`,
   },
+  // Purpose read models (migration 2030 section 4).
+  {
+    fn: "meeting_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.meeting_view(${t.meeting})`,
+  },
+  {
+    fn: "minutes_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.minutes_view(${t.minutes})`,
+  },
   {
     fn: "generate_minutes",
     outcome: "NOT_FOUND",
@@ -684,6 +695,73 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     fn: "apply_minutes_deemed_approval",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.apply_minutes_deemed_approval(${t.minutes})`,
+  },
+  // The owner's Finalization Set (migration 2030, ADR-040): acting roles, alternates, the snapshot amendment,
+  // emergency meetings, invitee acknowledgements and accommodations, vote revisions, recusals, notes and the
+  // minutes objection ruling.
+  {
+    fn: "activate_acting_chair",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_acting_chair(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "activate_acting_secretary",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_acting_secretary(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "activate_alternate_member",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_alternate_member(${t.participant}, ${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "amend_proceeding_snapshot",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.amend_proceeding_snapshot(${t.committeeProceeding}, ${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "schedule_emergency_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.schedule_emergency_meeting(${t.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)',
+        null, now() + interval '2 hours', now() + interval '3 hours', ${REASON}, 'Synthetic: probe emergency.')`,
+  },
+  {
+    fn: "acknowledge_meeting_confidentiality",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.acknowledge_meeting_confidentiality(${t.witness})`,
+  },
+  {
+    fn: "record_meeting_accommodation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_meeting_accommodation(${t.participant}, 'Synthetic: probe accommodation.')`,
+  },
+  {
+    fn: "revise_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revise_vote(${t.voteItem}, 'REJECT', ${REASON})`,
+  },
+  {
+    fn: "recuse_for_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.recuse_for_conflict(${t.voteItem}, ${REASON})`,
+  },
+  {
+    fn: "record_vote_note",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_vote_note(${t.voteItem}, 'Synthetic: probe note.', false)`,
+  },
+  {
+    fn: "reverse_meeting_conflict_determination",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.reverse_meeting_conflict_determination(${t.concern}, ${REASON})`,
+  },
+  {
+    fn: "overrule_minutes_objection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.overrule_minutes_objection(${t.minutes}, ${REASON})`,
   },
 ];
 
@@ -820,6 +898,33 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
     call: (tx, t) =>
       tx`select api.record_authority_decision(${t.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(), 'Probe authority',
         'MEMO-PROBE-0001', null, null)`,
+  },
+  // Migration 2030: return before submission, item flags, cancelling a request, a superseding opinion.
+  {
+    fn: "return_package_to_committee",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.return_package_to_committee(${t.pkg}, ${REASON})`,
+  },
+  {
+    fn: "recommendation_item_flags",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select * from api.recommendation_item_flags(${t.pkg})`,
+  },
+  {
+    fn: "cancel_legal_review_request",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_legal_review_request(${t.request}, ${REASON})`,
+  },
+  {
+    fn: "give_superseding_legal_opinion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.give_superseding_legal_opinion(${t.request}, 'CONCURS', null)`,
+  },
+  // DEC-AMB-003 (owner, 2026-10-13): the committee's resolution of a tainted item.
+  {
+    fn: "resolve_conflict_taint",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resolve_conflict_taint(${t.item}, 'CONFIRM', 'Probe resolution reason.')`,
   },
   // Migration 2040: executing a decided sanction (AMB-109; DEC-AMB-004, DEC-AMB-009, DEC-AMB-011).
   {
@@ -1178,6 +1283,11 @@ const ADMIN_COMMANDS = [
   "revise_committee_rule_set",
   // Recommendation authority rules (migration 1900): COMMITTEE_ADMIN only, no case.
   "set_action_authority_rule",
+  // Sanction catalogue versions, legal-review rules and authority-rule coverage (migration 2030): COMMITTEE_ADMIN
+  // only, no case (recommendations-authority.spec.ts).
+  "set_sanction_catalogue_entry",
+  "set_legal_review_rule",
+  "authority_rule_coverage",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
   "set_notification_rule",
   // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case. Migration 2040 (DEC-F21,
@@ -1204,6 +1314,14 @@ const ADMIN_COMMANDS = [
   "create_sector",
   "appoint_sector_member",
   "end_sector_membership",
+  // Migration 2030 (ADR-040): the business calendar (BUSINESS_CALENDAR_ADMIN), invitee-type rules and the
+  // independent conflict authority (COMMITTEE_ADMIN); none takes a case or a meeting.
+  "set_business_calendar_day",
+  "withdraw_business_calendar_day",
+  "set_business_week_pattern",
+  "set_invitee_type_rule",
+  "appoint_conflict_authority",
+  "end_conflict_authority",
 ];
 // Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
 // Covered in referral-preliminary.spec.ts.
@@ -1759,6 +1877,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
 
   it.each(OUTSIDERS)("%s", async (actor) => {
     await scenario(async (s) => {
+      await unseatDemoSeats(s);
       await s.as("platformAdmin");
       const [ic] = await s.tx<{ id: string }[]>`select id from committee.committee where code = 'IC'`;
       for (const [user, seatCode] of [
@@ -1768,6 +1887,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
       ] as const) {
         await s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS[user]}, ${seatCode}, now() - interval '1 day', null, 'DEMO-APPT')`;
       }
+      await preliminaryReferral(s, caseB); // AMB-018 (migration 2030)
       await s.as("caseManager");
       const [cp] = await s.tx<{ id: string }[]>`
         select api.refer_case_to_committee(${caseB}, ${ic!.id}, null, ${REASON}) as id`;
@@ -1842,6 +1962,12 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "attendance_excuse",
         "meeting_conflict_concern",
         "witness_exclusion",
+        "meeting_acting_role",
+        "proceeding_snapshot_amendment",
+        "minutes_objection_ruling",
+        "confidentiality_ack",
+        "meeting_accommodation",
+        "meeting_conflict_reversal",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
       }

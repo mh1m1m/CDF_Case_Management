@@ -87,6 +87,16 @@ describe("business days (Q98)", () => {
       new Date("2026-10-19T10:00:00+03:00").toISOString(), // Thu, Sun, Mon
     );
   });
+
+  it("a configured holiday is skipped and a working-day exception counts (DEC-F02)", () => {
+    const calendar = { nonWorkingDates: ["2026-10-18"], workingDates: ["2026-10-17"] };
+    // Thu, Sat (working by exception), Mon (Sunday is a holiday).
+    expect(addBusinessDays(new Date("2026-10-14T10:00:00+03:00"), 3, calendar).toISOString()).toBe(
+      new Date("2026-10-19T10:00:00+03:00").toISOString(),
+    );
+    expect(isBusinessDay(new Date("2026-10-18T12:00:00+03:00"), calendar)).toBe(false);
+    expect(isBusinessDay(new Date("2026-10-17T12:00:00+03:00"), calendar)).toBe(true);
+  });
 });
 
 describe("vote tally and outcome (Q55–Q63)", () => {

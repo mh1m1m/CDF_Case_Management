@@ -53,8 +53,8 @@ One table, two triggers, one function replaced and one command in PostgreSQL. Th
 
 ## Open questions (SOURCE_REQUIRED)
 
-1. May the subject, or the subject's legal counsel, ever be excluded from a hearing? Built: no (`INVALID`).
-2. Should an excluded witness keep seeing the meeting's logistics? Built: no (coordinator ruling). The alternative is to leave `authz.can_view_meeting` unchanged, so the witness keeps the date, mode and place.
+1. ~~May the subject, or the subject's legal counsel, ever be excluded from a hearing?~~ **Answered by DEC-F06 (owner, 2026-10-13):** keep the fail-safe default of no exclusion (`INVALID`, as built). An exception rule for a specific hearing type is SOURCE_REQUIRED, and no discretionary exclusion power is created without an approved source.
+2. ~~Should an excluded witness keep seeing the meeting's logistics?~~ **Answered by DEC-F07 (owner, 2026-10-13):** no. An excluded witness loses the meeting's logistics, packet materials and later meeting content, unless a separate purpose-bound entitlement exists, as built. ADR-040 adds that they receive no cancellation notice and that no acknowledgement or accommodation is recorded for them.
 
 ## Requirements
 

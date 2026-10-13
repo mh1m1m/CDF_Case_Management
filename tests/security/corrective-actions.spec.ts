@@ -7,8 +7,8 @@
 // outbox.
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, caseId, ownerScenario, type OwnerScenario, type Scenario, type UserKey } from "../support/db";
-import { REASON, committeeIds, seat } from "../support/committee";
-import { draftPackage, voteOnPackage, type PackageFixture } from "../support/decision";
+import { REASON, committeeIds, preliminaryReferral, seat } from "../support/committee";
+import { authorityRuleFor, draftPackage, voteOnPackage, type PackageFixture } from "../support/decision";
 
 const TITLE = "Synthetic: strengthen approval controls";
 const DESCRIPTION = "Synthetic: add a second approver to payments above the threshold.";
@@ -45,6 +45,8 @@ async function decidedPackage(
   outcome: "APPROVE_AS_RECOMMENDED" | "APPROVE_PARTIALLY" | null = "APPROVE_PARTIALLY",
 ): Promise<Decided> {
   const f = await draftPackage(s, ic, caseB);
+  // DEC-F13 (migration 2030): the remediation needs an authority rule to be submitted.
+  await authorityRuleFor(s, "GOVERNANCE_REMEDIATION");
   await s.as("committeeSecretary");
   const [rem] = await s.tx<{ id: string }[]>`
     select api.add_recommendation_item(${f.pkg}, 'GOVERNANCE_REMEDIATION', null, null,
@@ -62,7 +64,7 @@ async function decidedPackage(
         ]
       : null;
   const [d] = await s.tx<{ id: string }[]>`
-    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now() - interval '1 hour',
+    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now(),
       'Chief Executive (synthetic)', 'MEMO-DEMO-0101', ${items === null ? null : s.tx.json(items as never)}::jsonb, ${REASON}) as id`;
   return { ...f, remediation: rem!.id, decision: d!.id };
 }
@@ -72,14 +74,14 @@ async function decidedPackage(
 async function secondRound(s: Scenario, outcome: "APPROVE_AS_RECOMMENDED" | "REJECT"): Promise<Decided> {
   const f = await decidedPackage(s, null);
   await s.as("committeeSecretary");
-  await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'RETURN_TO_COMMITTEE', now() - interval '1 hour',
+  await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'RETURN_TO_COMMITTEE', now(),
     'Chief Executive (synthetic)', 'MEMO-DEMO-0106', null, ${REASON})`;
   await s.tx`select api.withdraw_recommendation_item(${f.remediation}, ${REASON})`;
   expect(await voteOnPackage(s, f)).toBe("ADOPTED");
   await s.as("committeeSecretary");
   await s.tx`select api.submit_to_authority(${f.pkg})`;
   const [d] = await s.tx<{ id: string }[]>`
-    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now() - interval '1 hour',
+    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now(),
       'Chief Executive (synthetic)', 'MEMO-DEMO-0107', null, ${REASON}) as id`;
   return { ...f, decision: d!.id };
 }
@@ -201,7 +203,7 @@ describe("opening corrective actions (ADR-033, Q72)", () => {
       );
       await s.as("committeeSecretary");
       const [d] = await s.tx<{ id: string }[]>`
-        select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_PARTIALLY', now() - interval '1 hour',
+        select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_PARTIALLY', now(),
           'Chief Executive (synthetic)', 'MEMO-DEMO-0101', ${s.tx.json([
             { item_id: f.corrective, outcome: "MODIFIED", modification: "Synthetic: within the quarter." },
             { item_id: f.remediation, outcome: "REJECTED" },
@@ -266,6 +268,8 @@ describe("opening corrective actions (ADR-033, Q72)", () => {
       await implementationOwners(s, "financeEmployee");
       // Item-level votes: the committee rejects the remediation; an OTHER item is adopted but is not actionable.
       const f = await draftPackage(s, ic, caseB, "ITEM");
+      // DEC-F13 (migration 2030): the adopted OTHER item needs an authority rule to be submitted.
+      await authorityRuleFor(s, "OTHER");
       await s.as("committeeSecretary");
       const [rem] = await s.tx<{ id: string }[]>`
         select api.add_recommendation_item(${f.pkg}, 'GOVERNANCE_REMEDIATION', null, null,
@@ -277,7 +281,7 @@ describe("opening corrective actions (ADR-033, Q72)", () => {
       await s.as("committeeSecretary");
       await s.tx`select api.submit_to_authority(${f.pkg})`;
       await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED',
-        now() - interval '1 hour', 'Chief Executive (synthetic)', 'MEMO-DEMO-0104', null, ${REASON})`;
+        now(), 'Chief Executive (synthetic)', 'MEMO-DEMO-0104', null, ${REASON})`;
       for (const item of [rem!.id, other!.id]) {
         await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () =>
           open(s, "caseManager", item, "financeEmployee"),
@@ -582,6 +586,8 @@ describe("managing actions", () => {
         ["committeeSecretary", "SECRETARY"],
         ["grcDeputy", "MEMBER"],
       ]);
+      await preliminaryReferral(s, caseExec); // AMB-018 (migration 2030)
+      await authorityRuleFor(s, "CORRECTIVE_ACTION"); // DEC-F13 (migration 2030)
       await s.as("grcDirector");
       await s.tx`select api.approve_restricted_committee_referral(${caseExec}, ${ic}, ${REASON})`;
       const [cp] = await s.tx<{ id: string }[]>`
@@ -614,7 +620,7 @@ describe("managing actions", () => {
       await s.tx`select api.record_package_adoption(${pkg!.id})`;
       await s.tx`select api.submit_to_authority(${pkg!.id})`;
       await s.tx`select api.record_authority_decision(${pkg!.id}, 'CEO', 'APPROVE_AS_RECOMMENDED',
-        now() - interval '1 hour', 'Chief Executive (synthetic)', 'MEMO-DEMO-0102', null, ${REASON})`;
+        now(), 'Chief Executive (synthetic)', 'MEMO-DEMO-0102', null, ${REASON})`;
 
       // The case manager cannot see the restricted case; the deputy can with a case grant, and still may not name
       // an owner; the case's owner and Restricted Case Authority may.

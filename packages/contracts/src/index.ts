@@ -117,6 +117,8 @@ export const PERMISSIONS = [
   "LEGAL_OPINION_GIVE",
   // Notification rules (migration 1920, ADR-025): event rules and committee defaults, never recipients or content.
   "NOTIFICATION_ADMIN",
+  // Business calendar (migration 2030, DEC-F02): working week and dated holidays, never case content.
+  "BUSINESS_CALENDAR_ADMIN",
   // Export builder (migration 1930, ADR-026, Q99). OWNER_DEFAULT, SOURCE_REQUIRED: the Delegation of Authority.
   "EXPORT_REQUEST",
   "EXPORT_APPROVE",
@@ -1171,6 +1173,8 @@ export const MEETING_INVITEE_ROLES = [
   "LEGAL",
   "INFORMATION_PROVIDER",
   "SUBJECT",
+  // Migration 2030 (AMB-156): disabled until enabled in committee.invitee_type_rule.
+  "INTERPRETER",
 ] as const;
 export type MeetingInviteeRole = (typeof MEETING_INVITEE_ROLES)[number];
 /** What a grievance-firewalled member may be invited as (Q46). */
@@ -1196,6 +1200,20 @@ export type MeetingConflictConcernStatus = (typeof MEETING_CONFLICT_CONCERN_STAT
 /** Who decides a raised conflict, per rule set (DEC-30; SOURCE_REQUIRED, CHAIR by default). */
 export const CONFLICT_DECIDERS = ["CHAIR", "SECRETARY"] as const;
 export type ConflictDecider = (typeof CONFLICT_DECIDERS)[number];
+/** The seat a raised conflict was decided as (DEC-F04, migration 2030: chair, deputy chair, independent authority). */
+export const CONFLICT_DECIDED_AS = ["CHAIR", "DEPUTY_CHAIR", "SECRETARY", "CONFLICT_AUTHORITY"] as const;
+export type ConflictDecidedAs = (typeof CONFLICT_DECIDED_AS)[number];
+/** Formal activations for one meeting (DEC-F03, AMB-041, AMB-042; migration 2030). */
+export const MEETING_ACTING_ROLES = ["ACTING_CHAIR", "ACTING_SECRETARY", "ALTERNATE_MEMBER"] as const;
+export type MeetingActingRole = (typeof MEETING_ACTING_ROLES)[number];
+export const MEETING_ACTING_BASES = ["ABSENT", "CONFLICTED", "INELIGIBLE", "VACANT", "HANDOVER"] as const;
+export type MeetingActingBasis = (typeof MEETING_ACTING_BASES)[number];
+/** Who sees individual choices after close (AMB-083): never the subject, the grievant or the case team. */
+export const BALLOT_SECRECY = ["COMMITTEE_AFTER_CLOSE", "SECRET_BALLOT"] as const;
+export type BallotSecrecy = (typeof BALLOT_SECRECY)[number];
+/** Dated exceptions to the working week (DEC-F02, migration 2030). */
+export const BUSINESS_CALENDAR_DAY_TYPES = ["HOLIDAY", "NON_WORKING_DAY", "WORKING_DAY"] as const;
+export type BusinessCalendarDayType = (typeof BUSINESS_CALENDAR_DAY_TYPES)[number];
 export const VOTE_TARGET_TYPES = [
   "FINDING",
   "RECOMMENDATION_ITEM",
@@ -1352,6 +1370,9 @@ export const NOTIFICATION_TEMPLATES = [
   // Kinds of employee notice (migration 1990, ADR-037)
   "RIGHTS_NOTICE_ISSUED",
   "DECISION_NOTICE_ISSUED",
+  // Meeting conflicts and votes (migration 2030 section 4, DEC-F04, DEC-F01)
+  "MEETING_CONFLICT_DECISION_REQUESTED",
+  "MEETING_VOTE_OPENED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;

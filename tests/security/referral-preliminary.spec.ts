@@ -5,6 +5,7 @@
 // sees only what awaits their approval. Nobody outside those paths sees a referral or a recommendation.
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
+import { preliminaryReferral, seat, unseatDemoSeats } from "../support/committee";
 
 const REASON = "Synthetic: referral and preliminary review test.";
 const OPS = "b0000000-0000-4000-8000-000000000001";
@@ -18,6 +19,7 @@ beforeAll(async () => {
 
 /** Seats a chair, a secretary and one voting member on the Investigation Committee, as the platform admin. */
 async function constitute(s: Scenario) {
+  await unseatDemoSeats(s);
   await s.as("platformAdmin");
   for (const [user, seat] of [
     ["committeeChair", "CHAIR"],
@@ -339,6 +341,7 @@ describe("direct referral: the committee secretary's decision (N6)", () => {
   it("acceptance fails whole when the committee is not constituted", async () => {
     await scenario(async (s) => {
       // The secretary alone is seated: no chair, no voting member.
+      await unseatDemoSeats(s);
       await s.as("platformAdmin");
       await s.tx`select api.appoint_committee_member(${ic}, ${USERS.committeeSecretary}, 'SECRETARY', now() - interval '1 day', null, 'DEMO-APPT')`;
       const id = await atSecretary(s);
@@ -1121,8 +1124,8 @@ describe("owner decisions DEC-F08, DEC-F09 and DEC-F10 (migration 2040)", () => 
 
   it("DEC-F09: an escalation never reaches someone who took part, nor a vacant seat (fail closed); targets are append-only", async () => {
     await ownerScenario(async (s) => {
-      // The sector head who approves the referral also chairs the committee.
-      await s.as("platformAdmin");
+      // The sector head who approves the referral also chairs the committee (the demo seats end first, 2030 §4).
+      await unseatDemoSeats(s);
       for (const [user, seat] of [
         ["sectorHead", "CHAIR"],
         ["committeeSecretary", "SECRETARY"],
@@ -1206,6 +1209,81 @@ describe("owner decisions DEC-F08, DEC-F09 and DEC-F10 (migration 2040)", () => 
         select count(*)::int as n from config.status_code
         where dimension = 'OUTCOME_CODE' and code in ('NOT_FEASIBLE', 'NO_PERSONAL_JURISDICTION') and is_active`;
       expect(codes!.n).toBe(2);
+    });
+  });
+});
+
+describe("preliminary review before the Investigation Committee (AMB-018, migration 2030)", () => {
+  const refer = (s: Scenario, caseId: string, committeeId: string) =>
+    s.tx<
+      { id: string }[]
+    >`select api.refer_case_to_committee(${caseId}, ${committeeId}, null, ${REASON}) as id`;
+  const prepare = async (s: Scenario, outcome: string) => {
+    await s.as("grcDirector");
+    const [r] = await s.tx<{ id: string }[]>`
+      select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, 'Synthetic: preliminary review rationale.') as id`;
+    return r!.id;
+  };
+  const approve = async (s: Scenario, id: string) => {
+    await s.as("grcSectorHead");
+    await s.tx`select api.approve_preliminary_recommendation(${id}, 'APPROVE', null, null)`;
+  };
+
+  it("T-AMB-008: a whistleblowing case without an approved REFERRED_TO_COMMITTEE review is not referred to the Investigation Committee", async () => {
+    await ownerScenario(async (s) => {
+      await constitute(s);
+      const [gc] = await admin<{ id: string }[]>`select id from committee.committee where code = 'GC'`;
+      await seat(s, gc!.id, [
+        ["committeeChair", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"],
+        ["legal", "MEMBER"],
+        ["investigatorA", "MEMBER"],
+      ]);
+      // No preliminary recommendation at all.
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseA, ic));
+      // Another approved outcome does not refer the case.
+      await approve(s, await prepare(s, "NOT_SERIOUS"));
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseA, ic));
+      // A referral recommendation that awaits approval does not either.
+      const pending = await prepare(s, "REFERRED_TO_COMMITTEE");
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseA, ic));
+      // A trigger, so every path is covered: even the table owner inserting the proceeding directly is refused.
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED",
+        (tx) =>
+          tx`insert into committee.committee_proceeding (proceeding_id, committee_id, case_id, rule_set_id, rule_snapshot,
+               referred_by)
+             select gen_random_uuid(), ${ic}, ${caseA}, r.id, '{}'::jsonb, ${USERS.caseManager}
+             from committee.rule_set r where r.committee_id = ${ic} and r.effective_to is null`,
+      );
+      // The Grievance Committee path is not a preliminary-review outcome and is unaffected.
+      await s.as("caseManager");
+      expect(await refer(s, caseA, gc!.id)).toHaveLength(1);
+      // Approved: the case reaches the Investigation Committee.
+      await approve(s, pending);
+      await s.as("caseManager");
+      const [cp] = await refer(s, caseA, ic);
+      expect(cp!.id).toBeDefined();
+    });
+  });
+
+  it("T-AMB-008 (DEC-F19): a restricted case still needs its authority's approval first, then the preliminary referral", async () => {
+    await ownerScenario(async (s) => {
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'SECRET'
+                 where id in (${USERS.committeeChair}, ${USERS.committeeSecretary}, ${USERS.committee})`;
+      await constitute(s);
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:AUTHORITY_APPROVAL_REQUIRED", () => refer(s, caseExec, ic));
+      await s.tx`select api.approve_restricted_committee_referral(${caseExec}, ${ic}, ${REASON})`;
+      await s.expectError("CDF_CONFLICT:PRELIMINARY_REFERRAL_REQUIRED", () => refer(s, caseExec, ic));
+      await preliminaryReferral(s, caseExec);
+      await s.as("grcDirector");
+      expect(await refer(s, caseExec, ic)).toHaveLength(1);
     });
   });
 });

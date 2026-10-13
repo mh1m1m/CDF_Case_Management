@@ -56,7 +56,7 @@ async function decided(s: Scenario, outcome = "APPROVE_AS_RECOMMENDED"): Promise
   await s.as("committeeSecretary");
   await s.tx`select api.submit_to_authority(${f.pkg})`;
   const [d] = await s.tx<{ id: string }[]>`
-    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now() - interval '1 hour',
+    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now(),
       'Chief Executive (synthetic)', 'MEMO-DEMO-0190', null, ${REASON}) as id`;
   return { ...f, ...subjects, decision: d!.id };
 }
@@ -290,8 +290,9 @@ describe("kinds of employee notice (migration 1990, P11-G5, ADR-037)", () => {
                    'NO_DECISION', 'APPROVED', ${REASON})`;
 
       // The subject sees the kind and the end of the window, acknowledges, and cannot respond to it.
+      // The subject also holds the defence notice the sanction needed before adoption (AMB-026, migration 2030).
       await s.as("employee");
-      const [mine] = await myNotices(s);
+      const mine = (await myNotices(s)).find((m) => m.notice_id === n!.id);
       expect(mine).toMatchObject({ notice_id: n!.id, kind: "DECISION", due_at: null, status: "ISSUED" });
       expect(mine!.grievance_window_ends_at).not.toBeNull();
       expect(await myInApp(s)).toEqual([

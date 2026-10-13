@@ -7,7 +7,15 @@
 // and the subject never decide, and nobody decides when nobody holds the role. Every step runs through the api.*
 // commands as `authenticated`; the owner connection is used only for a rule-set fixture and to probe the tables.
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  caseId,
+  ownerScenario,
+  scenario,
+  type OwnerScenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
 import {
   IC_SEATS,
   REASON,
@@ -408,22 +416,29 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
     });
   });
 
-  it("a chair with a declared conflict does not decide, and the deputy chair does not stand in (fail closed)", async () => {
+  // DEC-F04 (migration 2030, ADR-040) replaced the fail-closed rule of 2000: when the chair
+  // cannot decide, the deputy chair stands in, then the configured independent authority.
+  it("a chair with a declared conflict does not decide; the deputy chair stands in (DEC-F04)", async () => {
     await ownerScenario(async (s) => {
       const f = await ready(s, ["legal", "legalB", "lead"], DEPUTY_SEATS);
       await s.as("committeeChair");
       await s.tx`select api.declare_meeting_conflict(${f.participant.committeeChair!}, 'CONFLICT_DECLARED', 'Synthetic: related.')`;
       await s.as("legal");
       const [k] = await raise(s, f.participant.legalB!);
-      for (const u of ["committeeChair", "lead"] as const) {
-        await s.as(u);
-        await s.expectError("CDF_NOT_FOUND", () => decide(s, k!.id, "UPHELD"));
-      }
+      await s.as("committeeChair");
+      await s.expectError("CDF_NOT_FOUND", () => decide(s, k!.id, "UPHELD"));
       await s.as("committeeSecretary");
       await s.expectError(
         "CDF_CONFLICT:CONFLICT_CONCERN_OPEN",
         (tx) => tx`select api.open_vote_item(${f.meeting}, 'OTHER', null, 'Blocked (synthetic)')`,
       );
+      expect(await concernsSeenBy(s, "lead")).toEqual([k!.id]);
+      await s.as("lead");
+      await decide(s, k!.id, "DISMISSED");
+      await s.asOwner();
+      const [row] = await s.tx<{ decided_as: string; decided_by: string }[]>`
+        select decided_as, decided_by from committee.meeting_conflict_concern where id = ${k!.id}`;
+      expect(row).toEqual({ decided_as: "DEPUTY_CHAIR", decided_by: USERS.lead });
     });
   });
 
@@ -623,6 +638,151 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
         "api.record_excused_absence",
       );
       expect(modules.find((m) => m.code === "MEETING")!.commands).toContain("api.record_excused_absence");
+    });
+  });
+});
+
+describe("an upheld conflict and its reversal (T-AMB-032, DEC-F38, DEC-AMB-010, migration 2030)", () => {
+  const raiseAbout = (s: Scenario, participant: string) =>
+    s.tx<
+      { id: string }[]
+    >`select api.raise_meeting_conflict(${participant}, 'Synthetic: a concern about a member.') as id`;
+  const decideAs = (tx: Scenario["tx"], concern: string, decision: string) =>
+    tx`select api.decide_meeting_conflict(${concern}, ${decision}, 'Synthetic: decided on the record.')`;
+  const reverse =
+    (concern: string, reason = "Synthetic: the link was misread; no conflict.") =>
+    (tx: Scenario["tx"]) =>
+      tx`select api.reverse_meeting_conflict_determination(${concern}, ${reason})`;
+
+  async function auditMetadata(s: OwnerScenario, action: string) {
+    await s.asOwner();
+    return s.tx<{ actor_id: string; metadata: Record<string, unknown>; reason: string | null }[]>`
+      select actor_id, metadata, reason from audit.audit_event where action = ${action} order by seq`;
+  }
+
+  async function laterMeeting(s: Scenario, f: MeetingFixture, user: UserKey): Promise<string> {
+    await s.as("committeeSecretary");
+    const [m2] = await s.tx<{ id: string }[]>`
+      select api.schedule_meeting(${f.committeeProceeding}, 'HEARING', 'IN_PERSON', 'Room (synthetic)', null,
+        now() + interval '2 days', now() + interval '2 days 1 hour', ${REASON}) as id`;
+    const [p] = await s.tx<{ id: string }[]>`
+      select id from committee.meeting_participant where meeting_id = ${m2!.id} and user_id = ${USERS[user]}`;
+    return p!.id;
+  }
+
+  it("holds for the proceeding until the next decider reverses it; the reversal is prospective only", async () => {
+    await ownerScenario(async (s) => {
+      const f = await ready(s, VOTERS, DEPUTY_SEATS);
+      await s.as("legal");
+      const [dismissed] = await raiseAbout(s, f.participant.lead!);
+      await s.as("committeeChair");
+      await decideAs(s.tx, dismissed!.id, "DISMISSED");
+      await s.as("legal");
+      const [k] = await raiseAbout(s, f.participant.legalB!);
+      await s.as("committeeChair");
+      await decideAs(s.tx, k!.id, "UPHELD");
+
+      // A later meeting of the same proceeding: no "no conflict" while the determination stands.
+      const p2 = await laterMeeting(s, f, "legalB");
+      await s.as("legalB");
+      await s.expectError(
+        "CDF_CONFLICT:PRIOR_CONFLICT_DECLARED",
+        (tx) => tx`select api.declare_meeting_conflict(${p2}, 'NO_CONFLICT', null)`,
+      );
+
+      // Only the next decider in the DEC-F04 order: never the subject, the raiser, the deciding chair or the secretary.
+      for (const u of ["legalB", "employee", "investigatorA"] as const) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", reverse(k!.id));
+      }
+      for (const u of ["legal", "committeeChair", "committeeSecretary"] as const) {
+        await s.as(u);
+        await s.expectError("CDF_FORBIDDEN", reverse(k!.id));
+      }
+      await s.as("legal");
+      await s.expectError("CDF_CONFLICT:NOT_UPHELD", reverse(dismissed!.id));
+      await s.as("lead");
+      await s.expectError("CDF_INVALID:reason", reverse(k!.id, "short"));
+      await reverse(k!.id)(s.tx);
+      await s.expectError("CDF_CONFLICT:ALREADY_REVERSED", reverse(k!.id));
+
+      // Later meetings only: the member declares again there; the meeting of the determination keeps them conflicted.
+      await s.as("legalB");
+      await s.tx`select api.declare_meeting_conflict(${p2}, 'NO_CONFLICT', null)`;
+      await s.asOwner();
+      expect(
+        await s.tx`select coi_status from committee.meeting_participant where id = ${f.participant.legalB!}`,
+      ).toEqual([{ coi_status: "CONFLICT_DECLARED" }]);
+      const reversed = await auditMetadata(s, "MEETING_CONFLICT_REVERSED");
+      expect(
+        reversed.map((e) => [e.actor_id, e.metadata.reversed_as, e.metadata.decided_as, e.reason]),
+      ).toEqual([[USERS.lead, "DEPUTY_CHAIR", "CHAIR", null]]);
+      // The subject still reads neither the concern nor its reversal.
+      await s.as("legalB");
+      expect(await s.tx`select id from committee.meeting_conflict_reversal`).toEqual([]);
+      expect(await s.tx`select id from committee.meeting_conflict_concern`).toEqual([]);
+    });
+  });
+
+  it("with no eligible decider after the original one, nobody reverses (fail closed) until an authority is appointed", async () => {
+    await scenario(async (s) => {
+      const f = await ready(s, VOTERS, DEPUTY_SEATS);
+      await s.as("committeeChair");
+      await s.tx`select api.declare_meeting_conflict(${f.participant.committeeChair!}, 'CONFLICT_DECLARED', 'Synthetic: related.')`;
+      await s.as("legal");
+      const [k] = await raiseAbout(s, f.participant.legalB!);
+      await s.as("lead");
+      await decideAs(s.tx, k!.id, "UPHELD");
+      for (const u of ["lead", "committeeChair", "legal"] as const) {
+        await s.as(u);
+        await s.expectError(u === "committeeChair" ? "CDF_NOT_FOUND" : "CDF_FORBIDDEN", reverse(k!.id));
+      }
+      await s.as("platformAdmin");
+      await s.tx`select api.appoint_conflict_authority(${ic}, ${USERS.complianceManager}, now(), null, 'DEMO-CA-03', 'SOURCE_REQUIRED', ${REASON})`;
+      await s.as("complianceManager");
+      await reverse(k!.id)(s.tx);
+      expect(
+        await s.tx`select reversed_as from committee.meeting_conflict_reversal where concern_id = ${k!.id}`,
+      ).toEqual([{ reversed_as: "CONFLICT_AUTHORITY" }]);
+    });
+  });
+
+  it("reversing one upheld concern never clears a conflict that rests on another (AGENT-09 early look, note a)", async () => {
+    await ownerScenario(async (s) => {
+      const f = await ready(s, VOTERS, DEPUTY_SEATS);
+      await s.as("legal");
+      const [k] = await raiseAbout(s, f.participant.legalB!);
+      await s.as("committeeChair");
+      await decideAs(s.tx, k!.id, "UPHELD");
+      // Today no second concern is raised about a conflicted member (COI_ALREADY_DECLARED). Should that change, the
+      // conflict written by a second upheld concern still counts after the first is reversed.
+      await s.asOwner();
+      const [k2] = await s.tx<{ id: string }[]>`
+        insert into committee.meeting_conflict_concern
+          (meeting_id, participant_id, raised_by, raised_as, reason, status, decided_by, decided_as, decision_reason, decided_at)
+        values (${f.meeting}, ${f.participant.legalB!}, ${USERS.committeeSecretary}, 'SECRETARY',
+                'Synthetic: a second concern.', 'UPHELD', ${USERS.committeeChair}, 'CHAIR',
+                'Synthetic: decided on the record.', now())
+        returning id`;
+      const conflictRow =
+        (participant: string, source: string, concern: string | null) => (tx: Scenario["tx"]) =>
+          tx`insert into committee.meeting_conflict (meeting_id, participant_id, status, declared_by, source, reason, concern_id)
+           values (${f.meeting}, ${participant}, 'CONFLICT_DECLARED', ${USERS.committeeChair}, ${source},
+                   'Synthetic: decided on the record.', ${concern})`;
+      // A conflict row names a concern only when it is a decision, only that concern's subject, and always when it is one.
+      await s.expectError("insert or update on table", conflictRow(f.participant.lead!, "DECISION", k2!.id));
+      await s.expectError("new row for relation", conflictRow(f.participant.legalB!, "SELF", k2!.id));
+      await s.expectError("new row for relation", conflictRow(f.participant.legalB!, "DECISION", null));
+      await conflictRow(f.participant.legalB!, "DECISION", k2!.id)(s.tx);
+
+      await s.as("lead");
+      await reverse(k!.id)(s.tx);
+      const p2 = await laterMeeting(s, f, "legalB");
+      await s.as("legalB");
+      await s.expectError(
+        "CDF_CONFLICT:PRIOR_CONFLICT_DECLARED",
+        (tx) => tx`select api.declare_meeting_conflict(${p2}, 'NO_CONFLICT', null)`,
+      );
     });
   });
 });
