@@ -198,7 +198,8 @@ export function CDFAlert({
     <div
       role={tone === "danger" ? "alert" : "status"}
       data-testid={testId}
-      className={cx("mb-4 rounded-cdf-md border border-cdf-border p-3", toneClasses[tone])}
+      // break-words: a long token such as PRODUCTION_SUBSTITUTION_REQUIRED wraps at 320 px (WCAG 1.4.10).
+      className={cx("mb-4 rounded-cdf-md border border-cdf-border p-3 break-words", toneClasses[tone])}
     >
       {title ? <p className="font-semibold">{title}</p> : null}
       {children ? <div className={title ? "mt-1" : undefined}>{children}</div> : null}

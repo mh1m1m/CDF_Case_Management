@@ -33,6 +33,12 @@ export const en = {
     working: "Working…",
     mainNavigation: "Main navigation",
   },
+  // Dates on formal generated records (DEC-51): Gregorian first, Hijri (Umm al-Qura) second.
+  recordDate: {
+    hijri: "{day} {month} {year}H",
+    dual: "{gregorian} ({hijri})",
+    withTime: "{date}, {time}",
+  },
   nav: {
     intake: "Intake & Triage",
     cases: "Cases",

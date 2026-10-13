@@ -508,7 +508,7 @@ text differ, his text governs. None of these rows is open any more.
 | DEC-22 My Work row fields           | Approved as built (S1, S3): action label, object id, a non-sensitive code or type, status, dates and priority where authorized or configured; the case number only with case-metadata visibility; never a subject name, allegation text, reporter identity, sensitive title or a restricted case's existence | Migration 2045 adds the form code to form rows |
 | DEC-18 Server-side drafts           | Controlled server drafts for authenticated internal users, purpose-bound, under the owner's requirement list. Never for anonymous or unauthenticated flows, evidence binaries, or where an approved security rule forbids them. Restricted-case gates apply                                                  | Migration 2150 (ADR-052)                       |
 | DEC-48 Finding vocabularies         | Governed, effective-dated vocabularies; SOURCE_REQUIRED where no authoritative source exists; an authorized OTHER finding only with a mandatory rationale; additive, so recorded findings keep their codes                                                                                                   | Migration 2150 (ADR-052)                       |
-| DEC-51 Hijri dates                  | Gregorian first and Hijri second on formal generated records only; storage stays canonical; the platform's Umm al-Qura calendar, never a hand-written conversion                                                                                                                                             | Application only                               |
+| DEC-51 Hijri dates                  | Gregorian first and Hijri second on formal generated records only; storage stays canonical; the platform's Umm al-Qura calendar, never a hand-written conversion                                                                                                                                             | Application only: P12-9 (a), CDF-209           |
 | DEC-11 Oversight free text          | The general free-text field stays hidden; a controlled `OVERSIGHT_NOTE` where narrative is genuinely needed                                                                                                                                                                                                  | Migration 2160 (ADR-053)                       |
 | DEC-12 Dual control on grants       | Dual control on grants that materially expand access; the requester never approves; no self-approval; revocation is never delayed                                                                                                                                                                            | Migration 2160 (ADR-053)                       |
 | DEC-13 Clearance command, owner     | A dedicated `CLEARANCE_ADMIN`: elevation approved, lowering immediate, history kept. Its organisational owner is SOURCE_REQUIRED, so it stays fail closed until a holder is configured. `ROLE_ADMIN`, technical and committee administration never change clearance                                          | Migration 2160 (ADR-053)                       |
@@ -516,6 +516,14 @@ text differ, his text governs. None of these rows is open any more.
 | DEC-AMB-013 conflict after decision | Option A: re-vote without the conflicted member, the authority decides again, and the earlier decision is kept and marked SUPERSEDED. The committee and authority screens show it                                                                                                                            | Migration 2030 (rebase)                        |
 
 Every piece keeps D0's rule: the database decides, and the screen explains.
+
+**DEC-51, built (P12-9 (a), CDF-209).** `formatRecordDate` and `formatRecordDateToParts` in `@cdf/i18n` give the
+Gregorian date first and the Hijri date second for the same day in Riyadh, from the platform's Umm al-Qura calendar
+(ICU), with the words and brackets from the message catalogues: "13 October 2026 (2 Jumada I 1448H)" and
+«13 أكتوبر 2026 (2 جمادى الأولى 1448هـ)». A runtime without that calendar shows the Gregorian date alone rather than a
+wrong Hijri one. `CDFRecordDate` keeps the stored timestamp as the machine value and keeps each date on one line. The
+disposition certificate is the first formal record to use it; notices, minutes and export documents adopt it in their
+own slices (P12-5, P12-2, P12-6). Operational screens keep `CDFDateTime`. No migration and no access change.
 
 ## Delivery governance
 

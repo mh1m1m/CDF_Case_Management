@@ -45,21 +45,112 @@ export function translate(
   return node.replace(/\{(\w+)\}/g, (_, name: string) => String(vars[name] ?? `{${name}}`));
 }
 
+const RIYADH = "Asia/Riyadh";
+/** Gregorian, Latin digits. `ar-SA` alone would default to the Hijri calendar and Arabic-Indic digits. */
+const GREGORIAN: Record<Locale, string> = { ar: "ar-SA-u-ca-gregory-nu-latn", en: "en-GB" };
+const UMM_AL_QURA: Record<Locale, string> = {
+  ar: "ar-SA-u-ca-islamic-umalqura-nu-latn",
+  en: "en-GB-u-ca-islamic-umalqura",
+};
+
 export function formatDateTime(locale: Locale, value: string | Date): string {
   const d = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", {
+  return new Intl.DateTimeFormat(GREGORIAN[locale], {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Asia/Riyadh",
+    timeZone: RIYADH,
   }).format(d);
 }
 
 export function formatDate(locale: Locale, value: string | Date): string {
   const d = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA-u-ca-gregory-nu-latn" : "en-GB", {
+  return new Intl.DateTimeFormat(GREGORIAN[locale], {
     dateStyle: "medium",
-    timeZone: "Asia/Riyadh",
+    timeZone: RIYADH,
   }).format(d);
+}
+
+/** One piece of a formal record date, in the manner of `Intl.DateTimeFormat.prototype.formatToParts`. */
+export interface RecordDatePart {
+  type: "gregorian" | "hijri" | "time" | "literal";
+  value: string;
+}
+
+/**
+ * A date on a formal generated record (DEC-51): the Gregorian date first and the Hijri date second, both for the
+ * same day in Riyadh ("13 October 2026 (2 Jumada I 1448H)", «13 أكتوبر 2026 (2 جمادى الأولى 1448هـ)»), then the
+ * time when asked for. The Hijri date comes from the platform's Umm al-Qura calendar, never from a table kept here;
+ * a runtime without that calendar gets the Gregorian date alone rather than a wrong Hijri one. Only the rendering
+ * changes: the stored value stays the canonical timestamp. Operational screens keep formatDate and formatDateTime.
+ * An invalid value throws a RangeError, as those do.
+ */
+export function formatRecordDateToParts(
+  locale: Locale,
+  value: string | Date,
+  { withTime = false }: { withTime?: boolean } = {},
+): RecordDatePart[] {
+  const d = typeof value === "string" ? new Date(value) : value;
+  const gregorian: RecordDatePart = {
+    type: "gregorian",
+    value: new Intl.DateTimeFormat(GREGORIAN[locale], {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: RIYADH,
+    }).format(d),
+  };
+  const hijri = hijriDate(locale, d);
+  const date = hijri
+    ? fill(translate(locale, "recordDate.dual"), { gregorian: [gregorian], hijri: [hijri] })
+    : [gregorian];
+  if (!withTime) return date;
+  const time: RecordDatePart = {
+    type: "time",
+    value: new Intl.DateTimeFormat(GREGORIAN[locale], { timeStyle: "short", timeZone: RIYADH }).format(d),
+  };
+  return fill(translate(locale, "recordDate.withTime"), { date, time: [time] });
+}
+
+/** The same date as one line of text, for a generated document or message. */
+export function formatRecordDate(
+  locale: Locale,
+  value: string | Date,
+  options?: { withTime?: boolean },
+): string {
+  return formatRecordDateToParts(locale, value, options)
+    .map((p) => p.value)
+    .join("");
+}
+
+function hijriDate(locale: Locale, d: Date): RecordDatePart | null {
+  const f = new Intl.DateTimeFormat(UMM_AL_QURA[locale], {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: RIYADH,
+  });
+  // Without the calendar, ICU falls back to another one silently: the numbers would be Gregorian.
+  if (f.resolvedOptions().calendar !== "islamic-umalqura") return null;
+  const p: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  for (const { type, value } of f.formatToParts(d)) p[type] = value;
+  if (!p.day || !p.month || !p.year) return null;
+  return {
+    type: "hijri",
+    value: translate(locale, "recordDate.hijri", { day: p.day, month: p.month, year: p.year }),
+  };
+}
+
+/** Expands a `{name}` template into parts; the template's own words and punctuation become literals. */
+function fill(template: string, values: Record<string, RecordDatePart[]>): RecordDatePart[] {
+  const parts: RecordDatePart[] = [];
+  let at = 0;
+  for (const m of template.matchAll(/\{(\w+)\}/g)) {
+    if (m.index > at) parts.push({ type: "literal", value: template.slice(at, m.index) });
+    parts.push(...(values[m[1] ?? ""] ?? []));
+    at = m.index + m[0].length;
+  }
+  if (at < template.length) parts.push({ type: "literal", value: template.slice(at) });
+  return parts;
 }
 
 /** A whole number of days ("3 days", «3 أيام») with the locale's own plural forms. */

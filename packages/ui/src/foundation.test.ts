@@ -13,7 +13,7 @@ import {
 } from "@cdf/contracts";
 import { describe, expect, it } from "vitest";
 import { CDFDecisionPanel } from "./decision-panel";
-import { CDFDateTime, CDFIdentifier, CDFMeta } from "./identifier";
+import { CDFDateTime, CDFIdentifier, CDFMeta, CDFRecordDate } from "./identifier";
 import {
   CDFClassificationBadge,
   CDFLegalHoldIndicator,
@@ -97,6 +97,20 @@ describe("bidi-safe identifiers", () => {
     expect(html).toMatch(
       /^<time datetime="2026-10-11T09:04:00.000Z"><bdi class="whitespace-nowrap">[^<]+<\/bdi><\/time>$/i,
     );
+  });
+
+  it("gives a record date both calendars, each kept on one line, and the stored value as its machine date (DEC-51)", () => {
+    const html = renderToStaticMarkup(
+      h(CDFRecordDate, { value: "2026-10-13T11:05:00.000Z", locale: "en", withTime: true }),
+    );
+    expect(html).toMatch(/^<time datetime="2026-10-13T11:05:00.000Z"><bdi>/i);
+    expect(html).toContain(
+      '<span data-part="gregorian" class="whitespace-nowrap">13 October 2026</span> (' +
+        '<span data-part="hijri" class="whitespace-nowrap">2 Jumada I 1448H</span>), ' +
+        '<span data-part="time" class="whitespace-nowrap">14:05</span></bdi></time>',
+    );
+    const ar = renderToStaticMarkup(h(CDFRecordDate, { value: "2026-10-13T11:05:00.000Z", locale: "ar" }));
+    expect(ar).toContain('<span data-part="hijri" class="whitespace-nowrap">2 جمادى الأولى 1448هـ</span>');
   });
 
   it("isolates every part of a metadata line, and hides the separators", () => {
