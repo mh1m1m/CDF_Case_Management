@@ -2,7 +2,7 @@
 
 > SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204). Generated from one data set with its companion files, so counts agree across them.
 
-22 contradictions found while resolving the register (§30). Precedence is the appendix's §1: the 100 Q&A, then later owner decisions, then the business architecture, ADRs, governance documents, security decisions, implementation and catalogues. None needs a new owner question: each is resolved by a higher source, and the action names who changes what.
+23 contradictions found while resolving the register (§30). Precedence is the appendix's §1: the 100 Q&A, then later owner decisions, then the business architecture, ADRs, governance documents, security decisions, implementation and catalogues. None needs a new owner question: each is resolved by a higher source, and the action names who changes what.
 
 ## CON-001
 
@@ -179,3 +179,11 @@
 - **Conflict:** Early closure can strand open proceedings and cut off grievances.
 - **Authoritative resolution:** DEC-F40 governs.
 - **Action:** 2060: closure guards apply to every path into CLOSURE.
+
+## CON-023
+
+- **Source A:** DEC-01 (restriction at creation needs an eligible Restricted Case Authority) and DEC-AMB-012 (who may lift restricted status is an owner decision; until then it is not lifted)
+- **Source B:** Migration 0700 api.change_case_classification: is_restricted is set from the argument, a null counts as false, and RESTRICTED_CASE_GRANT is checked only when restricting
+- **Conflict:** A CLASSIFICATION_CHANGE holder can widen a restricted case to every CASE_VIEW_ALL holder, and a null argument does it silently.
+- **Authoritative resolution:** Fail closed until DEC-AMB-012 is decided: the security invariant and the owner decision outrank the implementation. Found by AGENT-09 while reviewing this register (PR #60).
+- **Action:** CDF-206 (migration 2015, AGENT-09): a null keeps the current value and true→false is refused until DEC-AMB-012 is decided; negative test T-AMB-145.

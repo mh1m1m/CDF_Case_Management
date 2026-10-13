@@ -2,24 +2,24 @@
 
 > SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204). Generated from one data set with its companion files, so counts agree across them.
 
-Only R5 items: 12 decisions covering 12 register rows (4.8% of 250). Everything else is resolved from evidence, configuration or a source request. Each decision has a fail-safe default that applies until it is answered, so nothing waits on these to build or merge.
+Only R5 items: 12 decisions covering 12 register rows (4.8% of 250). Everything else is resolved from evidence, configuration or a source request. Each decision has a fail-safe default that applies until it is answered. 6 of those defaults are how the platform behaves now; the other 6 need a guard first: DEC-AMB-001, 003, 004 and 011 in the rebase thread's 2030/2040; DEC-AMB-009 in a migration the coordinator still has to number; DEC-AMB-012 in the security fix CDF-206 (migration 2015). DEC-AMB-012 is the urgent one: reclassification can lift restricted status today. No build or merge waits on the answers themselves.
 
 Not included, because they are already decided (DEC-F01–F41, DEC-01…DEC-68 approved items, Q1–Q100) or already open in the UX audit register and not re-asked: DEC-05, DEC-12, DEC-13, DEC-16, DEC-18, DEC-23, DEC-24, DEC-25, DEC-26, DEC-36, DEC-40, DEC-41, DEC-44, DEC-45, DEC-54, DEC-63, DEC-67.
 
-| Decision                                                                                   | Register rows | Recommended | Default if unanswered                                                                                                                   |
-| ------------------------------------------------------------------------------------------ | ------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| DEC-AMB-001 A second grievance against a final grievance outcome                           | AMB-145       | Option B    | No second grievance (option A behaviour), with the data model able to add B later.                                                      |
-| DEC-AMB-002 Reopening a closed case                                                        | AMB-218       | Option B    | Reopening stays disabled; new information opens a new linked case.                                                                      |
-| DEC-AMB-003 A conflict of interest discovered after a vote or after the authority decision | AMB-051       | Option B    | Flag the item TAINTED_BY_CONFLICT and block further downstream steps until the committee acts (fail safe).                              |
-| DEC-AMB-004 Whether a grievance suspends execution of a sanction                           | AMB-110       | Option C    | Sanctions marked irreversible in the catalogue do not show as executable while a grievance window or grievance is open; others proceed. |
-| DEC-AMB-005 Visibility of a subject's history in other cases                               | AMB-034       | Option B    | No cross-case visibility (option A).                                                                                                    |
-| DEC-AMB-006 Evidence disclosure to the subject for the defence                             | AMB-159       | Option C    | Allegations only (option A).                                                                                                            |
-| DEC-AMB-007 Recording committee meetings                                                   | AMB-068       | Option A    | No recording function.                                                                                                                  |
-| DEC-AMB-008 Committee votes during an outage                                               | AMB-200       | Option B    | No offline vote import (option A).                                                                                                      |
-| DEC-AMB-009 A subject who leaves employment during the case                                | AMB-031       | Option A    | Flag the subject LEFT_EMPLOYMENT, keep findings, block sanction execution.                                                              |
-| DEC-AMB-010 Review of an upheld conflict decision                                          | AMB-055       | Option B    | No review (option A).                                                                                                                   |
-| DEC-AMB-011 Whether a grievance outcome may make the sanction more severe                  | AMB-149       | Option A    | Option A behaviour.                                                                                                                     |
-| DEC-AMB-012 Lifting a case's restricted status                                             | AMB-234       | Option C    | No command lifts restriction (option A behaviour).                                                                                      |
+| Decision                                                                                   | Register rows | Recommended | Default if unanswered                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------ | ------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DEC-AMB-001 A second grievance against a final grievance outcome                           | AMB-145       | Option B    | No second grievance (option A behaviour), with the data model able to add B later. Built today: only an open grievance blocks another on the same decision, so this default needs the guard listed in the register row.             |
+| DEC-AMB-002 Reopening a closed case                                                        | AMB-218       | Option B    | Reopening stays disabled; new information opens a new linked case.                                                                                                                                                                  |
+| DEC-AMB-003 A conflict of interest discovered after a vote or after the authority decision | AMB-051       | Option B    | Flag the item TAINTED_BY_CONFLICT and block further downstream steps until the committee acts (fail safe).                                                                                                                          |
+| DEC-AMB-004 Whether a grievance suspends execution of a sanction                           | AMB-110       | Option C    | Sanctions marked irreversible in the catalogue do not show as executable while a grievance window or grievance is open; others proceed.                                                                                             |
+| DEC-AMB-005 Visibility of a subject's history in other cases                               | AMB-034       | Option B    | No cross-case visibility (option A).                                                                                                                                                                                                |
+| DEC-AMB-006 Evidence disclosure to the subject for the defence                             | AMB-159       | Option C    | Allegations only (option A).                                                                                                                                                                                                        |
+| DEC-AMB-007 Recording committee meetings                                                   | AMB-068       | Option A    | No recording function.                                                                                                                                                                                                              |
+| DEC-AMB-008 Committee votes during an outage                                               | AMB-200       | Option B    | No offline vote import (option A).                                                                                                                                                                                                  |
+| DEC-AMB-009 A subject who leaves employment during the case                                | AMB-031       | Option A    | Flag the subject LEFT_EMPLOYMENT, keep findings, block sanction execution.                                                                                                                                                          |
+| DEC-AMB-010 Review of an upheld conflict decision                                          | AMB-055       | Option B    | No review (option A).                                                                                                                                                                                                               |
+| DEC-AMB-011 Whether a grievance outcome may make the sanction more severe                  | AMB-149       | Option A    | Option A behaviour.                                                                                                                                                                                                                 |
+| DEC-AMB-012 Lifting a case's restricted status                                             | AMB-234       | Option C    | Restriction is not lifted (option A behaviour). Built today: reclassification can lift restriction; fail-safe fix CDF-206 (migration 2015, AGENT-09) makes null keep the value and refuses true→false until DEC-AMB-012 is decided. |
 
 ## DEC-AMB-001 — A second grievance against a final grievance outcome
 
@@ -41,7 +41,9 @@ Impact: Any number of stages set per committee rule; most flexible, hardest to m
 
 **Why:** Keeps finality while giving a remedy for genuinely new evidence; the data model already links grievances to decisions, so B adds one admissibility check.
 
-**Default if unanswered:** No second grievance (option A behaviour), with the data model able to add B later.
+**Default if unanswered:** No second grievance (option A behaviour), with the data model able to add B later. Built today: only an open grievance blocks another on the same decision, so this default needs the guard listed in the register row.
+
+**Default in force today:** Not yet: the guard comes with the rebase thread's 2030/2040.
 
 ## DEC-AMB-002 — Reopening a closed case
 
@@ -65,6 +67,8 @@ Impact: Fastest; weakest control over closed records.
 
 **Default if unanswered:** Reopening stays disabled; new information opens a new linked case.
 
+**Default in force today:** Yes: this is how the platform behaves now.
+
 ## DEC-AMB-003 — A conflict of interest discovered after a vote or after the authority decision
 
 Register rows: AMB-051.
@@ -86,6 +90,8 @@ Impact: The conflict is noted; the result stands.
 **Why:** Avoids voiding sound decisions on a technicality while never letting a tainted vote pass silently; the "could not have changed the result" test is mechanical and auditable.
 
 **Default if unanswered:** Flag the item TAINTED_BY_CONFLICT and block further downstream steps until the committee acts (fail safe).
+
+**Default in force today:** Not yet: the guard comes with the rebase thread's 2030/2040.
 
 ## DEC-AMB-004 — Whether a grievance suspends execution of a sanction
 
@@ -109,6 +115,8 @@ Impact: Irreversible sanctions (for example termination, demotion) wait; reversi
 
 **Default if unanswered:** Sanctions marked irreversible in the catalogue do not show as executable while a grievance window or grievance is open; others proceed.
 
+**Default in force today:** Not yet: the guard comes with the rebase thread's 2030/2040.
+
 ## DEC-AMB-005 — Visibility of a subject's history in other cases
 
 Register rows: AMB-034.
@@ -130,6 +138,8 @@ Impact: Simplest for the committee; exposes unrelated allegations and investigat
 **Why:** Gives the committee the one fact progressive discipline needs while keeping other cases invisible.
 
 **Default if unanswered:** No cross-case visibility (option A).
+
+**Default in force today:** Yes: this is how the platform behaves now.
 
 ## DEC-AMB-006 — Evidence disclosure to the subject for the defence
 
@@ -153,6 +163,8 @@ Impact: The secretary selects items, a reviewer checks for identifying content, 
 
 **Default if unanswered:** Allegations only (option A).
 
+**Default in force today:** Yes: this is how the platform behaves now.
+
 ## DEC-AMB-007 — Recording committee meetings
 
 Register rows: AMB-068.
@@ -174,6 +186,8 @@ Impact: Flexible; more rules to govern.
 **Why:** Nothing in the Q&A asks for recordings, and A needs no new processor or retention class; B or C can follow if policy requires it.
 
 **Default if unanswered:** No recording function.
+
+**Default in force today:** Yes: this is how the platform behaves now.
 
 ## DEC-AMB-008 — Committee votes during an outage
 
@@ -197,6 +211,8 @@ Impact: Fastest; conflicts with Q60.
 
 **Default if unanswered:** No offline vote import (option A).
 
+**Default in force today:** Yes: this is how the platform behaves now.
+
 ## DEC-AMB-009 — A subject who leaves employment during the case
 
 Register rows: AMB-031.
@@ -218,6 +234,8 @@ Impact: Simplest; loses findings and any corrective actions tied to them.
 **Why:** Findings and corrective actions still matter for governance; marking sanctions not enforceable avoids acting outside the employment relationship.
 
 **Default if unanswered:** Flag the subject LEFT_EMPLOYMENT, keep findings, block sanction execution.
+
+**Default in force today:** Not yet: the guard comes with a migration the coordinator still has to number.
 
 ## DEC-AMB-010 — Review of an upheld conflict decision
 
@@ -241,6 +259,8 @@ Impact: Independent; slower.
 
 **Default if unanswered:** No review (option A).
 
+**Default in force today:** Yes: this is how the platform behaves now.
+
 ## DEC-AMB-011 — Whether a grievance outcome may make the sanction more severe
 
 Register rows: AMB-149.
@@ -263,12 +283,14 @@ Impact: Flexible.
 
 **Default if unanswered:** Option A behaviour.
 
+**Default in force today:** Not yet: the guard comes with the rebase thread's 2030/2040.
+
 ## DEC-AMB-012 — Lifting a case's restricted status
 
 Register rows: AMB-234.
 
 **Context:**
-DEC-01 governs restriction at creation. Nothing lets a case become unrestricted, which would open it to every CASE_VIEW_ALL holder.
+DEC-01 governs restriction at creation; nothing decides when a case may become unrestricted, which opens it to every CASE_VIEW_ALL holder. Built today: reclassification can lift restriction (api.change_case_classification, migration 0700: a CLASSIFICATION_CHANGE holder can pass false, and a null is treated as false).
 
 **Option A — Never**
 Impact: Restricted for life; access widened only by named approvals.
@@ -283,4 +305,6 @@ Impact: Two-person control; audited; previewed list of who gains access.
 
 **Why:** Widening access to a whole population is the most sensitive access change; two-person control matches disposition and hold release.
 
-**Default if unanswered:** No command lifts restriction (option A behaviour).
+**Default if unanswered:** Restriction is not lifted (option A behaviour). Built today: reclassification can lift restriction; fail-safe fix CDF-206 (migration 2015, AGENT-09) makes null keep the value and refuses true→false until DEC-AMB-012 is decided.
+
+**Default in force today:** Not yet: the guard comes with the security fix CDF-206 (migration 2015).
