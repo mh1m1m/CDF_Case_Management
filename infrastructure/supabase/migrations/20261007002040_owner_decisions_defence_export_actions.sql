@@ -2579,3 +2579,538 @@ begin
   return v_n;
 end;
 $$;
+
+-- =============================================================================
+-- Item 9. Export: the purpose catalogue (DEC-F21, AMB-195), approved external domains (DEC-F22, AMB-186), the
+-- Restricted Case Authority's approval (DEC-F23) and the approval deadlock (DEC-F24, AMB-193, CON-003; T-AMB-112)
+-- =============================================================================
+-- DEC-F24: export policy administration is separate from transaction approval. EXPORT_POLICY_ADMIN goes to the
+-- platform administrator (OWNER_DEFAULT; who holds it is a Delegation of Authority question, SOURCE_REQUIRED), and
+-- whoever holds an approval permission (EXPORT_APPROVE, EXPORT_SECOND_APPROVE) cannot administer export policy, so the
+-- 1930 grant of EXPORT_POLICY_ADMIN to GRC_DIRECTOR stays (additive only) but no longer lets its holders act.
+insert into iam.role_permission (role_code, permission_code) values ('PLATFORM_ADMIN', 'EXPORT_POLICY_ADMIN');
+
+create function authz.is_export_policy_admin()
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and authz.has_permission('EXPORT_POLICY_ADMIN')
+         and not authz.has_permission('EXPORT_APPROVE') and not authz.has_permission('EXPORT_SECOND_APPROVE');
+$$;
+revoke all on function authz.is_export_policy_admin() from public, anon;
+grant execute on function authz.is_export_policy_admin() to authenticated;
+
+-- DEC-F21: a governed, administrable purpose catalogue. The owner's eight initial categories are active (OTHER needs
+-- a justification); the 1930 codes are kept, inactive, for the history of the requests that carry them.
+create table exchange.export_purpose (
+  code                   text primary key check (code ~ '^[A-Z][A-Z0-9_]{2,59}$'),
+  name_en                text not null check (length(name_en) between 3 and 200),
+  name_ar                text not null check (length(name_ar) between 3 and 200),
+  requires_justification boolean not null default false,
+  is_active              boolean not null default true,
+  is_legacy              boolean not null default false,
+  source_status          text not null check (source_status in ('OWNER_DEFAULT', 'SOURCE_REQUIRED', 'APPROVED')),
+  sort_order             int not null check (sort_order between 1 and 999),
+  updated_by             uuid references iam.user_profile (id),
+  updated_at             timestamptz not null default now(),
+  check (not (is_legacy and is_active)),
+  check (code <> 'OTHER' or requires_justification)
+);
+create index export_purpose_updated_by on exchange.export_purpose (updated_by);
+comment on table exchange.export_purpose is
+  'Export purposes (DEC-F21, migration 2040): administrable reference data. Legacy 1930 codes are kept inactive.';
+insert into exchange.export_purpose (code, name_en, name_ar, requires_justification, is_active, is_legacy,
+                                     source_status, sort_order)
+values
+  ('COMMITTEE_PROCEEDING', 'Committee proceeding', 'إجراءات لجنة', false, true, false, 'OWNER_DEFAULT', 10),
+  ('LEGAL_REVIEW', 'Legal review', 'مراجعة قانونية', false, true, false, 'OWNER_DEFAULT', 20),
+  ('COMPETENT_AUTHORITY_DECISION', 'Competent-authority decision', 'قرار صاحب الصلاحية', false, true, false,
+   'OWNER_DEFAULT', 30),
+  ('INTERNAL_MANAGEMENT_REVIEW', 'Internal management review', 'مراجعة إدارية داخلية', false, true, false,
+   'OWNER_DEFAULT', 40),
+  ('RECORDS_REQUIREMENT', 'Records requirement', 'متطلب سجلات', false, true, false, 'OWNER_DEFAULT', 50),
+  ('REGULATORY_OR_EXTERNAL_AUTHORITY', 'Regulatory or external authority', 'جهة تنظيمية أو خارجية', false, true,
+   false, 'OWNER_DEFAULT', 60),
+  ('AUTHORIZED_BUSINESS_NEED', 'Authorized business need', 'حاجة عمل معتمدة', false, true, false, 'OWNER_DEFAULT', 70),
+  ('OTHER', 'Other (justification required)', 'أخرى (يلزم التبرير)', true, true, false, 'OWNER_DEFAULT', 80),
+  ('AUTHORITY_SUBMISSION', 'Authority submission (legacy)', 'رفع إلى صاحب الصلاحية (سابق)', false, false, true,
+   'SOURCE_REQUIRED', 910),
+  ('REGULATOR_REQUEST', 'Regulator request (legacy)', 'طلب جهة تنظيمية (سابق)', false, false, true, 'SOURCE_REQUIRED', 920),
+  ('LEGAL_COUNSEL', 'Legal counsel (legacy)', 'مستشار قانوني (سابق)', false, false, true, 'SOURCE_REQUIRED', 930),
+  ('INTERNAL_REPORTING', 'Internal reporting (legacy)', 'تقارير داخلية (سابق)', false, false, true, 'SOURCE_REQUIRED',
+   940),
+  ('AUDIT', 'Audit (legacy)', 'تدقيق (سابق)', false, false, true, 'SOURCE_REQUIRED', 950);
+
+-- The purpose names a catalogue code. The 1930 list check is widened (same name) to the code format, and the catalogue
+-- is the list.
+alter table exchange.export_request drop constraint export_request_purpose_check;
+alter table exchange.export_request add constraint export_request_purpose_check
+  check (purpose ~ '^[A-Z][A-Z0-9_]{2,59}$');
+alter table exchange.export_request add constraint export_request_purpose_fkey
+  foreign key (purpose) references exchange.export_purpose (code);
+create index export_request_purpose on exchange.export_request (purpose);
+
+-- Whatever path creates a request: an active purpose, and a justification where the purpose requires one.
+create function exchange.check_export_purpose()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_p exchange.export_purpose;
+begin
+  select * into v_p from exchange.export_purpose p where p.code = new.purpose;
+  if v_p.code is null or not v_p.is_active then perform api._fail('INVALID', 'purpose'); end if;
+  if v_p.requires_justification and new.justification is null then perform api._fail('INVALID', 'justification'); end if;
+  return new;
+end;
+$$;
+create trigger export_request_purpose before insert on exchange.export_request
+  for each row execute function exchange.check_export_purpose();
+
+-- DEC-F22: no external domain is invented. APPROVED_EXTERNAL_DOMAINS is SOURCE_REQUIRED and the list is empty; manual
+-- external addresses stay possible only through the governed external-email workflow (justification, party,
+-- approvals; synthetic @example.test addresses only in this prototype). PRODUCTION_SUBSTITUTION_REQUIRED: once the
+-- list is approved, a command maintains it and add_export_recipient checks external addresses against it.
+insert into config.setting (key, value, status, source_reference, description) values
+  ('APPROVED_EXTERNAL_DOMAINS', null, 'SOURCE_REQUIRED', null,
+   'DEC-F22: the external domains exports may be emailed to (exchange.approved_external_domain). None is invented; '
+   'external addresses go only through the governed external-email workflow.');
+create table exchange.approved_external_domain (
+  id               uuid primary key default gen_random_uuid(),
+  domain           text not null unique
+                     check (domain ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$'),
+  source_status    text not null check (source_status in ('SOURCE_REQUIRED', 'APPROVED')),
+  source_reference text check (length(source_reference) between 3 and 300),
+  added_by         uuid not null references iam.user_profile (id),
+  added_at         timestamptz not null default now()
+);
+create index approved_external_domain_added_by on exchange.approved_external_domain (added_by);
+comment on table exchange.approved_external_domain is
+  'DEC-F22 (migration 2040): approved external email domains. Empty: APPROVED_EXTERNAL_DOMAINS is SOURCE_REQUIRED.';
+
+-- DEC-F23: the Restricted Case Authority's approval of an export of a restricted case stays mandatory. No version of
+-- RESTRICTED_CASE_AUTHORITY may weaken it (NONE, a narrower audience, classification or content type), on any path;
+-- and the requirement no longer depends on that rule being in force (fail closed, below).
+create function exchange.protect_restricted_authority_rule()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.code = 'RESTRICTED_CASE_AUTHORITY'
+     and not (new.audience = 'ANY' and new.min_classification is null and new.object_type is null
+              and new.restricted_only and new.action = 'REQUIRE_AUTHORITY_APPROVAL') then
+    perform api._fail('CONFLICT', 'RESTRICTED_CASE_AUTHORITY_PROTECTED');
+  end if;
+  return new;
+end;
+$$;
+create trigger approval_rule_restricted_authority before insert on exchange.approval_rule
+  for each row execute function exchange.protect_restricted_authority_rule();
+
+-- Replaces 1930 (DEC-F23, fail closed): an export of a restricted case always needs its Restricted Case Authority's
+-- approval, whatever rule is in force; once required, always required (as built); a rule can still add the
+-- requirement elsewhere.
+create or replace function exchange.authority_approval_required(p_request_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select coalesce((select q.authority_approval_required from exchange.export_request q where q.id = p_request_id), false)
+         or exists (select 1 from exchange.export_request q join case_mgmt.case_record c on c.id = q.case_id
+                    where q.id = p_request_id and c.is_restricted)
+         or exists (select 1 from exchange.matched_rules(p_request_id) m where m.action = 'REQUIRE_AUTHORITY_APPROVAL');
+$$;
+
+-- DEC-F24: a configurable approver pool per approval stage. A stage's pool is in use once anyone was ever added to
+-- it; from then on only its current members may give that stage, and revoking the last member leaves the stage with
+-- nobody eligible (fail closed, with a configuration warning), never open to every permission holder again. Members
+-- still need the stage's permission, the case and every other check. Nobody adds themselves.
+create table exchange.export_approver_pool (
+  id            uuid primary key default gen_random_uuid(),
+  stage         int not null check (stage in (1, 2)),
+  user_id       uuid not null references iam.user_profile (id),
+  reason        text not null check (length(reason) between 5 and 2000),
+  added_by      uuid not null references iam.user_profile (id),
+  added_at      timestamptz not null default now(),
+  revoked_by    uuid references iam.user_profile (id),
+  revoked_at    timestamptz,
+  revoke_reason text check (length(revoke_reason) between 5 and 2000),
+  check (added_by <> user_id),
+  check ((revoked_at is null) = (revoked_by is null) and (revoked_at is null) = (revoke_reason is null))
+);
+create unique index export_approver_pool_active on exchange.export_approver_pool (stage, user_id)
+  where revoked_at is null;
+create index export_approver_pool_user on exchange.export_approver_pool (user_id);
+create index export_approver_pool_added_by on exchange.export_approver_pool (added_by);
+create index export_approver_pool_revoked_by on exchange.export_approver_pool (revoked_by);
+comment on table exchange.export_approver_pool is
+  'DEC-F24 (migration 2040): who may give an export approval stage once the stage''s pool is in use. Append-only; a '
+  'membership can only be revoked, once.';
+
+-- DEC-F24: a submitted export whose next stage has no independent eligible approver. Ids and counts only; raised once
+-- per request and stage. The export itself waits (fail closed): self-approval is never the way out.
+create table exchange.export_approval_warning (
+  id         uuid primary key default gen_random_uuid(),
+  request_id uuid not null references exchange.export_request (id),
+  stage      int not null check (stage in (1, 2)),
+  raised_at  timestamptz not null default now(),
+  unique (request_id, stage)
+);
+comment on table exchange.export_approval_warning is
+  'DEC-F24 (migration 2040): an export stage with no independent eligible approver (administrative warning).';
+
+do $$
+declare t text;
+begin
+  foreach t in array array['export_purpose', 'approved_external_domain', 'export_approver_pool',
+                           'export_approval_warning'] loop
+    execute format('create trigger no_delete before delete on exchange.%I for each row execute function committee.reject_mutation()', t);
+    execute format('create trigger no_truncate before truncate on exchange.%I for each statement execute function committee.reject_mutation()', t);
+    execute format('alter table exchange.%I enable row level security', t);
+    execute format('grant select on exchange.%I to authenticated', t);
+  end loop;
+  execute 'create trigger no_update before update on exchange.export_approval_warning for each row execute function committee.reject_mutation()';
+end;
+$$;
+create function exchange.protect_pool_records()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if old.revoked_at is not null
+     or (to_jsonb(new) - array['revoked_by', 'revoked_at', 'revoke_reason'])
+        <> (to_jsonb(old) - array['revoked_by', 'revoked_at', 'revoke_reason']) then
+    raise exception 'approver pool membership % can only be revoked, once', old.id using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end;
+$$;
+create trigger export_approver_pool_protect before update on exchange.export_approver_pool
+  for each row execute function exchange.protect_pool_records();
+
+create policy export_purpose_read on exchange.export_purpose for select to authenticated
+  using (authz.current_user_id() is not null);
+create policy approved_external_domain_read on exchange.approved_external_domain for select to authenticated
+  using (authz.is_export_policy_admin());
+create policy export_approver_pool_read on exchange.export_approver_pool for select to authenticated
+  using (authz.is_export_policy_admin() or user_id = authz.current_user_id());
+create policy export_approval_warning_read on exchange.export_approval_warning for select to authenticated
+  using (authz.is_export_policy_admin());
+
+-- Whether a stage's pool is in use, and whether a user is a current member of it.
+create function exchange.pool_in_use(p_stage int)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select exists (select 1 from exchange.export_approver_pool p where p.stage = p_stage);
+$$;
+create function exchange.in_pool(p_user_id uuid, p_stage int)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select exists (select 1 from exchange.export_approver_pool p
+                 where p.stage = p_stage and p.user_id = p_user_id and p.revoked_at is null);
+$$;
+
+-- Replaces 1930 (DEC-F24): who may give an approval stage also has to be in the stage's pool once it is in use. The
+-- requester, earlier approvers and authors of a rule in force for the export (X1) stay excluded.
+create or replace function exchange.eligible_approvers(p_request_id uuid, p_stage int)
+returns table (user_id uuid)
+language sql stable
+set search_path = ''
+as $$
+  select u.id
+  from exchange.export_request q
+  join iam.user_profile u on u.status = 'ACTIVE' and u.id <> q.requested_by
+  where q.id = p_request_id
+    and authz.user_has_permission(u.id, case p_stage when 1 then 'EXPORT_APPROVE' else 'EXPORT_SECOND_APPROVE' end)
+    and authz.user_can_view_case(u.id, q.case_id)
+    and not exists (select 1 from exchange.export_approval a where a.request_id = q.id and a.approver_id = u.id)
+    and not exchange.authored_rule_in_force(q.id, u.id)
+    and (not exchange.pool_in_use(p_stage) or exchange.in_pool(u.id, p_stage));
+$$;
+
+-- Table-level backup of the separation of duties (DEC-F24), whatever path writes an approval: never the requester,
+-- and only a current pool member once the stage's pool is in use.
+create function exchange.guard_export_approval()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if exists (select 1 from exchange.export_request q where q.id = new.request_id and q.requested_by = new.approver_id)
+     or (exchange.pool_in_use(new.stage) and not exchange.in_pool(new.approver_id, new.stage)) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  return new;
+end;
+$$;
+create trigger export_approval_guard before insert on exchange.export_approval
+  for each row execute function exchange.guard_export_approval();
+
+-- A submitted export whose next stage nobody independent may give raises the administrative warning, once.
+create function exchange.warn_unapprovable_export()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_stage int;
+  v_id uuid;
+begin
+  if new.status <> 'SUBMITTED' then return null; end if;
+  v_stage := 1 + (select count(*)::int from exchange.export_approval a where a.request_id = new.id);
+  if v_stage > coalesce(new.approvals_required, 0)
+     or exists (select 1 from exchange.eligible_approvers(new.id, v_stage))
+     or exists (select 1 from exchange.export_approval_warning w where w.request_id = new.id and w.stage = v_stage) then
+    return null;
+  end if;
+  insert into exchange.export_approval_warning (request_id, stage) values (new.id, v_stage) returning id into v_id;
+  perform audit.record_event('EXPORT_APPROVAL_CONFIGURATION_WARNING', 'ADMIN', 'SUCCESS', new.case_id,
+    'export_request', new.id::text, null,
+    jsonb_build_object('warning_id', v_id, 'stage', v_stage, 'approvals_required', new.approvals_required,
+                       'eligible_approvers', 0, 'pool_in_use', exchange.pool_in_use(v_stage)),
+    'SYSTEM');
+  return null;
+end;
+$$;
+create trigger export_request_approval_warning after update on exchange.export_request
+  for each row when (old.status is distinct from new.status or old.row_version is distinct from new.row_version)
+  execute function exchange.warn_unapprovable_export();
+
+revoke all on function
+  exchange.check_export_purpose(), exchange.protect_restricted_authority_rule(), exchange.protect_pool_records(),
+  exchange.pool_in_use(int), exchange.in_pool(uuid, int), exchange.guard_export_approval(),
+  exchange.warn_unapprovable_export()
+from public, anon, authenticated;
+
+-- Replaces 1930 (DEC-F24): only a policy administrator who holds no approval permission sets export rules. The rest
+-- is as built; RESTRICTED_CASE_AUTHORITY is protected by its trigger (DEC-F23).
+create or replace function api.set_export_rule(
+  p_code text, p_audience text, p_min_classification core.classification_level, p_object_type text,
+  p_restricted_only boolean, p_action text, p_effective_from timestamptz, p_source_status text, p_reason text
+)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_id uuid;
+  v_reason text;
+begin
+  if not authz.is_export_policy_admin() then perform api._fail('FORBIDDEN'); end if;
+  if p_code is null or p_code !~ '^[A-Z][A-Z0-9_]{2,59}$' then perform api._fail('INVALID', 'code'); end if;
+  if p_audience is null or p_audience not in ('INTERNAL', 'EXTERNAL', 'ANY') then
+    perform api._fail('INVALID', 'audience');
+  end if;
+  if p_object_type is not null and p_object_type not in (
+       'CASE_SUMMARY', 'FINDING', 'RECOMMENDATION_PACKAGE', 'AUTHORITY_DECISION', 'MINUTES') then
+    perform api._fail('INVALID', 'object_type');
+  end if;
+  if p_restricted_only is null then perform api._fail('INVALID', 'restricted_only'); end if;
+  if p_action is null or p_action not in ('REQUIRE_SECOND_APPROVAL', 'REQUIRE_AUTHORITY_APPROVAL', 'REFUSE', 'NONE') then
+    perform api._fail('INVALID', 'action');
+  end if;
+  if p_effective_from is null or p_effective_from < now() then perform api._fail('INVALID', 'effective_from'); end if;
+  if p_source_status is null or p_source_status not in ('SOURCE_REQUIRED', 'APPROVED') then
+    perform api._fail('INVALID', 'source_status');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  -- One version per code at a time: the version in force ends where the new one starts.
+  perform pg_advisory_xact_lock(hashtext('exchange.approval_rule:' || p_code));
+  if exists (select 1 from exchange.approval_rule r where r.code = p_code and r.effective_from >= p_effective_from) then
+    perform api._fail('CONFLICT', 'LATER_RULE_EXISTS');
+  end if;
+  update exchange.approval_rule set effective_to = p_effective_from where code = p_code and effective_to is null;
+  insert into exchange.approval_rule (code, audience, min_classification, object_type, restricted_only, action,
+                                      source_status, reason, effective_from, created_by)
+  values (p_code, p_audience, p_min_classification, p_object_type, p_restricted_only, p_action, p_source_status,
+          v_reason, p_effective_from, v_actor)
+  returning id into v_id;
+  perform audit.record_event('EXPORT_RULE_SET', 'ADMIN', 'SUCCESS', null, 'export_approval_rule', v_id::text, v_reason,
+    jsonb_build_object('code', p_code, 'audience', p_audience, 'min_classification', p_min_classification,
+                       'object_type', p_object_type, 'restricted_only', p_restricted_only, 'action', p_action,
+                       'effective_from', p_effective_from, 'source_status', p_source_status));
+  return v_id;
+end;
+$$;
+
+-- Replaces 1930 (DEC-F21): the purpose comes from the active catalogue, and a purpose that requires one (OTHER) needs
+-- a justification, internal or external. The rest is as built.
+create or replace function api.create_export_request(
+  p_case_id uuid, p_format text, p_audience text, p_purpose text, p_external_party text, p_justification text
+)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_id uuid;
+  v_party text;
+  v_justification text;
+  v_purpose exchange.export_purpose;
+begin
+  if p_case_id is null or not authz.can_view_case(p_case_id) then perform api._fail('NOT_FOUND'); end if;
+  if not authz.has_permission('EXPORT_REQUEST') then perform api._fail('FORBIDDEN'); end if;
+  if p_format is null or p_format not in ('PDF', 'XLSX', 'EMAIL') then perform api._fail('INVALID', 'format'); end if;
+  if p_audience is null or p_audience not in ('INTERNAL', 'EXTERNAL') then perform api._fail('INVALID', 'audience'); end if;
+  select * into v_purpose from exchange.export_purpose p where p.code = p_purpose and p.is_active;
+  if v_purpose.code is null then perform api._fail('INVALID', 'purpose'); end if;
+  if p_audience = 'EXTERNAL' then
+    -- Q99: external sending always needs a justification, and names who receives it.
+    v_party := api._require_text(p_external_party, 'external_party', 3, 200);
+    v_justification := api._require_text(p_justification, 'justification', 20, 2000);
+  else
+    if nullif(btrim(coalesce(p_external_party, '')), '') is not null then perform api._fail('INVALID', 'external_party'); end if;
+    if v_purpose.requires_justification or nullif(btrim(coalesce(p_justification, '')), '') is not null then
+      v_justification := api._require_text(p_justification, 'justification', 20, 2000);
+    end if;
+  end if;
+  insert into exchange.export_request (case_id, format, audience, purpose, external_party, justification, requested_by)
+  values (p_case_id, p_format, p_audience, v_purpose.code, v_party, v_justification, v_actor)
+  returning id into v_id;
+  perform audit.record_event('EXPORT_REQUESTED', 'BUSINESS', 'SUCCESS', p_case_id, 'export_request', v_id::text, null,
+    jsonb_build_object('format', p_format, 'audience', p_audience, 'purpose', v_purpose.code));
+  return v_id;
+end;
+$$;
+
+-- DEC-F21: the policy administrator maintains the purpose catalogue. Codes are never deleted; a purpose is
+-- deactivated instead. Legacy codes stay as they are; OTHER always requires a justification.
+create function api.set_export_purpose(p_code text, p_name_en text, p_name_ar text, p_requires_justification boolean,
+                                       p_is_active boolean, p_sort_order int, p_reason text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_old exchange.export_purpose;
+  v_name_en text;
+  v_name_ar text;
+  v_reason text;
+begin
+  if not authz.is_export_policy_admin() then perform api._fail('FORBIDDEN'); end if;
+  if p_code is null or p_code !~ '^[A-Z][A-Z0-9_]{2,59}$' then perform api._fail('INVALID', 'code'); end if;
+  v_name_en := api._require_text(p_name_en, 'name_en', 3, 200);
+  v_name_ar := api._require_text(p_name_ar, 'name_ar', 3, 200);
+  if p_requires_justification is null then perform api._fail('INVALID', 'requires_justification'); end if;
+  if p_is_active is null then perform api._fail('INVALID', 'is_active'); end if;
+  if p_sort_order is null or p_sort_order not between 1 and 899 then perform api._fail('INVALID', 'sort_order'); end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  select * into v_old from exchange.export_purpose p where p.code = p_code for update;
+  if v_old.is_legacy then perform api._fail('CONFLICT', 'LEGACY_PURPOSE'); end if;
+  if p_code = 'OTHER' and not p_requires_justification then
+    perform api._fail('CONFLICT', 'OTHER_REQUIRES_JUSTIFICATION');
+  end if;
+  insert into exchange.export_purpose (code, name_en, name_ar, requires_justification, is_active, is_legacy,
+                                       source_status, sort_order, updated_by, updated_at)
+  values (p_code, v_name_en, v_name_ar, p_requires_justification, p_is_active, false, 'APPROVED', p_sort_order,
+          v_actor, now())
+  on conflict (code) do update
+    set name_en = excluded.name_en, name_ar = excluded.name_ar,
+        requires_justification = excluded.requires_justification, is_active = excluded.is_active,
+        source_status = 'APPROVED', sort_order = excluded.sort_order, updated_by = excluded.updated_by,
+        updated_at = excluded.updated_at;
+  perform audit.record_event('EXPORT_PURPOSE_SET', 'ADMIN', 'SUCCESS', null, 'export_purpose', p_code, v_reason,
+    jsonb_build_object('created', v_old.code is null, 'requires_justification', p_requires_justification,
+                       'previous_requires_justification', v_old.requires_justification, 'is_active', p_is_active,
+                       'previous_is_active', v_old.is_active, 'sort_order', p_sort_order));
+  return p_code;
+end;
+$$;
+
+-- DEC-F24: the policy administrator adds a user holding the stage's permission to a stage's approver pool.
+create function api.add_export_approver(p_user_id uuid, p_stage int, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_id uuid;
+  v_reason text;
+begin
+  if not authz.is_export_policy_admin() then perform api._fail('FORBIDDEN'); end if;
+  if p_stage is null or p_stage not in (1, 2) then perform api._fail('INVALID', 'stage'); end if;
+  if p_user_id is null or not exists (select 1 from iam.user_profile u where u.id = p_user_id and u.status = 'ACTIVE') then
+    perform api._fail('INVALID', 'user_id');
+  end if;
+  if p_user_id = v_actor then perform api._fail('FORBIDDEN'); end if;
+  if not authz.user_has_permission(p_user_id, case p_stage when 1 then 'EXPORT_APPROVE' else 'EXPORT_SECOND_APPROVE' end) then
+    perform api._fail('CONFLICT', 'APPROVER_LACKS_PERMISSION');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  perform pg_advisory_xact_lock(hashtext('exchange.export_approver_pool:' || p_stage));
+  if exchange.in_pool(p_user_id, p_stage) then perform api._fail('CONFLICT', 'ALREADY_MEMBER'); end if;
+  insert into exchange.export_approver_pool (stage, user_id, reason, added_by)
+  values (p_stage, p_user_id, v_reason, v_actor)
+  returning id into v_id;
+  perform audit.record_event('EXPORT_APPROVER_ADDED', 'ADMIN', 'SUCCESS', null, 'export_approver_pool', v_id::text,
+    v_reason, jsonb_build_object('user_id', p_user_id, 'stage', p_stage));
+  return v_id;
+end;
+$$;
+
+create function api.revoke_export_approver(p_membership_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v exchange.export_approver_pool;
+  v_reason text;
+begin
+  if not authz.is_export_policy_admin() then perform api._fail('FORBIDDEN'); end if;
+  select * into v from exchange.export_approver_pool p where p.id = p_membership_id for update;
+  if v.id is null then perform api._fail('NOT_FOUND'); end if;
+  if v.revoked_at is not null then perform api._fail('CONFLICT', 'ALREADY_REVOKED'); end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  update exchange.export_approver_pool set revoked_by = v_actor, revoked_at = now(), revoke_reason = v_reason
+   where id = v.id;
+  perform audit.record_event('EXPORT_APPROVER_REVOKED', 'ADMIN', 'SUCCESS', null, 'export_approver_pool', v.id::text,
+    v_reason, jsonb_build_object('user_id', v.user_id, 'stage', v.stage));
+end;
+$$;
+
+-- DEC-F24, T-AMB-112: the administrative configuration warnings, for the policy administrator. Ids, stages, counts
+-- and times only: never a case, an item or a person beyond the pool's own member ids.
+create function api.export_approval_config_warnings()
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+begin
+  if not authz.is_export_policy_admin() then perform api._fail('FORBIDDEN'); end if;
+  return jsonb_build_object(
+    'pools', (select jsonb_agg(jsonb_build_object(
+                       'stage', st.stage, 'in_use', exchange.pool_in_use(st.stage),
+                       'active_members', (select count(*) from exchange.export_approver_pool p
+                                          where p.stage = st.stage and p.revoked_at is null))
+                     order by st.stage)
+              from (values (1), (2)) st (stage)),
+    'warnings', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'warning_id', w.id, 'request_id', w.request_id, 'stage', w.stage, 'raised_at', w.raised_at,
+               'still_blocked', q.status = 'SUBMITTED'
+                                and 1 + (select count(*) from exchange.export_approval a where a.request_id = q.id) = w.stage
+                                and not exists (select 1 from exchange.eligible_approvers(q.id, w.stage)))
+             order by w.raised_at, w.id)
+      from exchange.export_approval_warning w join exchange.export_request q on q.id = w.request_id), '[]'::jsonb));
+end;
+$$;
+
+grant execute on function
+  api.set_export_purpose(text, text, text, boolean, boolean, int, text), api.add_export_approver(uuid, int, text),
+  api.revoke_export_approver(uuid, text), api.export_approval_config_warnings()
+to authenticated;

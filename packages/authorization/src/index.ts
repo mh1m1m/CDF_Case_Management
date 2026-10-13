@@ -132,7 +132,16 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   // COMMITTEE_ADMIN maintains committee seats and rules only (ADR-019, Q28); it opens no proceeding or case.
   // SECTOR_ADMIN maintains sectors and positions only; it shows no referral or case (migration 1880).
   // NOTIFICATION_ADMIN maintains notification rules only; notifications carry no content (migration 1920).
-  PLATFORM_ADMIN: ["USER_ADMIN", "ROLE_ADMIN", "COMMITTEE_ADMIN", "SECTOR_ADMIN", "NOTIFICATION_ADMIN"],
+  // EXPORT_POLICY_ADMIN maintains export rules, purposes and approver pools only (migration 2040, DEC-F24); a holder
+  // of an export approval permission cannot use it (GRC_DIRECTOR keeps the 1930 grant, inert: see canAdministerExportPolicy).
+  PLATFORM_ADMIN: [
+    "USER_ADMIN",
+    "ROLE_ADMIN",
+    "COMMITTEE_ADMIN",
+    "SECTOR_ADMIN",
+    "NOTIFICATION_ADMIN",
+    "EXPORT_POLICY_ADMIN",
+  ],
   // Form entitlements (ADR-011) give these roles their first permissions; the rest come in later phases.
   // DB_ADMIN never receives application permissions (§21).
   COMPLIANCE: ["FORM_VIEW", "FORM_PREPARE", "FORM_REVIEW"],
@@ -171,6 +180,14 @@ export function permissionsForRoles(roles: readonly Role[]): Permission[] {
 
 export function can(actor: Pick<Actor, "permissions"> | null | undefined, permission: Permission): boolean {
   return !!actor && actor.permissions.includes(permission);
+}
+
+/** DEC-F24 (migration 2040, authz.is_export_policy_admin): export policy administration is separate from export
+ *  approval; whoever holds an approval permission cannot administer export policy. */
+export function canAdministerExportPolicy(actor: Pick<Actor, "permissions"> | null | undefined): boolean {
+  return (
+    can(actor, "EXPORT_POLICY_ADMIN") && !can(actor, "EXPORT_APPROVE") && !can(actor, "EXPORT_SECOND_APPROVE")
+  );
 }
 
 export function withinClearance(actor: Pick<Actor, "clearance">, classification: Classification): boolean {

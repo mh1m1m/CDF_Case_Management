@@ -990,7 +990,8 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
   {
     fn: "create_export_request",
     outcome: "NOT_FOUND",
-    call: (tx, t) => tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'AUDIT', null, null)`,
+    call: (tx, t) =>
+      tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null)`,
   },
   {
     fn: "add_export_item",
@@ -1166,8 +1167,14 @@ const ADMIN_COMMANDS = [
   "set_action_authority_rule",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
   "set_notification_rule",
-  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case.
+  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case. Migration 2040 (DEC-F21,
+  // DEC-F24): the purpose catalogue, the approver pools and the configuration warnings (ids and counts), for a policy
+  // administrator who approves no export.
   "set_export_rule",
+  "set_export_purpose",
+  "add_export_approver",
+  "revoke_export_approver",
+  "export_approval_config_warnings",
   // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case; its shared
   // owner pools (migration 2040, DEC-F28) likewise.
   "set_corrective_action_policy",
@@ -2001,7 +2008,7 @@ describe("IDOR: export requests (migration 1930)", () => {
     await scenario(async (s) => {
       await s.as("caseManager");
       const [r] = await s.tx<{ id: string }[]>`
-        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST', 'Regulator Alpha (synthetic)',
+        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATORY_OR_EXTERNAL_AUTHORITY', 'Regulator Alpha (synthetic)',
           'Synthetic: the regulator asked for the case summary.') as id`;
       await s.tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${caseB})`;
       await s.tx`select api.add_export_recipient(${r!.id}, 'EXTERNAL', null, 'officer.alpha@example.test')`;

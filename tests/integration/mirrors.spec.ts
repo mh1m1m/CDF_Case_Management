@@ -7,6 +7,9 @@ import {
   CASE_TASK_TYPES,
   CONFLICT_DECIDERS,
   EMPLOYEE_NOTICE_KINDS,
+  EXPORT_PURPOSES,
+  EXPORT_PURPOSES_LEGACY,
+  EXPORT_PURPOSES_REQUIRING_JUSTIFICATION,
   MEETING_CONFLICT_CONCERN_STATUSES,
   NOTIFICATION_TEMPLATES,
   PERMISSIONS,
@@ -131,6 +134,19 @@ describe("mirrors", () => {
       const wording = messagesFor(locale).notificationTemplate as Record<string, string>;
       for (const code of NOTIFICATION_TEMPLATES) expect(wording[code], `${locale} ${code}`).toBeTruthy();
     }
+  });
+
+  it("export purposes match the governed catalogue exchange.export_purpose (DEC-F21, 2040)", async () => {
+    const rows = await admin<
+      { code: string; isActive: boolean; isLegacy: boolean; requiresJustification: boolean }[]
+    >`
+      select code, is_active as "isActive", is_legacy as "isLegacy", requires_justification as "requiresJustification"
+      from exchange.export_purpose order by sort_order`;
+    expect(rows.filter((r) => r.isActive).map((r) => r.code)).toEqual([...EXPORT_PURPOSES]);
+    expect(rows.filter((r) => r.isLegacy).map((r) => r.code)).toEqual([...EXPORT_PURPOSES_LEGACY]);
+    expect(rows.filter((r) => r.requiresJustification).map((r) => r.code)).toEqual([
+      ...EXPORT_PURPOSES_REQUIRING_JUSTIFICATION,
+    ]);
   });
 
   it("permission codes match iam.permission", async () => {

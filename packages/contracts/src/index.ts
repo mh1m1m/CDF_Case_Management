@@ -1346,16 +1346,31 @@ export const EXPORT_FORMATS = ["PDF", "XLSX", "EMAIL"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 export const EXPORT_AUDIENCES = ["INTERNAL", "EXTERNAL"] as const;
 export type ExportAudience = (typeof EXPORT_AUDIENCES)[number];
-/** SOURCE_REQUIRED: the approved list of export purposes. */
+/** The active export purposes of the governed catalogue exchange.export_purpose (owner decision DEC-F21, migration
+ *  2040): administrable reference data, mirrored here (mirrors.spec). OTHER requires a justification. */
 export const EXPORT_PURPOSES = [
+  "COMMITTEE_PROCEEDING",
+  "LEGAL_REVIEW",
+  "COMPETENT_AUTHORITY_DECISION",
+  "INTERNAL_MANAGEMENT_REVIEW",
+  "RECORDS_REQUIREMENT",
+  "REGULATORY_OR_EXTERNAL_AUTHORITY",
+  "AUTHORIZED_BUSINESS_NEED",
+  "OTHER",
+] as const;
+export type ExportPurpose = (typeof EXPORT_PURPOSES)[number];
+/** Export purposes that require a justification whatever the audience (DEC-F21). */
+export const EXPORT_PURPOSES_REQUIRING_JUSTIFICATION: readonly ExportPurpose[] = ["OTHER"];
+/** The 1930 purposes, kept inactive in the catalogue for the history of the requests that carry them; never offered
+ *  for a new export. */
+export const EXPORT_PURPOSES_LEGACY = [
   "AUTHORITY_SUBMISSION",
   "REGULATOR_REQUEST",
   "LEGAL_COUNSEL",
   "INTERNAL_REPORTING",
   "AUDIT",
-  "OTHER",
 ] as const;
-export type ExportPurpose = (typeof EXPORT_PURPOSES)[number];
+export type ExportPurposeLegacy = (typeof EXPORT_PURPOSES_LEGACY)[number];
 /** Exportable content. Evidence is not exportable until UX S2 merges; protected identity never is (N19). */
 export const EXPORT_OBJECT_TYPES = [
   "CASE_SUMMARY",
@@ -1393,7 +1408,8 @@ export interface ExportDocument {
   classification: Classification;
   format: ExportFormat;
   audience: ExportAudience;
-  purpose: ExportPurpose;
+  /** A request created before migration 2040 may carry a legacy purpose. */
+  purpose: ExportPurpose | ExportPurposeLegacy;
   externalParty: string | null;
   items: ExportDocumentItem[];
 }

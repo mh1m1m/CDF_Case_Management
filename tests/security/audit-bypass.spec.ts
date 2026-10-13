@@ -87,6 +87,8 @@ const NOT_STATE_CHANGING = new Set([
   "list_retention_reviewers",
   // Migration 2040 (DEC-AMB-009): what the case team is shown about executing each decided sanction.
   "sanction_executability",
+  // Migration 2040 (DEC-F24, T-AMB-112): the export policy administrator's configuration warnings (ids and counts).
+  "export_approval_config_warnings",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -1713,11 +1715,37 @@ describe("every state-changing command writes its audit event in the same transa
       },
       // Export builder (migration 1930): an external email export of case A's summary, approved, generated and
       // sent; a second draft is cancelled. The walk rule is switched off (NONE) and matches nothing.
+      // 2040 (DEC-F24): the platform administrator holds export policy; an approver (grcDirector) no longer may.
       {
         fn: "set_export_rule",
-        actor: "grcDirector",
+        actor: "platformAdmin",
         run: (s) =>
           s.tx`select api.set_export_rule('WALK_RULE', 'ANY', null, 'MINUTES', false, 'NONE', now(), 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "set_export_purpose",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_export_purpose('WALK_PURPOSE', 'Walk purpose (synthetic)', 'غرض تجريبي', false, false, 99,
+            ${REASON})`,
+      },
+      {
+        fn: "add_export_approver",
+        actor: "platformAdmin",
+        run: async (s) =>
+          (ids.exportApprover = await one(
+            s,
+            s.tx`select api.add_export_approver(${USERS.grcDeputy}, 2, ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "revoke_export_approver",
+        actor: "platformAdmin",
+        // The stage-2 pool stays in use and empty until the deputy is added again (fixture for decide_export below).
+        run: async (s) => {
+          await s.tx`select api.revoke_export_approver(${ids.exportApprover!}, ${REASON})`;
+          return s.tx`select api.add_export_approver(${USERS.grcDeputy}, 2, ${REASON})`;
+        },
       },
       {
         fn: "create_export_request",
@@ -1725,7 +1753,7 @@ describe("every state-changing command writes its audit event in the same transa
         run: async (s) =>
           (ids.exportRequest = await one(
             s,
-            s.tx`select api.create_export_request(${caseA}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST',
+            s.tx`select api.create_export_request(${caseA}, 'EMAIL', 'EXTERNAL', 'REGULATORY_OR_EXTERNAL_AUTHORITY',
               'Regulator Alpha (synthetic)', 'Synthetic: the regulator asked for the case summary.') as id`,
           )),
       },
@@ -1790,7 +1818,7 @@ describe("every state-changing command writes its audit event in the same transa
         run: async (s) => {
           const draft = await one(
             s,
-            s.tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'AUDIT', null, null) as id`,
+            s.tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null) as id`,
           );
           return s.tx`select api.cancel_export(${draft}, ${REASON})`;
         },
@@ -1803,7 +1831,7 @@ describe("every state-changing command writes its audit event in the same transa
           const exec = await caseId("0003");
           const request = await one(
             s,
-            s.tx`select api.create_export_request(${exec}, 'PDF', 'INTERNAL', 'AUDIT', null, null) as id`,
+            s.tx`select api.create_export_request(${exec}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null) as id`,
           );
           await s.tx`select api.add_export_item(${request}, 'CASE_SUMMARY', ${exec})`;
           const hash = await one(s, s.tx`select api.preview_export(${request}) ->> 'hash' as h`);
@@ -2069,6 +2097,8 @@ describe("audit internals are not reachable", () => {
       "authz.is_committee_secretary",
       "authz.is_evidence_lead",
       "authz.is_evidence_team",
+      // Migration 2040 (DEC-F24): whether the caller administers export policy (and approves no export).
+      "authz.is_export_policy_admin",
       "authz.is_portal_subject",
       "authz.is_reporter_correspondent",
       "authz.meeting_concern_decider_seat",
