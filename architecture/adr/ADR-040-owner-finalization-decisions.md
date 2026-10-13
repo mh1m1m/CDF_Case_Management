@@ -405,7 +405,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
   - DEC-49 (workflow follows the object): satisfied. Every 2030/2040 command keys on the case, proceeding, package, action, notice or grievance; catalogue rows own nothing.
   - DEC-05 (S3 rules kept): nothing in PR-A changes them.
   - DEC-13 (clearance): PR-A adds no clearance command; the 2015 refusal (null keeps, true to false refused) stands.
-  - DEC-12 (dual control): three PR-A grants that can widen access are single-approver today and are listed for 2160 (ADR-053): `api.appoint_conflict_authority` (2030), `api.add_export_approver` and `api.authorize_continuity_operator` (2040). Each refuses self-grant; none has a second approver yet. Separately, `api.set_corrective_action_pool_member` (2040) lets the corrective-action policy administrator add themselves to a pool. Revocations stay immediate, as DEC-12 allows.
+  - DEC-12 (dual control): three PR-A grants that can widen access are single-approver today and are listed for 2160 (ADR-053): `api.appoint_conflict_authority` (2030), `api.add_export_approver` and `api.authorize_continuity_operator` (2040). Each refuses self-grant; none has a second approver yet. Separately, `api.set_corrective_action_pool_member` (2040) lets the corrective-action policy administrator add themselves to a pool. Revocations stay immediate, as DEC-12 allows. Deferred to 2160 as well (AGENT-09, pack 6, non-blocking): `api.dispose_superseded_corrective_action` (2030), like `api.waive_corrective_action` (1940), does not refuse a manager who owns the action.
 - Screen impacts for Phase 12 (UX) are listed in `rebase/review/` with the early-look pack:
   - the acting chair, acting secretary and alternate activations;
   - emergency scheduling;
