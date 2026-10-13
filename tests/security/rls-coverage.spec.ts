@@ -106,12 +106,14 @@ describe("RLS coverage", () => {
     expect(rows.map((r) => r.fn)).toEqual([]);
   });
 
-  it("the user-id forms of the meeting rules are internal", async () => {
+  it("the user-id forms of the visibility and decider rules are internal", async () => {
     const rows = await admin<{ role: string; fn: string; ok: boolean }[]>`
       select r as role, f as fn, has_function_privilege(r, f, 'EXECUTE') as ok
       from unnest(${APP_ROLES}::text[]) r
       cross join unnest(array['committee.manages_meeting(uuid,uuid)', 'committee.concern_decider_seat_for(uuid,uuid)',
-                              'committee.concern_reverser_seat(uuid,uuid)']) f`;
+                              'committee.concern_reverser_seat(uuid,uuid)', 'intake.user_can_view_referral(uuid,uuid)',
+                              'case_mgmt.user_can_view_preliminary_recommendation(uuid,uuid)',
+                              'grievance.is_pending_decider(uuid,uuid)']) f`;
     expect(rows.filter((r) => r.ok)).toEqual([]);
   });
 

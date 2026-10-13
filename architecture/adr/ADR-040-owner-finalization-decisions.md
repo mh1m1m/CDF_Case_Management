@@ -280,6 +280,26 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
     - **DEC-F09, the target's record.** Its reason, author and source are read by committee registry administrators only (AGENT-09 pack 3, R4). The escalation rule, the available actions and the commands are SECURITY DEFINER, and a referral screen shows only the target's committee and seat.
     - **DEC-F09, objection.** An objection is refused once an escalation is decided.
     - **DEC-F10.** NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are INACTIVE. They are refused on insert and on endorsement or approval; an existing one can only be returned.
+17. **Purpose read models and notices for Phase 12 (the UX thread's asks).** The web BFF reads these instead of the case tables.
+    - **Views.** `api.referral_view` and `api.referral_queue`, `api.grievance_view` and `api.grievance_queue`, `api.export_request_view`, `api.corrective_action_view` and `api.bcp_import_batch_view`.
+      - Each is SECURITY DEFINER with `search_path = ''`, granted to `authenticated` only, and writes no audit event.
+      - Each returns NOT_FOUND exactly where row-level security hides the row.
+      - Each carries `capabilities` that mirror its commands, and a test checks every capability against the real command.
+    - **What they never show.**
+      - The referral view: the escalation target's committee and seat only.
+      - The export view: no document or storage key, and the requester is never offered an approval (DEC-F24).
+      - The action card: never the case. A pool shows its code and name only. On a restricted case no unit or pool owner is offered.
+      - The import batch: row metadata only, never the cells.
+    - **The admissibility decider's read path (DEC-F17).**
+      - While a grievance awaits the decision, its decider reads the grievance, its assessments, contested items, completion requests and supplements (additive policies through `authz.is_grievance_decider`).
+      - Under CHAIR the decider is the chair or deputy chair; under COMMITTEE, the chair, deputy chair or a member. They must pass the case gate and have taken no part in the Investigation Committee. On a restricted case they must already work the case.
+      - The read ends at the decision.
+    - **Content-free notices.**
+      - `GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED`.
+      - Four referral notices: submitted to the head, returned, submitted to the secretary, escalated.
+      - Three preliminary-review notices: review requested, approval requested, returned.
+      - Deep links go to `/referrals/<id>` and `/preliminary-reviews/<id>`.
+    - **Rules asked by user id.** `authz.can_view_referral` and `authz.can_view_preliminary_recommendation` wrap user-id forms (`intake.user_can_view_referral`, `case_mgmt.user_can_view_preliminary_recommendation`), so a notice checks its recipient without changing the request identity. The rule is the same for every caller.
 
 ## Consequences
 
