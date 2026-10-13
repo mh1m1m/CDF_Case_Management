@@ -14,6 +14,8 @@ Committee roles are global (`COMMITTEE_CHAIR`, `COMMITTEE_MEMBER`, `COMMITTEE_SE
 3. The committee may assign an investigator, team, member, external or technical investigator (Q31–Q34) as proceeding assignments; hearings, witnesses, technical analysis and legal opinion requests are meeting invitees or tasks.
 4. Global committee roles stay as prerequisites; access comes from the snapshot (ADR-019, AUTHORIZATION_IMPACT).
 5. Registry administration (create committee, appoint seats, set rules) needs `COMMITTEE_ADMIN`; PLATFORM_ADMIN can hold it without any content access.
+6. **Case gate on every seat (AGENT-09 review P1, 2026-10-12).** A seat holder is snapshotted as a voting member only when `authz.user_case_gate` passes for the case (clearance covers the classification, no declared case conflict). Anyone who fails it is recorded with `case_gate_excluded = true`, non-voting, and gets no view of the proceeding. Member and secretary visibility re-checks the gate on every read, so a case conflict declared after the snapshot removes access, deliberation and voting at once.
+7. **DEC-61 (owner decision 2026-10-12, option C "Authority approval").** A restricted case may be referred to a committee only after the case's Restricted Case Authority (DEC-01: its owner, eligible for the classification) records an approval with `api.approve_restricted_committee_referral` (audited `RESTRICTED_COMMITTEE_REFERRAL_APPROVED`). One approval opens one proceeding (`committee.restricted_referral_approval`, used once). Without it the referral fails with `AUTHORITY_APPROVAL_REQUIRED`. Point 6 then applies, so only cleared seats take part.
 
 ## Consequences
 
@@ -25,4 +27,4 @@ Membership appointments come from CDF governance decisions; the prototype record
 
 ## Requirements
 
-Q21–Q40.
+Q21–Q40; DEC-61; AGENT-09 1870/1880 review (P1a, P1b).

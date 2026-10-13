@@ -18,3 +18,5 @@ export { createInterviewService } from "./interviews";
 export type { InterviewDeps, InterviewGateway, InterviewService, RecordedStatement } from "./interviews";
 export { createRecordsService } from "./records";
 export type { RecordsDeps, RecordsGateway, RecordsService } from "./records";
+export { composeNotificationEmail, createNotificationService } from "./notifications";
+export type { DispatchResult, NotificationDeps, NotificationService } from "./notifications";

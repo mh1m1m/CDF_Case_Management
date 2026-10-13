@@ -200,3 +200,90 @@ Migration `20261007001200_interviews.sql` adds six tables to `case_mgmt`. Interv
 | `interview_recording`         | `interview_id`, `evidence_id` → `evidence.evidence`                                                                                                                                                               | Evidence must be `AVAILABLE` and `AUDIO`, `VIDEO` or `DOCUMENT`; append-only            |
 
 Identifier: `INT-NNN` is a per-case display number like `EV-NNN`; the UUID remains the only lookup key. `interview.form_instance_id` is a soft link reserved for the forms engine (ADR-011).
+
+## Proceedings and committee registry (migration 1870, ADR-017 to ADR-019)
+
+| Table                             | Purpose                                                                                                                              | Written by                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `case_record.source_type`         | Intake path: WHISTLEBLOWING, DIRECT_REFERRAL, DIRECT_GRIEVANCE, OTHER_AUTHORIZED_SOURCE (backfilled).                                | default; referral and grievance commands in later slices                                                    |
+| `case_mgmt.proceeding`            | Work inside a case; status plus one waiting or one suspension reason; outcome when closed. Frozen once closed.                       | `api.open_proceeding`, `api.update_proceeding_state`, `api.close_proceeding`, `api.refer_case_to_committee` |
+| `case_mgmt.case_subject`          | People a case is about (multi-subject). Append-only.                                                                                 | `api.add_case_subject`                                                                                      |
+| `case_mgmt.allegation` (extended) | Subject, policy reference, law reference.                                                                                            | `api.add_allegation`, `api.link_allegation_subject`                                                         |
+| `case_mgmt.finding`               | Versioned finding per allegation × subject × proceeding. Append-only.                                                                | `api.record_finding`                                                                                        |
+| `case_mgmt.evidence_link`         | Evidence supporting an allegation or a finding. Append-only.                                                                         | `api.link_supporting_material`                                                                              |
+| `config.status_code`              | Waiting, suspension and outcome codes (ADR-029); labels in `packages/i18n`.                                                          | migrations                                                                                                  |
+| `committee.committee`             | Investigation (IC) and Grievance (GC) committees.                                                                                    | migrations                                                                                                  |
+| `committee.membership`            | Effective-dated seats; only ever ended earlier.                                                                                      | `api.appoint_committee_member`, `api.end_committee_membership`                                              |
+| `committee.rule_set`              | Effective-dated quorum, casting vote, no-substantive-vote outcome, minutes window, deemed approval, grievance window, admissibility. | `api.set_committee_rule_set` (seeded OWNER_DEFAULT)                                                         |
+| `committee.committee_proceeding`  | A case before a committee, with an immutable rule snapshot.                                                                          | `api.refer_case_to_committee`                                                                               |
+| `committee.proceeding_member`     | Seat snapshot per proceeding, voting flag, grievance firewall flag. Append-only.                                                     | `api.refer_case_to_committee`                                                                               |
+
+## Direct referral and preliminary review (migration 1880, Q1–Q20)
+
+| Table                                  | Purpose                                                                                                                                                                                                            | Written by                                                                                                                                                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `iam.sector`                           | Organisational sectors that prepare direct referrals (reference data).                                                                                                                                             | `api.create_sector` (SECTOR_ADMIN)                                                                                                                                                                                       |
+| `iam.sector_membership`                | Effective-dated HEAD / MEMBER positions; one head per sector at a time; only ever ended earlier.                                                                                                                   | `api.appoint_sector_member`, `api.end_sector_membership`                                                                                                                                                                 |
+| `iam.sector_delegation`                | A head's time-bound, documented delegation of referral approval to a member; lapses when the delegator stops being head.                                                                                           | `api.delegate_referral_approval`, `api.revoke_referral_delegation`                                                                                                                                                       |
+| `intake.referral`                      | Direct referral: DRAFT → SUBMITTED_TO_HEAD → SUBMITTED_TO_SECRETARY → ACCEPTED / RETURNED_FOR_COMPLETION / REJECTED → OBJECTED; WITHDRAWN. Frozen once accepted or withdrawn. Display number `REF-DEMO-YYYY-NNNN`. | `api.create_referral`, `api.update_referral`, `api.submit_referral`, `api.sector_decide_referral`, `api.secretary_decide_referral`, `api.resubmit_referral`, `api.object_to_referral_rejection`, `api.withdraw_referral` |
+| `intake.referral_event`                | Append-only history: from → to, actor, structured reason codes, comment.                                                                                                                                           | every referral command, `api.comment_on_referral`                                                                                                                                                                        |
+| `case_mgmt.preliminary_recommendation` | Versioned preliminary review recommendation; review (skipped when the preparer holds the review authority) and approval set once each; a return is answered by the next version.                                   | `api.prepare_preliminary_recommendation`, `api.review_preliminary_recommendation`, `api.approve_preliminary_recommendation`                                                                                              |
+
+Acceptance of a referral creates, in one transaction, a case with `source_type = DIRECT_REFERRAL`, a CASE_OWNER assignment named by the secretary, an allegation from the referral, the CDF_CASE_V1 instance (REGISTERED) and an Investigation Committee proceeding with its snapshot. Approval of a preliminary recommendation concludes the PRELIMINARY_REVIEW proceeding with the recommended outcome; what follows (opening the investigation, closing, referring) is the case team's next action.
+
+## Committee meetings, voting and minutes (migration 1890, ADR-020)
+
+| Table                                           | Purpose                                         | Notes                                                                                                                                              |
+| ----------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `committee.meeting`                             | A sitting of a committee proceeding             | Purpose DELIBERATION/HEARING; mode IN_PERSON/TEAMS/HYBRID (manual link, PRODUCTION_SUBSTITUTION_REQUIRED); SCHEDULED → OPEN → CLOSED, or CANCELLED |
+| `committee.meeting_participant`                 | Members (from the snapshot) and invitees        | Current conflict status and attendance; PRESENT only when cleared                                                                                  |
+| `committee.meeting_conflict`                    | Conflict declarations                           | Append-only; reason visible to declarer and secretary                                                                                              |
+| `committee.vote_item`                           | A decision put to the vote                      | Target FINDING (bound to a finding) or a titled item until phase 6 records exist; tallies and result on close                                      |
+| `committee.vote`                                | Individual votes                                | No SELECT grant; one per member per item; secretary-recorded choices limited by check                                                              |
+| `committee.casting_vote`                        | Chair's casting vote on a tie                   | No SELECT grant; one per item                                                                                                                      |
+| `committee.minutes`                             | Versioned minutes                               | Snapshot (no individual choices) + narrative; IN_REVIEW → APPROVED / DEEMED_APPROVED, or CHANGES_REQUESTED → SUPERSEDED                            |
+| `committee.minutes_review`                      | One decision per reviewer per version           | Append-only                                                                                                                                        |
+| `committee.restricted_referral_approval` (1870) | DEC-61 authority approval for a restricted case | Used once by the proceeding it opens                                                                                                               |
+
+`committee.proceeding_member.case_gate_excluded` (1870) records seat holders not cleared for the case at referral.
+
+## Recommendations, legal review and authority decisions (migration 1900, ADR-021 to ADR-023, ADR-031)
+
+| Table                                       | Purpose                                                | Notes                                                                                |
+| ------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `decision.sanction_catalogue`               | Governed sanction codes                                | Synthetic seed; legal basis SOURCE_REQUIRED                                          |
+| `decision.authority_type`                   | CEO, BOARD, DELEGATED_EXECUTIVE, OTHER                 | Reference data                                                                       |
+| `decision.action_authority_rule`            | Which authority decides which item type                | Effective-dated; DISCIPLINARY_SANCTION → CEO seeded; `api.set_action_authority_rule` |
+| `decision.recommendation_package`           | A committee's recommendations in a proceeding          | Status lifecycle and rounds; frozen once DECIDED                                     |
+| `decision.recommendation_item`              | One recommendation                                     | Sanction code xor PROPOSED_UNVERIFIED text; case-wide or scoped; committee result    |
+| `decision.recommendation_item_subject`      | Item scope by subject                                  | Append-only                                                                          |
+| `decision.recommendation_item_allegation`   | Item scope by allegation                               | Append-only                                                                          |
+| `decision.legal_review_request`             | Assigned legal review and its opinion                  | One reviewer; RULE or SECRETARY_ELECTED; per round                                   |
+| `decision.packet`, `decision.packet_item`   | Purpose-bound snapshots                                | LEGAL_REVIEW or AUTHORITY_DECISION; append-only                                      |
+| `decision.authority_decision`               | Externally made decision                               | Source document reference NOT NULL; append-only                                      |
+| `decision.authority_item_decision`          | Per-item outcome for partial approval or modification  | Append-only                                                                          |
+| `decision.restricted_legal_review_approval` | Restricted Case Authority approval of one legal review | Names the reviewer; used once (AGENT-09 W2)                                          |
+
+`committee.vote_item` gains `package_id`, `recommendation_item_id` and `package_round` (1900).
+
+## Employee defence and grievances (migration 1910, ADR-024)
+
+| Table                                     | Purpose                                                                        | Notes                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `grievance.subject_portal_link`           | A case subject linked to an employee portal account                            | One active per subject; revoke only                                                  |
+| `grievance.defence_notice`                | Notice to one subject with a due date                                          | ISSUED → ACKNOWLEDGED → RESPONDED, or WITHDRAWN                                      |
+| `grievance.defence_notice_item`           | The subject's allegations, snapshotted                                         | Append-only                                                                          |
+| `grievance.defence_response`              | Portal or recorded response                                                    | Original date; document reference unless portal; append-only                         |
+| `grievance.grievance`                     | LINKED or STANDALONE grievance                                                 | Rule set, window and late flag stored (Q94)                                          |
+| `grievance.admissibility_assessment`      | Secretary assessment and the decider's decision                                | Not visible to the grievant                                                          |
+| `grievance.grievance_outcome`             | Combinable outcomes bound to an approved vote                                  | Reinvestigation path opens a REINVESTIGATION proceeding                              |
+| `grievance.restricted_grievance_approval` | Restricted Case Authority approval naming a GC secretary for a restricted case | Open row: records one linked grievance (G2); bound row: handles that grievance (G2b) |
+
+## Notifications (migration 1920, ADR-025)
+
+| Table               | Purpose                                 | Notes                                                       |
+| ------------------- | --------------------------------------- | ----------------------------------------------------------- |
+| `notify.template`   | Notification kinds                      | Reference data; wording in packages/i18n                    |
+| `notify.rule`       | Layered, effective-dated delivery rules | SYSTEM_MANDATORY from migrations only; closed, never edited |
+| `notify.preference` | A user's mutes                          | Mandatory templates cannot be muted                         |
+| `notify.outbox`     | One row per recipient and channel       | Template, ids and deep link only (N18); facts immutable     |

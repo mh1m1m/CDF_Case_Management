@@ -61,6 +61,14 @@ export const USERS = {
   recordsB: "a0000000-0000-4000-8000-000000000020",
   legal: "a0000000-0000-4000-8000-000000000021",
   legalB: "a0000000-0000-4000-8000-000000000022",
+  // Direct referral and preliminary review (migration 1880): Operations sector preparer, head and member; a
+  // Finance sector member; the Compliance Section Manager and the GRC Sector Head.
+  employee: "a0000000-0000-4000-8000-000000000023",
+  sectorHead: "a0000000-0000-4000-8000-000000000024",
+  employeeB: "a0000000-0000-4000-8000-000000000025",
+  complianceManager: "a0000000-0000-4000-8000-000000000026",
+  grcSectorHead: "a0000000-0000-4000-8000-000000000027",
+  financeEmployee: "a0000000-0000-4000-8000-000000000028",
 } as const;
 export type UserKey = keyof typeof USERS;
 

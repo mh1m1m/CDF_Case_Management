@@ -73,6 +73,7 @@ describe("role permission mirror", () => {
       "FORM_REVIEW",
       "FORM_VIEW",
       "LEGAL_HOLD_REQUEST",
+      "PRELIMINARY_PREPARE",
       "WORKFLOW_ADVANCE",
     ]);
   });

@@ -11,7 +11,7 @@
 | [MIGRATION_PLAN.md](MIGRATION_PLAN.md)                                 | Additive migration sequence, dependencies, compatibility, rollback.                                  |
 | [REQUIREMENTS_TRACE_100QA.md](REQUIREMENTS_TRACE_100QA.md)             | Q1–Q100 → design, enforcement, test, phase, ADR.                                                     |
 | [CRM_STATUS_RATIONALIZATION.md](CRM_STATUS_RATIONALIZATION.md)         | All 150 CRM statuses mapped to target dimensions.                                                    |
-| [FORM_CATALOGUE_RATIONALIZATION.md](FORM_CATALOGUE_RATIONALIZATION.md) | 188 forms classified into target modules; 274 catalogue SOURCE_REQUIRED.                             |
+| [FORM_CATALOGUE_RATIONALIZATION.md](FORM_CATALOGUE_RATIONALIZATION.md) | 188 forms classified into target modules; 274 catalogue supplied 2026-10-12, dispositions Phase 11.  |
 | [LINEAR_RECONCILIATION.md](LINEAR_RECONCILIATION.md)                   | Epics, reconciled existing issues, surfaced conflicts.                                               |
 
 Decisions: [ADR-017 … ADR-031](../../architecture/adr/README.md).
