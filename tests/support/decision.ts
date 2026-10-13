@@ -19,13 +19,24 @@ export interface CaseFacts {
   finding: string;
 }
 
+/** Runs as the case manager right after the subject is added, before the allegation and finding. */
+export type AfterSubject = (subject: string) => Promise<void>;
+
 /** An investigation proceeding with one subject, one allegation against them and a substantiated finding. */
-export async function caseFacts(s: Scenario, caseId: string): Promise<CaseFacts> {
+export async function caseFacts(
+  s: Scenario,
+  caseId: string,
+  afterSubject?: AfterSubject,
+): Promise<CaseFacts> {
   await s.as("caseManager");
   const [p] = await s.tx<{ id: string }[]>`
     select api.open_proceeding(${caseId}, 'INVESTIGATION', null, ${REASON}) as id`;
   const [subj] = await s.tx<{ id: string }[]>`
     select api.add_case_subject(${caseId}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+  if (afterSubject) {
+    await afterSubject(subj!.id);
+    await s.as("caseManager");
+  }
   const [a] = await s.tx<{ id: string }[]>`
     select api.add_allegation(${caseId}, 'FRAUD', 'Synthetic: allegation against Employee Sigma.', ${subj!.id}, null, null) as id`;
   await s.as("investigatorB");
@@ -69,10 +80,11 @@ export async function draftPackage(
   committeeId: string,
   caseId: string,
   granularity: "PACKAGE" | "ITEM" = "PACKAGE",
+  afterSubject?: AfterSubject,
 ): Promise<PackageFixture> {
   await seat(s, committeeId, DECISION_SEATS);
   await authorityRuleFor(s, "CORRECTIVE_ACTION");
-  const facts = await caseFacts(s, caseId);
+  const facts = await caseFacts(s, caseId, afterSubject);
   await s.as("caseManager");
   await s.tx`select api.issue_defence_notice(${facts.subject}, 'Synthetic: you are invited to respond.',
     ${[facts.allegation]}::uuid[], now() + interval '10 days')`;
@@ -145,4 +157,41 @@ export async function requestLegalReview(
   const [k] = await s.tx<{ id: string }[]>`
     select id from decision.packet where legal_review_request_id = ${r!.id}`;
   return { request: r!.id, packet: k!.id };
+}
+
+export interface DecidedForSubjects extends PackageFixture {
+  decision: string;
+  /** Employee Sigma (the package's subject), linked to the portal account of `employee`. */
+  sigma: string;
+  /** Employee Tau on the same case, not in the decision, linked to `employeeB`. */
+  tau: string;
+}
+
+/** Migration 2040 fixture: a package whose only active item is the WARNING sanction on Sigma (the case-wide corrective
+ *  action withdrawn), adopted, reviewed by legalB and decided by the CEO an hour ago. Sigma and Tau are linked to the
+ *  employee portal. Every step runs through the api.* commands. */
+export async function decidedForSubjects(
+  s: Scenario,
+  committeeId: string,
+  caseId: string,
+  outcome = "APPROVE_AS_RECOMMENDED",
+): Promise<DecidedForSubjects> {
+  const f = await draftPackage(s, committeeId, caseId);
+  await s.as("caseManager");
+  const [tau] = await s.tx<{ id: string }[]>`
+    select api.add_case_subject(${caseId}, 'Employee Tau (synthetic)', 'EMPLOYEE', null) as id`;
+  await s.tx`select api.link_subject_portal_account(${f.subject}, ${USERS.employee}, ${REASON})`;
+  await s.tx`select api.link_subject_portal_account(${tau!.id}, ${USERS.employeeB}, ${REASON})`;
+  await s.as("committeeSecretary");
+  await s.tx`select api.withdraw_recommendation_item(${f.corrective}, ${REASON})`;
+  await voteOnPackage(s, f);
+  const { request } = await requestLegalReview(s, f);
+  await s.as("legalB");
+  await s.tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`;
+  await s.as("committeeSecretary");
+  await s.tx`select api.submit_to_authority(${f.pkg})`;
+  const [d] = await s.tx<{ id: string }[]>`
+    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now() - interval '1 hour',
+      'Chief Executive (synthetic)', 'MEMO-DEMO-2040', null, ${REASON}) as id`;
+  return { ...f, decision: d!.id, sigma: f.subject, tau: tau!.id };
 }

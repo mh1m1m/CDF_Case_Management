@@ -238,6 +238,18 @@ jobs:
           n=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -c "select count(*) from committee.membership where appointment_reference like 'SEED-DEMO-COMMITTEE-%' and ended_at is null")
           echo "::notice::Demo committee seats on DEV: $n of 7"
 
+      - name: Synthetic continuity-workbook operator added to the seed since DEV was seeded (insert only)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
+        run: |
+          # 31_synthetic_continuity_operators.sql (migration 2040, DEC-F30) is idempotent and insert-only: it authorizes
+          # the synthetic case manager as the demo continuity-workbook operator only while no row carries its
+          # reference, so it neither duplicates the row nor undoes a revocation made on DEV. On a DEV seeded just now it
+          # changes nothing.
+          psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 --single-transaction \
+            -f infrastructure/supabase/seed/31_synthetic_continuity_operators.sql
+          n=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -c "select count(*) from exchange.bcp_continuity_operator where authorization_reference = 'BCP-AUTH-DEMO-0001' and revoked_at is null")
+          echo "::notice::Demo continuity-workbook operator on DEV: $n of 1"
+
       - name: Login-role passwords for the test run (stable from secrets, else throwaway)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:

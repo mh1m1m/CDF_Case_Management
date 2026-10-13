@@ -41,7 +41,7 @@ function document(format: ExportDocument["format"]): ExportDocument {
     classification: "CONFIDENTIAL",
     format,
     audience: "EXTERNAL",
-    purpose: "REGULATOR_REQUEST",
+    purpose: "REGULATORY_OR_EXTERNAL_AUTHORITY",
     externalParty: "Regulator Alpha (synthetic)",
     items: [],
   };
@@ -123,12 +123,36 @@ describe("export service", () => {
       caseId: CASE,
       format: "EMAIL",
       audience: "EXTERNAL",
-      purpose: "REGULATOR_REQUEST",
+      purpose: "REGULATORY_OR_EXTERNAL_AUTHORITY",
       justification: "Too short.",
     });
     expect(r.ok).toBe(false);
     if (!r.ok && "fieldErrors" in r)
       expect(r.fieldErrors.issues.map((i) => i.path.join("."))).toEqual(["externalParty", "justification"]);
+    expect(calls).toEqual([]);
+  });
+
+  it("DEC-F21: takes purposes from the catalogue only, and OTHER needs a justification even internally", async () => {
+    const { service, calls } = harness();
+    const internal = (purpose: string, justification?: string) =>
+      service.createRequest(ctx, requester, {
+        caseId: CASE,
+        format: "PDF",
+        audience: "INTERNAL",
+        purpose,
+        justification,
+      } as never);
+    for (const [purpose, justification, field] of [
+      ["REGULATOR_REQUEST", undefined, "purpose"], // legacy (1930): kept for history, never offered
+      ["NOT_A_PURPOSE", undefined, "purpose"],
+      ["OTHER", undefined, "justification"],
+      ["OTHER", "Too short.", "justification"],
+    ] as const) {
+      const r = await internal(purpose, justification);
+      expect(r.ok, purpose).toBe(false);
+      if (!r.ok && "fieldErrors" in r)
+        expect(r.fieldErrors.issues.map((i) => i.path.join("."))).toEqual([field]);
+    }
     expect(calls).toEqual([]);
   });
 

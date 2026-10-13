@@ -388,7 +388,8 @@ describe("direct referral: the committee secretary's decision (N6)", () => {
         "CDF_CONFLICT:OBJECTION_ALREADY_DECIDED",
         (tx) => tx`select api.object_to_referral_rejection(${id}, 'Synthetic: a second objection.')`,
       );
-      expect(await actions(s, "sectorHead", id)).toEqual(["RESUBMIT", "COMMENT"]);
+      // Migration 2040 (DEC-F09): after this repeated rejection the escalation path is offered too.
+      expect(await actions(s, "sectorHead", id)).toEqual(["RESUBMIT", "ESCALATE", "COMMENT"]);
       // Resubmission goes back through the sector.
       await s.as("employee");
       await s.tx`select api.resubmit_referral(${id}, null)`;
@@ -696,12 +697,16 @@ describe("preliminary closure outcomes (migration 1980, P11-G1, ADR-036)", () =>
     "NOT_FEASIBLE",
     "NO_PERSONAL_JURISDICTION",
   ] as const;
+  // Migration 2040 (DEC-F10): these two are not enabled for a new recommendation until their authority and
+  // definitions are confirmed; the owner-decisions describe below proves the refusal.
+  const NOT_ENABLED: readonly string[] = ["NOT_FEASIBLE", "NO_PERSONAL_JURISDICTION"];
+  const ENABLED = CLOSURES.filter((c) => !NOT_ENABLED.includes(c));
   const MARKER = "unique-rationale-marker-5519";
 
-  it("each closure goes through the same prepare and approve path and concludes the review with that outcome", async () => {
+  it("each enabled closure goes through the same prepare and approve path and concludes the review with that outcome", async () => {
     await scenario(async (s) => {
       const ids: string[] = [];
-      for (const outcome of CLOSURES) {
+      for (const outcome of ENABLED) {
         await s.as("grcDirector");
         const [r] = await s.tx<{ id: string }[]>`
           select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, ${`Synthetic: ${MARKER} ${outcome}.`}) as id`;
@@ -729,10 +734,10 @@ describe("preliminary closure outcomes (migration 1980, P11-G1, ADR-036)", () =>
         where object_type = 'preliminary_recommendation' and object_id = any(${ids}::text[]) order by occurred_at, action`;
       expect(
         events.filter((e) => e.action === "PRELIMINARY_RECOMMENDATION_APPROVED").map((e) => e.outcome),
-      ).toEqual([...CLOSURES]);
+      ).toEqual([...ENABLED]);
       expect(
         events.filter((e) => e.action === "PRELIMINARY_RECOMMENDATION_PREPARED").map((e) => e.outcome),
-      ).toEqual([...CLOSURES]);
+      ).toEqual([...ENABLED]);
       expect(JSON.stringify(events)).not.toContain(MARKER);
     });
   });
@@ -802,16 +807,16 @@ describe("preliminary closure outcomes (migration 1980, P11-G1, ADR-036)", () =>
     });
   });
 
-  it("the catalogue records where each closure comes from: Q12, or SOURCE_REQUIRED", async () => {
+  it("the catalogue records where each closure comes from: Q12, or SOURCE_REQUIRED and not enabled (DEC-F10)", async () => {
     const rows = await admin<{ value: string; state: string; source_status: string }[]>`
       select value, state, source_status from config.status_dimension_value
       where dimension = 'PRELIMINARY_OUTCOME' and value = any(${[...CLOSURES]}) order by value collate "C"`;
     expect(rows).toEqual([
       { value: "CHANNEL_ABUSE", state: "ACTIVE", source_status: "OWNER_DEFAULT" },
-      { value: "NOT_FEASIBLE", state: "ACTIVE", source_status: "SOURCE_REQUIRED" },
+      { value: "NOT_FEASIBLE", state: "INACTIVE", source_status: "SOURCE_REQUIRED" },
       { value: "NOT_SERIOUS", state: "ACTIVE", source_status: "OWNER_DEFAULT" },
       { value: "NOT_SUBSTANTIATED", state: "ACTIVE", source_status: "OWNER_DEFAULT" },
-      { value: "NO_PERSONAL_JURISDICTION", state: "ACTIVE", source_status: "SOURCE_REQUIRED" },
+      { value: "NO_PERSONAL_JURISDICTION", state: "INACTIVE", source_status: "SOURCE_REQUIRED" },
     ]);
     const [module] = await admin<{ delivered_in: string[] }[]>`
       select delivered_in from config.target_module where code = 'PRELIM_CLOSE_OUTCOME'`;
@@ -834,15 +839,376 @@ describe("preliminary closure outcomes (migration 1980, P11-G1, ADR-036)", () =>
 
   it("on a restricted case the GRC Sector Head gets nothing for a closure either (fail safe)", async () => {
     await scenario(async (s) => {
+      // Migration 2040 (DEC-F10): an enabled closure; NO_PERSONAL_JURISDICTION, used here before, is refused now.
       await s.as("grcDirector");
       const [r] = await s.tx<{ id: string }[]>`
-        select api.prepare_preliminary_recommendation(${caseExec}, 'NO_PERSONAL_JURISDICTION', 'Synthetic: outside personal jurisdiction.') as id`;
+        select api.prepare_preliminary_recommendation(${caseExec}, 'NOT_SUBSTANTIATED', 'Synthetic: not substantiated at first sight.') as id`;
       await s.as("grcSectorHead");
       expect(await s.tx`select * from api.preliminary_approval_queue()`).toEqual([]);
       await s.expectError(
         "CDF_NOT_FOUND",
         (tx) => tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`,
       );
+    });
+  });
+});
+
+describe("owner decisions DEC-F08, DEC-F09 and DEC-F10 (migration 2040)", () => {
+  const ESC = "Synthetic: unique-escalation-marker-2040, the rejection misreads the scope.";
+  const DELEGATION_KEY = "MAX_SECTOR_APPROVAL_DELEGATION_DAYS";
+
+  /** The committee secretary rejects the referral. */
+  async function reject(s: Scenario, id: string) {
+    await s.as("committeeSecretary");
+    await s.tx`select api.secretary_decide_referral(${id}, 'REJECT', array['OUT_OF_SCOPE'], null, null)`;
+  }
+  /** The preparer resubmits and the head approves again, so the referral is back with the secretary. */
+  async function resubmit(s: Scenario, id: string) {
+    await s.as("employee");
+    await s.tx`select api.resubmit_referral(${id}, null)`;
+    await s.as("sectorHead");
+    await s.tx`select api.sector_decide_referral(${id}, 'APPROVE', null, null)`;
+  }
+  /** A referral rejected twice by the secretary. */
+  async function rejectedTwice(s: Scenario): Promise<string> {
+    const id = await atSecretary(s);
+    await reject(s, id);
+    await resubmit(s, id);
+    await reject(s, id);
+    return id;
+  }
+  const DECIDING = ["ACCEPT_ESCALATION", "UPHOLD_REJECTION", "COMMENT"];
+
+  it("DEC-F08: no maximum delegation is invented; once configured, a longer delegation is refused (fail closed)", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("sectorHead");
+      expect(await s.tx`select value, status from config.setting where key = ${DELEGATION_KEY}`).toEqual([
+        { value: null, status: "SOURCE_REQUIRED" },
+      ]);
+      // Not configured: the 1880 rules alone apply (an end date and evidence), however long the period.
+      await s.tx`select api.delegate_referral_approval(${OPS}, ${USERS.employeeB}, now(), now() + interval '400 days', 'DEMO-DEL-F08', ${REASON})`;
+      // Configured (a synthetic value for the test only): a period longer than the limit is refused.
+      await s.asOwner();
+      await s.tx`update config.setting set value = '30', status = 'CONFIGURED', source_reference = 'SYNTHETIC-TEST'
+                 where key = ${DELEGATION_KEY}`;
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_CONFLICT:DELEGATION_TOO_LONG",
+        (tx) =>
+          tx`select api.delegate_referral_approval(${OPS}, ${USERS.employee}, now(), now() + interval '31 days', 'DEMO-DEL-F08', ${REASON})`,
+      );
+      await s.tx`select api.delegate_referral_approval(${OPS}, ${USERS.employee}, now(), now() + interval '30 days', 'DEMO-DEL-F08', ${REASON})`;
+      // A configured value that is not a whole number of days refuses every new delegation.
+      await s.asOwner();
+      await s.tx`update config.setting set value = 'thirty' where key = ${DELEGATION_KEY}`;
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_CONFLICT:DELEGATION_LIMIT_MISCONFIGURED",
+        (tx) =>
+          tx`select api.delegate_referral_approval(${OPS}, ${USERS.employee}, now() + interval '40 days', now() + interval '41 days', 'DEMO-DEL-F08', ${REASON})`,
+      );
+      // The table refuses it whatever the path, the owner connection included.
+      await s.asOwner();
+      await s.tx`update config.setting set value = '30' where key = ${DELEGATION_KEY}`;
+      await s.expectError(
+        "CDF_CONFLICT:DELEGATION_TOO_LONG",
+        (tx) => tx`
+          insert into iam.sector_delegation (sector_id, delegator_id, delegate_id, scope, effective_from, effective_to,
+                                             evidence_reference, reason)
+          values (${OPS}, ${USERS.sectorHead}, ${USERS.employee}, 'REFERRAL_APPROVAL', now() + interval '50 days',
+                  now() + interval '90 days', 'DEMO-DEL-F08', ${REASON})`,
+      );
+    });
+  });
+
+  it("DEC-F09: escalation is offered after the second rejection and reaches only the configured target", async () => {
+    await scenario(async (s) => {
+      await constitute(s);
+      const id = await atSecretary(s);
+      await reject(s, id);
+      // One rejection: resubmission or objection, no escalation yet.
+      expect(await actions(s, "sectorHead", id)).toEqual(["RESUBMIT", "OBJECT", "COMMENT"]);
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_CONFLICT:ESCALATION_NOT_AVAILABLE",
+        (tx) => tx`select api.escalate_referral_rejection(${id}, ${ESC})`,
+      );
+      await resubmit(s, id);
+      await reject(s, id);
+      // The repeated rejection: the escalation path is offered next to resubmission and objection.
+      expect(await actions(s, "sectorHead", id)).toEqual(["RESUBMIT", "OBJECT", "ESCALATE", "COMMENT"]);
+      // Never to the preparer (as for an objection).
+      expect(await actions(s, "employee", id)).not.toContain("ESCALATE");
+      await s.as("employee");
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.escalate_referral_rejection(${id}, ${ESC})`);
+      // The target sees nothing before the escalation.
+      expect(await visible(s, "committeeChair", id)).toBe(false);
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_INVALID:comment",
+        (tx) => tx`select api.escalate_referral_rejection(${id}, 'Too short')`,
+      );
+      await s.tx`select api.escalate_referral_rejection(${id}, ${ESC})`;
+      const [r] = await s.tx<{ status: string; target: string }[]>`
+        select status, escalation_target_id as target from intake.referral where id = ${id}`;
+      const [t] = await admin<{ id: string; seat: string; source_status: string; committee_id: string }[]>`
+        select id, seat, source_status, committee_id from intake.referral_escalation_target where effective_to is null`;
+      expect(t).toEqual({ id: r!.target, seat: "CHAIR", source_status: "OWNER_DEFAULT", committee_id: ic });
+      expect(r!.status).toBe("ESCALATED");
+      // Only the holder of the target seat (the Investigation Committee Chair, owner default) sees and decides it.
+      expect(await visible(s, "committeeChair", id)).toBe(true);
+      expect(await visible(s, "committee", id)).toBe(false);
+      expect(await actions(s, "committeeChair", id)).toEqual(DECIDING);
+      expect(await actions(s, "committeeSecretary", id)).toEqual(["COMMENT"]);
+      expect(await actions(s, "sectorHead", id)).toEqual(["COMMENT"]);
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.decide_referral_escalation(${id}, 'ACCEPT', null, null, ${USERS.caseManager})`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:REFERRAL_NOT_AWAITING_SECRETARY",
+        (tx) => tx`select api.secretary_decide_referral(${id}, 'ACCEPT', null, null, ${USERS.caseManager})`,
+      );
+      for (const user of ["committee", "platformAdmin", "grcDirector"] as const) {
+        await s.as(user);
+        await s.expectError(
+          "CDF_NOT_FOUND",
+          (tx) =>
+            tx`select api.decide_referral_escalation(${id}, 'ACCEPT', null, null, ${USERS.caseManager})`,
+        );
+      }
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_CONFLICT:REFERRAL_NOT_REJECTED",
+        (tx) => tx`select api.escalate_referral_rejection(${id}, ${ESC})`,
+      );
+      // The Chair upholds the rejection, with structured reasons.
+      await s.as("committeeChair");
+      await s.expectError(
+        "CDF_INVALID:reason_codes",
+        (tx) => tx`select api.decide_referral_escalation(${id}, 'UPHOLD', '{}', null, null)`,
+      );
+      await s.expectError(
+        "CDF_INVALID:decision",
+        (tx) => tx`select api.decide_referral_escalation(${id}, 'REJECT', array['OUT_OF_SCOPE'], null, null)`,
+      );
+      await s.tx`select api.decide_referral_escalation(${id}, 'UPHOLD', array['OUT_OF_SCOPE'], null, null)`;
+      // One escalation per rejection, and the decided escalation is not reopened by an objection; resubmission is
+      // never capped.
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_CONFLICT:ESCALATION_ALREADY_DECIDED",
+        (tx) => tx`select api.escalate_referral_rejection(${id}, ${ESC})`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:ESCALATION_ALREADY_DECIDED",
+        (tx) =>
+          tx`select api.object_to_referral_rejection(${id}, 'Synthetic: an objection after the escalation.')`,
+      );
+      expect(await actions(s, "sectorHead", id)).toEqual(["RESUBMIT", "COMMENT"]);
+      await resubmit(s, id);
+      await reject(s, id);
+      await s.as("sectorHead");
+      await s.tx`select api.escalate_referral_rejection(${id}, ${ESC})`;
+      // This time the Chair accepts: the case and its committee proceeding, as on the secretary's acceptance.
+      await s.as("committeeChair");
+      await s.expectError(
+        "CDF_INVALID:case_owner_id",
+        (tx) => tx`select api.decide_referral_escalation(${id}, 'ACCEPT', null, null, null)`,
+      );
+      const [c] = await s.tx<{ id: string }[]>`
+        select api.decide_referral_escalation(${id}, 'ACCEPT', null, null, ${USERS.caseManager}) as id`;
+      const [done] = await s.tx<{ status: string; case_id: string; decided_by: string }[]>`
+        select status, case_id, decided_by from intake.referral where id = ${id}`;
+      expect(done).toEqual({ status: "ACCEPTED", case_id: c!.id, decided_by: USERS.committeeChair });
+      await s.as("caseManager");
+      const [k] = await s.tx<{ source_type: string; proceedings: number }[]>`
+        select c.source_type, (select count(*)::int from committee.committee_proceeding cp where cp.case_id = c.id) as proceedings
+        from case_mgmt.case_record c where c.id = ${c!.id}`;
+      expect(k).toEqual({ source_type: "DIRECT_REFERRAL", proceedings: 1 });
+      // History and audit carry codes and ids, never the comment.
+      await s.as("dpo");
+      const events = await s.tx<{ action: string; decision: string | null; metadata: unknown }[]>`
+        select action, metadata->>'decision' as decision, metadata from audit.audit_event
+        where object_type = 'referral' and object_id = ${id} and action like 'REFERRAL_ESCALAT%' order by seq`;
+      expect(events.map((e) => [e.action, e.decision])).toEqual([
+        ["REFERRAL_ESCALATED", null],
+        ["REFERRAL_ESCALATION_DECIDED", "UPHOLD"],
+        ["REFERRAL_ESCALATED", null],
+        ["REFERRAL_ESCALATION_DECIDED", "ACCEPT"],
+      ]);
+      expect(JSON.stringify(events)).not.toContain("unique-escalation-marker");
+    });
+  });
+
+  it("DEC-F09: the target is set by COMMITTEE_ADMIN, effective-dated, and a change does not re-route an open escalation", async () => {
+    await scenario(async (s) => {
+      await constitute(s);
+      await s.as("platformAdmin");
+      await s.tx`select api.appoint_committee_member(${ic}, ${USERS.legal}, 'DEPUTY_CHAIR', now() - interval '1 day', null, 'DEMO-APPT')`;
+      const first = await rejectedTwice(s);
+      await s.as("sectorHead");
+      await s.tx`select api.escalate_referral_rejection(${first}, ${ESC})`;
+      for (const user of ["sectorHead", "committeeChair", "committeeSecretary", "grcSectorHead"] as const) {
+        await s.as(user);
+        await s.expectError(
+          "CDF_FORBIDDEN",
+          (tx) =>
+            tx`select api.set_referral_escalation_target(${ic}, 'DEPUTY_CHAIR', now(), 'DEMO-DEC-F09', ${REASON})`,
+        );
+      }
+      await s.as("platformAdmin");
+      for (const [prefix, call] of [
+        [
+          "CDF_INVALID:seat",
+          (tx: Scenario["tx"]) =>
+            tx`select api.set_referral_escalation_target(${ic}, 'SECRETARY', now(), 'DEMO-DEC-F09', ${REASON})`,
+        ],
+        [
+          "CDF_INVALID:effective_from",
+          (tx: Scenario["tx"]) =>
+            tx`select api.set_referral_escalation_target(${ic}, 'DEPUTY_CHAIR', now() - interval '1 day', 'DEMO-DEC-F09', ${REASON})`,
+        ],
+        [
+          "CDF_INVALID:source_reference",
+          (tx: Scenario["tx"]) =>
+            tx`select api.set_referral_escalation_target(${ic}, 'DEPUTY_CHAIR', now(), null, ${REASON})`,
+        ],
+        [
+          "CDF_INVALID:committee_id",
+          (tx: Scenario["tx"]) =>
+            tx`select api.set_referral_escalation_target(${OPS}, 'DEPUTY_CHAIR', now(), 'DEMO-DEC-F09', ${REASON})`,
+        ],
+      ] as const) {
+        await s.expectError(prefix, call);
+      }
+      await s.tx`select api.set_referral_escalation_target(${ic}, 'DEPUTY_CHAIR', now(), 'DEMO-DEC-F09', ${REASON})`;
+      expect(
+        await s.tx`select seat, source_status, effective_to is null as open from intake.referral_escalation_target
+                   order by effective_from`,
+      ).toEqual([
+        { seat: "CHAIR", source_status: "OWNER_DEFAULT", open: false },
+        { seat: "DEPUTY_CHAIR", source_status: "APPROVED", open: true },
+      ]);
+      await s.expectError(
+        "CDF_CONFLICT:ESCALATION_TARGET_SCHEDULED",
+        (tx) =>
+          tx`select api.set_referral_escalation_target(${ic}, 'CHAIR', now(), 'DEMO-DEC-F09', ${REASON})`,
+      );
+      // The open escalation stays with the target in force when it was raised.
+      expect(await visible(s, "legal", first)).toBe(false);
+      expect(await actions(s, "committeeChair", first)).toEqual(DECIDING);
+      // A new escalation reaches the Deputy Chair only.
+      const second = await rejectedTwice(s);
+      await s.as("sectorHead");
+      await s.tx`select api.escalate_referral_rejection(${second}, ${ESC})`;
+      expect(await visible(s, "committeeChair", second)).toBe(false);
+      expect(await actions(s, "legal", second)).toEqual(DECIDING);
+      await s.as("committeeChair");
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) =>
+          tx`select api.decide_referral_escalation(${second}, 'UPHOLD', array['OUT_OF_SCOPE'], null, null)`,
+      );
+      await s.as("legal");
+      await s.tx`select api.decide_referral_escalation(${second}, 'UPHOLD', array['OUT_OF_SCOPE'], null, null)`;
+      // The setting is audited with ids and codes.
+      await s.as("dpo");
+      const [e] = await s.tx<{ category: string; seat: string }[]>`
+        select category, metadata->>'seat' as seat from audit.audit_event
+        where action = 'REFERRAL_ESCALATION_TARGET_SET' order by seq desc limit 1`;
+      expect(e).toEqual({ category: "ADMIN", seat: "DEPUTY_CHAIR" });
+    });
+  });
+
+  it("DEC-F09: an escalation never reaches someone who took part, nor a vacant seat (fail closed); targets are append-only", async () => {
+    await ownerScenario(async (s) => {
+      // The sector head who approves the referral also chairs the committee (the demo seats end first, 2030 §4).
+      await unseatDemoSeats(s);
+      for (const [user, seat] of [
+        ["sectorHead", "CHAIR"],
+        ["committeeSecretary", "SECRETARY"],
+        ["committee", "MEMBER"],
+      ] as const) {
+        await s.tx`select api.appoint_committee_member(${ic}, ${USERS[user]}, ${seat}, now() - interval '1 day', null, 'DEMO-APPT')`;
+      }
+      const id = await rejectedTwice(s);
+      expect(await actions(s, "sectorHead", id)).not.toContain("ESCALATE");
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_CONFLICT:ESCALATION_TARGET_UNAVAILABLE",
+        (tx) => tx`select api.escalate_referral_rejection(${id}, ${ESC})`,
+      );
+      // A target seat nobody holds: refused, not parked.
+      await s.as("platformAdmin");
+      await s.tx`select api.set_referral_escalation_target(${ic}, 'DEPUTY_CHAIR', now(), 'DEMO-DEC-F09', ${REASON})`;
+      await s.as("sectorHead");
+      await s.expectError(
+        "CDF_CONFLICT:ESCALATION_TARGET_UNAVAILABLE",
+        (tx) => tx`select api.escalate_referral_rejection(${id}, ${ESC})`,
+      );
+      expect(await actions(s, "sectorHead", id)).toEqual(["RESUBMIT", "OBJECT", "COMMENT"]);
+      // A target version is never edited or deleted, even by the owner; ending it is the one change.
+      await s.asOwner();
+      await s.expectError(
+        "intake.referral_escalation_target is append-only",
+        (tx) => tx`update intake.referral_escalation_target set seat = 'CHAIR' where seat = 'DEPUTY_CHAIR'`,
+      );
+      await s.expectError(
+        "intake.referral_escalation_target is append-only",
+        (tx) => tx`delete from intake.referral_escalation_target`,
+      );
+    });
+  });
+
+  it("DEC-F10: NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are refused for a new recommendation; an existing one keeps its code and can only be returned", async () => {
+    await ownerScenario(async (s) => {
+      for (const outcome of ["NOT_FEASIBLE", "NO_PERSONAL_JURISDICTION"]) {
+        for (const user of ["grcDirector", "investigatorA"] as const) {
+          await s.as(user);
+          await s.expectError(
+            "CDF_CONFLICT:OUTCOME_NOT_ENABLED",
+            (tx) =>
+              tx`select api.prepare_preliminary_recommendation(${caseA}, ${outcome}, 'Synthetic: an outcome not enabled.')`,
+          );
+        }
+      }
+      // A recommendation from before the decision (simulated on the owner connection, as the commands no longer
+      // create one) keeps its code; it can be returned, never endorsed or approved.
+      await s.as("investigatorA");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseA}, 'NOT_SERIOUS', 'Synthetic: not serious at first sight.') as id`;
+      await s.asOwner();
+      await s.tx`alter table case_mgmt.preliminary_recommendation disable trigger user`;
+      await s.tx`update case_mgmt.preliminary_recommendation set recommended_outcome = 'NOT_FEASIBLE' where id = ${r!.id}`;
+      await s.tx`alter table case_mgmt.preliminary_recommendation enable trigger user`;
+      // Whatever path inserts a new one is refused too.
+      await s.expectError(
+        "CDF_CONFLICT:OUTCOME_NOT_ENABLED",
+        (tx) => tx`
+          insert into case_mgmt.preliminary_recommendation (case_id, proceeding_id, version_no, recommended_outcome, rationale,
+                                                            status, prepared_by, prepared_role, review_required)
+          select case_id, proceeding_id, version_no + 1, 'NO_PERSONAL_JURISDICTION', rationale, 'AWAITING_REVIEW',
+                 prepared_by, prepared_role, true
+          from case_mgmt.preliminary_recommendation where id = ${r!.id}`,
+      );
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:OUTCOME_NOT_ENABLED",
+        (tx) => tx`select api.review_preliminary_recommendation(${r!.id}, 'ENDORSE', null, null)`,
+      );
+      await s.tx`select api.review_preliminary_recommendation(${r!.id}, 'RETURN', array['RECOMMENDATION_INCOMPLETE'], null)`;
+      expect(
+        await s.tx`select recommended_outcome, status from case_mgmt.preliminary_recommendation where id = ${r!.id}`,
+      ).toEqual([{ recommended_outcome: "NOT_FEASIBLE", status: "RETURNED" }]);
+      // The next version names an enabled outcome; both codes stay in the check and remain outcome codes.
+      await s.as("investigatorA");
+      await s.tx`select api.prepare_preliminary_recommendation(${caseA}, 'NOT_SUBSTANTIATED', 'Synthetic: the next version.')`;
+      const [codes] = await admin<{ n: number }[]>`
+        select count(*)::int as n from config.status_code
+        where dimension = 'OUTCOME_CODE' and code in ('NOT_FEASIBLE', 'NO_PERSONAL_JURISDICTION') and is_active`;
+      expect(codes!.n).toBe(2);
     });
   });
 });

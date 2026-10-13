@@ -1268,6 +1268,7 @@ describe("BCP import: integrity", () => {
       order by table_name, privilege_type`;
     expect(grants.every((g) => g.privilege_type === "SELECT")).toBe(true);
     expect(grants.map((g) => g.table_name)).toEqual([
+      "bcp_continuity_operator", // migration 2040 (DEC-F30): the operator registry, read-only too
       "bcp_import_batch",
       "bcp_import_row",
       "bcp_provenance",
@@ -1329,5 +1330,162 @@ describe("BCP import: integrity", () => {
              exchange.bcp_error_code('CDF_NOT_FOUND') as found,
              exchange.bcp_error_code('CDF_CONFLICT:BATCH_OPEN') as conflict`;
     expect(codes).toEqual({ raw: "CDF_ERROR", found: "CDF_NOT_FOUND", conflict: "CDF_CONFLICT:BATCH_OPEN" });
+  });
+});
+
+describe("owner decisions DEC-F30 and DEC-F31 (migration 2040)", () => {
+  it("T-AMB-116 (DEC-F30): a role holder without the continuity-operator authorization cannot stage or work an import", async () => {
+    await ownerScenario(async (s) => {
+      // Case 0001, which the lead works; prepared and recorded offline by investigatorA, who works it too.
+      const t = await clock(s, caseA);
+      const ctl = control(t, caseA, { PREPARED_BY: EMAIL.investigatorA! });
+      const input = [
+        row(
+          "05_SUBJECTS",
+          3,
+          "BCP-S1",
+          t.now,
+          { DISPLAY_LABEL: "Employee Omega (synthetic)", SUBJECT_CATEGORY: "EMPLOYEE" },
+          "investigatorA",
+        ),
+      ];
+      const stageAs = (tx: Scenario["tx"]) =>
+        tx`select api.stage_bcp_import(${tx.json(ctl as never)}::jsonb, ${SHA}, ${tx.json(input as never)}::jsonb)`;
+      // The lead holds BCP_IMPORT and sees the case, but is not an authorized continuity operator.
+      await s.as("lead");
+      await s.expectError("CDF_FORBIDDEN", (tx) => stageAs(tx));
+      // The registry guard is on the table, whatever path stages a workbook.
+      await s.asOwner();
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (
+          tx,
+        ) => tx`insert into exchange.bcp_import_batch (case_id, template_version, workbook_id, file_sha256, control,
+                                                         offline_from, prepared_by, imported_by)
+                   values (${caseA}, 'BCP-1', 'BCP-DEMO-OWNER', ${SHA}, '{}'::jsonb, now(), ${USERS.investigatorA},
+                           ${USERS.lead})`,
+      );
+      const authorize = (user: UserKey, reference = "BCP-AUTH-DEMO-0002") =>
+        s.tx<{ id: string }[]>`
+          select api.authorize_continuity_operator(${USERS[user]}, ${reference}, ${REASON}) as id`;
+      // Only the continuity administrator authorizes: never themselves, only holders of BCP_IMPORT, once.
+      for (const actor of ["caseManager", "grcDirector", "lead"] as const) {
+        await s.as(actor);
+        await s.expectError("CDF_FORBIDDEN", () => authorize("lead"));
+      }
+      await s.as("platformAdmin");
+      await s.expectError(
+        "CDF_INVALID:user_id",
+        (tx) =>
+          tx`select api.authorize_continuity_operator(gen_random_uuid(), 'BCP-AUTH-DEMO-0002', ${REASON})`,
+      );
+      await s.expectError("CDF_FORBIDDEN", () => authorize("platformAdmin"));
+      await s.expectError("CDF_CONFLICT:OPERATOR_LACKS_PERMISSION", () => authorize("investigatorB"));
+      await s.expectError("CDF_INVALID:authorization_reference", () => authorize("lead", "x"));
+      await s.expectError("CDF_CONFLICT:ALREADY_AUTHORIZED", () => authorize("caseManager")); // the demo seed
+      const [op] = await authorize("lead");
+      const batch = await stage(s, "lead", ctl, input);
+      // An operator sees their own authorization; the administrator sees the registry; others see nothing of it.
+      await s.as("lead");
+      expect(await s.tx`select user_id from exchange.bcp_continuity_operator`).toEqual([
+        { user_id: USERS.lead },
+      ]);
+      await s.as("investigatorB");
+      expect(await s.tx`select user_id from exchange.bcp_continuity_operator`).toEqual([]);
+      await s.as("platformAdmin");
+      expect(await s.tx`select user_id from exchange.bcp_continuity_operator`).toHaveLength(2);
+      // Revocation is the administrator's, once, and stops the importer's own steps at once.
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.revoke_continuity_operator(${op!.id}, ${REASON})`,
+      );
+      await s.as("platformAdmin");
+      await s.tx`select api.revoke_continuity_operator(${op!.id}, ${REASON})`;
+      await s.expectError(
+        "CDF_CONFLICT:ALREADY_REVOKED",
+        (tx) => tx`select api.revoke_continuity_operator(${op!.id}, ${REASON})`,
+      );
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.revoke_continuity_operator(gen_random_uuid(), ${REASON})`,
+      );
+      await s.as("lead");
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.preview_bcp_import(${batch})`);
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.cancel_bcp_import(${batch}, ${REASON})`);
+      const other = { ...ctl, WORKBOOK_ID: "BCP-DEMO-0001-WB2" };
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) =>
+          tx`select api.stage_bcp_import(${tx.json(other as never)}::jsonb, ${SHA}, ${tx.json(input as never)}::jsonb)`,
+      );
+      // Audited with ids only; the history is append-only.
+      await s.asOwner();
+      const events = await s.tx<{ action: string; keys: string[] }[]>`
+        select action, array(select jsonb_object_keys(metadata)) as keys from audit.audit_event
+        where object_id = ${op!.id} order by seq`;
+      expect(events).toEqual([
+        { action: "BCP_OPERATOR_AUTHORIZED", keys: ["user_id"] },
+        { action: "BCP_OPERATOR_REVOKED", keys: ["user_id"] },
+      ]);
+      await s.expectError(
+        "continuity operator",
+        (tx) => tx`update exchange.bcp_continuity_operator set authorization_reference = 'BCP-CHANGED'`,
+      );
+    });
+  });
+
+  it("DEC-F31: nothing is purged while the staging retention is SOURCE_REQUIRED; once configured, a finished workbook loses its cells and keeps its trail", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      const done = await importAll(s, control(t, caseB), [subjectRow(3, "BCP-S1", t.now)]);
+      const open = await stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: "BCP-DEMO-0002-WB2" }), [
+        subjectRow(3, "BCP-S9", t.now),
+      ]);
+      const purge = async () => {
+        await s.asOwner();
+        const [r] = await s.tx<{ n: number }[]>`select exchange.purge_expired_bcp_staging() as n`;
+        return r!.n;
+      };
+      await s.asOwner();
+      expect(
+        await s.tx`select value, status from config.setting where key = 'BCP_STAGING_RETENTION_DAYS'`,
+      ).toEqual([{ value: null, status: "SOURCE_REQUIRED" }]);
+      expect(await purge()).toBe(0);
+      // The server's scheduled job runs it (cdf_bff), never an application user.
+      for (const actor of ["platformAdmin", "caseManager"] as const) {
+        await s.as(actor);
+        await s.expectError("permission denied", (tx) => tx`select exchange.purge_expired_bcp_staging()`);
+      }
+      // Configured (a synthetic value for the test only): the finished workbook's staged cells are cleared.
+      await s.asOwner();
+      await s.tx`update config.setting set value = '0', status = 'CONFIGURED', source_reference = 'SYNTHETIC-TEST'
+                 where key = 'BCP_STAGING_RETENTION_DAYS'`;
+      expect(await purge()).toBe(1);
+      expect(await purge()).toBe(0);
+      const rows = await s.tx<{ batch_id: string; cells: object; purged: boolean; kept: boolean }[]>`
+        select batch_id, cells, purged_at is not null as purged,
+               row_key is not null and payload_hash is not null and state is not null
+               and recorded_offline_by is not null as kept
+        from exchange.bcp_import_row where batch_id in (${done}, ${open})`;
+      expect(rows.find((r) => r.batch_id === done)).toEqual({
+        batch_id: done,
+        cells: {},
+        purged: true,
+        kept: true,
+      });
+      expect(rows.find((r) => r.batch_id === open)).toMatchObject({ purged: false, kept: true });
+      expect(Object.keys(rows.find((r) => r.batch_id === open)!.cells).length).toBeGreaterThan(0);
+      expect(await s.tx`select id from exchange.bcp_provenance where batch_id = ${done}`).toHaveLength(1);
+      const [event] = await s.tx<{ actor_type: string; metadata: Record<string, number> }[]>`
+        select actor_type, metadata from audit.audit_event where action = 'BCP_STAGING_PURGED'`;
+      expect(event).toEqual({ actor_type: "SYSTEM", metadata: { rows: 1, batches: 1, retention_days: 0 } });
+      // The purge is the only change a finished row allows, and only once.
+      await s.expectError(
+        "staged continuity row",
+        (tx) =>
+          tx`update exchange.bcp_import_row set cells = '{"DISPLAY_LABEL": "x"}'::jsonb where batch_id = ${done}`,
+      );
+    });
   });
 });

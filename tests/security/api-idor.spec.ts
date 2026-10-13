@@ -77,6 +77,12 @@ const PROBES: Probe[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.approve_form(${t.formInstance}, 'APPROVED', null)`,
   },
+  // Migration 2040 (DEC-AMB-009): what the case team is shown about executing each decided sanction.
+  {
+    fn: "sanction_executability",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.sanction_executability(${t.case})`,
+  },
   {
     fn: "assign_case",
     outcome: "NOT_FOUND",
@@ -527,6 +533,19 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.withdraw_referral(${t.referral}, ${REASON})`,
   },
+  // Escalation after a repeated rejection (migration 2040, DEC-F09).
+  {
+    fn: "escalate_referral_rejection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.escalate_referral_rejection(${t.referral}, 'Synthetic: probe escalation text.')`,
+  },
+  {
+    fn: "decide_referral_escalation",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.decide_referral_escalation(${t.referral}, 'ACCEPT', null, null, ${self})`,
+  },
   {
     fn: "comment_on_referral",
     outcome: "NOT_FOUND",
@@ -907,6 +926,13 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.resolve_conflict_taint(${t.item}, 'CONFIRM', 'Probe resolution reason.')`,
   },
+  // Migration 2040: executing a decided sanction (AMB-109; DEC-AMB-004, DEC-AMB-009, DEC-AMB-011).
+  {
+    fn: "record_sanction_execution",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_sanction_execution(${t.item}, ${randomUUID()}, now(), 'HR-PROBE-0001')`,
+  },
 ];
 
 // Employee defence and grievance commands (migration 1910) take a subject, a portal link, a defence notice or a
@@ -1002,6 +1028,61 @@ const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
     call: (tx, t) =>
       tx`select api.record_grievance_outcome(${t.grievance}, ${["UPHOLD"]}::text[], null, ${randomUUID()}, 'Probe summary.')`,
   },
+  // Migration 2040: notice delivery and deadline changes (DEC-F15, DEC-F18), the grievant's withdrawal and completion
+  // (AMB-140, AMB-141), the one reconsideration on new evidence by either path (DEC-AMB-001), and a subject who left
+  // employment (DEC-AMB-009).
+  {
+    fn: "record_notice_delivery",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_notice_delivery(${t.notice}, 'HAND_DELIVERY', now(), 'HAND-PROBE-0001')`,
+  },
+  {
+    fn: "change_defence_deadline",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.change_defence_deadline(${t.notice}, 'EXTENSION', now() + interval '20 days', ${REASON})`,
+  },
+  {
+    fn: "withdraw_grievance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_grievance(${t.grievance}, ${REASON})`,
+  },
+  {
+    fn: "request_grievance_completion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.request_grievance_completion(${t.grievance}, ${REASON})`,
+  },
+  {
+    fn: "complete_grievance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.complete_grievance(${t.grievance}, 'Probe supplement text.')`,
+  },
+  {
+    fn: "file_grievance_reconsideration",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.file_grievance_reconsideration(${t.grievance}, 'Probe grievance grounds.',
+        'Probe new evidence description.', 'EVIDENCE-PROBE-0001')`,
+  },
+  {
+    fn: "record_grievance_reconsideration",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_grievance_reconsideration(${t.grievance}, 'EMAIL', now(), 'Probe grievance grounds.',
+        'LETTER-PROBE-0001', 'Probe new evidence description.', 'EVIDENCE-PROBE-0001')`,
+  },
+  {
+    fn: "flag_subject_left_employment",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.flag_subject_left_employment(${t.subject}, current_date, 'HR-PROBE-0001')`,
+  },
+  {
+    fn: "record_employment_execution_statement",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_employment_execution_statement(${t.subject}, 'WARNING', 'HR-PROBE-0001', ${REASON})`,
+  },
 ];
 
 // Notification commands (migration 1920) take the caller's own notification; nobody else's is reachable.
@@ -1027,7 +1108,8 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
   {
     fn: "create_export_request",
     outcome: "NOT_FOUND",
-    call: (tx, t) => tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'AUDIT', null, null)`,
+    call: (tx, t) =>
+      tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null)`,
   },
   {
     fn: "add_export_item",
@@ -1127,6 +1209,13 @@ const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.waive_corrective_action(${t.action}, 'MEMO-PROBE-0001', ${REASON})`,
   },
+  // Migration 2040 (DEC-F28): a unit, pool or external party owns the action.
+  {
+    fn: "set_corrective_action_owner_kind",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.set_corrective_action_owner_kind(${t.action}, 'EXTERNAL_PARTY', null, null, 'Probe party', ${REASON})`,
+  },
 ];
 
 // Continuity workbook import (migration 1960): staging names a case in the workbook's control sheet; every other
@@ -1201,10 +1290,26 @@ const ADMIN_COMMANDS = [
   "authority_rule_coverage",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
   "set_notification_rule",
-  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case.
+  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case. Migration 2040 (DEC-F21,
+  // DEC-F24): the purpose catalogue, the approver pools and the configuration warnings (ids and counts), for a policy
+  // administrator who approves no export.
   "set_export_rule",
-  // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case.
+  "set_export_purpose",
+  "add_export_approver",
+  "revoke_export_approver",
+  "export_approval_config_warnings",
+  // Continuity-workbook operator registry (migration 2040, DEC-F30): BCP_CONTINUITY_ADMIN only, no batch or case.
+  "authorize_continuity_operator",
+  "revoke_continuity_operator",
+  // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case; its shared
+  // owner pools (migration 2040, DEC-F28) likewise.
   "set_corrective_action_policy",
+  "create_corrective_action_pool",
+  "set_corrective_action_pool_member",
+  // Sanction catalogue rules (migration 2040; DEC-AMB-004, DEC-AMB-011): COMMITTEE_ADMIN only, no case.
+  "set_sanction_rule",
+  // Referral escalation target (migration 2040, DEC-F09): COMMITTEE_ADMIN only, no referral or case.
+  "set_referral_escalation_target",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
@@ -1720,6 +1825,7 @@ describe("IDOR: referral commands give outsiders the same answer for real object
     "grcDirector",
     "committee",
     "committeeSecretary",
+    "committeeChair", // the owner-default escalation target (DEC-F09), with nothing escalated
     "internalAudit",
     "dpo",
     "complianceManager",
@@ -2047,7 +2153,7 @@ describe("IDOR: export requests (migration 1930)", () => {
     await scenario(async (s) => {
       await s.as("caseManager");
       const [r] = await s.tx<{ id: string }[]>`
-        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST', 'Regulator Alpha (synthetic)',
+        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATORY_OR_EXTERNAL_AUTHORITY', 'Regulator Alpha (synthetic)',
           'Synthetic: the regulator asked for the case summary.') as id`;
       await s.tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${caseB})`;
       await s.tx`select api.add_export_recipient(${r!.id}, 'EXTERNAL', null, 'officer.alpha@example.test')`;

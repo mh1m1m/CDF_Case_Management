@@ -132,6 +132,8 @@ export const PERMISSIONS = [
   // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED ("authorized continuity users").
   "BCP_IMPORT",
   "BCP_IMPORT_APPROVE",
+  // Migration 2040 (DEC-F30): authorizes continuity-workbook operators (the registry); no import or case content.
+  "BCP_CONTINUITY_ADMIN",
   // Reporter conversation (ADR-016 D4, DEC-06)
   "REPORTER_CONVERSATION_HOLD",
   "REPORTER_CONVERSATION_OVERSEE",
@@ -1070,6 +1072,8 @@ export const REFERRAL_STATUSES = [
   "OBJECTED",
   "ACCEPTED",
   "WITHDRAWN",
+  // Migration 2040 (DEC-F09): escalated after a repeated rejection, awaiting the escalation target.
+  "ESCALATED",
 ] as const;
 export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
 
@@ -1087,6 +1091,9 @@ export const REFERRAL_EVENT_TYPES = [
   "OBJECTED",
   "WITHDRAWN",
   "COMMENTED",
+  // Migration 2040 (DEC-F09).
+  "ESCALATED",
+  "ESCALATION_DECIDED",
 ] as const;
 export type ReferralEventType = (typeof REFERRAL_EVENT_TYPES)[number];
 
@@ -1101,6 +1108,10 @@ export const REFERRAL_ACTIONS = [
   "REJECT",
   "RESUBMIT",
   "OBJECT",
+  // Migration 2040 (DEC-F09): the sector's approver after a repeated rejection; the escalation target's decision.
+  "ESCALATE",
+  "ACCEPT_ESCALATION",
+  "UPHOLD_REJECTION",
   "WITHDRAW",
   "COMMENT",
 ] as const;
@@ -1125,6 +1136,13 @@ export const PRELIMINARY_OUTCOMES = [
   "NO_PERSONAL_JURISDICTION",
 ] as const;
 export type PreliminaryOutcome = (typeof PRELIMINARY_OUTCOMES)[number];
+
+/** Outcomes kept for existing records but not enabled for a new recommendation until their authority and definitions
+ *  are confirmed (DEC-F10, migration 2040; the PRELIMINARY_OUTCOME catalogue value is INACTIVE). Never offer them. */
+export const PRELIMINARY_OUTCOMES_NOT_ENABLED: readonly PreliminaryOutcome[] = [
+  "NOT_FEASIBLE",
+  "NO_PERSONAL_JURISDICTION",
+];
 
 export const PRELIMINARY_RECOMMENDATION_STATUSES = [
   "AWAITING_REVIEW",
@@ -1367,16 +1385,31 @@ export const EXPORT_FORMATS = ["PDF", "XLSX", "EMAIL"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 export const EXPORT_AUDIENCES = ["INTERNAL", "EXTERNAL"] as const;
 export type ExportAudience = (typeof EXPORT_AUDIENCES)[number];
-/** SOURCE_REQUIRED: the approved list of export purposes. */
+/** The active export purposes of the governed catalogue exchange.export_purpose (owner decision DEC-F21, migration
+ *  2040): administrable reference data, mirrored here (mirrors.spec). OTHER requires a justification. */
 export const EXPORT_PURPOSES = [
+  "COMMITTEE_PROCEEDING",
+  "LEGAL_REVIEW",
+  "COMPETENT_AUTHORITY_DECISION",
+  "INTERNAL_MANAGEMENT_REVIEW",
+  "RECORDS_REQUIREMENT",
+  "REGULATORY_OR_EXTERNAL_AUTHORITY",
+  "AUTHORIZED_BUSINESS_NEED",
+  "OTHER",
+] as const;
+export type ExportPurpose = (typeof EXPORT_PURPOSES)[number];
+/** Export purposes that require a justification whatever the audience (DEC-F21). */
+export const EXPORT_PURPOSES_REQUIRING_JUSTIFICATION: readonly ExportPurpose[] = ["OTHER"];
+/** The 1930 purposes, kept inactive in the catalogue for the history of the requests that carry them; never offered
+ *  for a new export. */
+export const EXPORT_PURPOSES_LEGACY = [
   "AUTHORITY_SUBMISSION",
   "REGULATOR_REQUEST",
   "LEGAL_COUNSEL",
   "INTERNAL_REPORTING",
   "AUDIT",
-  "OTHER",
 ] as const;
-export type ExportPurpose = (typeof EXPORT_PURPOSES)[number];
+export type ExportPurposeLegacy = (typeof EXPORT_PURPOSES_LEGACY)[number];
 /** Exportable content. Evidence is not exportable until UX S2 merges; protected identity never is (N19). */
 export const EXPORT_OBJECT_TYPES = [
   "CASE_SUMMARY",
@@ -1414,7 +1447,8 @@ export interface ExportDocument {
   classification: Classification;
   format: ExportFormat;
   audience: ExportAudience;
-  purpose: ExportPurpose;
+  /** A request created before migration 2040 may carry a legacy purpose. */
+  purpose: ExportPurpose | ExportPurposeLegacy;
   externalParty: string | null;
   items: ExportDocumentItem[];
 }
