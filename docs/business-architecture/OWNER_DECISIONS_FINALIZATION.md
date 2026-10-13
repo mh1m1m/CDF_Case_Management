@@ -14,6 +14,7 @@ The decision text below is the owner's, lightly reformatted.
   3. otherwise no casting vote is available, and the vote stays unresolved (tied) for further committee handling.
 
   Never transfer the casting vote automatically to the Secretary.
+
 - **DEC-F04: conflict raised by another participant.** The Chair decides by default. If the Chair is the subject of the conflict, conflicted, absent or otherwise ineligible, the Deputy Chair decides, if eligible. If no eligible Chair or Deputy exists, the matter goes to the configured independent conflict authority. The person whose conflict is assessed never decides their own case. The rule stays configurable and effective-dated.
 - **DEC-F05: hearing the subject of a conflict concern.** There is no automatic entitlement to a separate hearing solely because a conflict concern was raised. The assessor may request clarification or evidence where necessary. Do not create a mandatory hearing workflow unless governing policy requires it.
 
