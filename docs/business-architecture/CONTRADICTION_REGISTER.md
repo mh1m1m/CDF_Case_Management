@@ -162,7 +162,7 @@
 - **Source B:** ADR-034 §2: BCP-1 imports four sheets; committee, grievance and evidence workbooks are later increments
 - **Conflict:** Continuity is partial.
 - **Authoritative resolution:** Q100 is the target; BCP-1 is a first increment, not a contradiction of intent.
-- **Action:** Plan the committee-scoped and grievance-scoped workbooks after DEC-AMB-008 is answered (coordinator to assign numbers).
+- **Action:** DEC-AMB-008 was decided on 2026-10-13 (option B; text in OWNER_DECISIONS_FROM_AMBIGUITIES.md). The committee workbook with paper ballots is migration 2120 (ADR-048); the grievance-scoped workbook still needs a number from the coordinator.
 
 ## CON-021
 
@@ -182,8 +182,8 @@
 
 ## CON-023
 
-- **Source A:** DEC-01 (restriction at creation needs an eligible Restricted Case Authority) and DEC-AMB-012 (who may lift restricted status is an owner decision; until then it is not lifted)
+- **Source A:** DEC-01 (restriction at creation needs an eligible Restricted Case Authority) and DEC-AMB-012 (decided 2026-10-13: restricted status may be lifted only through two-person control)
 - **Source B:** Migration 0700 api.change_case_classification: is_restricted is set from the argument, a null counts as false, and RESTRICTED_CASE_GRANT is checked only when restricting
 - **Conflict:** A CLASSIFICATION_CHANGE holder can widen a restricted case to every CASE_VIEW_ALL holder, and a null argument does it silently.
-- **Authoritative resolution:** Fail closed until DEC-AMB-012 is decided: the security invariant and the owner decision outrank the implementation. Found by AGENT-09 while reviewing this register (PR #60).
-- **Action:** CDF-206 (migration 2015, AGENT-09): a null keeps the current value and true→false is refused until DEC-AMB-012 is decided; negative test T-AMB-145.
+- **Authoritative resolution:** Fail closed: the security invariant and the owner decision outrank the implementation. Found by AGENT-09 while reviewing this register (PR #60).
+- **Action:** CDF-206 (migration 2015, AGENT-09): a null keeps the current value and true→false is refused. Per DEC-AMB-012 that refusal stays until the two-person lift (migration 2130, ADR-049) is implemented and security-cleared; negative test T-AMB-145.
