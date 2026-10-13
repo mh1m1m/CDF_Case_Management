@@ -1840,6 +1840,21 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.decide_restricted_export(${request}, 'APPROVE', ${REASON}, ${hash})`;
         },
       },
+      // Migration 2040 (DEC-F30): the continuity-operator registry; the case manager is the seeded operator.
+      {
+        fn: "authorize_continuity_operator",
+        actor: "platformAdmin",
+        run: async (s) =>
+          (ids.bcpOperator = await one(
+            s,
+            s.tx`select api.authorize_continuity_operator(${USERS.lead}, 'BCP-AUTH-WALK', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "revoke_continuity_operator",
+        actor: "platformAdmin",
+        run: (s) => s.tx`select api.revoke_continuity_operator(${ids.bcpOperator!}, ${REASON})`,
+      },
       // Continuity workbook import (migration 1960, ADR-034): a subject recorded offline and a recorded-only row.
       {
         fn: "stage_bcp_import",

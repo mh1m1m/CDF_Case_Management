@@ -1175,6 +1175,9 @@ const ADMIN_COMMANDS = [
   "add_export_approver",
   "revoke_export_approver",
   "export_approval_config_warnings",
+  // Continuity-workbook operator registry (migration 2040, DEC-F30): BCP_CONTINUITY_ADMIN only, no batch or case.
+  "authorize_continuity_operator",
+  "revoke_continuity_operator",
   // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case; its shared
   // owner pools (migration 2040, DEC-F28) likewise.
   "set_corrective_action_policy",

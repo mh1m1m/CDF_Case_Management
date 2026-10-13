@@ -3114,3 +3114,246 @@ grant execute on function
   api.set_export_purpose(text, text, text, boolean, boolean, int, text), api.add_export_approver(uuid, int, text),
   api.revoke_export_approver(uuid, text), api.export_approval_config_warnings()
 to authenticated;
+
+-- =============================================================================
+-- Item 10. Continuity workbook: authorized continuity operators (DEC-F30, AMB-198, CON-008; T-AMB-116) and staged
+-- data retention (DEC-F31, AMB-206)
+-- =============================================================================
+-- DEC-F30: who may use the continuity workbook is never inferred from a broad role. BCP_IMPORT stays a prerequisite;
+-- the importer must also be on the continuity-operator registry, authorized by someone else holding
+-- BCP_CONTINUITY_ADMIN (the platform administrator: administrative configuration, no case or import content), and
+-- audited. The registry starts empty in the migration (fail closed); the synthetic seed authorizes the demo importer.
+insert into iam.permission (code, description) values
+  ('BCP_CONTINUITY_ADMIN', 'Authorize and revoke continuity workbook operators; never imports or their content');
+insert into iam.role_permission (role_code, permission_code) values ('PLATFORM_ADMIN', 'BCP_CONTINUITY_ADMIN');
+
+create table exchange.bcp_continuity_operator (
+  id                      uuid primary key default gen_random_uuid(),
+  user_id                 uuid not null references iam.user_profile (id),
+  authorization_reference text not null check (length(authorization_reference) between 3 and 300),
+  reason                  text not null check (length(reason) between 5 and 2000),
+  authorized_by           uuid not null references iam.user_profile (id),
+  authorized_at           timestamptz not null default now(),
+  revoked_by              uuid references iam.user_profile (id),
+  revoked_at              timestamptz,
+  revoke_reason           text check (length(revoke_reason) between 5 and 2000),
+  check (authorized_by <> user_id),
+  check ((revoked_at is null) = (revoked_by is null) and (revoked_at is null) = (revoke_reason is null))
+);
+create unique index bcp_continuity_operator_active on exchange.bcp_continuity_operator (user_id)
+  where revoked_at is null;
+create index bcp_continuity_operator_authorized_by on exchange.bcp_continuity_operator (authorized_by);
+create index bcp_continuity_operator_revoked_by on exchange.bcp_continuity_operator (revoked_by);
+comment on table exchange.bcp_continuity_operator is
+  'DEC-F30 (migration 2040): the authorized continuity-workbook operators. Append-only; an authorization is only '
+  'revoked, once.';
+create trigger no_delete before delete on exchange.bcp_continuity_operator
+  for each row execute function committee.reject_mutation();
+create trigger no_truncate before truncate on exchange.bcp_continuity_operator
+  for each statement execute function committee.reject_mutation();
+create function exchange.protect_operator_records()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if old.revoked_at is not null
+     or (to_jsonb(new) - array['revoked_by', 'revoked_at', 'revoke_reason'])
+        <> (to_jsonb(old) - array['revoked_by', 'revoked_at', 'revoke_reason']) then
+    raise exception 'continuity operator % can only be revoked, once', old.id using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end;
+$$;
+create trigger bcp_continuity_operator_protect before update on exchange.bcp_continuity_operator
+  for each row execute function exchange.protect_operator_records();
+alter table exchange.bcp_continuity_operator enable row level security;
+create policy bcp_continuity_operator_read on exchange.bcp_continuity_operator for select to authenticated
+  using (authz.has_permission('BCP_CONTINUITY_ADMIN') or user_id = authz.current_user_id());
+grant select on exchange.bcp_continuity_operator to authenticated;
+
+create function exchange.is_continuity_operator(p_user_id uuid)
+returns boolean
+language sql stable
+set search_path = ''
+as $$
+  select exists (select 1 from exchange.bcp_continuity_operator o where o.user_id = p_user_id and o.revoked_at is null);
+$$;
+
+-- Whatever path stages a workbook: its importer is an authorized continuity operator (T-AMB-116).
+create function exchange.require_continuity_operator()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if not exchange.is_continuity_operator(new.imported_by) then perform api._fail('FORBIDDEN'); end if;
+  return new;
+end;
+$$;
+create trigger bcp_import_batch_operator before insert on exchange.bcp_import_batch
+  for each row execute function exchange.require_continuity_operator();
+
+-- Replaces 1960 (DEC-F30): the importer's own steps (preview, resolve, submit, apply, cancel) also need a current
+-- continuity-operator authorization; revoking it stops them. Approvers are unchanged.
+create or replace function exchange.lock_bcp_batch(p_batch_id uuid, p_own boolean)
+returns exchange.bcp_import_batch
+language plpgsql
+set search_path = ''
+as $$
+declare v exchange.bcp_import_batch;
+begin
+  if p_batch_id is null or not authz.can_view_bcp_import(p_batch_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v from exchange.bcp_import_batch b where b.id = p_batch_id for update;
+  if p_own and (v.imported_by <> authz.current_user_id() or not authz.has_permission('BCP_IMPORT')
+                or not exchange.is_continuity_operator(authz.current_user_id())) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  return v;
+end;
+$$;
+
+create function api.authorize_continuity_operator(p_user_id uuid, p_authorization_reference text, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_id uuid;
+  v_reference text;
+  v_reason text;
+begin
+  if not authz.has_permission('BCP_CONTINUITY_ADMIN') then perform api._fail('FORBIDDEN'); end if;
+  if p_user_id is null or not exists (select 1 from iam.user_profile u where u.id = p_user_id and u.status = 'ACTIVE') then
+    perform api._fail('INVALID', 'user_id');
+  end if;
+  if p_user_id = v_actor then perform api._fail('FORBIDDEN'); end if;
+  if not authz.user_has_permission(p_user_id, 'BCP_IMPORT') then
+    perform api._fail('CONFLICT', 'OPERATOR_LACKS_PERMISSION');
+  end if;
+  v_reference := api._require_text(p_authorization_reference, 'authorization_reference', 3, 300);
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  perform pg_advisory_xact_lock(hashtext('exchange.bcp_continuity_operator:' || p_user_id));
+  if exchange.is_continuity_operator(p_user_id) then perform api._fail('CONFLICT', 'ALREADY_AUTHORIZED'); end if;
+  insert into exchange.bcp_continuity_operator (user_id, authorization_reference, reason, authorized_by)
+  values (p_user_id, v_reference, v_reason, v_actor)
+  returning id into v_id;
+  perform audit.record_event('BCP_OPERATOR_AUTHORIZED', 'ADMIN', 'SUCCESS', null, 'bcp_continuity_operator',
+    v_id::text, v_reason, jsonb_build_object('user_id', p_user_id));
+  return v_id;
+end;
+$$;
+
+create function api.revoke_continuity_operator(p_operator_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v exchange.bcp_continuity_operator;
+  v_reason text;
+begin
+  if not authz.has_permission('BCP_CONTINUITY_ADMIN') then perform api._fail('FORBIDDEN'); end if;
+  select * into v from exchange.bcp_continuity_operator o where o.id = p_operator_id for update;
+  if v.id is null then perform api._fail('NOT_FOUND'); end if;
+  if v.revoked_at is not null then perform api._fail('CONFLICT', 'ALREADY_REVOKED'); end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  update exchange.bcp_continuity_operator set revoked_by = v_actor, revoked_at = now(), revoke_reason = v_reason
+   where id = v.id;
+  perform audit.record_event('BCP_OPERATOR_REVOKED', 'ADMIN', 'SUCCESS', null, 'bcp_continuity_operator', v.id::text,
+    v_reason, jsonb_build_object('user_id', v.user_id));
+end;
+$$;
+grant execute on function api.authorize_continuity_operator(uuid, text, text),
+  api.revoke_continuity_operator(uuid, text) to authenticated;
+
+-- DEC-F31: no staging retention period is invented. BCP_STAGING_RETENTION_DAYS is SOURCE_REQUIRED; while it is not
+-- configured nothing is purged. Once it is, the staged cells of a finished workbook (imported, rejected or cancelled)
+-- are cleared that many days after it finished; the row keeps its identity, sheet, row number and key, state,
+-- resolution, outcome, recorder, event time and payload hash, and the batch, provenance and audit trail are kept.
+-- PRODUCTION_SUBSTITUTION_REQUIRED: the CDF secure-deletion and disposition rules for staging storage.
+insert into config.setting (key, value, status, source_reference, description) values
+  ('BCP_STAGING_RETENTION_DAYS', null, 'SOURCE_REQUIRED', null,
+   'DEC-F31: days the staged cells of a finished continuity workbook are kept before they are cleared. Not invented: '
+   'nothing is purged until it is configured.');
+alter table exchange.bcp_import_row add column purged_at timestamptz;
+
+-- Replaces 1960 (DEC-F31): a row of a finished batch may change exactly once more, to clear its cells for the
+-- retention purge; everything else is as built.
+create or replace function exchange.protect_bcp()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_fixed text[];
+  v_status text;
+begin
+  if tg_table_name = 'bcp_import_batch' then
+    v_fixed := array['id', 'case_id', 'template_version', 'workbook_id', 'file_sha256', 'control', 'offline_from',
+                     'offline_to', 'prepared_by', 'imported_by', 'created_at'];
+    if old.status in ('IMPORTED', 'REJECTED', 'CANCELLED')
+       or (select jsonb_object_agg(k, to_jsonb(new) -> k) from unnest(v_fixed) k)
+          <> (select jsonb_object_agg(k, to_jsonb(old) -> k) from unnest(v_fixed) k)
+       or (old.submitted_hash is not null and new.submitted_hash is distinct from old.submitted_hash) then
+      raise exception 'continuity import % is final or its identity is immutable', old.id
+        using errcode = 'insufficient_privilege';
+    end if;
+  else
+    select b.status into v_status from exchange.bcp_import_batch b where b.id = old.batch_id;
+    if v_status in ('IMPORTED', 'REJECTED', 'CANCELLED') and old.purged_at is null and new.purged_at is not null
+       and new.cells = '{}'::jsonb
+       and (to_jsonb(new) - array['cells', 'purged_at']) = (to_jsonb(old) - array['cells', 'purged_at']) then
+      return new;
+    end if;
+    if v_status <> 'STAGED' or old.purged_at is not null
+       or (to_jsonb(new) - array['resolution', 'resolution_reason', 'resolved_by', 'resolved_at', 'outcome'])
+          <> (to_jsonb(old) - array['resolution', 'resolution_reason', 'resolved_by', 'resolved_at', 'outcome']) then
+      raise exception 'staged continuity row % is fixed', old.id using errcode = 'insufficient_privilege';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+-- The retention purge, for the server's scheduled job (cdf_bff), like the reminder job. Returns the rows cleared.
+create function exchange.purge_expired_bcp_staging()
+returns int
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_days int;
+  v_rows int;
+  v_batches int;
+begin
+  select case when s.status = 'CONFIGURED' and s.value ~ '^[0-9]{1,4}$' then s.value::int end into v_days
+  from config.setting s where s.key = 'BCP_STAGING_RETENTION_DAYS';
+  if v_days is null then return 0; end if;
+  with expired as (
+    select r.id, r.batch_id
+    from exchange.bcp_import_row r join exchange.bcp_import_batch b on b.id = r.batch_id
+    where r.purged_at is null and b.status in ('IMPORTED', 'REJECTED', 'CANCELLED')
+      and coalesce(b.applied_at, b.decided_at, b.cancelled_at) + make_interval(days => v_days) <= now()
+  ), purged as (
+    update exchange.bcp_import_row r set cells = '{}'::jsonb, purged_at = now()
+    from expired e where r.id = e.id
+    returning r.batch_id
+  )
+  select count(*)::int, count(distinct p.batch_id)::int into v_rows, v_batches from purged p;
+  if v_rows > 0 then
+    perform audit.record_event('BCP_STAGING_PURGED', 'ADMIN', 'SUCCESS', null, 'bcp_import_row', null, null,
+      jsonb_build_object('rows', v_rows, 'batches', v_batches, 'retention_days', v_days), 'SYSTEM');
+  end if;
+  return v_rows;
+end;
+$$;
+grant usage on schema exchange to cdf_bff;
+revoke all on function
+  exchange.protect_operator_records(), exchange.is_continuity_operator(uuid), exchange.require_continuity_operator(),
+  exchange.purge_expired_bcp_staging()
+from public, anon, authenticated;
+grant execute on function exchange.purge_expired_bcp_staging() to cdf_bff;

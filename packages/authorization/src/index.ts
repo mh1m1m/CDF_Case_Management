@@ -141,6 +141,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
     "SECTOR_ADMIN",
     "NOTIFICATION_ADMIN",
     "EXPORT_POLICY_ADMIN",
+    // Authorizes continuity-workbook operators only (migration 2040, DEC-F30); no import or case content.
+    "BCP_CONTINUITY_ADMIN",
   ],
   // Form entitlements (ADR-011) give these roles their first permissions; the rest come in later phases.
   // DB_ADMIN never receives application permissions (§21).

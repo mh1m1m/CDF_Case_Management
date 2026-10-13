@@ -130,6 +130,8 @@ export const PERMISSIONS = [
   // Continuity workbook import (migration 1960, ADR-034): OWNER_DEFAULT, SOURCE_REQUIRED ("authorized continuity users").
   "BCP_IMPORT",
   "BCP_IMPORT_APPROVE",
+  // Migration 2040 (DEC-F30): authorizes continuity-workbook operators (the registry); no import or case content.
+  "BCP_CONTINUITY_ADMIN",
   // Reporter conversation (ADR-016 D4, DEC-06)
   "REPORTER_CONVERSATION_HOLD",
   "REPORTER_CONVERSATION_OVERSEE",
