@@ -82,6 +82,8 @@ as $$
 $$;
 
 -- The caller's basis for the case file beyond triage: what investigation content (findings) needs.
+-- Never use it alone: it applies no case gate (clearance, conflict, linked subject), so it is always ANDed with
+-- authz.can_view_case, as finding_read does.
 create function authz.has_case_file_basis(p_case_id uuid)
 returns boolean
 language sql stable security definer
