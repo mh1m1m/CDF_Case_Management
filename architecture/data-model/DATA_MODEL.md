@@ -214,7 +214,7 @@ Identifier: `INT-NNN` is a per-case display number like `EV-NNN`; the UUID remai
 | `config.status_code`              | Waiting, suspension and outcome codes (ADR-029); labels in `packages/i18n`.                                                          | migrations                                                                                                  |
 | `committee.committee`             | Investigation (IC) and Grievance (GC) committees.                                                                                    | migrations                                                                                                  |
 | `committee.membership`            | Effective-dated seats; only ever ended earlier.                                                                                      | `api.appoint_committee_member`, `api.end_committee_membership`                                              |
-| `committee.rule_set`              | Effective-dated quorum, casting vote, no-substantive-vote outcome, minutes window, deemed approval, grievance window, admissibility. | `api.set_committee_rule_set` (seeded OWNER_DEFAULT)                                                         |
+| `committee.rule_set`              | Effective-dated quorum, casting vote, no-substantive-vote outcome, minutes window, deemed approval, grievance window, both deciders. | `api.set_committee_rule_set` (seeded OWNER_DEFAULT)                                                         |
 | `committee.committee_proceeding`  | A case before a committee, with an immutable rule snapshot.                                                                          | `api.refer_case_to_committee`                                                                               |
 | `committee.proceeding_member`     | Seat snapshot per proceeding, voting flag, grievance firewall flag. Append-only.                                                     | `api.refer_case_to_committee`                                                                               |
 
@@ -236,8 +236,11 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | Table                                           | Purpose                                         | Notes                                                                                                                                              |
 | ----------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `committee.meeting`                             | A sitting of a committee proceeding             | Purpose DELIBERATION/HEARING; mode IN_PERSON/TEAMS/HYBRID (manual link, PRODUCTION_SUBSTITUTION_REQUIRED); SCHEDULED → OPEN → CLOSED, or CANCELLED |
-| `committee.meeting_participant`                 | Members (from the snapshot) and invitees        | Current conflict status and attendance; PRESENT only when cleared                                                                                  |
-| `committee.meeting_conflict`                    | Conflict declarations                           | Append-only; reason visible to declarer and secretary                                                                                              |
+| `committee.meeting_participant`                 | Members (from the snapshot) and invitees        | Current conflict status and attendance; PRESENT only when cleared; EXCUSED with a reason (2000)                                                    |
+| `committee.meeting_conflict`                    | Conflict declarations                           | Append-only; reason visible to declarer and secretary; source DECISION when a raised conflict is upheld (2000)                                     |
+| `committee.attendance_excuse`                   | A justified absence (EXCUSED)                   | 2000: append-only; reason visible to the secretary and the participant                                                                             |
+| `committee.meeting_conflict_concern`            | A conflict raised by another participant        | 2000: decided once (UPHELD / DISMISSED) by the rule set's decider; no vote opens while open; reason: raiser, secretary, decider, never the subject |
+| `committee.witness_exclusion`                   | A witness excluded from a meeting               | 2010: append-only, once per witness; reason: secretary, cleared members; the witness no longer sees the meeting                                    |
 | `committee.vote_item`                           | A decision put to the vote                      | Target FINDING (bound to a finding) or a titled item until phase 6 records exist; tallies and result on close                                      |
 | `committee.vote`                                | Individual votes                                | No SELECT grant; one per member per item; secretary-recorded choices limited by check                                                              |
 | `committee.casting_vote`                        | Chair's casting vote on a tie                   | No SELECT grant; one per item                                                                                                                      |
@@ -271,10 +274,10 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | Table                                     | Purpose                                                                        | Notes                                                                                |
 | ----------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `grievance.subject_portal_link`           | A case subject linked to an employee portal account                            | One active per subject; revoke only                                                  |
-| `grievance.defence_notice`                | Notice to one subject with a due date                                          | ISSUED → ACKNOWLEDGED → RESPONDED, or WITHDRAWN                                      |
+| `grievance.defence_notice`                | RIGHTS, DEFENCE (due date) or DECISION notice to one subject (1990)            | ISSUED → ACKNOWLEDGED → RESPONDED (DEFENCE only), or WITHDRAWN                       |
 | `grievance.defence_notice_item`           | The subject's allegations, snapshotted                                         | Append-only                                                                          |
 | `grievance.defence_response`              | Portal or recorded response                                                    | Original date; document reference unless portal; append-only                         |
-| `grievance.grievance`                     | LINKED or STANDALONE grievance                                                 | Rule set, window and late flag stored (Q94)                                          |
+| `grievance.grievance`                     | LINKED or STANDALONE grievance; may name its decision notice                   | Rule set, window and late flag stored (Q94); a decision notice's own (1990)          |
 | `grievance.admissibility_assessment`      | Secretary assessment and the decider's decision                                | Not visible to the grievant                                                          |
 | `grievance.grievance_outcome`             | Combinable outcomes bound to an approved vote                                  | Reinvestigation path opens a REINVESTIGATION proceeding                              |
 | `grievance.restricted_grievance_approval` | Restricted Case Authority approval naming a GC secretary for a restricted case | Open row: records one linked grievance (G2); bound row: handles that grievance (G2b) |
@@ -287,3 +290,46 @@ Acceptance of a referral creates, in one transaction, a case with `source_type =
 | `notify.rule`       | Layered, effective-dated delivery rules | SYSTEM_MANDATORY from migrations only; closed, never edited |
 | `notify.preference` | A user's mutes                          | Mandatory templates cannot be muted                         |
 | `notify.outbox`     | One row per recipient and channel       | Template, ids and deep link only (N18); facts immutable     |
+
+## Export builder (migration 1930, ADR-026, ADR-032)
+
+| Table                                 | Purpose                                                                      | Notes                                                                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exchange.approval_rule`              | Effective-dated export rules: second approval, authority approval or refusal | Matches audience, case classification, restricted cases, content type; seeded SOURCE_REQUIRED; an author never decides exports it applies to |
+| `exchange.export_request`             | One export of one case: format, audience, purpose, status                    | External needs party and justification; bound to a submitted hash; final once sent or closed                                                 |
+| `exchange.export_item`                | Object type and id of an exported item                                       | No content: rendered per viewer at preview, approval and generation (N16)                                                                    |
+| `exchange.export_recipient`           | Internal users cleared for the case, or external addresses                   | EMAIL only; external addresses synthetic `@example.test` (PRODUCTION_SUBSTITUTION_REQUIRED)                                                  |
+| `exchange.export_approval`            | One approval per stage, bound to the preview hash approved                   | Never the requester; stage 2 by a different person with EXPORT_SECOND_APPROVE                                                                |
+| `exchange.restricted_export_approval` | The Restricted Case Authority's decision on one export of a restricted case  | Case owner only; bound to the submitted hash; one per export (DEC-61/62 precedent)                                                           |
+
+## Corrective actions (migration 1940, ADR-033)
+
+| Table                               | Purpose                                                                      | Notes                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `decision.corrective_action_policy` | Effective-dated per action type: due period, reminder, escalation, evidence  | Seeded as empty SOURCE_REQUIRED placeholders; versions never edited                                |
+| `decision.corrective_action`        | One action from an approved CORRECTIVE_ACTION or GOVERNANCE_REMEDIATION item | Item and authority decision fixed; owner, due date, status; never deleted; WAIVED is final         |
+| `decision.corrective_action_event`  | Append-only history of each action                                           | Opening, owner and due-date changes, progress, completion, verification, return, reopening, waiver |
+
+## Continuity workbook import (migration 1960, ADR-034)
+
+| Table                          | Purpose                                                                                                     | Notes                                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `exchange.bcp_template_sheet`  | The sheets of template BCP-1 and the command each imported sheet runs                                       | Reference data; equal to `BCP_TEMPLATE` in `@cdf/contracts` (tested)                                           |
+| `exchange.bcp_template_column` | Each sheet's columns: kind, required, length, allowed values                                                | Reference data; the database's column rules (`exchange.bcp_cell_ok`)                                           |
+| `exchange.bcp_import_batch`    | One staged workbook for one case: control row, file SHA-256, status, preview and submitted hashes           | Importer and approver differ; at most one open batch per case and workbook id; the file itself is not kept     |
+| `exchange.bcp_import_row`      | A staged row: cells as strings, state, failing column, resolution with reason, last dry-run outcome         | Immutable from submission; visible with its batch only                                                         |
+| `exchange.bcp_provenance`      | Offline origin of each imported object: workbook, sheet, row id, original time, recorder, importer, markers | Append-only; unique per case, workbook and row id (re-import is a no-op); visible with the object it describes |
+
+## Form and status catalogue (migration 1970, ADR-035)
+
+Reference data only: written by the migration, readable by every ACTIVE user, never by the anonymous role, writable by no application role. Nothing in it is case content.
+
+| Table                           | Purpose                                                                                               | Notes                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `config.target_class`           | The 15 classes a legacy form becomes (USER_FORM … RETIRED)                                            | What each class needs and produces                                                                                            |
+| `config.target_module`          | The 61 target modules: domain object, commands, permissions, UI surface, delivery state, migrations   | Delivered (IMPLEMENTED or PARTIAL) exactly when it names migrations; commands, permissions and migrations are tested to exist |
+| `config.legacy_catalogue`       | The six source catalogues (two status lists, CDF_CASE_V1, three form sources) and their sizes         | Each size equals its mapped rows (tested)                                                                                     |
+| `config.status_dimension`       | The 24 status dimensions: STORED, STATUS_CODE, DERIVED or PLANNED, and the column that holds each     | A stored dimension names its relation and column                                                                              |
+| `config.status_dimension_value` | Each dimension's values, ACTIVE or PLANNED, with the derivation of a derived value                    | Equal to the column's check constraint or the active status codes (tested)                                                    |
+| `config.legacy_status_map`      | 305 legacy statuses → dimension value, audit event (IMPLEMENTED or PLANNED), domain object, module    | Key (catalogue, code); links across the two lists (`same_as`, `code_conflict`); nothing is deleted                            |
+| `config.legacy_form_map`        | 462 legacy forms and controls → target class, module, merge target, disposition, data owner, statuses | Key (catalogue, sequence); USER_FORM only in the two user-entered form modules; `gap_ref` P11-G1–G6                           |

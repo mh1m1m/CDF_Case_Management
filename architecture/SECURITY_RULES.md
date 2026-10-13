@@ -302,3 +302,35 @@ Implemented in migration `20261007001200_interviews.sql`; this supersedes the "I
 - Email delivery and reminders run only through `notify.*` functions granted to the BFF login role, never to `authenticated` or `anon`.
 - Mandatory notifications (meeting invitations, minutes review, legal review assignment, defence notices, grievance decisions) cannot be muted. Rules are maintained only with `NOTIFICATION_ADMIN`.
 - Tests: `tests/security/notifications.spec.ts`, notification IDOR probes and the audit walk.
+
+## 20. Exports (migration 1930; ADR-026, ADR-032; Q99)
+
+- An export holds object ids only. Each item is rendered for the person looking at it with the same predicate as its table's RLS policy; an item they cannot see, from another case or missing is refused when added and listed as withheld afterwards (N16). Withheld items block submission, approval and generation.
+- The preview hash covers the rendered items, recipients, format, audience, purpose, justification and the case's current classification. Submission is bound to the requester's own preview; each approval and the generation recompute it, so any change answers `PREVIEW_CHANGED`. A rejection is always possible.
+- External exports need an external party, a justification, the requester's confirmation of the case's classification and one approval; a matching rule adds a second approval or refuses (seeded: SECRET refused, CONFIDENTIAL and minutes need two, restricted cases need one even internally; all SOURCE_REQUIRED). A rule that begins later binds pending exports.
+- Separation of duties: the requester never approves; the second approval is by a different person holding `EXPORT_SECOND_APPROVE`. A policy administrator who authored a version, in force since the export was created, of a rule code that applies to it never decides it and is not asked (X1). Only the requester generates, sends or cancels. Drafts are visible to their requester only.
+- Restricted case (DEC-61/62 precedent, rule `RESTRICTED_CASE_AUTHORITY`, SOURCE_REQUIRED): the case owner, eligible as Restricted Case Authority, approves or rejects each export as submitted, once, through `api.decide_restricted_export`; the export is approved only with every stage and that decision, and generation re-checks it.
+- Internal recipients must be able to see the case when added, submitted and generated, and are handed to the mail adapter by user id, never by address. External addresses never enter the audit ledger.
+- No item reads the report, the reporter's WB id or protected identity (N19); evidence is not exportable until UX S2 merges. Approved minutes export their narrative only.
+- Tests: `tests/security/export.spec.ts` (mutations of the controls killed; see the 1930 review notes), export IDOR probes and the audit walk.
+
+## 21. Corrective actions (migration 1940; ADR-033; Q72)
+
+- An action is opened only from a CORRECTIVE_ACTION or GOVERNANCE_REMEDIATION item that the committee adopted and the effective authority decision approved or modified; the item and the decision are fixed on it.
+- The owner holds `CORRECTIVE_ACTION_OWN` and passes the case gate (active, cleared, not conflicted) when named and while they keep the action. They see their own action and its history, never the case, item, package or decision (CDF-73 option D); losing the role, the clearance or the gate removes it.
+- `CORRECTIVE_ACTION_MANAGE` on a visible case opens, reassigns, reschedules, verifies, returns and reopens. Only the current owner reports progress and submits completion. Whoever owned or ever submitted an action never verifies it.
+- On a restricted case only its Restricted Case Authority (the case owner) names or changes the owner (DEC-61/62 precedent).
+- A waiver needs `CORRECTIVE_ACTION_WAIVE`, held by no role until the Delegation of Authority names one, and the authority's source document; it is final.
+- A case does not close while an approved actionable item has no action or an action that is not completed or waived.
+- Notifications carry ids only; verification requests and escalations go only to managers who can see the case. Reminders and escalation run from the server-only reminder job and only when a policy sets them; the seeded policy sets none.
+- Tests: `tests/security/corrective-actions.spec.ts` (mutations of the controls killed; see the 1940 review notes), corrective-action IDOR probes and the audit walk.
+
+## 22. Continuity workbook import (migration 1960; ADR-027, ADR-034; Q100)
+
+- The uploaded workbook is untrusted. The application accepts only an `.xlsx` file of at most 10 MiB from someone holding `BCP_IMPORT`, scans it (only CLEAN is read), and reads it through the `WorkbookReader` port: container sizes, entry count and compression ratio are checked before anything is inflated, inflation is capped per entry and in total over every read, each part is read once, unsafe or duplicate paths, encryption, ZIP64, macros, embedded objects, external links, DTDs and entity declarations refuse the file, and every cell is returned as a string. Refusals are codes; no cell text, file name or content reaches a log, event or error.
+- The workbook must be template BCP-1 and name, in its control row, the case it is uploaded from. Every row is validated with the same column rules in the application and in `api.stage_bcp_import`, which also requires the importer to see the case (`NOT_FOUND` otherwise). The preparer and every offline recorder it names must be ACTIVE users who see the case.
+- Rows are classified NEW, CONFLICT, ALREADY_IMPORTED, UNSUPPORTED or INVALID; nothing is overwritten silently, and every explicit resolution carries a reason and is audited.
+- The preview is a dry run of the real `api.*` commands as the importer, always rolled back. Submission is bound to the importer's own clean preview; rows and resolutions are immutable from then on.
+- A different person approves: `BCP_IMPORT_APPROVE`, sees the case, is neither the importer nor the preparer and recorded no row offline; the approval is bound to the submitted hash. Only the importer applies, in one transaction, through the same commands; any failure aborts the whole import. An import grants nothing the importer could not do online.
+- Provenance (original time, offline recorder, importer, markers) is append-only and readable only by those who can see the object it describes. Notifications carry ids only and go to people who can open the batch.
+- Tests: `tests/security/bcp-import.spec.ts`, `tests/integration/bcp-import-upload.spec.ts`, the reader's unit tests, BCP IDOR probes and the audit walk.

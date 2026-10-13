@@ -1,6 +1,6 @@
 # ADR-024: Grievance proceedings, employee defence and the independence firewall
 
-- **Status:** Proposed (2026-10-12). Linear CDF-193, CDF-194.
+- **Status:** Proposed (2026-10-12). Linear CDF-193, CDF-194. Amended by [ADR-037](ADR-037-employee-notice-kinds.md) (migration 1990): a notice is a RIGHTS, DEFENCE or DECISION notice, and the decision notice starts the grievance window.
 - **Protocol:** §19–§22, §39, §87; owner Q&A Q37, Q45–Q46, Q90–Q96.
 
 ## Decision

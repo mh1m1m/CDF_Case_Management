@@ -422,6 +422,10 @@ export * from "./records";
 // ---- Interviews (EPIC 09, CDF-60) ----------------------------------------------------------------
 export * from "./interviews";
 
+// ---- Export builder (ADR-026, migration 1930) ------------------------------------------------------
+export * from "./exports";
+export * from "./corrective-actions";
+
 /** Decide someone else's declared conflict (UX redesign S1, RC-10). The database refuses self-decision. */
 export const CONFLICT_DECISIONS = ["CONFLICT_CONFIRMED", "CONFLICT_CLEARED"] as const;
 export const decideConflictSchema = z.object({
@@ -430,3 +434,4 @@ export const decideConflictSchema = z.object({
   decision: z.enum(CONFLICT_DECISIONS),
   reason: text(10, 2000),
 });
+export * from "./bcp";

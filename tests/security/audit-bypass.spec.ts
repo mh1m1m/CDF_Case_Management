@@ -87,6 +87,28 @@ const NOT_STATE_CHANGING = new Set([
   "list_retention_reviewers",
 ]);
 
+/** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
+ *  creation (ADR-034): a subject to import and a recorded-only row to skip. */
+function stageWalkWorkbook(s: Scenario, workbookId: string) {
+  return s.tx`
+    with c as (
+      select id, case_number, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at
+      from case_mgmt.case_record where id = ${caseA}
+    )
+    select api.stage_bcp_import(
+      jsonb_build_object('TEMPLATE_VERSION', 'BCP-1', 'WORKBOOK_ID', ${workbookId}::text, 'CASE_ID', c.id::text,
+                         'CASE_NUMBER', c.case_number, 'OFFLINE_FROM', c.at, 'PREPARED_BY', 'lead@example.test'),
+      repeat('a', 64),
+      jsonb_build_array(
+        jsonb_build_object('sheet', '05_SUBJECTS', 'row_number', 3, 'has_formula', false, 'cells',
+          jsonb_build_object('ROW_ID', 'BCP-WS1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'lead@example.test',
+                             'DISPLAY_LABEL', 'Employee Walk (synthetic)', 'SUBJECT_CATEGORY', 'EMPLOYEE')),
+        jsonb_build_object('sheet', '02_CASE_MASTER', 'row_number', 3, 'has_formula', false, 'cells',
+          jsonb_build_object('ROW_ID', 'BCP-WC1', 'ORIGINAL_EVENT_AT', c.at, 'RECORDED_OFFLINE_BY', 'lead@example.test',
+                             'DETAILS', 'Synthetic: noted during the outage.')))) as id
+    from c`;
+}
+
 interface Step {
   fn: string;
   actor: UserKey;
@@ -658,6 +680,44 @@ describe("every state-changing command writes its audit event in the same transa
           return r;
         },
       },
+      // Excused attendance and a raised conflict (migration 2000), between vote items; the concern is dismissed so
+      // the package vote below can open.
+      {
+        fn: "record_excused_absence",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const [expert] = await s.tx<{ id: string }[]>`
+            select id from committee.meeting_participant where meeting_id = ${ids.meeting!} and user_id = ${USERS.lead}`;
+          return s.tx`select api.record_excused_absence(${expert!.id}, 'Synthetic: travelling.')`;
+        },
+      },
+      {
+        fn: "raise_meeting_conflict",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.concern = await one(
+            s,
+            s.tx`select api.raise_meeting_conflict(${ids.memberSeat!}, 'Synthetic: walk concern raised.') as id`,
+          )),
+      },
+      {
+        fn: "decide_meeting_conflict",
+        actor: "committeeChair",
+        run: (s) =>
+          s.tx`select api.decide_meeting_conflict(${ids.concern!}, 'DISMISSED', 'Synthetic: walk concern dismissed.')`,
+      },
+      // A witness invited and excluded (migration 2010).
+      {
+        fn: "exclude_meeting_witness",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const witness = await one(
+            s,
+            s.tx`select api.invite_to_meeting(${ids.meeting!}, 'WITNESS', ${USERS.employeeB}, null, false, ${REASON}) as id`,
+          );
+          return s.tx`select api.exclude_meeting_witness(${witness}, 'Synthetic: walk witness excluded.')`;
+        },
+      },
       // Recommendation package (migration 1900): drafted, voted and adopted in the open meeting, reviewed by Legal,
       // sent to the authority and decided.
       {
@@ -683,8 +743,11 @@ describe("every state-changing command writes its audit event in the same transa
             s,
             s.tx`select api.add_recommendation_item(${ids.pkg!}, 'OTHER', null, null, 'Synthetic: walk recommendation.', null, null) as id`,
           );
-          return s.tx`select api.add_recommendation_item(${ids.pkg!}, 'CORRECTIVE_ACTION', null, null,
-            'Synthetic: walk corrective action.', null, null)`;
+          return (ids.correctiveItem = await one(
+            s,
+            s.tx`select api.add_recommendation_item(${ids.pkg!}, 'CORRECTIVE_ACTION', null, null,
+              'Synthetic: walk corrective action.', null, null) as id`,
+          ));
         },
       },
       {
@@ -759,9 +822,72 @@ describe("every state-changing command writes its audit event in the same transa
       {
         fn: "record_authority_decision",
         actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.decision = await one(
+            s,
+            s.tx`select api.record_authority_decision(${ids.pkg!}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED',
+              now() - interval '1 hour', 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON}) as id`,
+          )),
+      },
+      // Corrective actions (migration 1940): opened from the approved item, run by the case manager, reported by
+      // its owner (financeEmployee, then employeeB; both given IMPLEMENTATION_OWNER before the walk), verified,
+      // reopened and waived.
+      {
+        fn: "set_corrective_action_policy",
+        actor: "grcDirector",
         run: (s) =>
-          s.tx`select api.record_authority_decision(${ids.pkg!}, 'DELEGATED_EXECUTIVE', 'APPROVE_AS_RECOMMENDED',
-            now() - interval '1 hour', 'Delegated executive (synthetic)', 'MEMO-DEMO-WALK', null, ${REASON})`,
+          s.tx`select api.set_corrective_action_policy('GOVERNANCE_REMEDIATION', null, null, null, 'REFERENCE_REQUIRED',
+            now(), 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "open_corrective_action",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.correctiveAction = await one(
+            s,
+            s.tx`select api.open_corrective_action(${ids.correctiveItem!}, 'Synthetic: walk action',
+              'Synthetic: walk corrective action text.', ${USERS.financeEmployee}, current_date + 30) as id`,
+          )),
+      },
+      {
+        fn: "assign_corrective_action_owner",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.assign_corrective_action_owner(${ids.correctiveAction!}, ${USERS.employeeB}, ${REASON})`,
+      },
+      {
+        fn: "change_corrective_action_due_date",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.change_corrective_action_due_date(${ids.correctiveAction!}, current_date + 45, ${REASON})`,
+      },
+      {
+        fn: "record_corrective_action_progress",
+        actor: "employeeB",
+        run: (s) =>
+          s.tx`select api.record_corrective_action_progress(${ids.correctiveAction!}, 50, ${REASON})`,
+      },
+      {
+        fn: "submit_corrective_action_completion",
+        actor: "employeeB",
+        run: (s) =>
+          s.tx`select api.submit_corrective_action_completion(${ids.correctiveAction!}, ${REASON}, 'SOP-DEMO-WALK')`,
+      },
+      {
+        fn: "verify_corrective_action",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.verify_corrective_action(${ids.correctiveAction!}, 'VERIFIED', null)`,
+      },
+      {
+        fn: "reopen_corrective_action",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.reopen_corrective_action(${ids.correctiveAction!}, ${REASON})`,
+      },
+      {
+        fn: "waive_corrective_action",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.waive_corrective_action(${ids.correctiveAction!}, 'MEMO-DEMO-WALK-2', ${REASON})`,
       },
       {
         fn: "close_meeting",
@@ -1255,6 +1381,37 @@ describe("every state-changing command writes its audit event in the same transa
           s.tx`select api.record_defence_response(${ids.notice2!}, 'EMAIL', now(),
             'Synthetic: walk response received by email.', 'EMAIL-DEMO-WALK')`,
       },
+      // Kinds of employee notice (migration 1990): a rights notice to the walk subject; a decision notice of the
+      // walk's authority decision (its corrective action applies to the whole case) to a second subject linked to
+      // the same employee, who grieves it from the portal.
+      {
+        fn: "issue_rights_notice",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.issue_rights_notice(${ids.subject!}, 'Synthetic: walk rights notice.', ${[ids.allegation!]}::uuid[])`,
+      },
+      {
+        fn: "issue_decision_notice",
+        actor: "caseManager",
+        run: async (s) => {
+          ids.subject2 = await one(
+            s,
+            s.tx`select api.add_case_subject(${caseA}, 'Employee Omicron Two (synthetic)', 'EMPLOYEE', null) as id`,
+          );
+          await s.tx`select api.link_subject_portal_account(${ids.subject2}, ${USERS.employee}, ${REASON})`;
+          return (ids.decisionNotice = await one(
+            s,
+            s.tx`select api.issue_decision_notice(${ids.subject2}, ${ids.decision!}, 'Synthetic: walk decision notice.') as id`,
+          ));
+        },
+      },
+      {
+        fn: "file_grievance_on_decision_notice",
+        actor: "employee",
+        run: (s) =>
+          s.tx`select api.file_grievance_on_decision_notice(${ids.decisionNotice!},
+            'Synthetic: walk grievance on the decision notice.')`,
+      },
       {
         fn: "file_grievance",
         actor: "employee",
@@ -1388,6 +1545,154 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.decide_grievance_admissibility(${ids.grievance2!}, 'INADMISSIBLE', null, ${REASON})`;
         },
       },
+      // Export builder (migration 1930): an external email export of case A's summary, approved, generated and
+      // sent; a second draft is cancelled. The walk rule is switched off (NONE) and matches nothing.
+      {
+        fn: "set_export_rule",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.set_export_rule('WALK_RULE', 'ANY', null, 'MINUTES', false, 'NONE', now(), 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "create_export_request",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.exportRequest = await one(
+            s,
+            s.tx`select api.create_export_request(${caseA}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST',
+              'Regulator Alpha (synthetic)', 'Synthetic: the regulator asked for the case summary.') as id`,
+          )),
+      },
+      {
+        fn: "add_export_item",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.add_export_item(${ids.exportRequest!}, 'CASE_SUMMARY', ${caseA})`,
+      },
+      {
+        fn: "add_export_recipient",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.add_export_recipient(${ids.exportRequest!}, 'EXTERNAL', null, 'walk.officer@example.test')`,
+      },
+      {
+        fn: "preview_export",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.exportHash = await one(
+            s,
+            s.tx`select api.preview_export(${ids.exportRequest!}) ->> 'hash' as h`,
+          )),
+      },
+      {
+        fn: "submit_export",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.submit_export(${ids.exportRequest!}, ${ids.exportHash!},
+            (select classification from case_mgmt.case_record where id = ${caseA}))`,
+      },
+      {
+        fn: "decide_export",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.decide_export(${ids.exportRequest!}, 'APPROVE', ${REASON}, ${ids.exportHash!})`,
+      },
+      {
+        fn: "generate_export",
+        actor: "caseManager",
+        run: async (s) => {
+          // Fixture: a second approval when the case's classification rule asks for one.
+          const status = await one(
+            s,
+            s.tx`select status from exchange.export_request where id = ${ids.exportRequest!}`,
+          );
+          if (status === "SUBMITTED") {
+            await s.as("grcDeputy");
+            await s.tx`select api.decide_export(${ids.exportRequest!}, 'APPROVE', ${REASON}, ${ids.exportHash!})`;
+            await s.as("caseManager");
+          }
+          return s.tx`select api.generate_export(${ids.exportRequest!})`;
+        },
+      },
+      {
+        fn: "record_export_sent",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.record_export_sent(${ids.exportRequest!})`,
+      },
+      {
+        fn: "cancel_export",
+        actor: "caseManager",
+        run: async (s) => {
+          const draft = await one(
+            s,
+            s.tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'AUDIT', null, null) as id`,
+          );
+          return s.tx`select api.cancel_export(${draft}, ${REASON})`;
+        },
+      },
+      {
+        fn: "decide_restricted_export",
+        actor: "grcDirector",
+        run: async (s) => {
+          // Fixture: grcDirector, owner and Restricted Case Authority of case 0003, exports its summary internally.
+          const exec = await caseId("0003");
+          const request = await one(
+            s,
+            s.tx`select api.create_export_request(${exec}, 'PDF', 'INTERNAL', 'AUDIT', null, null) as id`,
+          );
+          await s.tx`select api.add_export_item(${request}, 'CASE_SUMMARY', ${exec})`;
+          const hash = await one(s, s.tx`select api.preview_export(${request}) ->> 'hash' as h`);
+          await s.tx`select api.submit_export(${request}, ${hash},
+            (select classification from case_mgmt.case_record where id = ${exec}))`;
+          return s.tx`select api.decide_restricted_export(${request}, 'APPROVE', ${REASON}, ${hash})`;
+        },
+      },
+      // Continuity workbook import (migration 1960, ADR-034): a subject recorded offline and a recorded-only row.
+      {
+        fn: "stage_bcp_import",
+        actor: "caseManager",
+        run: async (s) => (ids.bcpBatch = await one(s, stageWalkWorkbook(s, "BCP-WALK-1"))),
+      },
+      {
+        fn: "resolve_bcp_row",
+        actor: "caseManager",
+        run: async (s) => {
+          const unsupported = await one(
+            s,
+            s.tx`select id from exchange.bcp_import_row where batch_id = ${ids.bcpBatch!} and state = 'UNSUPPORTED'`,
+          );
+          return s.tx`select api.resolve_bcp_row(${unsupported}, 'SKIP', 'Synthetic: entered online after the outage.')`;
+        },
+      },
+      {
+        fn: "preview_bcp_import",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.bcpHash = await one(s, s.tx`select api.preview_bcp_import(${ids.bcpBatch!}) ->> 'hash' as h`)),
+      },
+      {
+        fn: "submit_bcp_import",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.submit_bcp_import(${ids.bcpBatch!}, ${ids.bcpHash!})`,
+      },
+      {
+        fn: "decide_bcp_import",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.decide_bcp_import(${ids.bcpBatch!}, 'APPROVE', ${REASON}, ${ids.bcpHash!})`,
+      },
+      {
+        fn: "apply_bcp_import",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.apply_bcp_import(${ids.bcpBatch!}, ${ids.bcpHash!})`,
+      },
+      {
+        fn: "cancel_bcp_import",
+        actor: "caseManager",
+        run: async (s) => {
+          const batch = await one(s, stageWalkWorkbook(s, "BCP-WALK-2"));
+          return s.tx`select api.cancel_bcp_import(${batch}, ${REASON})`;
+        },
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
@@ -1403,6 +1708,13 @@ describe("every state-changing command writes its audit event in the same transa
                                          access_granted_at, expires_at)
         values (${caseA}, 'LEGAL_HOLD_RELEASE', ${USERS.legalB}, 'LEGAL_REVIEWER', 'Synthetic: lapsed audit walk task.',
                 array['CASE_VIEW_METADATA'], ${USERS.caseManager}, now() - interval '2 days', now() - interval '1 day')`;
+      // Corrective-action owners, and the waiver permission no role holds yet (SOURCE_REQUIRED; rolled back).
+      await s.tx`insert into iam.role_permission (role_code, permission_code)
+                 values ('GRC_DIRECTOR', 'CORRECTIVE_ACTION_WAIVE')`;
+      await s.as("platformAdmin");
+      for (const u of [USERS.financeEmployee, USERS.employeeB]) {
+        await s.tx`select api.grant_role(${u}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner for the walk')`;
+      }
       const missing: string[] = [];
       for (const step of steps) {
         const { events } = await audited(s, step);
@@ -1518,7 +1830,7 @@ describe("audit internals are not reachable", () => {
   it("authenticated can execute exactly the documented helper functions outside api", async () => {
     const rows = await admin<{ fn: string }[]>`
       select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records', 'config', 'decision', 'grievance', 'notify')
+      where n.nspname in ('audit', 'authz', 'workflow', 'case_mgmt', 'committee', 'core', 'evidence', 'forms', 'intake', 'iam', 'protected_identity', 'public_api', 'records', 'config', 'decision', 'grievance', 'notify', 'exchange')
         and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`;
     // Predicates about the caller only (used by RLS policies), the forms engine's pure hashing helpers
@@ -1553,17 +1865,22 @@ describe("audit internals are not reachable", () => {
       "authz.can_review_legal_hold",
       "authz.can_route_retention_review",
       "authz.can_upload_evidence",
+      "authz.can_view_bcp_import",
+      "authz.can_view_bcp_provenance",
       "authz.can_view_case",
       "authz.can_view_case_content",
       "authz.can_view_case_metadata",
       "authz.can_view_committee_proceeding",
       "authz.can_view_committee_registry",
+      "authz.can_view_corrective_action",
       "authz.can_view_evidence",
+      "authz.can_view_export",
       "authz.can_view_form_instance",
       "authz.can_view_grievance",
       "authz.can_view_grievance_assessment",
       "authz.can_view_interview",
       "authz.can_view_meeting",
+      "authz.can_view_meeting_concern",
       "authz.can_view_meeting_deliberation",
       "authz.can_view_meeting_roster",
       "authz.can_view_packet",
@@ -1588,6 +1905,7 @@ describe("audit internals are not reachable", () => {
       "authz.is_evidence_team",
       "authz.is_portal_subject",
       "authz.is_reporter_correspondent",
+      "authz.meeting_concern_decider_seat",
       "authz.task_grants",
       "forms.canonical_json",
       "forms.content_hash",

@@ -33,5 +33,13 @@
 | [ADR-029](ADR-029-status-catalogue-rationalization.md)          | Status catalogue rationalization                                                | Proposed |
 | [ADR-030](ADR-030-guided-workflow-ux.md)                        | Guided workflow UX and committee navigation                                     | Proposed |
 | [ADR-031](ADR-031-purpose-bound-packet-access.md)               | Purpose-bound packet access                                                     | Proposed |
+| [ADR-032](ADR-032-export-approval-binding.md)                   | Export approval rules, preview binding and generation                           | Proposed |
+| [ADR-033](ADR-033-corrective-action-tracking.md)                | Corrective-action tracking                                                      | Proposed |
+| [ADR-034](ADR-034-bcp-import-pipeline.md)                       | Continuity workbook template BCP-1 and the governed import pipeline             | Proposed |
+| [ADR-035](ADR-035-form-status-catalogue-reference-data.md)      | The form and status catalogue as grounded reference data                        | Proposed |
+| [ADR-036](ADR-036-preliminary-closure-outcomes.md)              | Closure outcomes of the preliminary review                                      | Proposed |
+| [ADR-037](ADR-037-employee-notice-kinds.md)                     | Kinds of employee notice; the decision notice starts the grievance window       | Proposed |
+| [ADR-038](ADR-038-meeting-excuses-raised-conflicts.md)          | Excused attendance; conflicts raised by another meeting participant             | Proposed |
+| [ADR-039](ADR-039-meeting-witness-exclusion.md)                 | Excluding a witness from a committee meeting                                    | Proposed |
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.
