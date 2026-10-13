@@ -248,3 +248,38 @@ describe("excluding a witness from a meeting (migration 2010, P11-G4, ADR-039)",
     });
   });
 });
+
+describe("ambiguity register: the subject and legal counsel are never excluded (CDF-205, DEC-F06)", () => {
+  it("T-AMB-041: excluding the subject or a legal-counsel invitee is refused and leaves both in the meeting", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      const [sub] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [p] = await s.tx<
+        { person_id: string }[]
+      >`select person_id from case_mgmt.case_subject where id = ${sub!.id}`;
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await s.as("committeeSecretary");
+      const [subject] = await s.tx<{ id: string }[]>`
+        select api.invite_to_meeting(${f.meeting}, 'SUBJECT', null, ${p!.person_id}, false, ${REASON}) as id`;
+      const [counsel] = await s.tx<{ id: string }[]>`
+        select api.invite_to_meeting(${f.meeting}, 'LEGAL', ${USERS.grcDeputy}, null, false, ${REASON}) as id`;
+      for (const target of [subject!.id, counsel!.id]) {
+        await s.expectError("CDF_INVALID:participant", () => exclude(s, target));
+      }
+      await openWithPresent(s, f, ["committeeChair", "legal", "legalB", "lead"]);
+      await s.as("committeeSecretary");
+      for (const target of [subject!.id, counsel!.id]) {
+        await s.expectError("CDF_INVALID:participant", () => exclude(s, target));
+      }
+      await s.asOwner();
+      expect(await s.tx`select id from committee.witness_exclusion where meeting_id = ${f.meeting}`).toEqual(
+        [],
+      );
+      // The counsel still sees the meeting they were invited to.
+      await s.as("grcDeputy");
+      expect((await sees(s, f.meeting)).meeting).toBe(1);
+    });
+  });
+});
