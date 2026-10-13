@@ -671,3 +671,20 @@ describe("meeting records are append-only", () => {
     });
   });
 });
+
+describe("committee meetings are not recorded (T-AMB-040, DEC-AMB-007, migration 2030)", () => {
+  it("no meeting recording command or field exists; minutes are the record", async () => {
+    await ownerScenario(async (s) => {
+      await s.asOwner();
+      expect(
+        await s.tx`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname in ('api', 'committee') and p.proname ~ 'recording'
+                     and p.proname ~ '(meeting|committee|minutes|vote)'`,
+      ).toEqual([]);
+      expect(
+        await s.tx`select table_name, column_name from information_schema.columns
+                   where table_schema = 'committee' and column_name ~ '(recording|audio|video)'`,
+      ).toEqual([]);
+    });
+  });
+});
