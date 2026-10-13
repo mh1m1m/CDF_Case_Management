@@ -1,7 +1,84 @@
 -- =============================================================================
 -- 2040 Owner Finalization Set, part 2: employee notices, defence, grievances, sanction execution guards, corrective
 -- actions, export, continuity workbook, catalogue governance and referral escalation (CDF-196)
--- HEADER_PLACEHOLDER
+-- Requirements: §18–§22, §29, §39, §45, §53, §68, §87; owner decisions DEC-F08–F10, DEC-F15–F18, DEC-F21–F24,
+-- DEC-F26–F28, DEC-F30–F34 (OWNER_DECISIONS_FINALIZATION.md, 2026-10-13) and DEC-AMB-001, -003, -004, -009, -011
+-- (owner, 2026-10-13); ambiguity rows AMB-009, -031, -109, -110, -137, -139–-141, -143, -145, -148, -149, -151, -152,
+-- -154, -175, -180, -186, -193, -195, -198, -206; contradictions CON-001–-004, -008–-010, -013, -019; ADR-040 (draft)
+--
+-- Migration 2030 recorded the owner's Finalization Set and applied it to committees and decisions. This migration
+-- applies the rest. Where a decision leaves a value SOURCE_REQUIRED, nothing is invented: the value is null, and the
+-- guard that needs it fails closed (CONFLICT:<CODE>) or stays off until it is configured.
+-- This migration adds:
+--   * Notices (items 1, 4, 7). Formal delivery of an employee notice (api.record_notice_delivery, once, ids and dates
+--     audited); a DECISION notice's grievance window starts on the rule set's basis (DELIVERY, ACKNOWLEDGEMENT, or
+--     ISSUE for pre-2030 rule versions), so an undelivered notice has no running window (T-AMB-081). The defence
+--     response period is effective-dated configuration (grievance.defence_response_period, SOURCE_REQUIRED): with
+--     none configured a notice needs an entered due date (T-AMB-090). Due-date changes are append-only events with a
+--     reason (grievance.defence_deadline_change, api.change_defence_deadline; T-AMB-091). A response may be DECLINED
+--     and a late one may give a reason; a suspended period is neither late nor reminded. A failed mandatory notice
+--     email gives the issuer a delivery task (grievance.notice_delivery_task, T-AMB-103), closed by recording the
+--     delivery.
+--   * Grievances (items 2, 3, 5). The rule in force at the contested decision (DEC-F16); the non-admission decider
+--     snapshotted at filing, a Secretary-only non-admission refused under the default rule (T-AMB-087), EXTERNAL
+--     recorded with its reference; one open grievance per contested decision (T-AMB-083); withdrawal; completion with
+--     the configured period only; contested items; one reconsideration on new evidence (DEC-AMB-001, T-AMB-085).
+--   * Sanctions (item 6). Catalogue columns severity_rank, is_irreversible, grievance_execution_rule (seeded
+--     SOURCE_REQUIRED; TERMINATION irreversible) set by api.set_sanction_rule (DEC-AMB-004, -011); the employment flag
+--     and execution statements (DEC-AMB-009, T-AMB-013); an append-only sanction-execution record whose guard and read
+--     (api.sanction_executability) share decision.execution_block: delivery (T-AMB-062), a package tainted by a
+--     conflict (DEC-AMB-003), employment, a grievance outcome, and the suspension rule (T-AMB-063); grievance outcome
+--     substitutions never more severe (T-AMB-088).
+--   * Corrective actions (item 8). Reminder repeat, overdue threshold and escalation steps (DEC-F26, seeded off, every
+--     recipient under the case gate); completion evidence types (DEC-F27); owner kinds USER, ORG_UNIT, SHARED_POOL,
+--     EXTERNAL_PARTY with the accountable owner kept and the case gate for every person acting (DEC-F28).
+--   * Export (item 9). The governed purpose catalogue (DEC-F21; OTHER needs a justification; legacy codes kept,
+--     inactive); approved external domains, empty and SOURCE_REQUIRED (DEC-F22); the RESTRICTED_CASE_AUTHORITY rule
+--     protected (DEC-F23); EXPORT_POLICY_ADMIN apart from approval, the requester never an approver, approver pools and
+--     a configuration-warning read model with ids and counts (DEC-F24, T-AMB-112).
+--   * Continuity workbook (item 10). An authorized-operator registry (DEC-F30, T-AMB-116) and a staging purge that does
+--     nothing until BCP_STAGING_RETENTION_DAYS is configured (DEC-F31).
+--   * Catalogue (item 11). The status-code conflict register (DEC-F32; S099 resolved as LEGAL_HOLD, DEC-F33) and the
+--     five form-retirement criteria (DEC-F34); nothing is retired.
+--   * Referral (item 12). MAX_SECTOR_APPROVAL_DELEGATION_DAYS (SOURCE_REQUIRED, enforced once configured; DEC-F08);
+--     escalation after a repeated rejection to an effective-dated target, owner default the Investigation Committee
+--     Chair, offered in the available actions, resubmission never capped (DEC-F09); NOT_FEASIBLE and
+--     NO_PERSONAL_JURISDICTION INACTIVE in the catalogue and refused for new recommendations (DEC-F10).
+--
+-- Replaced functions (create or replace: same signature, owner and grants; no check weakened), and why:
+--   * grievance.insert_notice, grievance.protect_records, api.my_defence_notices: window basis, delivery, suspension.
+--   * grievance.insert_grievance: the rule at the contested decision (DEC-F16), the non-admission decider (DEC-F17).
+--   * api.file_grievance_on_decision_notice (2 args), api.assess_grievance_admissibility and
+--     api.decide_grievance_admissibility (4 args): delegate to their new overloads.
+--   * api.issue_defence_notice: the configured default period (T-AMB-090).
+--   * api.submit_defence_response (2 args), api.record_defence_response (5 args): delegate (DECLINED, late reason).
+--   * authz.can_view_corrective_action, decision.require_owner: unit and pool members act (DEC-F28).
+--   * api.set_corrective_action_policy (8 args), api.submit_corrective_action_completion (3 args): delegate.
+--   * notify.emit_due_reminders: suspended notices skipped (DEC-F18); the DEC-F26 loops added.
+--   * exchange.authority_approval_required: a restricted case always needs its authority (DEC-F23).
+--   * exchange.eligible_approvers: approver pools (DEC-F24).
+--   * api.set_export_rule: EXPORT_POLICY_ADMIN that approves no export (DEC-F24).
+--   * api.create_export_request: the governed purpose catalogue (DEC-F21).
+--   * exchange.lock_bcp_batch, exchange.protect_bcp: the operator registry (DEC-F30) and the purge (DEC-F31).
+--   * authz.can_view_referral, api.referral_available_actions: the escalation target and ESCALATE (DEC-F09).
+--   * api.object_to_referral_rejection: no objection once an escalation is decided (DEC-F09).
+-- Checks widened by drop and re-add under the same name: defence_notice_decision_window, grievance_check4,
+-- grievance_admissibility_decider_check, admissibility_assessment_decided_by_role_check,
+-- corrective_action_event_event_type_check, export_request_purpose_check (the catalogue FK carries the list),
+-- referral_status_check, referral_event_event_type_check, status_dimension_value_state_check (adds INACTIVE).
+--
+-- TEMPORARY STUB (item 6): decision.package_tainted(uuid) belongs to migration 2035 (DEC-AMB-003), not in this tree.
+-- A clearly marked block creates it only when absent (to_regprocedure); drop the block at merge.
+--
+-- Controls:
+--   * Additive: no table, column, row, catalogue code, status or option code is dropped, renamed or deleted. Every new
+--     table has RLS with SELECT policies only where a reader exists and no write grants; history tables are
+--     append-only, configuration versions only ever gain an end.
+--   * Writes go through api.* SECURITY DEFINER commands (search_path '', schema-qualified) that audit in the same
+--     transaction with ids, codes, dates and counts only; table-level triggers back the rules whatever the path.
+--   * PLATFORM_ADMIN gains EXPORT_POLICY_ADMIN and BCP_CONTINUITY_ADMIN (mirrored in packages/authorization), which
+--     reach no case content; protected identity is untouched; api.change_case_classification is not touched.
+--   * PRODUCTION_SUBSTITUTION_REQUIRED: email delivery, approved external domains (not enforced), staging disposal.
 -- =============================================================================
 
 -- =============================================================================
