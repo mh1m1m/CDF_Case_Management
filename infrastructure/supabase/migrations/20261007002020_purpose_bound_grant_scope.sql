@@ -12,7 +12,10 @@
 --   2. Hand-over (D3): the transition that takes a case out of the triage stages (COMPLETE_TRIAGE, SCREEN_OUT)
 --      ends every TRIAGE grant on it in the same transaction, one CASE_ACCESS_REVOKED event per grant. A
 --      restricted case is handed over only to a receiving owner (an owner or investigator assignment, or a CASE
---      grant); otherwise the transition is refused with CONFLICT:HANDOVER_NO_RECEIVING_OWNER.
+--      grant, held by someone the case gate admits); otherwise the transition is refused with
+--      CONFLICT:HANDOVER_NO_RECEIVING_OWNER. Reassignment already ends the outgoing assignee's assignment in its
+--      own transaction (api.reassign_case); with the TRIAGE residue closed here, nothing else keeps the former
+--      assignee in the case unless an independent relationship exists (AMB-013; test T-AMB-005).
 --   3. New COMMITTEE and REVIEW grants are refused (api.grant_case_access, and a table trigger as defence in
 --      depth). Committee and legal-review work runs through the committee, packet and legal-review commands
 --      (1870-1920; gap map accepted 2026-10-12).
@@ -297,7 +300,9 @@ $$;
 
 -- Formal hand-over: a legitimate receiving owner or team exists and responsibility moves to it. For an ordinary
 -- case the receiving team is case management (CASE_VIEW_ALL); a restricted case needs a named owner or
--- investigator, or a CASE grant. Every TRIAGE grant still in effect ends in the caller's transaction.
+-- investigator, or a CASE grant, held by an active user the case gate admits (clearance, no conflict), so the
+-- case is never handed to someone who cannot open it. Every TRIAGE grant still in effect ends in the caller's
+-- transaction.
 create function case_mgmt.hand_over_from_triage(p_case_id uuid, p_actor uuid, p_transition text)
 returns void
 language plpgsql security definer
@@ -308,10 +313,12 @@ begin
   if exists (select 1 from case_mgmt.case_record c where c.id = p_case_id and c.is_restricted)
      and not exists (select 1 from case_mgmt.case_assignment a
                       where a.case_id = p_case_id and a.status = 'ACTIVE'
-                        and a.assignment_role in ('CASE_OWNER', 'LEAD_INVESTIGATOR', 'INVESTIGATOR'))
+                        and a.assignment_role in ('CASE_OWNER', 'LEAD_INVESTIGATOR', 'INVESTIGATOR')
+                        and authz.user_case_gate(a.user_id, p_case_id))
      and not exists (select 1 from case_mgmt.case_access_grant x
                       where x.case_id = p_case_id and x.scope = 'CASE' and x.status = 'ACTIVE'
-                        and x.effective_from <= now() and (x.effective_to is null or x.effective_to > now())) then
+                        and x.effective_from <= now() and (x.effective_to is null or x.effective_to > now())
+                        and authz.user_case_gate(x.user_id, p_case_id)) then
     perform api._fail('CONFLICT', 'HANDOVER_NO_RECEIVING_OWNER');
   end if;
   for g in select x.id from case_mgmt.case_access_grant x
@@ -793,9 +800,9 @@ as $$
          and (g.scope in ('CASE', 'AUDIT') or (g.scope = 'TRIAGE' and authz.case_before_handover(g.case_id)))
          and authz.can_view_case_metadata(g.case_id)
       union all
-      -- S3 (ADR-016 D2, path (a)): one row per kept form, by its code. The case is named only where the caller may
-      -- see its metadata, as for every other row.
-      select 'FORM_ACCESS', i.form_code,
+      -- S3 (ADR-016 D2, path (a)): one row per kept form, coded '<form code>:<instance no>' so each form is told
+      -- apart. The case is named only where the caller may see its metadata, as for every other row.
+      select 'FORM_ACCESS', i.form_code || ':' || i.instance_no,
              case when authz.can_view_case_metadata(i.case_id) then i.case_id end, fa.created_at, null, 4
         from case_mgmt.form_instance_access fa
         join forms.form_instance i on i.id = fa.instance_id, me
@@ -822,7 +829,8 @@ returns table (
   display_name text,
   display_name_ar text,
   relationship text,       -- ASSIGNMENT, GRANT or FORM_ACCESS (S3: a form kept from a COMMITTEE or REVIEW grant)
-  code text,               -- the assignment role, the grant's purpose (TRIAGE, CASE, COMMITTEE, REVIEW) or the form code
+  code text,               -- the assignment role, the grant's purpose (TRIAGE, CASE, COMMITTEE, REVIEW), or for
+                           -- FORM_ACCESS '<form code>:<instance no>'
   since_at timestamptz,
   until_at timestamptz,    -- a grant's expiry; null when open-ended or for an assignment
   ended_at timestamptz,    -- when an assignment ended or a grant was revoked
@@ -855,7 +863,7 @@ as $$
     union all
     -- Form-scoped access (ADR-016 D2, path (a)) for those who manage the team: active while the form is in flight
     -- on an active case, ended when it is final or withdrawn. Its holder cannot open the case, so has no own row.
-    select fa.user_id, 'FORM_ACCESS', i.form_code, fa.created_at, null,
+    select fa.user_id, 'FORM_ACCESS', i.form_code || ':' || i.instance_no, fa.created_at, null,
            case when fa_live.live then null else i.updated_at end,
            case when fa_live.live then 'ACTIVE' else 'ENDED' end
       from case_mgmt.form_instance_access fa
