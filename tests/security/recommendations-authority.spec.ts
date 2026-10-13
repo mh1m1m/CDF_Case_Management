@@ -2332,6 +2332,11 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           await s.expectError("CDF_CONFLICT:ITEM_NOT_APPROVED", () => openAction(s, f));
           await s.expectError(REMEDIATION, () => closeCase(s));
           await s.asOwner();
+          // Nor does the case leave ACTIVE any other way (AGENT-09, pack 5).
+          await s.expectError(
+            REMEDIATION,
+            (tx) => tx`update case_mgmt.case_record set records_state = 'RETENTION' where id = ${caseB}`,
+          );
           await s.expectError(
             REMEDIATION,
             (tx) =>

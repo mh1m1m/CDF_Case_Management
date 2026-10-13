@@ -206,7 +206,7 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
   - progress on one (status or percentage; the due date, the owner and a waiver are not progress);
   - issuing a decision notice, and delivering one (2040), so no grievance window starts on such a decision;
   - executing a sanction (2040, `decision.execution_block`);
-  - case closure (a trigger on `case_record`).
+  - case closure, and any other move out of ACTIVE (a trigger on `case_record`, so a later path out cannot skip it).
 
   Reminders skip actions of a blocked decision, and `api.corrective_action_view` shows the code to the case team with the progress capabilities off. The package's items carry the flag `CONFLICT_REMEDIATION` while the remediation is open.
 
@@ -383,7 +383,12 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
 - Enabling INTERPRETER, and the acknowledgement wording reference.
 - An approval path for amending a restricted case's snapshot.
 - Whether the Restricted Case Authority names a grievance admissibility decider on a restricted case where no seated decider can view the case. Until a source decides it, nobody is asked (fail closed).
-- After DEC-AMB-013 supersedes a decision (fail closed until decided):
-  - a corrective action opened under it stays frozen, and the case cannot close until it is waived;
-  - a sanction already executed under it stays recorded and is not executed again;
-  - a grievance already filed on it is left as it is.
+- Two DEC-AMB-013 questions for the owner, both fail closed until decided:
+  - A corrective action opened under a superseded decision stays frozen, and the case cannot close until it is waived.
+  - A conflict found after the case has closed cannot enter the remediation path, because the path needs an open meeting on an active case.
+- DEC-AMB-013 coordinator defaults, kept as built:
+  - a sanction already executed under a superseded decision stays recorded and is not executed again;
+  - a grievance already filed on one is left as it is;
+  - both show their decision as SUPERSEDED;
+  - a new grievance filed on a decision while its remediation is open is not refused (it protects the subject and executes nothing);
+  - a package withdrawn or cancelled while it is being remediated leaves the remediation OPEN, so the case cannot close.

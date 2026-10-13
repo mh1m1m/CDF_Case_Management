@@ -3818,8 +3818,9 @@ $$;
 create trigger corrective_action_decision_block before update on decision.corrective_action
   for each row execute function decision.freeze_blocked_action();
 
--- DEC-AMB-003, DEC-AMB-013: a case does not close while one of its packages is under conflict remediation, or decided
--- and tainted.
+-- DEC-AMB-003, DEC-AMB-013: a case does not close, or leave ACTIVE any other way, while one of its packages is under
+-- conflict remediation, or decided and tainted. Any move out of ACTIVE is guarded, so no later path out can skip it
+-- (AGENT-09, pack 5).
 create function decision.guard_case_closure_conflict()
 returns trigger
 language plpgsql
@@ -3837,7 +3838,7 @@ begin
 end;
 $$;
 create trigger case_record_conflict_remediation before update of records_state on case_mgmt.case_record
-  for each row when (old.records_state = 'ACTIVE' and new.records_state = 'CLOSED')
+  for each row when (old.records_state = 'ACTIVE' and new.records_state <> 'ACTIVE')
   execute function decision.guard_case_closure_conflict();
 
 -- DEC-AMB-013: called by api.record_authority_decision when its decision makes a package DECIDED. An open remediation
