@@ -14,4 +14,16 @@
 | [FORM_CATALOGUE_RATIONALIZATION.md](FORM_CATALOGUE_RATIONALIZATION.md) | All 462 legacy forms and controls (sources A, C, D) classified into target modules; gap register P11-G1–G6 (migration 1970). |
 | [LINEAR_RECONCILIATION.md](LINEAR_RECONCILIATION.md)                   | Epics, reconciled existing issues, surfaced conflicts.                                                                       |
 
-Decisions: [ADR-017 … ADR-039](../../architecture/adr/README.md).
+Decisions: [ADR-017 … ADR-040](../../architecture/adr/README.md). Owner decisions: [OWNER_DECISIONS_FINALIZATION.md](OWNER_DECISIONS_FINALIZATION.md) (DEC-F01–F41, DEC-AMB-001–012).
+
+## Glossary: approver roles (CON-021)
+
+The Q&A, the ADRs and the code use different names for the same three roles. They are one role each, never different approvers.
+
+| Role code                    | Q&A name (Q13–Q15)                                    | Also written as                   |
+| ---------------------------- | ----------------------------------------------------- | --------------------------------- |
+| `COMPLIANCE_SECTION_MANAGER` | Compliance Section Manager                            | Compliance Manager                |
+| `GRC_DIRECTOR`               | Governance & Corporate Compliance Department Director | Department Director, GRC Director |
+| `GRC_SECTOR_HEAD`            | Sector Head of Governance and Compliance              | Sector Head, GRC Sector Head      |
+
+English and Arabic labels come from `packages/i18n` (DEC-54).

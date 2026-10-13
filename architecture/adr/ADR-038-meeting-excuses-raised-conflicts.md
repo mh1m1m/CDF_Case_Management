@@ -41,6 +41,7 @@ Q49 asks that the declaration, the decision, the recusal and the resulting restr
    - The raiser and the subject never decide, and every decider must be cleared for the case.
    - When nobody in the meeting holds the role, nobody decides (fail closed). The votes then wait until the subject declares the conflict, or the meeting closes and another is scheduled.
    - Every rule set takes CHAIR. No command sets the decider yet; one comes with the owner's answer.
+   - **Amended by ADR-040 (DEC-F04, CON-006).** The CHAIR rule is a cascade: the chair, then the deputy chair, then the committee's independent conflict authority (`committee.conflict_authority`). Each must be eligible: no conflict, not recorded absent or excused, seat current, cleared for the case, and neither the raiser nor the subject. The deputy no longer waits for the chair to be the raiser or subject. Nobody decides only when no level has anyone eligible (fail closed). `api.revise_committee_rule_set` (2030) sets `conflict_decider` (CHAIR or SECRETARY).
 6. **Who reads what.**
    - Concerns, with their reasons: the raiser, the secretary running the meeting and the decider, each only while cleared for the case (`authz.can_view_meeting_concern`, used by the read policy and by the decision command).
    - Never the subject, not even a subject who runs the meeting as secretary (AGENT-09 S1); the other members do not either. The subject learns the outcome through their conflict status.
@@ -70,7 +71,7 @@ Two tables, a column, constraints, a trigger and functions in PostgreSQL; they m
 ## Open questions (SOURCE_REQUIRED)
 
 1. Who decides a conflict raised by another participant: the chair (the default here), the secretary, or the committee? This is configured per rule set, and no command sets it until the owner answers.
-2. Is the subject of a raised conflict told of it, and heard, before the decision? Here the subject does not read the concern.
+2. ~~Is the subject of a raised conflict told of it, and heard, before the decision?~~ **Answered by DEC-F05 (owner, 2026-10-13):** no automatic entitlement to a separate hearing; the decider may ask for clarification or evidence where necessary; no mandatory hearing workflow unless governing policy requires one. As built, the subject does not read the concern.
 3. On the case itself (gap P11-G7), may someone raise another person's conflict, and does an upheld one suspend that person's case access? This is an access-model decision, so it is not built.
 
 ## Requirements

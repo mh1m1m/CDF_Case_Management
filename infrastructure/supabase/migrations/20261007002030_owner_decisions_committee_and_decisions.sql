@@ -2416,8 +2416,26 @@ $$;
 -- -----------------------------------------------------------------------------
 -- 2.13 Raised conflicts (DEC-F04) and the cancellation notice (DEC-F07)
 -- -----------------------------------------------------------------------------
--- As in 2000, except that the meeting is locked directly: the independent conflict authority decides without seeing
--- the meeting itself. Visibility is the concern's (raiser, secretary running the meeting, decider; never the subject).
+-- The conflict an upheld concern writes names that concern (DEC-AMB-010, AGENT-09 early-look note a), so that reversing
+-- one concern clears only the conflict that rests on it (committee.conflict_counts, 2.14). The pair (concern,
+-- participant) must match. Rows written before 2030 carry no concern and keep counting (fail closed).
+alter table committee.meeting_conflict_concern
+  add constraint meeting_conflict_concern_id_participant unique (id, participant_id);
+alter table committee.meeting_conflict add column concern_id uuid;
+alter table committee.meeting_conflict add constraint meeting_conflict_concern_fk
+  foreign key (concern_id, participant_id) references committee.meeting_conflict_concern (id, participant_id);
+alter table committee.meeting_conflict add constraint meeting_conflict_concern_only_decision
+  check (concern_id is null or source = 'DECISION');
+alter table committee.meeting_conflict add constraint meeting_conflict_decision_names_concern
+  check (source <> 'DECISION' or concern_id is not null) not valid;
+create index meeting_conflict_concern_ref on committee.meeting_conflict (concern_id);
+comment on column committee.meeting_conflict.concern_id is
+  'For source DECISION: the upheld concern this conflict rests on (migration 2030, DEC-AMB-010). Null otherwise, and on '
+  'DECISION rows written before 2030.';
+
+-- As in 2000, except that the meeting is locked directly (the independent conflict authority decides without seeing
+-- the meeting itself) and the conflict an upheld concern writes names that concern. Visibility is the concern's
+-- (raiser, secretary running the meeting, decider; never the subject).
 create or replace function api.decide_meeting_conflict(p_concern_id uuid, p_decision text, p_reason text)
 returns void
 language plpgsql security definer
@@ -2459,8 +2477,8 @@ begin
   if p_decision = 'UPHELD' then
     select * into v_p from committee.meeting_participant mp where mp.id = v_c.participant_id for update;
     if v_p.coi_status <> 'CONFLICT_DECLARED' then
-      insert into committee.meeting_conflict (meeting_id, participant_id, status, declared_by, source, reason)
-      values (v_m.id, v_p.id, 'CONFLICT_DECLARED', v_actor, 'DECISION', v_reason);
+      insert into committee.meeting_conflict (meeting_id, participant_id, status, declared_by, source, reason, concern_id)
+      values (v_m.id, v_p.id, 'CONFLICT_DECLARED', v_actor, 'DECISION', v_reason, v_c.id);
       update committee.meeting_participant
          set coi_status = 'CONFLICT_DECLARED', coi_declared_at = now(),
              attendance = case when attendance <> 'NOT_RECORDED' then 'EXCUSED_CONFLICT' else attendance end
@@ -2524,9 +2542,11 @@ create trigger no_delete before delete on committee.meeting_conflict_reversal
 create trigger no_truncate before truncate on committee.meeting_conflict_reversal
   for each statement execute function committee.reject_mutation();
 
--- Whether a participant's declared conflict still counts for the proceeding: always, unless it came only from an
--- upheld concern that has since been reversed (DEC-AMB-010). A conflict the participant declared themself, or that the
--- secretary recorded for them, always counts.
+-- Whether a participant's declared conflict still counts for the proceeding (DEC-AMB-010). It counts unless every
+-- conflict row behind it is a DECISION row whose own upheld concern has since been reversed. Because each DECISION row
+-- names its concern (2.13), reversing one concern never clears a conflict the participant declared, one the secretary
+-- recorded for them, or one upheld on another concern. A DECISION row without a concern (written before 2030), and a
+-- conflicted status with no row behind it, always count (fail closed).
 create function committee.conflict_counts(p_participant_id uuid)
 returns boolean
 language sql stable
@@ -2535,12 +2555,13 @@ as $$
   select exists (
     select 1 from committee.meeting_participant mp
     where mp.id = p_participant_id and mp.coi_status = 'CONFLICT_DECLARED'
-      and not (exists (select 1 from committee.meeting_conflict_concern c
-                       join committee.meeting_conflict_reversal r on r.concern_id = c.id
-                       where c.participant_id = mp.id and c.status = 'UPHELD')
-               and not exists (select 1 from committee.meeting_conflict mc
-                               where mc.participant_id = mp.id and mc.status = 'CONFLICT_DECLARED'
-                                 and mc.source <> 'DECISION')));
+      and (not exists (select 1 from committee.meeting_conflict mc
+                       where mc.participant_id = mp.id and mc.status = 'CONFLICT_DECLARED')
+           or exists (select 1 from committee.meeting_conflict mc
+                      where mc.participant_id = mp.id and mc.status = 'CONFLICT_DECLARED'
+                        and not (mc.source = 'DECISION'
+                                 and exists (select 1 from committee.meeting_conflict_reversal r
+                                             where r.concern_id = mc.concern_id)))));
 $$;
 
 -- The seat the user reverses an upheld concern as, or null: the first level after the original decider's (SECRETARY,

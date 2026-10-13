@@ -63,6 +63,7 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
    - **Acting chair.** The secretary running the meeting activates the deputy chair when the chair is absent, conflicted, ineligible or vacant.
    - **Casting vote.** It goes to the chair if participating and eligible. Otherwise it goes to the activated acting chair, only when the snapshot grants `acting_chair_casting_vote`. Otherwise nobody casts and a tie stays TIED. The secretary never casts.
    - **Acting secretary.** The alternate secretary is activated by the seated secretary (handover) or by the meeting's chair or acting chair. `authz.can_manage_meeting` is narrowed: an alternate secretary runs a meeting only while recorded as acting for it. Committee-level alternate-secretary work (scheduling, grievances, packages) stays as built.
+   - **Handover.** On a HANDOVER basis the seated secretary keeps managing the meeting alongside the acting alternate; both can run it. This is accepted (AGENT-09 early look, note b): the handover adds a manager and removes none.
 3. **Alternate members (AMB-041/088).**
    - An ALTERNATE_MEMBER seat holder votes in place of a named voting member who is conflicted, ineligible, absent or excused.
    - Quorum counts seats: the replaced member stops counting and cannot be recorded present (`REPLACED_BY_ALTERNATE`).
@@ -77,7 +78,7 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
 5. **Seats and the snapshot (AMB-038, AMB-039).**
    - A member whose seat has ended no longer sees the proceeding, its meetings or its deliberation. They are not copied into later meetings and cannot vote (`SEAT_ENDED`). This closes the backlog note "snapshotted members keep visibility after seat end".
    - A member appointed after the referral joins later meetings only through `api.amend_proceeding_snapshot` (the secretary, with a reason).
-   - On a restricted case the amendment is refused (`AUTHORITY_APPROVAL_REQUIRED`) until an approval path exists (DEC-F19, fail closed).
+   - On a restricted case the amendment is refused (`AUTHORITY_APPROVAL_REQUIRED`) until a Restricted Case Authority approval path exists (DEC-F19, fail closed; AGENT-09 early look, note c, keeps it).
 6. **Quorum and voting (DEC-F01, AMB-043/067/077/081/082/083).**
    - No vote item opens without quorum, on any path (a trigger on `committee.vote_item`).
    - Abstentions count neither way.
@@ -104,6 +105,7 @@ The work is split by number. ADR-040 covers 2030 and 2040 (PR-A). The other numb
     - The reversal is prospective:
       - the member may declare again in later meetings (`PRIOR_CONFLICT_DECLARED` skips a conflict that came only from a reversed determination);
       - `authz.has_meeting_conflict` stops counting that conflict for the proceeding's later work;
+      - the conflict row an upheld concern writes names that concern (`committee.meeting_conflict.concern_id`), so reversing one concern clears only the conflict resting on it; a conflict the member declared, the secretary recorded, or another concern upheld still counts, and so does a decision row written before 2030 (AGENT-09 early look, note a);
       - the meeting in which the conflict was upheld keeps the member conflicted.
     - DEC-F38 for committees is as built: a conflict declared or upheld in one meeting bars a "no conflict" declaration in the proceeding's later meetings.
 11. **No meeting recording (DEC-AMB-007, AMB-068, T-AMB-040).** No recording command, field or provider integration exists. Approved minutes and the structured meeting records are the official record.
