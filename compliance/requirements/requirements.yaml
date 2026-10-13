@@ -241,7 +241,7 @@ requirements:
         "apps/investigation-web/src/app/(shell)/intake/[id]/restricted-case-fields.tsx",
       ]
     tests: [tests/security/restricted-case-authority.spec.ts, tests/e2e/restricted-case.spec.ts]
-    notes: "Ordinary (non-restricted) cases keep the creator's TRIAGE grant until grant scope lands (S3, DEC-02/DEC-03)."
+    notes: "Ordinary (non-restricted) cases end the creator's TRIAGE grant at hand-over since S3 (CDF-UX-011, DEC-03)."
 
   - id: CDF-DATA-001
     title: "Synthetic data only; constraints prevent non-synthetic users and case numbers"
@@ -440,7 +440,41 @@ requirements:
         tests/security/audit-bypass.spec.ts,
         tests/e2e/evidence.spec.ts,
       ]
-    notes: "Packet-linked evidence for review, committee and decision users is S5; until then they get none. Triage keeps the reporter's files (listing only) through its TRIAGE grant until DEC-03 ends that grant at hand-over (S3)."
+    notes: "Packet-linked evidence for review, committee and decision users is S5; until then they get none. Triage lists the reporter's files through its TRIAGE grant only before hand-over (S3, CDF-UX-011)."
+
+  - id: CDF-UX-011
+    title: "A grant opens the case only within its purpose: TRIAGE ends at hand-over, COMMITTEE and REVIEW open no case, legacy grants are reconciled with evidence and never deleted"
+    source:
+      [
+        UX audit 2026-10-10 UX-036,
+        UX-066,
+        UX-112,
+        RC-24; ADR-016 D2,
+        D3; DEC-02,
+        DEC-03; ambiguity register AMB-013,
+      ]
+    external_ids: []
+    linear_issues: [CDF-179]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002020_purpose_bound_grant_scope.sql,
+        authz.has_active_grant,
+        case_mgmt.hand_over_from_triage,
+        case_mgmt.reconcile_grant_scope,
+        "apps/investigation-web/src/app/(shell)/my-work/forms/[instanceId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/page.tsx",
+      ]
+    tests:
+      [
+        tests/security/grant-scope.spec.ts,
+        tests/security/forms-access.spec.ts,
+        tests/e2e/purpose-bound.spec.ts,
+        tests/accessibility/purpose-bound.spec.ts,
+        tests/e2e/forms.spec.ts,
+        tests/e2e/evidence.spec.ts,
+      ]
+    notes: "Hosted DEV reconciliation evidence comes after merge. Decision packets for committee and review users are S5 / Phase 12. DEC-04, DEC-05 (four parts), DEC-19 and DEC-49 stay open with the owner."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
