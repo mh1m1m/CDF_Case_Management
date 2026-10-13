@@ -1,8 +1,9 @@
 // UX redesign S4 (ADR-025, migration 1920) through the real inbox service, gateway and database: the caller's own
-// in-app notifications, the unread count, marking one read, and the notification settings. The fixture seat lies
-// wholly in the past (a unique one-millisecond range), so it notifies without seating anyone today. The SQL-level
-// negatives (only the recipient reads or marks a row; a mandatory notice cannot be muted) live in
-// tests/security/notifications.spec.ts.
+// in-app notifications, the unread count, marking one read, and the notification settings. The service commits, so
+// the fixture notice cannot sit in a rolled-back scenario. Its one write on the owner connection queues the notice
+// with notify.enqueue, the function every notification trigger calls, so the run leaves no committee seat behind
+// (registry counts in tests/security stay exact). Who is notified, and the SQL-level negatives (only the recipient
+// reads or marks a row; a mandatory notice cannot be muted), live in tests/security/notifications.spec.ts.
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInboxService } from "@cdf/application";
@@ -18,21 +19,13 @@ const service = createInboxService({
 const ctxFor = (user: UserKey) => ({ userId: USERS[user], requestId: randomUUID() });
 
 let committeeId: string;
-let seatId: string;
+const fixtureKey = `inbox-test:${randomUUID()}`;
 
 beforeAll(async () => {
   ({ ic: committeeId } = await committeeIds());
-  // The platform administrator appoints the synthetic Committee member to a seat that ended years ago.
-  const [row] = await withUserContext(
-    bff,
-    ctxFor("platformAdmin"),
-    (tx) =>
-      tx<{ id: string }[]>`
-      select api.appoint_committee_member(${committeeId}, ${USERS.committee}, 'MEMBER',
-        clock_timestamp() - interval '5 years', clock_timestamp() - interval '5 years' + interval '1 millisecond',
-        'DEMO-INBOX') as id`,
-  );
-  seatId = row!.id;
+  // A seat notice for the synthetic Committee member, as the membership trigger would queue it.
+  await admin`select notify.enqueue('COMMITTEE_SEAT_ASSIGNED', ${USERS.committee}, ${committeeId}, ${committeeId},
+    ${fixtureKey})`;
 });
 
 afterAll(async () => {
@@ -48,7 +41,7 @@ describe("inbox through the service", () => {
   it("lists the caller's own notice with a template, an id-only link and no content; marking it read counts down", async () => {
     const ctx = ctxFor("committee");
     const [mine] = await admin<{ id: string }[]>`
-      select id from notify.outbox where dedupe_key like ${`seat-assigned:${seatId}:%`} and channel = 'IN_APP'`;
+      select id from notify.outbox where dedupe_key like ${`${fixtureKey}:%`} and channel = 'IN_APP'`;
     const list = await service.list(ctx);
     const notice = list.find((n) => n.id === mine!.id);
     expect(notice).toEqual({
@@ -79,7 +72,7 @@ describe("inbox through the service", () => {
 
   it("another user's notification answers NOT_FOUND, exactly like an id that does not exist, and is recorded", async () => {
     const [mine] = await admin<{ id: string }[]>`
-      select id from notify.outbox where dedupe_key like ${`seat-assigned:${seatId}:%`} and channel = 'IN_APP'`;
+      select id from notify.outbox where dedupe_key like ${`${fixtureKey}:%`} and channel = 'IN_APP'`;
     for (const id of [mine!.id, randomUUID()]) {
       const r = await service.markRead(ctxFor("legalB"), { notificationId: id });
       expect(r.ok === false && "error" in r && r.error.kind).toBe("NOT_FOUND");
