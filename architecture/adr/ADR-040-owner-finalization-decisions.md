@@ -5,7 +5,7 @@
   - the Finalization Set DEC-F01 to DEC-F41 (2026-10-13 02:54 UTC), recorded in `docs/business-architecture/OWNER_DECISIONS_FINALIZATION.md`;
   - the ambiguity decisions DEC-AMB-001 to DEC-AMB-012 (2026-10-13 10:01 UTC), recorded in the same file, section 16;
   - DEC-AMB-013, option A (2026-10-13 14:40 UTC, confirmed final 14:43), recorded in section 16 and applied in section 3 item 10 below;
-  - DEC-AMB-014 and DEC-AMB-015, option A each (2026-10-13 15:48 UTC, one message, final), recorded in section 16 and applied in section 3 items 11 and 12 below; the reopening half of DEC-AMB-015 is migration 2060's (ADR-042);
+  - DEC-AMB-014 and DEC-AMB-015, option A each (2026-10-13 15:48 UTC, one message, final; confirmed closed on the owner side at 17:27), recorded in section 16 and applied in section 3 items 11 and 12 below; the reopening half of DEC-AMB-015 is migration 2060's (ADR-042);
   - the Phase 12 owner pack (DEC-04, 05, 11, 12, 13, 18, 19, 22, 36, 48, 49, 51; 2026-10-13 14:43 UTC), recorded in section 17. PR-A builds none of it: the screens and migrations 2150 (ADR-052) and 2160 (ADR-053) belong to the UX thread. PR-A was checked against DEC-05, DEC-12, DEC-13, DEC-19 and DEC-49 (Consequences).
 - **Protocol:** §12–§14, §18–§22, §29, §65, §68, §87, §88.
 
