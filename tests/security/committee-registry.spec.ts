@@ -104,7 +104,8 @@ describe("registry administration (N13, Q28)", () => {
       await refer(s, ic);
       await s.as("platformAdmin");
       expect((await s.tx`select id from committee.membership`).length).toBe(3);
-      expect((await s.tx`select id from committee.rule_set`).length).toBe(2);
+      // The two seeded rule sets plus the Grievance Committee version of the owner's Finalization Set (2030).
+      expect((await s.tx`select id from committee.rule_set`).length).toBe(3);
       expect(await s.tx`select id from committee.committee_proceeding`).toEqual([]);
       expect(await s.tx`select id from committee.proceeding_member`).toEqual([]);
       expect(await s.tx`select id from case_mgmt.proceeding`).toEqual([]);
