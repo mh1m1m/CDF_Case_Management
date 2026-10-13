@@ -225,6 +225,19 @@ jobs:
             echo "::notice::Seed users: ${added%% *} synthetic users of the seed in Git added to DEV (${added#* })"
           fi
 
+      - name: Synthetic committee seats added to the seed since DEV was seeded (insert only)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
+        run: |
+          # 30_synthetic_committee_seats.sql (migration 2030 section 4) is idempotent and insert-only, unlike the
+          # seed files before it: it adds its demo users and their roles only when missing (the step above has
+          # normally added them), and appoints each demo seat through api.appoint_committee_member only when its
+          # appointment reference is new and nobody holds that seat. Nothing on DEV is updated or deleted; on a DEV
+          # seeded just now it changes nothing. The suites end these seats inside each test's own transaction.
+          psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 --single-transaction \
+            -f infrastructure/supabase/seed/30_synthetic_committee_seats.sql
+          n=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -c "select count(*) from committee.membership where appointment_reference like 'SEED-DEMO-COMMITTEE-%' and ended_at is null")
+          echo "::notice::Demo committee seats on DEV: $n of 7"
+
       - name: Login-role passwords for the test run (stable from secrets, else throwaway)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:

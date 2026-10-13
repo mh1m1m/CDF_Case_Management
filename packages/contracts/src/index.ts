@@ -1352,6 +1352,9 @@ export const NOTIFICATION_TEMPLATES = [
   // Kinds of employee notice (migration 1990, ADR-037)
   "RIGHTS_NOTICE_ISSUED",
   "DECISION_NOTICE_ISSUED",
+  // Meeting conflicts and votes (migration 2030 section 4, DEC-F04, DEC-F01)
+  "MEETING_CONFLICT_DECISION_REQUESTED",
+  "MEETING_VOTE_OPENED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;

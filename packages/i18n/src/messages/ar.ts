@@ -1553,6 +1553,8 @@ export const ar: Messages = {
     BCP_IMPORT_DECIDED: "سُجّل قرار بشأن استيراد مصنف استمرارية الأعمال الذي قدمته.",
     RIGHTS_NOTICE_ISSUED: "يوجد إشعار بحقوقك بانتظارك.",
     DECISION_NOTICE_ISSUED: "يوجد إشعار بقرار بانتظارك، وقد بدأت مهلة تقديم التظلّم.",
+    MEETING_CONFLICT_DECISION_REQUESTED: "تعارض مصالح أُثير في اجتماع بانتظار قرارك.",
+    MEETING_VOTE_OPENED: "تم فتح تصويت في اجتماع تحضره.",
   },
   bcpTemplate: {
     readme: {

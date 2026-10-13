@@ -24,7 +24,7 @@ import {
   placeHold,
   requestDisposition,
 } from "../support/records";
-import { committeeIds } from "../support/committee";
+import { committeeIds, unseatDemoSeats } from "../support/committee";
 import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
 
 interface Targets {
@@ -645,6 +645,17 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     fn: "vote_item_status",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.vote_item_status(${t.voteItem})`,
+  },
+  // Purpose read models (migration 2030 section 4).
+  {
+    fn: "meeting_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.meeting_view(${t.meeting})`,
+  },
+  {
+    fn: "minutes_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.minutes_view(${t.minutes})`,
   },
   {
     fn: "generate_minutes",
@@ -1728,6 +1739,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
 
   it.each(OUTSIDERS)("%s", async (actor) => {
     await scenario(async (s) => {
+      await unseatDemoSeats(s);
       await s.as("platformAdmin");
       const [ic] = await s.tx<{ id: string }[]>`select id from committee.committee where code = 'IC'`;
       for (const [user, seatCode] of [

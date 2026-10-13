@@ -16,6 +16,7 @@ import {
   type UserKey,
 } from "../support/db";
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
+import { unseatDemoSeats } from "../support/committee";
 
 let caseA: string, caseB: string;
 let receivedReport: string, infoReport: string;
@@ -75,6 +76,9 @@ const NOT_STATE_CHANGING = new Set([
   "preliminary_approval_queue",
   // Committee meetings (migration 1890): who has voted, and choices only after close.
   "vote_item_status",
+  // Purpose read models of a meeting and its minutes (migration 2030 section 4): reads, like vote_item_status.
+  "meeting_view",
+  "minutes_view",
   // Employee defence (migration 1910): the subject's own notices.
   "my_defence_notices",
   // S2 read models (migration 1830): a case's history and access roster, read inside an audited case view.
@@ -1943,6 +1947,8 @@ describe("every state-changing command writes its audit event in the same transa
       for (const u of [USERS.financeEmployee, USERS.employeeB]) {
         await s.tx`select api.grant_role(${u}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner for the walk')`;
       }
+      // IC and GC start unseated, as before the demo seats of seed 30 (fixture, outside every step's request id).
+      await unseatDemoSeats(s);
       const missing: string[] = [];
       for (const step of steps) {
         const { events } = await audited(s, step);

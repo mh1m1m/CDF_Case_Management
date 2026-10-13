@@ -9,9 +9,28 @@ export async function committeeIds(): Promise<{ ic: string; gc: string }> {
   return { ic: rows.find((r) => r.code === "IC")!.id, gc: rows.find((r) => r.code === "GC")!.id };
 }
 
-/** Seats the given users on a committee from yesterday, as the platform admin. */
-export async function seat(s: Scenario, committeeId: string, seats: [UserKey, string][]): Promise<void> {
+/** Appointment-reference prefix of the demo seats in infrastructure/supabase/seed/30_synthetic_committee_seats.sql. */
+export const DEMO_SEAT_REFERENCE = "SEED-DEMO-COMMITTEE-";
+
+/**
+ * Ends the seeded demo seats on IC and GC inside the test's own transaction, which rolls back with it, so every test
+ * starts with both committees unseated as before the demo seed. Each seat ends one second after it began, through
+ * api.end_committee_membership as the platform admin, so it overlaps no seat a test appoints. Leaves the platform
+ * admin acting; a no-op once the seats are ended.
+ */
+export async function unseatDemoSeats(s: Scenario): Promise<void> {
   await s.as("platformAdmin");
+  await s.tx`
+    select api.end_committee_membership(m.id, m.effective_from + interval '1 second',
+      'Synthetic: the test starts with the committee unseated.')
+    from committee.membership m
+    where m.appointment_reference like ${DEMO_SEAT_REFERENCE + "%"} and m.ended_at is null
+    order by m.id`;
+}
+
+/** Seats the given users on a committee from yesterday, as the platform admin, after ending the demo seats. */
+export async function seat(s: Scenario, committeeId: string, seats: [UserKey, string][]): Promise<void> {
+  await unseatDemoSeats(s);
   for (const [user, seatCode] of seats) {
     await s.tx`select api.appoint_committee_member(${committeeId}, ${USERS[user]}, ${seatCode}, now() - interval '1 day', null, 'DEMO-APPT')`;
   }
@@ -27,6 +46,7 @@ export const IC_SEATS: [UserKey, string][] = [
 ];
 
 export async function refer(s: Scenario, committeeId: string, caseId: string, by: UserKey = "caseManager") {
+  await unseatDemoSeats(s);
   await s.as(by);
   const [cp] = await s.tx<{ id: string }[]>`
     select api.refer_case_to_committee(${caseId}, ${committeeId}, null, ${REASON}) as id`;

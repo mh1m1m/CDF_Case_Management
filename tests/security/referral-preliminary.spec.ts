@@ -5,6 +5,7 @@
 // sees only what awaits their approval. Nobody outside those paths sees a referral or a recommendation.
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
+import { unseatDemoSeats } from "../support/committee";
 
 const REASON = "Synthetic: referral and preliminary review test.";
 const OPS = "b0000000-0000-4000-8000-000000000001";
@@ -18,6 +19,7 @@ beforeAll(async () => {
 
 /** Seats a chair, a secretary and one voting member on the Investigation Committee, as the platform admin. */
 async function constitute(s: Scenario) {
+  await unseatDemoSeats(s);
   await s.as("platformAdmin");
   for (const [user, seat] of [
     ["committeeChair", "CHAIR"],
@@ -339,6 +341,7 @@ describe("direct referral: the committee secretary's decision (N6)", () => {
   it("acceptance fails whole when the committee is not constituted", async () => {
     await scenario(async (s) => {
       // The secretary alone is seated: no chair, no voting member.
+      await unseatDemoSeats(s);
       await s.as("platformAdmin");
       await s.tx`select api.appoint_committee_member(${ic}, ${USERS.committeeSecretary}, 'SECRETARY', now() - interval '1 day', null, 'DEMO-APPT')`;
       const id = await atSecretary(s);

@@ -12,7 +12,15 @@ import {
   type Scenario,
   type UserKey,
 } from "../support/db";
-import { IC_SEATS, REASON, committeeIds, openWithPresent, scheduleMeeting, seat } from "../support/committee";
+import {
+  DEMO_SEAT_REFERENCE,
+  IC_SEATS,
+  REASON,
+  committeeIds,
+  openWithPresent,
+  scheduleMeeting,
+  seat,
+} from "../support/committee";
 
 let caseB: string, caseR: string, ic: string, gc: string;
 
@@ -323,8 +331,14 @@ const VISIBLE: Record<string, string> = {
 
 async function outbox(s: OwnerScenario) {
   await s.asOwner();
+  // Every row, except the seat notices about the demo seats of seed 30 (their appointment by the seed, their end by
+  // unseatDemoSeats): those seats are never part of a scenario.
   return s.tx<{ recipient_id: string; template_code: string; object_type: string; object_id: string }[]>`
-    select recipient_id, template_code, object_type, object_id from notify.outbox order by created_at`;
+    select o.recipient_id, o.template_code, o.object_type, o.object_id from notify.outbox o
+    where not exists (select 1 from committee.membership m
+                      where m.appointment_reference like ${DEMO_SEAT_REFERENCE + "%"}
+                        and o.dedupe_key like 'seat-%:' || m.id || ':%')
+    order by o.created_at`;
 }
 
 async function expectRecipientsSeeObjects(s: OwnerScenario) {

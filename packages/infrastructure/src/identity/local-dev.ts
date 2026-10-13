@@ -35,6 +35,14 @@ export const LOCAL_DEV_USERS: Readonly<Record<string, string>> = {
   "compliance.mgr@example.test": "a0000000-0000-4000-8000-000000000026",
   "grc.sector.head@example.test": "a0000000-0000-4000-8000-000000000027",
   "employee.chi@example.test": "a0000000-0000-4000-8000-000000000028",
+  // Demo committee seats (seed 30_synthetic_committee_seats.sql); never used by the tests.
+  "ic.chair@example.test": "a0000000-0000-4000-8000-000000000101",
+  "ic.deputy@example.test": "a0000000-0000-4000-8000-000000000102",
+  "ic.secretary@example.test": "a0000000-0000-4000-8000-000000000103",
+  "ic.member.a@example.test": "a0000000-0000-4000-8000-000000000104",
+  "ic.member.b@example.test": "a0000000-0000-4000-8000-000000000105",
+  "gc.chair@example.test": "a0000000-0000-4000-8000-000000000106",
+  "gc.secretary@example.test": "a0000000-0000-4000-8000-000000000107",
 };
 
 export const SESSION_COOKIE = "cdf_session";

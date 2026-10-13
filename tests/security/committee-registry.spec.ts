@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario } from "../support/db";
+import { DEMO_SEAT_REFERENCE, unseatDemoSeats } from "../support/committee";
 
 const REASON = "Synthetic: committee registry test.";
 let caseA: string, caseB: string, ic: string, gc: string;
@@ -18,6 +19,7 @@ beforeAll(async () => {
 
 /** Seats a chair, a secretary and one member on a committee, effective from yesterday, as the platform admin. */
 async function constitute(s: Scenario, committeeId: string, member: keyof typeof USERS = "committee") {
+  await unseatDemoSeats(s);
   await s.as("platformAdmin");
   const appoint = (user: keyof typeof USERS, seat: string, ref: string) =>
     s.tx<{ id: string }[]>`
@@ -103,7 +105,16 @@ describe("registry administration (N13, Q28)", () => {
       await constitute(s, ic);
       await refer(s, ic);
       await s.as("platformAdmin");
-      expect((await s.tx`select id from committee.membership`).length).toBe(3);
+      expect(
+        (
+          await s.tx`select id from committee.membership where appointment_reference not like ${DEMO_SEAT_REFERENCE + "%"}`
+        ).length,
+      ).toBe(3);
+      // The seven demo seats of seed 30, every one ended inside this test's transaction (unseatDemoSeats).
+      expect(
+        await s.tx`select count(*)::int as n, count(*) filter (where ended_at is not null)::int as ended
+                   from committee.membership where appointment_reference like ${DEMO_SEAT_REFERENCE + "%"}`,
+      ).toEqual([{ n: 7, ended: 7 }]);
       // The two seeded rule sets plus the Grievance Committee version of the owner's Finalization Set (2030).
       expect((await s.tx`select id from committee.rule_set`).length).toBe(3);
       expect(await s.tx`select id from committee.committee_proceeding`).toEqual([]);
@@ -198,6 +209,7 @@ describe("registry administration (N13, Q28)", () => {
 describe("committee proceedings and snapshots (Q30, Q45–Q46)", () => {
   it("cannot open on a committee without a chair, a secretary and a voting member", async () => {
     await scenario(async (s) => {
+      await unseatDemoSeats(s);
       await s.as("caseManager");
       await s.expectError(
         "CDF_CONFLICT:COMMITTEE_NOT_CONSTITUTED",

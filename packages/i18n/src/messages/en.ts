@@ -1579,6 +1579,8 @@ export const en = {
     BCP_IMPORT_DECIDED: "A decision was recorded on your continuity workbook import.",
     RIGHTS_NOTICE_ISSUED: "A notice of your rights awaits you.",
     DECISION_NOTICE_ISSUED: "A decision notice awaits you. The period to file a grievance has started.",
+    MEETING_CONFLICT_DECISION_REQUESTED: "A conflict of interest raised in a meeting awaits your decision.",
+    MEETING_VOTE_OPENED: "A vote is open in a meeting you attend.",
   },
   bcpTemplate: {
     readme: {
