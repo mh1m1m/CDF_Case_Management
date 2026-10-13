@@ -13,6 +13,7 @@ import {
   voteOnPackage,
   type PackageFixture,
 } from "../support/decision";
+import { decisionNotice, executeSanction, recordDelivery, setSanctionRule } from "../support/grievance";
 
 let caseA: string, caseB: string, ic: string, gc: string;
 
@@ -610,6 +611,118 @@ describe("AGENT-09 review of 1900 (W1, W2, reviewer eligibility)", () => {
       await s.expectError(
         "CDF_FORBIDDEN",
         (tx) => tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`,
+      );
+    });
+  });
+});
+
+// Migration 2040, DEC-AMB-009 (owner, 2026-10-13): a subject who leaves employment during the case.
+describe("a subject who leaves employment during the case (DEC-AMB-009 (owner, 2026-10-13), AMB-031)", () => {
+  it("T-AMB-013: the case continues to findings and recommendations; the sanction is recorded but not executable; corrective and governance actions stay actionable", async () => {
+    await ownerScenario(async (s) => {
+      const flag = (subject: string, on: string | null) =>
+        s.tx`select api.flag_subject_left_employment(${subject}, ${on}::date, 'HR-DEMO-LEFT-2040') as id`;
+      // The subject leaves before the finding is recorded and the package drafted.
+      const f = await draftPackage(s, ic, caseB, "PACKAGE", async (subject) => {
+        await s.as("investigatorB");
+        await s.expectError("CDF_FORBIDDEN", () => flag(subject, "2026-09-30"));
+        for (const u of ["investigatorA", "platformAdmin"] as const) {
+          await s.as(u);
+          await s.expectError("CDF_NOT_FOUND", () => flag(subject, "2026-09-30"));
+        }
+        await s.as("caseManager");
+        await s.expectError("CDF_INVALID:left_on", () => flag(subject, null));
+        await s.expectError("CDF_INVALID:left_on", () => flag(subject, "2999-01-01"));
+        await flag(subject, "2026-09-30");
+        await s.expectError("CDF_CONFLICT:ALREADY_FLAGGED", () => flag(subject, "2026-09-30"));
+      });
+      // Findings and recommendations continue: the finding is recorded, the sanction is recommended, adopted, reviewed
+      // and decided, next to a governance remediation and a corrective action.
+      await s.as("committeeSecretary");
+      const [gov] = await s.tx<{ id: string }[]>`
+        select api.add_recommendation_item(${f.pkg}, 'GOVERNANCE_REMEDIATION', null, null,
+          'Synthetic: revise the approval procedure.', null, null) as id`;
+      expect(await voteOnPackage(s, f)).toBe("ADOPTED");
+      const { request } = await requestLegalReview(s, f);
+      await s.as("legalB");
+      await s.tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${f.pkg})`;
+      const [d] = await decide(s, f, "CEO", "APPROVE_AS_RECOMMENDED", "MEMO-DEMO-2040-LEFT");
+      await s.asOwner();
+      expect(
+        await s.tx`select (select count(*)::int from case_mgmt.finding where id = ${f.finding}) as findings,
+                          (select committee_result from decision.recommendation_item where id = ${f.sanction}) as result`,
+      ).toEqual([{ findings: 1, result: "APPROVED" }]);
+
+      await s.as("caseManager");
+      await s.tx`select api.link_subject_portal_account(${f.subject}, ${USERS.employee}, ${REASON})`;
+      const n = await decisionNotice(s, f.subject, d!.id);
+      await recordDelivery(s, n);
+      // WARNING is configured to proceed (synthetic rule), so only the employment rule holds it back.
+      await setSanctionRule(s, "WARNING", null, false, "PROCEED");
+      const shown = async () => {
+        await s.as("caseManager");
+        const [r] = await s.tx<{ v: unknown }[]>`select api.sanction_executability(${caseB}) as v`;
+        return r!.v;
+      };
+      const row = (blocked: string | null, executed = false) => [
+        {
+          item_id: f.sanction,
+          subject_id: f.subject,
+          authority_decision_id: d!.id,
+          decided_sanction_code: "WARNING",
+          sanction_code: "WARNING",
+          executed,
+          blocked_by: blocked,
+          executable: !executed && blocked === null,
+        },
+      ];
+      expect(await shown()).toEqual(row("SUBJECT_LEFT_EMPLOYMENT"));
+      await s.expectError("CDF_CONFLICT:SUBJECT_LEFT_EMPLOYMENT", () =>
+        executeSanction(s, f.sanction, f.subject),
+      );
+
+      // Corrective and governance actions stay actionable.
+      await s.as("platformAdmin");
+      await s.tx`select api.grant_role(${USERS.financeEmployee}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner for the test')`;
+      await s.as("caseManager");
+      for (const item of [f.corrective, gov!.id]) {
+        await s.tx`select api.open_corrective_action(${item}, 'Synthetic: strengthen approval controls',
+          'Synthetic: add a second approver to payments.', ${USERS.financeEmployee},
+          (now() at time zone 'Asia/Riyadh')::date + 30)`;
+      }
+
+      // Only a recorded statement that the relationship still permits that sanction type makes it executable.
+      const statement = (subject: string, code: string) =>
+        s.tx`select api.record_employment_execution_statement(${subject}, ${code}, 'HR-DEMO-STATEMENT-2040', ${REASON}) as id`;
+      for (const u of ["investigatorA", "platformAdmin", "employee"] as const) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", () => statement(f.subject, "WARNING"));
+      }
+      await s.as("investigatorB");
+      await s.expectError("CDF_FORBIDDEN", () => statement(f.subject, "WARNING"));
+      await s.as("caseManager");
+      const [tau] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Tau (synthetic)', 'EMPLOYEE', null) as id`;
+      await s.expectError("CDF_CONFLICT:SUBJECT_NOT_FLAGGED", () => statement(tau!.id, "WARNING"));
+      await s.expectError("CDF_INVALID:sanction_code", () => statement(f.subject, "NOPE_CODE"));
+      await statement(f.subject, "TERMINATION");
+      expect(await shown()).toEqual(row("SUBJECT_LEFT_EMPLOYMENT"));
+      await statement(f.subject, "WARNING");
+      await s.expectError("CDF_CONFLICT:ALREADY_RECORDED", () => statement(f.subject, "WARNING"));
+      expect(await shown()).toEqual(row(null));
+      await executeSanction(s, f.sanction, f.subject);
+      expect(await shown()).toEqual(row(null, true));
+      await s.asOwner();
+      const events = await s.tx<{ metadata: Record<string, unknown> }[]>`
+        select metadata from audit.audit_event where action = 'EMPLOYMENT_EXECUTION_STATEMENT_RECORDED'
+        order by metadata ->> 'sanction_code' collate "C"`;
+      expect(events.map((e) => e.metadata.sanction_code)).toEqual(["TERMINATION", "WARNING"]);
+      expect(JSON.stringify(events)).not.toContain(REASON);
+      await s.expectError(
+        "decision.employment_execution_statement is append-only",
+        (tx) => tx`update decision.employment_execution_statement set sanction_code = 'DEMOTION'`,
       );
     });
   });

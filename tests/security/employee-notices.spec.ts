@@ -6,7 +6,7 @@
 // `authenticated`; the owner connection is used only for fixtures (a notice issued in the past) and to probe the
 // table constraints.
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, caseId, ownerScenario, scenario, type Scenario } from "../support/db";
+import { USERS, caseId, ownerScenario, scenario, type OwnerScenario, type Scenario } from "../support/db";
 import { REASON, committeeIds } from "../support/committee";
 import { draftPackage, requestLegalReview, voteOnPackage, type PackageFixture } from "../support/decision";
 
@@ -63,7 +63,7 @@ async function decided(s: Scenario, outcome = "APPROVE_AS_RECOMMENDED"): Promise
 
 /** Fixture: a Grievance Committee rule version whose window starts at ISSUE, in force from a second ago (owner insert,
  *  so a rule change at now() stays possible afterwards). */
-async function issueBasisRule(s: Scenario): Promise<void> {
+async function issueBasisRule(s: OwnerScenario): Promise<void> {
   await s.asOwner();
   await s.tx`
     with cur as (

@@ -365,7 +365,7 @@ $$;
 -- =============================================================================
 -- Items 2, 3 and 5. Grievances: the rule at the contested decision (DEC-F16), the non-admission decider (DEC-F17,
 -- AMB-148, CON-004), scope per decision (AMB-139, CON-010), withdrawal (AMB-140), completion (AMB-141), contested
--- items (AMB-143) and the further-grievance guard (AMB-145, CDF-207)
+-- items (AMB-143) and the further-grievance rule (AMB-145, CDF-207; DEC-AMB-001 (owner, 2026-10-13))
 -- =============================================================================
 alter table grievance.grievance
   add column non_admission_decider text check (non_admission_decider in ('SECRETARY', 'CHAIR', 'COMMITTEE', 'EXTERNAL')),
@@ -389,6 +389,28 @@ alter table grievance.admissibility_assessment add constraint admissibility_asse
   check (decided_by_role in ('SECRETARY', 'CHAIR', 'COMMITTEE', 'EXTERNAL'));
 alter table grievance.admissibility_assessment add constraint admissibility_assessment_external_reference
   check (decided_by_role is distinct from 'EXTERNAL' or decision_reference is not null);
+-- DEC-AMB-001 (owner, 2026-10-13): after a contested decision's grievance is decided, the grievant may file ONE
+-- reconsideration, and only on genuinely new evidence, stated with a description and a reference. No unlimited chain:
+-- a further grievance on the same decision is always refused (RECONSIDERATION_USED). New facts found otherwise go
+-- through reinvestigation, which needs no grievance.
+alter table grievance.grievance
+  add column reconsideration_of       uuid references grievance.grievance (id),
+  add column new_evidence_description text check (length(new_evidence_description) between 10 and 4000),
+  add column new_evidence_reference   text check (length(new_evidence_reference) between 3 and 300);
+create unique index grievance_reconsideration_of on grievance.grievance (reconsideration_of);
+alter table grievance.grievance add constraint grievance_reconsideration_evidence check (
+  (reconsideration_of is null) = (new_evidence_description is null)
+  and (reconsideration_of is null) = (new_evidence_reference is null));
+comment on column grievance.grievance.reconsideration_of is
+  'The decided grievance this one reconsiders on new evidence (DEC-AMB-001 (owner, 2026-10-13)). One per contested '
+  'decision; the new evidence is stated in new_evidence_description and new_evidence_reference.';
+-- The admissibility of a reconsideration confirms that its evidence is new; without that confirmation it is not
+-- admitted (fail closed). Null on every other grievance.
+alter table grievance.admissibility_assessment add column new_evidence_confirmed boolean;
+comment on column grievance.admissibility_assessment.new_evidence_confirmed is
+  'On a reconsideration (DEC-AMB-001 (owner, 2026-10-13)): whether the assessor confirms the evidence is genuinely new. '
+  'An ADMISSIBLE assessment or decision of a reconsideration needs true; null on other grievances.';
+
 -- Widened under the same name: a grievance withdrawn after admission keeps its committee proceeding.
 alter table grievance.grievance drop constraint grievance_check4;
 alter table grievance.grievance add constraint grievance_check4 check (
@@ -449,30 +471,62 @@ begin
 end;
 $$;
 
--- Scope guards on every grievance of a subject, whatever path files it (AMB-139, AMB-145): one open grievance per
--- subject per contested decision; none on a decision whose grievance is decided (fail-safe until DEC-AMB-001). An
--- unknown decision on either side matches (fail-safe); a decided one then matches on the contested decision date.
+-- Scope guards on every grievance, whatever path files it (AMB-139, AMB-145, CDF-207; DEC-AMB-001 (owner,
+-- 2026-10-13)). A reconsideration names a decided grievance that is not itself a reconsideration, on the same case,
+-- grievant and contested decision, and is the only one of it. For a known subject: any grievance after a
+-- reconsideration on the same decision is refused with its own code, whatever the reconsideration's status; one open
+-- grievance per contested decision; on a decision whose grievance is decided, only the reconsideration. An unknown
+-- decision on either side matches (fail-safe); a decided one or a reconsideration then matches on the contested
+-- decision date. A grievance recorded with a label only cannot be matched beyond its own reconsideration.
 create function grievance.guard_grievance_scope()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  v_prior grievance.grievance;
 begin
-  if new.grievant_subject_id is not null then
-    if exists (select 1 from grievance.grievance g
-               where g.grievant_subject_id = new.grievant_subject_id
-                 and g.status in ('RECEIVED', 'AWAITING_ADMISSIBILITY_DECISION', 'ADMITTED')
-                 and (g.contested_authority_decision_id is null or new.contested_authority_decision_id is null
-                      or g.contested_authority_decision_id = new.contested_authority_decision_id)) then
-      perform api._fail('CONFLICT', 'GRIEVANCE_OPEN');
+  if new.reconsideration_of is not null then
+    select * into v_prior from grievance.grievance g where g.id = new.reconsideration_of;
+    if v_prior.reconsideration_of is not null
+       or exists (select 1 from grievance.grievance g where g.reconsideration_of = new.reconsideration_of) then
+      perform api._fail('CONFLICT', 'RECONSIDERATION_USED');
     end if;
-    if exists (select 1 from grievance.grievance g
-               where g.grievant_subject_id = new.grievant_subject_id and g.status = 'DECIDED'
-                 and (g.contested_authority_decision_id = new.contested_authority_decision_id
-                      or ((g.contested_authority_decision_id is null or new.contested_authority_decision_id is null)
-                          and g.contested_decision_date = new.contested_decision_date))) then
-      perform api._fail('CONFLICT', 'GRIEVANCE_ALREADY_DECIDED');
+    if v_prior.id is null or v_prior.status <> 'DECIDED' or v_prior.case_id <> new.case_id
+       or v_prior.grievant_subject_id is distinct from new.grievant_subject_id
+       or v_prior.grievant_label is distinct from new.grievant_label
+       or v_prior.contested_authority_decision_id is distinct from new.contested_authority_decision_id
+       or v_prior.contested_decision_date <> new.contested_decision_date then
+      perform api._fail('INVALID', 'reconsideration_of');
     end if;
+    -- The reconsideration is asked after the grievance it reconsiders was decided.
+    if new.original_submission_date < (select o.recorded_at from grievance.grievance_outcome o
+                                       where o.grievance_id = v_prior.id) then
+      perform api._fail('INVALID', 'original_submission_date');
+    end if;
+  end if;
+  if new.grievant_subject_id is null then return new; end if;
+  if exists (select 1 from grievance.grievance g
+             where g.grievant_subject_id = new.grievant_subject_id and g.reconsideration_of is not null
+               and (g.contested_authority_decision_id = new.contested_authority_decision_id
+                    or ((g.contested_authority_decision_id is null or new.contested_authority_decision_id is null)
+                        and g.contested_decision_date = new.contested_decision_date))) then
+    perform api._fail('CONFLICT', 'RECONSIDERATION_USED');
+  end if;
+  if exists (select 1 from grievance.grievance g
+             where g.grievant_subject_id = new.grievant_subject_id
+               and g.status in ('RECEIVED', 'AWAITING_ADMISSIBILITY_DECISION', 'ADMITTED')
+               and (g.contested_authority_decision_id is null or new.contested_authority_decision_id is null
+                    or g.contested_authority_decision_id = new.contested_authority_decision_id)) then
+    perform api._fail('CONFLICT', 'GRIEVANCE_OPEN');
+  end if;
+  if new.reconsideration_of is null
+     and exists (select 1 from grievance.grievance g
+                 where g.grievant_subject_id = new.grievant_subject_id and g.status = 'DECIDED'
+                   and (g.contested_authority_decision_id = new.contested_authority_decision_id
+                        or ((g.contested_authority_decision_id is null or new.contested_authority_decision_id is null)
+                            and g.contested_decision_date = new.contested_decision_date))) then
+    perform api._fail('CONFLICT', 'GRIEVANCE_ALREADY_DECIDED');
   end if;
   return new;
 end;
@@ -532,6 +586,13 @@ begin
                     and not exists (select 1 from decision.authority_item_decision aid
                                     where aid.decision_id = v_d.id and aid.item_id = i.id and aid.outcome = 'REJECTED'))) then
     perform api._fail('INVALID', 'item_ids');
+  end if;
+  -- The scope trigger refuses the same; checked first here so that a used reconsideration keeps its own code.
+  if exists (select 1 from grievance.grievance g
+             where g.grievant_subject_id = v_n.subject_id and g.reconsideration_of is not null
+               and (g.contested_authority_decision_id = v_d.id
+                    or (g.contested_authority_decision_id is null and g.contested_decision_date = v_d.decided_at))) then
+    perform api._fail('CONFLICT', 'RECONSIDERATION_USED');
   end if;
   if exists (select 1 from grievance.grievance g
              where g.grievant_subject_id = v_n.subject_id
@@ -646,11 +707,35 @@ begin
 end;
 $$;
 
--- Replaced from 1910: a proposed non-admission waits for the non-admission decider unless that decider is the
--- secretary (DEC-F17, T-AMB-087); an admission still follows the admissibility decider. Nothing is assessed while a
--- completion request is open. The G3b refusal and every other check are as before.
-create or replace function api.assess_grievance_admissibility(p_grievance_id uuid, p_assessment text,
-                                                              p_proposed_action text, p_reason text)
+-- DEC-AMB-001 (owner, 2026-10-13): the admissibility of a reconsideration confirms that its evidence is new. Guarded on
+-- the row, whatever path writes it: an ADMISSIBLE assessment or decision of a reconsideration without that
+-- confirmation is refused; the confirmation means nothing on another grievance.
+create function grievance.guard_new_evidence_confirmation()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_reconsideration boolean;
+begin
+  select g.reconsideration_of is not null into v_reconsideration from grievance.grievance g where g.id = new.grievance_id;
+  if not coalesce(v_reconsideration, false) then
+    if new.new_evidence_confirmed is not null then perform api._fail('INVALID', 'new_evidence_confirmed'); end if;
+  elsif new.assessment = 'ADMISSIBLE' and new.new_evidence_confirmed is distinct from true then
+    perform api._fail('CONFLICT', 'NEW_EVIDENCE_NOT_CONFIRMED');
+  end if;
+  return new;
+end;
+$$;
+create trigger admissibility_new_evidence before insert on grievance.admissibility_assessment
+  for each row execute function grievance.guard_new_evidence_confirmation();
+
+-- The admissibility assessment with the reconsideration's new-evidence confirmation (DEC-AMB-001 (owner, 2026-10-13)).
+-- A proposed non-admission waits for the non-admission decider unless that decider is the secretary (DEC-F17,
+-- T-AMB-087); an admission still follows the admissibility decider. Nothing is assessed while a completion request is
+-- open. The G3b refusal and every other check are as in 1910.
+create function api.assess_grievance_admissibility(p_grievance_id uuid, p_assessment text, p_proposed_action text,
+                                                   p_reason text, p_new_evidence_confirmed boolean)
 returns text
 language plpgsql security definer
 set search_path = ''
@@ -676,13 +761,15 @@ begin
   v_decider := case when p_assessment = 'INADMISSIBLE' then coalesce(v_g.non_admission_decider, v_g.admissibility_decider)
                     else v_g.admissibility_decider end;
   insert into grievance.admissibility_assessment (grievance_id, stage, assessment, proposed_action, decided_by_role,
-                                                  reason, recorded_by)
+                                                  reason, recorded_by, new_evidence_confirmed)
   values (v_g.id, case when v_decider = 'SECRETARY' then 'DECISION' else 'SECRETARY_ASSESSMENT' end,
           p_assessment, case when p_proposed_action is not null then api._require_text(p_proposed_action, 'proposed_action', 5, 4000) end,
           case when v_decider = 'SECRETARY' then 'SECRETARY' end,
-          api._require_text(p_reason, 'reason', 5, 2000), v_actor);
+          api._require_text(p_reason, 'reason', 5, 2000), v_actor, p_new_evidence_confirmed);
   perform audit.record_event('GRIEVANCE_ADMISSIBILITY_ASSESSED', 'BUSINESS', 'SUCCESS', v_g.case_id, 'grievance',
-    v_g.id::text, null, jsonb_build_object('assessment', p_assessment, 'decider', v_decider));
+    v_g.id::text, null, jsonb_build_object('assessment', p_assessment, 'decider', v_decider,
+                                           'reconsideration', v_g.reconsideration_of is not null,
+                                           'new_evidence_confirmed', p_new_evidence_confirmed));
   if v_decider = 'SECRETARY' then
     return grievance.apply_admissibility(v_g, p_assessment, v_actor);
   end if;
@@ -691,13 +778,28 @@ begin
   return 'AWAITING_ADMISSIBILITY_DECISION';
 end;
 $$;
+grant execute on function api.assess_grievance_admissibility(uuid, text, text, text, boolean) to authenticated;
 
--- Replaced from 1910: the decider is the one the secretary's assessment awaits (DEC-F17). The chair (or deputy) decides
--- for CHAIR and COMMITTEE, as before, with every seat, gate and G3 check; an EXTERNAL decision is recorded by a
--- secretary who may handle the grievance (G3b applies) with the external decision's reference; COMMITTEE and EXTERNAL
--- need a reference.
-create or replace function api.decide_grievance_admissibility(p_grievance_id uuid, p_decision text,
-                                                              p_decision_reference text, p_reason text)
+-- Replaced from 1910: delegates to the overload above without a new-evidence confirmation, so a reconsideration is
+-- never admitted through it (DEC-AMB-001 (owner, 2026-10-13)); on every other grievance the behaviour is the overload's
+-- (DEC-F17, completion requests).
+create or replace function api.assess_grievance_admissibility(p_grievance_id uuid, p_assessment text,
+                                                              p_proposed_action text, p_reason text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  return api.assess_grievance_admissibility(p_grievance_id, p_assessment, p_proposed_action, p_reason, null::boolean);
+end;
+$$;
+
+-- The admissibility decision with the reconsideration's new-evidence confirmation (DEC-AMB-001 (owner, 2026-10-13)).
+-- The decider is the one the secretary's assessment awaits (DEC-F17). The chair (or deputy) decides for CHAIR and
+-- COMMITTEE, as in 1910, with every seat, gate and G3 check; an EXTERNAL decision is recorded by a secretary who may
+-- handle the grievance (G3b applies) with the external decision's reference; COMMITTEE and EXTERNAL need a reference.
+create function api.decide_grievance_admissibility(p_grievance_id uuid, p_decision text, p_decision_reference text,
+                                                   p_reason text, p_new_evidence_confirmed boolean)
 returns text
 language plpgsql security definer
 set search_path = ''
@@ -735,13 +837,30 @@ begin
     perform api._fail('INVALID', 'decision_reference');
   end if;
   insert into grievance.admissibility_assessment (grievance_id, stage, assessment, decision_reference, decided_by_role,
-                                                  reason, recorded_by)
+                                                  reason, recorded_by, new_evidence_confirmed)
   values (v_g.id, 'DECISION', p_decision,
           case when p_decision_reference is not null then api._require_text(p_decision_reference, 'decision_reference', 3, 300) end,
-          v_pending, api._require_text(p_reason, 'reason', 5, 2000), v_actor);
+          v_pending, api._require_text(p_reason, 'reason', 5, 2000), v_actor, p_new_evidence_confirmed);
   perform audit.record_event('GRIEVANCE_ADMISSIBILITY_DECIDED', 'BUSINESS', 'SUCCESS', v_g.case_id, 'grievance',
-    v_g.id::text, null, jsonb_build_object('decision', p_decision, 'decider', v_pending));
+    v_g.id::text, null, jsonb_build_object('decision', p_decision, 'decider', v_pending,
+                                           'reconsideration', v_g.reconsideration_of is not null,
+                                           'new_evidence_confirmed', p_new_evidence_confirmed));
   return grievance.apply_admissibility(v_g, p_decision, v_actor);
+end;
+$$;
+grant execute on function api.decide_grievance_admissibility(uuid, text, text, text, boolean) to authenticated;
+
+-- Replaced from 1910: delegates to the overload above without a new-evidence confirmation, so a reconsideration is
+-- never admitted through it (DEC-AMB-001 (owner, 2026-10-13)); on every other grievance the behaviour is the overload's
+-- (DEC-F17 deciders).
+create or replace function api.decide_grievance_admissibility(p_grievance_id uuid, p_decision text,
+                                                              p_decision_reference text, p_reason text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  return api.decide_grievance_admissibility(p_grievance_id, p_decision, p_decision_reference, p_reason, null::boolean);
 end;
 $$;
 
@@ -839,6 +958,113 @@ begin
 end;
 $$;
 grant execute on function api.complete_grievance(uuid, text) to authenticated;
+
+-- DEC-AMB-001 (owner, 2026-10-13): the grievant asks, through the portal, for ONE reconsideration of a decided grievance,
+-- stating the new evidence (a description and a reference). It contests the same decision and items, under the same
+-- rule set and deciders; the scope trigger refuses a second (RECONSIDERATION_USED) and an open one (GRIEVANCE_OPEN).
+-- No reconsideration period exists (none is invented, SOURCE_REQUIRED), so it is not measured against the grievance
+-- window: is_late is false and admissibility judges whether the evidence is genuinely new.
+create function api.file_grievance_reconsideration(p_grievance_id uuid, p_grounds text,
+                                                   p_new_evidence_description text, p_new_evidence_reference text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_g grievance.grievance;
+  v grievance.grievance;
+  v_items int;
+begin
+  select * into v_g from grievance.grievance g where g.id = p_grievance_id;
+  if v_g.id is null or not authz.can_view_grievance(v_g.id) then perform api._fail('NOT_FOUND'); end if;
+  if v_g.grievant_user_id is distinct from v_actor or v_g.grievant_subject_id is null
+     or not authz.is_portal_subject(v_g.grievant_subject_id) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  perform 1 from case_mgmt.case_record c where c.id = v_g.case_id for update;
+  if v_g.reconsideration_of is not null then perform api._fail('CONFLICT', 'RECONSIDERATION_USED'); end if;
+  if v_g.status <> 'DECIDED' then perform api._fail('CONFLICT', 'GRIEVANCE_NOT_DECIDED'); end if;
+  insert into grievance.grievance (case_id, kind, grievant_subject_id, grievant_user_id, channel, original_submission_date,
+                                   contested_decision_date, grounds, rule_set_id, window_days, is_late,
+                                   admissibility_decider, non_admission_decider, recorded_by, decision_notice_id,
+                                   contested_authority_decision_id, reconsideration_of, new_evidence_description,
+                                   new_evidence_reference)
+  values (v_g.case_id, v_g.kind, v_g.grievant_subject_id, v_actor, 'EMPLOYEE_PORTAL', now(), v_g.contested_decision_date,
+          api._require_text(p_grounds, 'grounds', 10, 20000), v_g.rule_set_id, v_g.window_days, false,
+          v_g.admissibility_decider, v_g.non_admission_decider, v_actor, v_g.decision_notice_id,
+          v_g.contested_authority_decision_id, v_g.id,
+          api._require_text(p_new_evidence_description, 'new_evidence_description', 10, 4000),
+          api._require_text(p_new_evidence_reference, 'new_evidence_reference', 3, 300))
+  returning * into v;
+  insert into grievance.contested_item (grievance_id, item_id)
+  select v.id, c.item_id from grievance.contested_item c where c.grievance_id = v_g.id;
+  get diagnostics v_items = row_count;
+  perform audit.record_event('GRIEVANCE_FILED', 'BUSINESS', 'SUCCESS', v.case_id, 'grievance', v.id::text, null,
+    jsonb_build_object('kind', v.kind, 'channel', 'EMPLOYEE_PORTAL', 'is_late', false, 'window_days', v.window_days,
+                       'rule_set_id', v.rule_set_id, 'admissibility_decider', v.admissibility_decider,
+                       'non_admission_decider', v.non_admission_decider, 'reconsideration_of', v_g.id,
+                       'authority_decision_id', v.contested_authority_decision_id, 'contested_items', v_items));
+  return v.id;
+end;
+$$;
+grant execute on function api.file_grievance_reconsideration(uuid, text, text, text) to authenticated;
+
+-- DEC-AMB-001 (owner, 2026-10-13), the Secretary path: the Grievance Committee Secretary who may handle a decided
+-- grievance records its ONE reconsideration received outside the portal, with the channel, the received document and
+-- the new evidence; also for a grievance recorded with a label only. Same rule set, deciders and contested items.
+create function api.record_grievance_reconsideration(p_grievance_id uuid, p_channel text,
+                                                     p_original_submission_date timestamptz, p_grounds text,
+                                                     p_original_document_reference text,
+                                                     p_new_evidence_description text, p_new_evidence_reference text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_g grievance.grievance;
+  v grievance.grievance;
+  v_items int;
+begin
+  v_g := grievance.lock_handled_grievance(p_grievance_id);
+  perform 1 from case_mgmt.case_record c where c.id = v_g.case_id for update;
+  if v_g.reconsideration_of is not null then perform api._fail('CONFLICT', 'RECONSIDERATION_USED'); end if;
+  if v_g.status <> 'DECIDED' then perform api._fail('CONFLICT', 'GRIEVANCE_NOT_DECIDED'); end if;
+  if p_channel is null or p_channel not in ('EMAIL', 'PHYSICAL_SUBMISSION', 'SECRETARY_ENTRY', 'BCP_IMPORT',
+                                            'OTHER_AUTHORIZED_CHANNEL') then
+    perform api._fail('INVALID', 'channel');
+  end if;
+  if p_original_submission_date is null or p_original_submission_date > now() then
+    perform api._fail('INVALID', 'original_submission_date');
+  end if;
+  insert into grievance.grievance (case_id, kind, grievant_subject_id, grievant_user_id, grievant_label, channel,
+                                   original_submission_date, contested_decision_date, grounds,
+                                   original_document_reference, rule_set_id, window_days, is_late,
+                                   admissibility_decider, non_admission_decider, recorded_by, decision_notice_id,
+                                   contested_authority_decision_id, reconsideration_of, new_evidence_description,
+                                   new_evidence_reference)
+  values (v_g.case_id, v_g.kind, v_g.grievant_subject_id, v_g.grievant_user_id, v_g.grievant_label, p_channel,
+          p_original_submission_date, v_g.contested_decision_date, api._require_text(p_grounds, 'grounds', 10, 20000),
+          api._require_text(p_original_document_reference, 'original_document_reference', 3, 300), v_g.rule_set_id,
+          v_g.window_days, false, v_g.admissibility_decider, v_g.non_admission_decider, v_actor, v_g.decision_notice_id,
+          v_g.contested_authority_decision_id, v_g.id,
+          api._require_text(p_new_evidence_description, 'new_evidence_description', 10, 4000),
+          api._require_text(p_new_evidence_reference, 'new_evidence_reference', 3, 300))
+  returning * into v;
+  insert into grievance.contested_item (grievance_id, item_id)
+  select v.id, c.item_id from grievance.contested_item c where c.grievance_id = v_g.id;
+  get diagnostics v_items = row_count;
+  perform audit.record_event('GRIEVANCE_FILED', 'BUSINESS', 'SUCCESS', v.case_id, 'grievance', v.id::text, null,
+    jsonb_build_object('kind', v.kind, 'channel', p_channel, 'is_late', false, 'window_days', v.window_days,
+                       'rule_set_id', v.rule_set_id, 'admissibility_decider', v.admissibility_decider,
+                       'non_admission_decider', v.non_admission_decider, 'reconsideration_of', v_g.id,
+                       'authority_decision_id', v.contested_authority_decision_id, 'contested_items', v_items));
+  return v.id;
+end;
+$$;
+grant execute on function api.record_grievance_reconsideration(uuid, text, timestamptz, text, text, text, text)
+  to authenticated;
 
 -- =============================================================================
 -- Item 4. Defence response period (DEC-F18; AMB-151, AMB-152, AMB-154, CON-019; T-AMB-090, T-AMB-091)
@@ -1112,23 +1338,63 @@ end;
 $$;
 
 -- =============================================================================
--- Item 6. Fail-safe guards on sanctions and their execution (AMB-031, AMB-109, AMB-110, AMB-145, AMB-149; T-AMB-013,
--- T-AMB-062, T-AMB-063, T-AMB-085, T-AMB-088). Placeholders until the owner decides (DEC-AMB-001, -004, -009, -011);
--- no other sanction-catalogue column is added here.
+-- Item 6. Sanctions and their execution: DEC-AMB-004, DEC-AMB-009 and DEC-AMB-011 (owner, 2026-10-13), and the
+-- delivery guard (AMB-031, AMB-109, AMB-110, AMB-149; T-AMB-013, T-AMB-062, T-AMB-063, T-AMB-088). DEC-AMB-001 (the
+-- reconsideration, AMB-145, T-AMB-085) is in the grievance section above.
 -- =============================================================================
+-- DEC-AMB-004 (owner, 2026-10-13), configuration SANCTION_GRIEVANCE_SUSPENSION: the effect of a grievance on executing a
+-- sanction is configured per sanction type. An irreversible (or materially difficult to reverse) sanction stays
+-- suspended during the grievance window and, once a grievance is filed, until it is resolved; a reversible one follows
+-- its configured rule (SUSPEND_UNTIL_RESOLVED or PROCEED). Seeded SOURCE_REQUIRED: no rule is invented; a type with no
+-- rule, or a sanction outside the catalogue, is held as irreversible (fail closed); TERMINATION is marked irreversible
+-- as the fail-safe default. DEC-AMB-011 (owner, 2026-10-13), configuration SANCTION_SEVERITY_RANK: a rank per type,
+-- seeded unranked; null means "not comparable", never "equal".
 alter table decision.sanction_catalogue
-  add column severity_rank int check (severity_rank between 1 and 100),
-  add column is_irreversible boolean not null default false;
+  add column severity_rank            int check (severity_rank between 1 and 100),
+  add column is_irreversible          boolean not null default false,
+  add column grievance_execution_rule text check (grievance_execution_rule in ('SUSPEND_UNTIL_RESOLVED', 'PROCEED')),
+  add column rule_source_status       text not null default 'SOURCE_REQUIRED'
+    check (rule_source_status in ('SOURCE_REQUIRED', 'APPROVED')),
+  add constraint sanction_catalogue_irreversible_suspended
+    check (not is_irreversible or grievance_execution_rule is distinct from 'PROCEED');
 comment on column decision.sanction_catalogue.severity_rank is
-  'Relative severity, higher = more severe (AMB-149, migration 2040). SOURCE_REQUIRED: null until the owner ranks the '
-  'catalogue; a grievance outcome substituting a sanction is refused while either rank is unknown.';
+  'SANCTION_SEVERITY_RANK: relative severity, higher = more severe (DEC-AMB-011 (owner, 2026-10-13), AMB-149, migration '
+  '2040). Null = not comparable (SOURCE_REQUIRED): a grievance outcome cannot change the sanction to or from this type.';
 comment on column decision.sanction_catalogue.is_irreversible is
-  'Fail-safe placeholder (AMB-110, migration 2040): an irreversible sanction is not executed while a grievance window '
-  'or grievance on it is open. TERMINATION is marked; the owner confirms the list (DEC-AMB-004).';
+  'Irreversible or materially difficult to reverse (DEC-AMB-004 (owner, 2026-10-13), AMB-110, migration 2040): never '
+  'executed while a grievance window or grievance on it is open. TERMINATION is marked as the fail-safe default.';
+comment on column decision.sanction_catalogue.grievance_execution_rule is
+  'SANCTION_GRIEVANCE_SUSPENSION: whether a reversible sanction waits for the grievance window and any grievance '
+  '(SUSPEND_UNTIL_RESOLVED) or is executed regardless (PROCEED) (DEC-AMB-004 (owner, 2026-10-13)). Null = '
+  'SOURCE_REQUIRED: held as irreversible, suspended (fail closed).';
+comment on column decision.sanction_catalogue.rule_source_status is
+  'Source status of severity_rank, is_irreversible and grievance_execution_rule (migration 2040).';
 update decision.sanction_catalogue set is_irreversible = true where code = 'TERMINATION';
 
--- AMB-031: a subject who left employment keeps every finding; execution of a sanction on them waits for an explicit
--- authority decision (DEC-AMB-009, SOURCE_REQUIRED).
+-- Every change of those attributes, by a COMMITTEE_ADMIN holder, with its reason (append-only).
+create table decision.sanction_rule_change (
+  id                       uuid primary key default gen_random_uuid(),
+  sanction_code            text not null references decision.sanction_catalogue (code),
+  severity_rank            int check (severity_rank between 1 and 100),
+  is_irreversible          boolean not null,
+  grievance_execution_rule text not null check (grievance_execution_rule in ('SUSPEND_UNTIL_RESOLVED', 'PROCEED')),
+  source_status            text not null check (source_status in ('SOURCE_REQUIRED', 'APPROVED')),
+  reason                   text not null check (length(reason) between 5 and 2000),
+  changed_by               uuid not null references iam.user_profile (id),
+  changed_at               timestamptz not null default now(),
+  check (not is_irreversible or grievance_execution_rule = 'SUSPEND_UNTIL_RESOLVED')
+);
+create index sanction_rule_change_code on decision.sanction_rule_change (sanction_code);
+create index sanction_rule_change_changed_by on decision.sanction_rule_change (changed_by);
+comment on table decision.sanction_rule_change is
+  'Changes of a sanction''s severity rank, irreversibility and grievance execution rule (DEC-AMB-004, DEC-AMB-011 '
+  '(owner, 2026-10-13), migration 2040). Append-only; the reason stays here.';
+
+-- DEC-AMB-009 (owner, 2026-10-13): a subject who leaves employment keeps the investigation going through findings and
+-- recommendations; a sanction may be recorded and decided, but it is not executable (nor shown as executable) where
+-- the employment relationship no longer permits it. Fail closed: not executable, unless a recorded statement says the
+-- relationship still permits executing that sanction type for that subject. There is no authority override.
+-- Governance and corrective actions are not affected.
 create table case_mgmt.subject_employment_event (
   id               uuid primary key default gen_random_uuid(),
   subject_id       uuid not null unique references case_mgmt.case_subject (id),
@@ -1142,55 +1408,186 @@ create table case_mgmt.subject_employment_event (
 create index subject_employment_event_case on case_mgmt.subject_employment_event (case_id);
 create index subject_employment_event_recorded_by on case_mgmt.subject_employment_event (recorded_by);
 comment on table case_mgmt.subject_employment_event is
-  'A subject flagged LEFT_EMPLOYMENT (AMB-031, migration 2040). Findings stay; sanction execution waits for an explicit '
-  'authority decision. Append-only.';
+  'A subject flagged LEFT_EMPLOYMENT (AMB-031; DEC-AMB-009 (owner, 2026-10-13), migration 2040). The investigation, '
+  'findings, recommendations and corrective actions continue; no sanction on the subject is executable without an '
+  'employment execution statement for its type. Append-only.';
 
-create table decision.sanction_execution_authorization (
+create table decision.employment_execution_statement (
   id                        uuid primary key default gen_random_uuid(),
-  item_id                   uuid not null references decision.recommendation_item (id),
   subject_id                uuid not null references case_mgmt.case_subject (id),
   case_id                   uuid not null references case_mgmt.case_record (id),
-  authority_type            text not null references decision.authority_type (code),
+  sanction_code             text not null references decision.sanction_catalogue (code),
   source_document_reference text not null check (length(source_document_reference) between 3 and 300),
   reason                    text not null check (length(reason) between 10 and 2000),
   recorded_by               uuid not null references iam.user_profile (id),
   recorded_at               timestamptz not null default now(),
-  unique (item_id, subject_id)
+  unique (subject_id, sanction_code)
 );
-create index sanction_execution_authorization_subject on decision.sanction_execution_authorization (subject_id);
-create index sanction_execution_authorization_case on decision.sanction_execution_authorization (case_id);
-create index sanction_execution_authorization_authority on decision.sanction_execution_authorization (authority_type);
-create index sanction_execution_authorization_recorded_by on decision.sanction_execution_authorization (recorded_by);
-comment on table decision.sanction_execution_authorization is
-  'An explicit authority decision that a sanction may be executed on a subject who left employment (AMB-031, '
-  'migration 2040). Append-only; the reason stays here.';
+create index employment_execution_statement_case on decision.employment_execution_statement (case_id);
+create index employment_execution_statement_code on decision.employment_execution_statement (sanction_code);
+create index employment_execution_statement_recorded_by on decision.employment_execution_statement (recorded_by);
+comment on table decision.employment_execution_statement is
+  'A recorded statement that the employment relationship of a subject who left employment still permits executing a '
+  'sanction type (DEC-AMB-009 (owner, 2026-10-13), migration 2040). Strictly a statement with its source document; '
+  'not an authority override. Append-only; the reason stays here.';
 
 -- A minimal execution record: one per sanction item and subject, append-only.
 create table decision.sanction_execution (
-  id                    uuid primary key default gen_random_uuid(),
-  item_id               uuid not null references decision.recommendation_item (id),
-  subject_id            uuid not null references case_mgmt.case_subject (id),
-  case_id               uuid not null references case_mgmt.case_record (id),
-  authority_decision_id uuid not null references decision.authority_decision (id),
-  decision_notice_id    uuid references grievance.defence_notice (id),
-  effective_from        timestamptz not null,
-  execution_reference   text not null check (length(execution_reference) between 3 and 300),
-  recorded_by           uuid not null references iam.user_profile (id),
-  recorded_at           timestamptz not null default now(),
+  id                     uuid primary key default gen_random_uuid(),
+  item_id                uuid not null references decision.recommendation_item (id),
+  subject_id             uuid not null references case_mgmt.case_subject (id),
+  case_id                uuid not null references case_mgmt.case_record (id),
+  authority_decision_id  uuid not null references decision.authority_decision (id),
+  decision_notice_id     uuid references grievance.defence_notice (id),
+  executed_sanction_code text references decision.sanction_catalogue (code),
+  effective_from         timestamptz not null,
+  execution_reference    text not null check (length(execution_reference) between 3 and 300),
+  recorded_by            uuid not null references iam.user_profile (id),
+  recorded_at            timestamptz not null default now(),
   unique (item_id, subject_id)
 );
 create index sanction_execution_subject on decision.sanction_execution (subject_id);
 create index sanction_execution_case on decision.sanction_execution (case_id);
 create index sanction_execution_decision on decision.sanction_execution (authority_decision_id);
 create index sanction_execution_notice on decision.sanction_execution (decision_notice_id);
+create index sanction_execution_code on decision.sanction_execution (executed_sanction_code);
 create index sanction_execution_recorded_by on decision.sanction_execution (recorded_by);
 comment on table decision.sanction_execution is
-  'That a decided sanction was executed on a subject, from when (migration 2040). Guarded: never effective before the '
-  'DECISION notice is delivered (AMB-109); never while the subject has left employment without an authority decision '
-  '(AMB-031); an irreversible sanction never while a grievance window or grievance on it is open (AMB-110).';
+  'That a decided sanction was executed on a subject, from when, and which sanction after any grievance substitution '
+  '(migration 2040). Guarded by decision.execution_block: never effective before the DECISION notice is delivered '
+  '(AMB-109); never on a subject who left employment without a statement for the type (DEC-AMB-009); never once a '
+  'grievance cancelled it or returned it for reinvestigation (DEC-AMB-011); a suspended type never while a grievance '
+  'window or grievance on it is open (DEC-AMB-004).';
 
--- Guards, in order: delivery (T-AMB-062), employment (T-AMB-013), irreversibility (T-AMB-063). A sanction outside the
--- catalogue has an unknown irreversibility and is treated as irreversible (fail-safe).
+-- DEC-AMB-011 (owner, 2026-10-13): a grievance outcome never makes a sanction more severe. It upholds, reduces, modifies
+-- to a sanction no more severe, or cancels. A modification substitutes a sanction here, guarded in the database: a
+-- change between types needs both ranks and a substitute no more severe (an unranked type is not comparable and is
+-- refused); within the same type the outcome declares the change REDUCE or NONE, and an INCREASE is refused. The item
+-- carries no structured measure (days, amount), so a within-type reduction is declared, not computed. New facts
+-- against the subject go through reinvestigation (RETURN_FOR_REINVESTIGATION opens a REINVESTIGATION proceeding with
+-- its own findings and recommendations), never through a grievance outcome.
+create table grievance.outcome_substitution (
+  id                       uuid primary key default gen_random_uuid(),
+  grievance_id             uuid not null references grievance.grievance (id),
+  item_id                  uuid not null references decision.recommendation_item (id),
+  original_sanction_code   text references decision.sanction_catalogue (code),
+  substitute_sanction_code text not null references decision.sanction_catalogue (code),
+  original_severity_rank   int,
+  substitute_severity_rank int,
+  within_type_change       text check (within_type_change in ('REDUCE', 'NONE')),
+  recorded_by              uuid not null references iam.user_profile (id),
+  recorded_at              timestamptz not null default now(),
+  unique (grievance_id, item_id),
+  check (substitute_severity_rank <= original_severity_rank),
+  check ((within_type_change is not null) = (substitute_sanction_code is not distinct from original_sanction_code))
+);
+create index outcome_substitution_item on grievance.outcome_substitution (item_id);
+create index outcome_substitution_original on grievance.outcome_substitution (original_sanction_code);
+create index outcome_substitution_substitute on grievance.outcome_substitution (substitute_sanction_code);
+create index outcome_substitution_recorded_by on grievance.outcome_substitution (recorded_by);
+comment on table grievance.outcome_substitution is
+  'A sanction substituted by a MODIFY grievance outcome on a contested item (DEC-AMB-011 (owner, 2026-10-13), AMB-149, '
+  'migration 2040). Never more severe than the sanction in effect: between types both ranks are recorded and compared '
+  '(unranked = not comparable, refused); within a type the change is REDUCE or NONE. Append-only.';
+
+-- The sanction in effect on an item for a subject: the latest grievance substitution, else the decided sanction. A
+-- reconsideration's substitution follows its grievance's.
+create function decision.effective_sanction_code(p_item_id uuid, p_subject_id uuid)
+returns text
+language sql stable
+set search_path = ''
+as $$
+  select coalesce(
+    (select s.substitute_sanction_code from grievance.outcome_substitution s
+     join grievance.grievance g on g.id = s.grievance_id
+     where s.item_id = p_item_id and g.grievant_subject_id = p_subject_id
+     order by (g.reconsideration_of is not null) desc, s.recorded_at desc, s.id desc limit 1),
+    (select i.sanction_code from decision.recommendation_item i where i.id = p_item_id));
+$$;
+
+create function grievance.guard_outcome_substitution()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  select c.severity_rank into new.original_severity_rank
+  from decision.sanction_catalogue c where c.code = new.original_sanction_code;
+  select c.severity_rank into new.substitute_severity_rank
+  from decision.sanction_catalogue c where c.code = new.substitute_sanction_code;
+  if new.substitute_sanction_code = new.original_sanction_code then
+    -- Within the same type no rank is needed: reduced or unchanged; an increase is refused.
+    if new.within_type_change = 'INCREASE' then perform api._fail('CONFLICT', 'SANCTION_MORE_SEVERE'); end if;
+    if new.within_type_change is null or new.within_type_change not in ('REDUCE', 'NONE') then
+      perform api._fail('INVALID', 'within_type_change');
+    end if;
+  else
+    if new.within_type_change is not null then perform api._fail('INVALID', 'within_type_change'); end if;
+    if new.original_severity_rank is null or new.substitute_severity_rank is null then
+      perform api._fail('CONFLICT', 'SANCTION_NOT_COMPARABLE');
+    end if;
+    if new.substitute_severity_rank > new.original_severity_rank then
+      perform api._fail('CONFLICT', 'SANCTION_MORE_SEVERE');
+    end if;
+  end if;
+  return new;
+end;
+$$;
+create trigger outcome_substitution_guard before insert on grievance.outcome_substitution
+  for each row execute function grievance.guard_outcome_substitution();
+
+-- Why a decided sanction may not be executed on a subject now, as a code; null when it may. The one source for the
+-- execution guard and the executability read, in order: delivery (AMB-109, T-AMB-062); employment (DEC-AMB-009,
+-- T-AMB-013); a grievance that cancelled the item or returned it for reinvestigation (DEC-AMB-011); the suspension of
+-- the sanction in effect (DEC-AMB-004, T-AMB-063). A grievance whose decision is unknown matches (fail-safe).
+create function decision.execution_block(p_item_id uuid, p_subject_id uuid, p_authority_decision_id uuid)
+returns text
+language plpgsql stable
+set search_path = ''
+as $$
+declare
+  v_n grievance.defence_notice;
+  v_c decision.sanction_catalogue;
+  v_code text := decision.effective_sanction_code(p_item_id, p_subject_id);
+begin
+  select n.* into v_n from grievance.defence_notice n
+  where n.kind = 'DECISION' and n.subject_id = p_subject_id and n.authority_decision_id = p_authority_decision_id
+    and n.status <> 'WITHDRAWN'
+  order by n.issued_at desc, n.id desc limit 1;
+  if v_n.id is null or v_n.delivered_at is null then return 'DECISION_NOT_DELIVERED'; end if;
+  if exists (select 1 from case_mgmt.subject_employment_event e
+             where e.subject_id = p_subject_id and e.event_type = 'LEFT_EMPLOYMENT')
+     and not exists (select 1 from decision.employment_execution_statement x
+                     where x.subject_id = p_subject_id and x.sanction_code = v_code) then
+    return 'SUBJECT_LEFT_EMPLOYMENT';
+  end if;
+  if exists (select 1 from grievance.grievance g
+             join grievance.grievance_outcome o on o.grievance_id = g.id
+             where g.grievant_subject_id = p_subject_id and g.status = 'DECIDED'
+               and (g.contested_authority_decision_id is null or g.contested_authority_decision_id = p_authority_decision_id)
+               and o.outcomes && array['CANCEL', 'RETURN_FOR_REINVESTIGATION']::text[]
+               and (not exists (select 1 from grievance.contested_item c where c.grievance_id = g.id)
+                    or exists (select 1 from grievance.contested_item c where c.grievance_id = g.id and c.item_id = p_item_id))) then
+    return 'SANCTION_SET_ASIDE_BY_GRIEVANCE';
+  end if;
+  select c.* into v_c from decision.sanction_catalogue c where c.code = v_code;
+  if v_c.code is null or v_c.is_irreversible or v_c.grievance_execution_rule is distinct from 'PROCEED' then
+    if v_n.grievance_window_ends_at is null or now() < v_n.grievance_window_ends_at then
+      return 'GRIEVANCE_WINDOW_OPEN';
+    end if;
+    if exists (select 1 from grievance.grievance g
+               where g.grievant_subject_id = p_subject_id
+                 and g.status in ('RECEIVED', 'AWAITING_ADMISSIBILITY_DECISION', 'ADMITTED')
+                 and (g.contested_authority_decision_id is null
+                      or g.contested_authority_decision_id = p_authority_decision_id)) then
+      return 'GRIEVANCE_OPEN';
+    end if;
+  end if;
+  return null;
+end;
+$$;
+
+-- The guard on every execution row, whatever path writes it.
 create function decision.guard_sanction_execution()
 returns trigger
 language plpgsql
@@ -1198,86 +1595,30 @@ set search_path = ''
 as $$
 declare
   v_n grievance.defence_notice;
-  v_code text;
-  v_irreversible boolean;
+  v_block text;
 begin
   select n.* into v_n from grievance.defence_notice n
   where n.kind = 'DECISION' and n.subject_id = new.subject_id and n.authority_decision_id = new.authority_decision_id
-    and n.status <> 'WITHDRAWN';
+    and n.status <> 'WITHDRAWN'
+  order by n.issued_at desc, n.id desc limit 1;
   if v_n.id is null or v_n.delivered_at is null then perform api._fail('CONFLICT', 'DECISION_NOT_DELIVERED'); end if;
   if new.effective_from < v_n.delivered_at then perform api._fail('CONFLICT', 'EFFECTIVE_BEFORE_DELIVERY'); end if;
+  v_block := decision.execution_block(new.item_id, new.subject_id, new.authority_decision_id);
+  if v_block is not null then perform api._fail('CONFLICT', v_block); end if;
   new.decision_notice_id := v_n.id;
-  if exists (select 1 from case_mgmt.subject_employment_event e
-             where e.subject_id = new.subject_id and e.event_type = 'LEFT_EMPLOYMENT')
-     and not exists (select 1 from decision.sanction_execution_authorization a
-                     where a.item_id = new.item_id and a.subject_id = new.subject_id) then
-    perform api._fail('CONFLICT', 'SUBJECT_LEFT_EMPLOYMENT');
-  end if;
-  select i.sanction_code into v_code from decision.recommendation_item i where i.id = new.item_id;
-  select coalesce((select c.is_irreversible from decision.sanction_catalogue c where c.code = v_code), true)
-    into v_irreversible;
-  if v_irreversible then
-    if v_n.grievance_window_ends_at is null or now() < v_n.grievance_window_ends_at then
-      perform api._fail('CONFLICT', 'GRIEVANCE_WINDOW_OPEN');
-    end if;
-    if exists (select 1 from grievance.grievance g
-               where g.grievant_subject_id = new.subject_id
-                 and g.status in ('RECEIVED', 'AWAITING_ADMISSIBILITY_DECISION', 'ADMITTED')
-                 and (g.contested_authority_decision_id is null
-                      or g.contested_authority_decision_id = new.authority_decision_id)) then
-      perform api._fail('CONFLICT', 'GRIEVANCE_OPEN');
-    end if;
-  end if;
+  new.executed_sanction_code := decision.effective_sanction_code(new.item_id, new.subject_id);
   return new;
 end;
 $$;
 create trigger sanction_execution_guard before insert on decision.sanction_execution
   for each row execute function decision.guard_sanction_execution();
 
--- AMB-149: a grievance outcome that modifies a sanction never substitutes a more severe one; with either rank unknown
--- it is refused (T-AMB-088).
-create table grievance.outcome_substitution (
-  id                       uuid primary key default gen_random_uuid(),
-  grievance_id             uuid not null references grievance.grievance (id),
-  item_id                  uuid not null references decision.recommendation_item (id),
-  original_sanction_code   text references decision.sanction_catalogue (code),
-  substitute_sanction_code text not null references decision.sanction_catalogue (code),
-  recorded_by              uuid not null references iam.user_profile (id),
-  recorded_at              timestamptz not null default now(),
-  unique (grievance_id, item_id)
-);
-create index outcome_substitution_item on grievance.outcome_substitution (item_id);
-create index outcome_substitution_original on grievance.outcome_substitution (original_sanction_code);
-create index outcome_substitution_substitute on grievance.outcome_substitution (substitute_sanction_code);
-create index outcome_substitution_recorded_by on grievance.outcome_substitution (recorded_by);
-comment on table grievance.outcome_substitution is
-  'A sanction substituted by a MODIFY grievance outcome on a contested item (AMB-149, migration 2040). Never more '
-  'severe; refused while either severity rank is unknown. Append-only.';
-
-create function grievance.guard_outcome_substitution()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-declare
-  v_original int;
-  v_substitute int;
-begin
-  select c.severity_rank into v_original from decision.sanction_catalogue c where c.code = new.original_sanction_code;
-  select c.severity_rank into v_substitute from decision.sanction_catalogue c where c.code = new.substitute_sanction_code;
-  if v_original is null or v_substitute is null then perform api._fail('CONFLICT', 'SANCTION_SEVERITY_UNKNOWN'); end if;
-  if v_substitute > v_original then perform api._fail('CONFLICT', 'SANCTION_MORE_SEVERE'); end if;
-  return new;
-end;
-$$;
-create trigger outcome_substitution_guard before insert on grievance.outcome_substitution
-  for each row execute function grievance.guard_outcome_substitution();
-
 do $$
 declare t text;
 begin
-  foreach t in array array['case_mgmt.subject_employment_event', 'decision.sanction_execution_authorization',
-                           'decision.sanction_execution', 'grievance.outcome_substitution'] loop
+  foreach t in array array['decision.sanction_rule_change', 'case_mgmt.subject_employment_event',
+                           'decision.employment_execution_statement', 'decision.sanction_execution',
+                           'grievance.outcome_substitution'] loop
     execute format('create trigger no_update before update on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_delete before delete on %s for each row execute function committee.reject_mutation()', t);
     execute format('create trigger no_truncate before truncate on %s for each statement execute function committee.reject_mutation()', t);
@@ -1286,14 +1627,67 @@ begin
   end loop;
 end;
 $$;
+create policy sanction_rule_change_read on decision.sanction_rule_change for select to authenticated
+  using (authz.has_permission('COMMITTEE_ADMIN'));
 create policy subject_employment_event_read on case_mgmt.subject_employment_event for select to authenticated
   using (authz.can_view_case(case_id));
-create policy sanction_execution_authorization_read on decision.sanction_execution_authorization for select
+create policy employment_execution_statement_read on decision.employment_execution_statement for select
   to authenticated using (authz.can_view_case(case_id));
 create policy sanction_execution_read on decision.sanction_execution for select to authenticated
   using (authz.can_view_case(case_id));
 create policy outcome_substitution_read on grievance.outcome_substitution for select to authenticated
   using (authz.can_view_grievance(grievance_id));
+
+-- DEC-AMB-004 / DEC-AMB-011 (owner, 2026-10-13): a COMMITTEE_ADMIN holder configures a sanction's severity rank,
+-- irreversibility and grievance execution rule, with a reason and a source status. An irreversible sanction is always
+-- suspended. Configuration only: no case content is reached.
+create function api.set_sanction_rule(p_code text, p_severity_rank int, p_is_irreversible boolean,
+                                      p_grievance_execution_rule text, p_source_status text, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_old decision.sanction_catalogue;
+  v_id uuid;
+begin
+  if not authz.has_permission('COMMITTEE_ADMIN') then perform api._fail('FORBIDDEN'); end if;
+  select * into v_old from decision.sanction_catalogue c where c.code = p_code for update;
+  if v_old.code is null then perform api._fail('INVALID', 'code'); end if;
+  if p_severity_rank is not null and p_severity_rank not between 1 and 100 then
+    perform api._fail('INVALID', 'severity_rank');
+  end if;
+  if p_is_irreversible is null then perform api._fail('INVALID', 'is_irreversible'); end if;
+  if p_grievance_execution_rule is null or p_grievance_execution_rule not in ('SUSPEND_UNTIL_RESOLVED', 'PROCEED') then
+    perform api._fail('INVALID', 'grievance_execution_rule');
+  end if;
+  if p_is_irreversible and p_grievance_execution_rule = 'PROCEED' then
+    perform api._fail('CONFLICT', 'IRREVERSIBLE_SANCTION_SUSPENDED');
+  end if;
+  if p_source_status is null or p_source_status not in ('SOURCE_REQUIRED', 'APPROVED') then
+    perform api._fail('INVALID', 'source_status');
+  end if;
+  insert into decision.sanction_rule_change (sanction_code, severity_rank, is_irreversible, grievance_execution_rule,
+                                             source_status, reason, changed_by)
+  values (v_old.code, p_severity_rank, p_is_irreversible, p_grievance_execution_rule, p_source_status,
+          api._require_text(p_reason, 'reason', 5, 2000), v_actor)
+  returning id into v_id;
+  update decision.sanction_catalogue
+     set severity_rank = p_severity_rank, is_irreversible = p_is_irreversible,
+         grievance_execution_rule = p_grievance_execution_rule, rule_source_status = p_source_status
+   where code = v_old.code;
+  perform audit.record_event('SANCTION_RULE_SET', 'ADMIN', 'SUCCESS', null, 'sanction_catalogue', v_old.code, null,
+    jsonb_build_object('change_id', v_id, 'severity_rank', p_severity_rank,
+                       'previous_severity_rank', v_old.severity_rank, 'is_irreversible', p_is_irreversible,
+                       'previous_is_irreversible', v_old.is_irreversible,
+                       'grievance_execution_rule', p_grievance_execution_rule,
+                       'previous_grievance_execution_rule', v_old.grievance_execution_rule,
+                       'source_status', p_source_status));
+  return v_id;
+end;
+$$;
+grant execute on function api.set_sanction_rule(text, int, boolean, text, text, text) to authenticated;
 
 create function api.flag_subject_left_employment(p_subject_id uuid, p_left_on date, p_source_reference text)
 returns uuid
@@ -1322,6 +1716,47 @@ begin
 end;
 $$;
 grant execute on function api.flag_subject_left_employment(uuid, date, text) to authenticated;
+
+-- DEC-AMB-009 (owner, 2026-10-13): whoever flagged the subject records, per sanction type, that the employment
+-- relationship still permits executing it, with the source document. Nothing else makes such a sanction executable.
+create function api.record_employment_execution_statement(p_subject_id uuid, p_sanction_code text,
+                                                          p_source_document_reference text, p_reason text)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_s case_mgmt.case_subject;
+  v_id uuid;
+begin
+  select * into v_s from case_mgmt.case_subject s where s.id = p_subject_id;
+  if v_s.id is null or not authz.can_view_case(v_s.case_id) then perform api._fail('NOT_FOUND'); end if;
+  if not authz.can_edit_case(v_s.case_id) then perform api._fail('FORBIDDEN'); end if;
+  perform 1 from case_mgmt.case_record c where c.id = v_s.case_id for update;
+  if not exists (select 1 from case_mgmt.subject_employment_event e
+                 where e.subject_id = v_s.id and e.event_type = 'LEFT_EMPLOYMENT') then
+    perform api._fail('CONFLICT', 'SUBJECT_NOT_FLAGGED');
+  end if;
+  if not exists (select 1 from decision.sanction_catalogue c where c.code = p_sanction_code and c.is_active) then
+    perform api._fail('INVALID', 'sanction_code');
+  end if;
+  if exists (select 1 from decision.employment_execution_statement x
+             where x.subject_id = v_s.id and x.sanction_code = p_sanction_code) then
+    perform api._fail('CONFLICT', 'ALREADY_RECORDED');
+  end if;
+  insert into decision.employment_execution_statement (subject_id, case_id, sanction_code, source_document_reference,
+                                                       reason, recorded_by)
+  values (v_s.id, v_s.case_id, p_sanction_code,
+          api._require_text(p_source_document_reference, 'source_document_reference', 3, 300),
+          api._require_text(p_reason, 'reason', 10, 2000), v_actor)
+  returning id into v_id;
+  perform audit.record_event('EMPLOYMENT_EXECUTION_STATEMENT_RECORDED', 'BUSINESS', 'SUCCESS', v_s.case_id,
+    'case_subject', v_s.id::text, null, jsonb_build_object('statement_id', v_id, 'sanction_code', p_sanction_code));
+  return v_id;
+end;
+$$;
+grant execute on function api.record_employment_execution_statement(uuid, text, text, text) to authenticated;
 
 -- The sanction item a subject may be executed under, with its latest effective authority decision.
 create function decision.executable_sanction(p_item_id uuid, p_subject_id uuid)
@@ -1352,49 +1787,7 @@ begin
 end;
 $$;
 
--- The package's secretary records the explicit authority decision for a subject who left employment.
-create function api.authorize_sanction_execution(p_item_id uuid, p_subject_id uuid, p_authority_type text,
-                                                 p_source_document_reference text, p_reason text)
-returns uuid
-language plpgsql security definer
-set search_path = ''
-as $$
-declare
-  v_actor uuid := api._actor();
-  v_i decision.recommendation_item;
-  v_id uuid;
-begin
-  select * into v_i from decision.recommendation_item i where i.id = p_item_id;
-  if v_i.id is null or not authz.can_view_recommendation_package(v_i.package_id) then perform api._fail('NOT_FOUND'); end if;
-  if not authz.can_manage_recommendation_package(v_i.package_id) then perform api._fail('FORBIDDEN'); end if;
-  perform 1 from case_mgmt.case_record c where c.id = v_i.case_id for update;
-  perform decision.executable_sanction(v_i.id, p_subject_id);
-  if not exists (select 1 from case_mgmt.subject_employment_event e
-                 where e.subject_id = p_subject_id and e.event_type = 'LEFT_EMPLOYMENT') then
-    perform api._fail('CONFLICT', 'SUBJECT_NOT_FLAGGED');
-  end if;
-  if exists (select 1 from decision.sanction_execution_authorization a
-             where a.item_id = v_i.id and a.subject_id = p_subject_id) then
-    perform api._fail('CONFLICT', 'ALREADY_AUTHORIZED');
-  end if;
-  if not exists (select 1 from decision.authority_type a where a.code = p_authority_type and a.is_active) then
-    perform api._fail('INVALID', 'authority_type');
-  end if;
-  insert into decision.sanction_execution_authorization (item_id, subject_id, case_id, authority_type,
-                                                         source_document_reference, reason, recorded_by)
-  values (v_i.id, p_subject_id, v_i.case_id, p_authority_type,
-          api._require_text(p_source_document_reference, 'source_document_reference', 3, 300),
-          api._require_text(p_reason, 'reason', 10, 2000), v_actor)
-  returning id into v_id;
-  perform audit.record_event('SANCTION_EXECUTION_AUTHORIZED', 'BUSINESS', 'SUCCESS', v_i.case_id,
-    'recommendation_item', v_i.id::text, null,
-    jsonb_build_object('authorization_id', v_id, 'subject_id', p_subject_id, 'authority_type', p_authority_type));
-  return v_id;
-end;
-$$;
-grant execute on function api.authorize_sanction_execution(uuid, uuid, text, text, text) to authenticated;
-
--- Whoever notifies the decision records its execution; the guards above refuse what the fail-safes forbid.
+-- Whoever notifies the decision records its execution; the guard refuses what the owner rules forbid.
 create function api.record_sanction_execution(p_item_id uuid, p_subject_id uuid, p_effective_from timestamptz,
                                               p_execution_reference text)
 returns uuid
@@ -1405,8 +1798,7 @@ declare
   v_actor uuid := api._actor();
   v_i decision.recommendation_item;
   v_d decision.authority_decision;
-  v_id uuid;
-  v_notice uuid;
+  v decision.sanction_execution;
 begin
   select * into v_i from decision.recommendation_item i where i.id = p_item_id;
   if v_i.id is null or not authz.can_view_case(v_i.case_id) then perform api._fail('NOT_FOUND'); end if;
@@ -1421,18 +1813,54 @@ begin
                                            execution_reference, recorded_by)
   values (v_i.id, p_subject_id, v_i.case_id, v_d.id, p_effective_from,
           api._require_text(p_execution_reference, 'execution_reference', 3, 300), v_actor)
-  returning id, decision_notice_id into v_id, v_notice;
+  returning * into v;
   perform audit.record_event('SANCTION_EXECUTION_RECORDED', 'BUSINESS', 'SUCCESS', v_i.case_id, 'recommendation_item',
-    v_i.id::text, null, jsonb_build_object('execution_id', v_id, 'subject_id', p_subject_id,
-                                           'authority_decision_id', v_d.id, 'decision_notice_id', v_notice,
+    v_i.id::text, null, jsonb_build_object('execution_id', v.id, 'subject_id', p_subject_id,
+                                           'authority_decision_id', v_d.id, 'decision_notice_id', v.decision_notice_id,
+                                           'executed_sanction_code', v.executed_sanction_code,
                                            'effective_from', p_effective_from));
-  return v_id;
+  return v.id;
 end;
 $$;
 grant execute on function api.record_sanction_execution(uuid, uuid, timestamptz, text) to authenticated;
 
--- A MODIFY outcome may name substitute sanctions for contested items (AMB-143, AMB-149). The outcome itself is
--- recorded by the 1910 command, unchanged.
+-- What a case viewer is shown about executing each decided sanction (DEC-AMB-009: never shown as executable where the
+-- guard would refuse it). Read-only; codes and ids only.
+create function api.sanction_executability(p_case_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+begin
+  if p_case_id is null or not authz.can_view_case(p_case_id) then perform api._fail('NOT_FOUND'); end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'item_id', x.item_id, 'subject_id', x.subject_id, 'authority_decision_id', x.decision_id,
+             'decided_sanction_code', x.sanction_code,
+             'sanction_code', decision.effective_sanction_code(x.item_id, x.subject_id),
+             'executed', x.executed, 'blocked_by', case when not x.executed then x.block end,
+             'executable', not x.executed and x.block is null)
+           order by x.item_id, x.subject_id)
+    from (select i.id as item_id, s.subject_id, i.sanction_code, d.id as decision_id,
+                 exists (select 1 from decision.sanction_execution e
+                         where e.item_id = i.id and e.subject_id = s.subject_id) as executed,
+                 decision.execution_block(i.id, s.subject_id, d.id) as block
+          from decision.recommendation_item i
+          join decision.recommendation_item_subject s on s.item_id = i.id
+          cross join lateral (select ad.* from decision.authority_decision ad where ad.package_id = i.package_id
+                              order by ad.package_round desc, ad.recorded_at desc, ad.id desc limit 1) d
+          where i.case_id = p_case_id and i.item_type = 'DISCIPLINARY_SANCTION' and i.status = 'ACTIVE'
+            and i.committee_result = 'APPROVED' and d.outcome not in ('RETURN_TO_COMMITTEE', 'REJECT')
+            and not exists (select 1 from decision.authority_item_decision a
+                            where a.decision_id = d.id and a.item_id = i.id and a.outcome = 'REJECTED')) x),
+    '[]'::jsonb);
+end;
+$$;
+grant execute on function api.sanction_executability(uuid) to authenticated;
+
+-- A MODIFY outcome may name substitute sanctions for contested items (AMB-143; DEC-AMB-011 (owner, 2026-10-13)): each
+-- {item_id, sanction_code[, within_type_change]} is compared with the sanction in effect (after an earlier grievance's
+-- substitution) by the guard above, never more severe. The outcome itself is recorded by the 1910 command, unchanged.
 create function api.record_grievance_outcome(p_grievance_id uuid, p_outcomes text[], p_reinvestigation_path text,
                                              p_vote_item_id uuid, p_summary text, p_substitutions jsonb)
 returns uuid
@@ -1446,7 +1874,7 @@ declare
   v_id uuid;
   e jsonb;
   v_code text;
-  v_sub uuid;
+  v_sub grievance.outcome_substitution;
 begin
   v_g := grievance.lock_handled_grievance(p_grievance_id);
   if p_substitutions is not null then
@@ -1459,7 +1887,8 @@ begin
     end if;
     for e in select x from jsonb_array_elements(p_substitutions) x loop
       if jsonb_typeof(e) <> 'object' or coalesce(e ->> 'item_id', '') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-         or not exists (select 1 from decision.sanction_catalogue c where c.code = e ->> 'sanction_code' and c.is_active) then
+         or not exists (select 1 from decision.sanction_catalogue c where c.code = e ->> 'sanction_code' and c.is_active)
+         or (e ? 'within_type_change' and coalesce(e ->> 'within_type_change', '') not in ('REDUCE', 'NONE', 'INCREASE')) then
         perform api._fail('INVALID', 'substitutions');
       end if;
       if not exists (
@@ -1476,15 +1905,18 @@ begin
   end if;
   v_id := api.record_grievance_outcome(p_grievance_id, p_outcomes, p_reinvestigation_path, p_vote_item_id, p_summary);
   for e in select x from jsonb_array_elements(coalesce(p_substitutions, '[]'::jsonb)) x loop
-    select i.sanction_code into v_code from decision.recommendation_item i where i.id = (e ->> 'item_id')::uuid;
+    v_code := decision.effective_sanction_code((e ->> 'item_id')::uuid, v_g.grievant_subject_id);
     insert into grievance.outcome_substitution (grievance_id, item_id, original_sanction_code, substitute_sanction_code,
-                                                recorded_by)
-    values (v_g.id, (e ->> 'item_id')::uuid, v_code, e ->> 'sanction_code', v_actor)
-    returning id into v_sub;
+                                                within_type_change, recorded_by)
+    values (v_g.id, (e ->> 'item_id')::uuid, v_code, e ->> 'sanction_code', e ->> 'within_type_change', v_actor)
+    returning * into v_sub;
     perform audit.record_event('GRIEVANCE_OUTCOME_SUBSTITUTION', 'BUSINESS', 'SUCCESS', v_g.case_id, 'grievance',
-      v_g.id::text, null, jsonb_build_object('substitution_id', v_sub, 'item_id', e ->> 'item_id',
-                                             'original_sanction_code', v_code, 'substitute_sanction_code',
-                                             e ->> 'sanction_code'));
+      v_g.id::text, null, jsonb_build_object('substitution_id', v_sub.id, 'item_id', v_sub.item_id,
+                                             'original_sanction_code', v_sub.original_sanction_code,
+                                             'substitute_sanction_code', v_sub.substitute_sanction_code,
+                                             'original_severity_rank', v_sub.original_severity_rank,
+                                             'substitute_severity_rank', v_sub.substitute_severity_rank,
+                                             'within_type_change', v_sub.within_type_change));
   end loop;
   return v_id;
 end;

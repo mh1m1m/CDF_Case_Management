@@ -1,16 +1,24 @@
 // Business architecture rebase, migration 2040 (owner Finalization Set, part 2): decision-notice delivery and the
 // grievance window (DEC-F15, DEC-F16), the non-admission decider (DEC-F17), grievance scope, withdrawal, completion and
-// contested items (AMB-139, AMB-140, AMB-141, AMB-143), and the fail-safe guards on sanctions and their execution
-// (AMB-031, AMB-109, AMB-110, AMB-145, AMB-149). Every step runs through the api.* commands as `authenticated`; the
-// owner connection is used only for fixtures (a notice issued in the past, synthetic severity ranks) and to read rows.
+// contested items (AMB-139, AMB-140, AMB-141, AMB-143), and the delivery guard on sanction execution (AMB-109). The
+// owner-decided rules DEC-AMB-001, -004, -011 are tested in grievance-defence.spec.ts and DEC-AMB-009 in
+// recommendations-authority.spec.ts. Every step runs through the api.* commands as `authenticated`; the owner
+// connection is used only for fixtures (a notice issued in the past) and to read rows.
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, caseId, ownerScenario, type OwnerScenario, type Scenario, type UserKey } from "../support/db";
 import { REASON, committeeIds, seat } from "../support/committee";
 import { decidedForSubjects } from "../support/decision";
-
-const TEXT = "Synthetic: unique-notice-marker-2040 for the subject.";
-const GROUNDS = "Synthetic: unique-grounds-marker-2040, the decision ignored my defence.";
-const DELIVERY_REF = "HAND-DEMO-2040-unique-delivery-marker";
+import {
+  DELIVERY_REF,
+  GRIEVANCE_GROUNDS as GROUNDS,
+  GRIEVANCE_SEATS as GC_SEATS,
+  decisionNotice,
+  executeSanction,
+  fileOnNotice,
+  oldDeliveryNotice as oldNotice,
+  recordDelivery,
+  setSanctionRule,
+} from "../support/grievance";
 
 let caseB: string, ic: string, gc: string;
 beforeAll(async () => {
@@ -18,49 +26,9 @@ beforeAll(async () => {
   ({ ic, gc } = await committeeIds());
 });
 
-const GC_SEATS: [UserKey, string][] = [
-  ["committee", "CHAIR"],
-  ["committeeSecretary", "SECRETARY"],
-  ["legal", "MEMBER"],
-  ["investigatorA", "MEMBER"],
-];
-
-const decisionNotice = async (s: Scenario, subject: string, decision: string) => {
-  await s.as("caseManager");
-  const [n] = await s.tx<
-    { id: string }[]
-  >`select api.issue_decision_notice(${subject}, ${decision}, ${TEXT}) as id`;
-  return n!.id;
-};
-async function recordDelivery(s: Scenario, notice: string, agoDays = 0): Promise<string | null> {
-  await s.as("caseManager");
-  const [r] = await s.tx<{ ends: string | null }[]>`
-    select api.record_notice_delivery(${notice}, 'HAND_DELIVERY', now() - make_interval(days => ${agoDays}::int),
-      ${DELIVERY_REF}) as ends`;
-  return r!.ends;
-}
-const fileOnNotice = (s: Scenario, notice: string, items: string[] | null = null) =>
-  s.tx<{ id: string }[]>`
-    select api.file_grievance_on_decision_notice(${notice}, ${GROUNDS}, ${items}::uuid[]) as id`;
-
-/** A DECISION notice issued `days` ago on the DELIVERY basis, not yet delivered (owner fixture: commands issue at now()). */
-async function oldDeliveryNotice(
-  s: OwnerScenario,
-  subject: string,
-  decision: string,
-  days: number,
-): Promise<string> {
-  await s.asOwner();
-  const [n] = await s.tx<{ id: string }[]>`
-    insert into grievance.defence_notice (case_id, subject_id, sequence_no, notice_text, issued_by, issued_at, kind,
-                                          authority_decision_id, grievance_rule_set_id, grievance_window_days,
-                                          window_start_basis)
-    select ${caseB}, ${subject}, 9, ${TEXT}, ${USERS.caseManager}, now() - make_interval(days => ${days}::int), 'DECISION',
-           ${decision}, r.id, 30, 'DELIVERY'
-    from committee.rule_set r where r.committee_id = ${gc} and r.effective_to is null
-    returning id`;
-  return n!.id;
-}
+/** A DECISION notice on case B issued `days` ago on the DELIVERY basis, not yet delivered. */
+const oldDeliveryNotice = (s: OwnerScenario, subject: string, decision: string, days: number) =>
+  oldNotice(s, caseB, gc, subject, decision, days);
 
 /** A case B subject linked to `user`'s portal account; returns the subject and link. */
 async function portalSubject(s: Scenario, user: UserKey, label: string) {
@@ -81,35 +49,6 @@ const revise = async (s: Scenario, changes: Record<string, unknown>) => {
   await s.as("platformAdmin");
   await s.tx`select api.revise_committee_rule_set(${gc}, now(), ${s.tx.json(changes as never)}, 'APPROVED', ${REASON})`;
 };
-
-/** The Grievance Committee approves one vote item in the admitted grievance's proceeding; returns the item. */
-async function approvedGrievanceVote(s: Scenario, grievance: string): Promise<string> {
-  await s.as("committeeSecretary");
-  const [g] = await s.tx<{ cp: string }[]>`
-    select committee_proceeding_id as cp from grievance.grievance where id = ${grievance}`;
-  const [m] = await s.tx<{ id: string }[]>`
-    select api.schedule_meeting(${g!.cp}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
-      now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`;
-  const parts = await s.tx<{ id: string; user_id: string }[]>`
-    select id, user_id from committee.meeting_participant where meeting_id = ${m!.id} and is_voting`;
-  const key = (id: string) => Object.entries(USERS).find(([, v]) => v === id)![0] as UserKey;
-  for (const p of parts) {
-    await s.as(key(p.user_id));
-    await s.tx`select api.declare_meeting_conflict(${p.id}, 'NO_CONFLICT', null)`;
-  }
-  await s.as("committeeSecretary");
-  await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
-  for (const p of parts) await s.tx`select api.record_attendance(${p.id}, 'PRESENT')`;
-  const [vi] = await s.tx<{ id: string }[]>`
-    select api.open_vote_item(${m!.id}, 'OTHER', null, 'Grievance outcome (synthetic)') as id`;
-  for (const p of parts) {
-    await s.as(key(p.user_id));
-    await s.tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`;
-  }
-  await s.as("committeeSecretary");
-  await s.tx`select api.close_vote_item(${vi!.id}, null)`;
-  return vi!.id;
-}
 
 describe("decision-notice delivery and the grievance window (DEC-F15, DEC-F16, AMB-137)", () => {
   it("T-AMB-081: window end = delivery + days; an undelivered notice has no running window", async () => {
@@ -589,13 +528,15 @@ describe("grievance scope, withdrawal, completion and contested items (AMB-139, 
   });
 });
 
-describe("sanction execution guards (AMB-031, AMB-109, AMB-110) and grievance outcomes (AMB-145, AMB-149)", () => {
-  const execute = (s: Scenario, item: string, subject: string, from = "0 days") =>
-    s.tx`select api.record_sanction_execution(${item}, ${subject}, now() - ${from}::interval, 'HR-DEMO-2040') as id`;
+describe("sanction execution: the delivery guard (AMB-109)", () => {
+  const execute = executeSanction;
 
   it("T-AMB-062: execution never shows a sanction effective before the decision notice is delivered", async () => {
     await ownerScenario(async (s) => {
       const f = await decidedForSubjects(s, ic, caseB);
+      // DEC-AMB-004 (owner, 2026-10-13): a WARNING with no configured rule waits for the grievance window; here it is
+      // configured to proceed (synthetic rule), so only the delivery guard is exercised.
+      await setSanctionRule(s, "WARNING", null, false, "PROCEED");
       await s.as("caseManager");
       await s.expectError("CDF_CONFLICT:DECISION_NOT_DELIVERED", () => execute(s, f.sanction, f.sigma));
       const n = await decisionNotice(s, f.sigma, f.decision);
@@ -617,158 +558,15 @@ describe("sanction execution guards (AMB-031, AMB-109, AMB-110) and grievance ou
       await s.expectError("CDF_CONFLICT:ALREADY_EXECUTED", () => execute(s, f.sanction, f.sigma));
       await s.asOwner();
       expect(
-        await s.tx`select decision_notice_id, authority_decision_id from decision.sanction_execution where item_id = ${f.sanction}`,
-      ).toEqual([{ decision_notice_id: n, authority_decision_id: f.decision }]);
+        await s.tx`select decision_notice_id, authority_decision_id, executed_sanction_code
+                   from decision.sanction_execution where item_id = ${f.sanction}`,
+      ).toEqual([
+        { decision_notice_id: n, authority_decision_id: f.decision, executed_sanction_code: "WARNING" },
+      ]);
       await s.expectError(
         "decision.sanction_execution is append-only",
         (tx) => tx`update decision.sanction_execution set effective_from = now() - interval '9 days'`,
       );
-    });
-  });
-
-  it("T-AMB-063: an irreversible sanction is not executable while the grievance window is open", async () => {
-    await ownerScenario(async (s) => {
-      const f = await decidedForSubjects(s, ic, caseB);
-      await s.asOwner();
-      expect(
-        await s.tx`select code from decision.sanction_catalogue where is_irreversible order by code`,
-      ).toEqual([{ code: "TERMINATION" }]);
-      // Fixture: the WARNING of this package is treated as irreversible for the test.
-      await s.tx`update decision.sanction_catalogue set is_irreversible = true where code = 'WARNING'`;
-      const n = await decisionNotice(s, f.sigma, f.decision);
-      await recordDelivery(s, n);
-      await s.as("caseManager");
-      await s.expectError("CDF_CONFLICT:GRIEVANCE_WINDOW_OPEN", () => execute(s, f.sanction, f.sigma));
-      await s.asOwner();
-      await s.tx`update decision.sanction_catalogue set is_irreversible = false where code = 'WARNING'`;
-      await s.as("caseManager");
-      await execute(s, f.sanction, f.sigma);
-    });
-  });
-
-  it("T-AMB-063: an irreversible sanction is not executable while a grievance on it is open, even after the window", async () => {
-    await ownerScenario(async (s) => {
-      const f = await decidedForSubjects(s, ic, caseB);
-      await s.asOwner();
-      await s.tx`update decision.sanction_catalogue set is_irreversible = true where code = 'WARNING'`;
-      const old = await oldDeliveryNotice(s, f.sigma, f.decision, 40);
-      await recordDelivery(s, old, 35);
-      await s.as("employee");
-      const [g] = await fileOnNotice(s, old);
-      await s.as("caseManager");
-      await s.expectError("CDF_CONFLICT:GRIEVANCE_OPEN", () => execute(s, f.sanction, f.sigma));
-      await s.as("employee");
-      await s.tx`select api.withdraw_grievance(${g!.id}, ${REASON})`;
-      await s.as("caseManager");
-      await execute(s, f.sanction, f.sigma);
-    });
-  });
-
-  it("T-AMB-013: a subject who left employment keeps findings; execution needs an explicit authority decision", async () => {
-    await ownerScenario(async (s) => {
-      const f = await decidedForSubjects(s, ic, caseB);
-      const flag = (subject: string, on = "current_date") =>
-        s.tx`select api.flag_subject_left_employment(${subject},
-          ${on === "current_date" ? null : on}::date, 'HR-DEMO-LEFT-2040') as id`;
-      await s.as("investigatorB");
-      await s.expectError("CDF_FORBIDDEN", () => flag(f.sigma));
-      await s.as("investigatorA");
-      await s.expectError("CDF_NOT_FOUND", () => flag(f.sigma));
-      await s.as("caseManager");
-      await s.expectError("CDF_INVALID:left_on", () => flag(f.sigma));
-      await s.expectError("CDF_INVALID:left_on", () => flag(f.sigma, "2999-01-01"));
-      await flag(f.sigma, "2026-09-30");
-      await s.expectError("CDF_CONFLICT:ALREADY_FLAGGED", () => flag(f.sigma, "2026-09-30"));
-      const n = await decisionNotice(s, f.sigma, f.decision);
-      await recordDelivery(s, n);
-      await s.as("caseManager");
-      await s.expectError("CDF_CONFLICT:SUBJECT_LEFT_EMPLOYMENT", () => execute(s, f.sanction, f.sigma));
-      await s.asOwner();
-      expect(await s.tx`select id from case_mgmt.finding where id = ${f.finding}`).toEqual([
-        { id: f.finding },
-      ]);
-
-      const authorize = () =>
-        s.tx`select api.authorize_sanction_execution(${f.sanction}, ${f.sigma}, 'CEO', 'MEMO-DEMO-LEFT-2040', ${REASON}) as id`;
-      for (const u of ["investigatorA", "platformAdmin"] as const) {
-        await s.as(u);
-        await s.expectError("CDF_NOT_FOUND", () => authorize());
-      }
-      for (const u of ["caseManager", "committeeChair"] as const) {
-        await s.as(u);
-        await s.expectError("CDF_FORBIDDEN", () => authorize());
-      }
-      await s.as("committeeSecretary");
-      await s.expectError(
-        "CDF_INVALID:authority_type",
-        (tx) =>
-          tx`select api.authorize_sanction_execution(${f.sanction}, ${f.sigma}, 'NOBODY', 'MEMO-DEMO-LEFT-2040', ${REASON})`,
-      );
-      await s.expectError(
-        "CDF_INVALID:item_id",
-        (tx) =>
-          tx`select api.authorize_sanction_execution(${f.sanction}, ${f.tau}, 'CEO', 'MEMO-DEMO-LEFT-2040', ${REASON})`,
-      );
-      await authorize();
-      await s.expectError("CDF_CONFLICT:ALREADY_AUTHORIZED", () => authorize());
-      await s.as("caseManager");
-      await execute(s, f.sanction, f.sigma);
-    });
-  });
-
-  it("T-AMB-088 and T-AMB-085: MODIFY never substitutes a more severe or unranked sanction; a decided decision takes no further grievance", async () => {
-    await ownerScenario(async (s) => {
-      await seat(s, gc, GC_SEATS);
-      const f = await decidedForSubjects(s, ic, caseB);
-      const n = await decisionNotice(s, f.sigma, f.decision);
-      await recordDelivery(s, n);
-      await s.as("employee");
-      const [g] = await fileOnNotice(s, n, [f.sanction]);
-      await s.as("committeeSecretary");
-      await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
-      const vi = await approvedGrievanceVote(s, g!.id);
-      // Fixture: synthetic severity ranks for the test only (the catalogue's ranks are SOURCE_REQUIRED).
-      await s.asOwner();
-      expect(
-        await s.tx`select count(*)::int as n from decision.sanction_catalogue where severity_rank is not null`,
-      ).toEqual([{ n: 0 }]);
-      await s.tx`update decision.sanction_catalogue set severity_rank = case code when 'SALARY_DEDUCTION' then 1
-                   when 'WARNING' then 2 when 'TERMINATION' then 5 end
-                 where code in ('SALARY_DEDUCTION', 'WARNING', 'TERMINATION')`;
-      const outcome = (outcomes: string[], subs: unknown) =>
-        s.tx`select api.record_grievance_outcome(${g!.id}, ${outcomes}::text[], null, ${vi},
-          'Synthetic: outcome summary for the grievance.', ${subs === null ? null : s.tx.json(subs as never)}) as id`;
-      await s.as("committeeSecretary");
-      await s.expectError("CDF_CONFLICT:SANCTION_MORE_SEVERE", () =>
-        outcome(["MODIFY"], [{ item_id: f.sanction, sanction_code: "TERMINATION" }]),
-      );
-      await s.expectError("CDF_CONFLICT:SANCTION_SEVERITY_UNKNOWN", () =>
-        outcome(["MODIFY"], [{ item_id: f.sanction, sanction_code: "SUSPENSION" }]),
-      );
-      await s.expectError("CDF_INVALID:substitutions", () =>
-        outcome(["UPHOLD"], [{ item_id: f.sanction, sanction_code: "SALARY_DEDUCTION" }]),
-      );
-      await s.expectError("CDF_INVALID:substitutions", () =>
-        outcome(["MODIFY"], [{ item_id: f.corrective, sanction_code: "SALARY_DEDUCTION" }]),
-      );
-      await s.expectError("CDF_INVALID:substitutions", () =>
-        outcome(["MODIFY"], [{ item_id: "not-a-uuid", sanction_code: "SALARY_DEDUCTION" }]),
-      );
-      await s.as("employee");
-      await s.expectError("CDF_FORBIDDEN", () =>
-        outcome(["MODIFY"], [{ item_id: f.sanction, sanction_code: "SALARY_DEDUCTION" }]),
-      );
-      await s.as("committeeSecretary");
-      await outcome(["MODIFY"], [{ item_id: f.sanction, sanction_code: "SALARY_DEDUCTION" }]);
-      await s.asOwner();
-      expect(
-        await s.tx`select original_sanction_code, substitute_sanction_code from grievance.outcome_substitution
-                   where grievance_id = ${g!.id}`,
-      ).toEqual([{ original_sanction_code: "WARNING", substitute_sanction_code: "SALARY_DEDUCTION" }]);
-
-      // T-AMB-085: the decision's grievance is decided; a further one is refused until the owner rules (DEC-AMB-001).
-      await s.as("employee");
-      await s.expectError("CDF_CONFLICT:GRIEVANCE_ALREADY_DECIDED", () => fileOnNotice(s, n));
     });
   });
 });

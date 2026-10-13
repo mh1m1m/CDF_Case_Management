@@ -19,13 +19,24 @@ export interface CaseFacts {
   finding: string;
 }
 
+/** Runs as the case manager right after the subject is added, before the allegation and finding. */
+export type AfterSubject = (subject: string) => Promise<void>;
+
 /** An investigation proceeding with one subject, one allegation against them and a substantiated finding. */
-export async function caseFacts(s: Scenario, caseId: string): Promise<CaseFacts> {
+export async function caseFacts(
+  s: Scenario,
+  caseId: string,
+  afterSubject?: AfterSubject,
+): Promise<CaseFacts> {
   await s.as("caseManager");
   const [p] = await s.tx<{ id: string }[]>`
     select api.open_proceeding(${caseId}, 'INVESTIGATION', null, ${REASON}) as id`;
   const [subj] = await s.tx<{ id: string }[]>`
     select api.add_case_subject(${caseId}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+  if (afterSubject) {
+    await afterSubject(subj!.id);
+    await s.as("caseManager");
+  }
   const [a] = await s.tx<{ id: string }[]>`
     select api.add_allegation(${caseId}, 'FRAUD', 'Synthetic: allegation against Employee Sigma.', ${subj!.id}, null, null) as id`;
   await s.as("investigatorB");
@@ -48,9 +59,10 @@ export async function draftPackage(
   committeeId: string,
   caseId: string,
   granularity: "PACKAGE" | "ITEM" = "PACKAGE",
+  afterSubject?: AfterSubject,
 ): Promise<PackageFixture> {
   await seat(s, committeeId, DECISION_SEATS);
-  const facts = await caseFacts(s, caseId);
+  const facts = await caseFacts(s, caseId, afterSubject);
   const meeting = await scheduleMeeting(s, committeeId, caseId);
   await openWithPresent(s, meeting, DECISION_VOTERS);
   await s.as("committeeSecretary");

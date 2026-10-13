@@ -85,6 +85,8 @@ const NOT_STATE_CHANGING = new Set([
   // api.create_case_task, audited as CASE_TASK_ASSIGNED.
   "retention_review_queue",
   "list_retention_reviewers",
+  // Migration 2040 (DEC-AMB-009): what the case team is shown about executing each decided sanction.
+  "sanction_executability",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -138,6 +140,38 @@ describe("every state-changing command writes its audit event in the same transa
     const one = async (s: Scenario, q: Promise<readonly Record<string, unknown>[]>) => {
       const rows = await q;
       return Object.values(rows[0] ?? {})[0] as string;
+    };
+    /** The seated Grievance Committee approves one vote item in the admitted grievance's proceeding. */
+    const grievanceVote = async (s: Scenario, grievance: string) => {
+      const cp = await one(
+        s,
+        s.tx`select committee_proceeding_id from grievance.grievance where id = ${grievance}`,
+      );
+      const m = await one(
+        s,
+        s.tx`select api.schedule_meeting(${cp}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`,
+      );
+      const seats = await s.tx<{ id: string; user_id: string }[]>`
+        select id, user_id from committee.meeting_participant where meeting_id = ${m} and is_voting`;
+      for (const key of ["legal", "legalB"] as const) {
+        await s.as(key);
+        await s.tx`select api.declare_meeting_conflict(${seats.find((r) => r.user_id === USERS[key])!.id}, 'NO_CONFLICT', null)`;
+      }
+      await s.as("committeeSecretary");
+      await s.tx`select api.open_meeting(${m}, ${REASON})`;
+      for (const r of seats) await s.tx`select api.record_attendance(${r.id}, 'PRESENT')`;
+      const vi = await one(
+        s,
+        s.tx`select api.open_vote_item(${m}, 'OTHER', null, 'Grievance outcome (synthetic)') as id`,
+      );
+      for (const key of ["legal", "legalB"] as const) {
+        await s.as(key);
+        await s.tx`select api.cast_vote(${vi}, 'APPROVE', null)`;
+      }
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${vi}, null)`;
+      return vi;
     };
     const steps: Step[] = [
       {
@@ -731,7 +765,7 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "set_action_authority_rule",
         actor: "platformAdmin",
         run: (s) =>
-          s.tx`select api.set_action_authority_rule('CORRECTIVE_ACTION', 'DELEGATED_EXECUTIVE', now(), 'SOURCE_REQUIRED', ${REASON})`,
+          s.tx`select api.set_action_authority_rule('DISCIPLINARY_SANCTION', 'DELEGATED_EXECUTIVE', now(), 'SOURCE_REQUIRED', ${REASON})`,
       },
       {
         fn: "create_recommendation_package",
@@ -749,6 +783,12 @@ describe("every state-changing command writes its audit event in the same transa
           ids.recItem = await one(
             s,
             s.tx`select api.add_recommendation_item(${ids.pkg!}, 'OTHER', null, null, 'Synthetic: walk recommendation.', null, null) as id`,
+          );
+          // Migration 2040: a sanction on the walk subject, executed later in the walk (DEC-AMB-004, -009).
+          ids.sanctionItem = await one(
+            s,
+            s.tx`select api.add_recommendation_item(${ids.pkg!}, 'DISCIPLINARY_SANCTION', 'WARNING', null,
+              'Synthetic: walk written warning.', ${[ids.subject!]}::uuid[], ${[ids.allegation!]}::uuid[]) as id`,
           );
           return (ids.correctiveItem = await one(
             s,
@@ -867,6 +907,29 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "caseManager",
         run: (s) =>
           s.tx`select api.change_corrective_action_due_date(${ids.correctiveAction!}, current_date + 45, ${REASON})`,
+      },
+      // Migration 2040 (DEC-F28): a shared pool of eligible users owns the action; employeeB stays accountable.
+      {
+        fn: "create_corrective_action_pool",
+        actor: "grcDirector",
+        run: async (s) =>
+          (ids.pool = await one(
+            s,
+            s.tx`select api.create_corrective_action_pool('WALK_POOL', 'Walk pool (synthetic)', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "set_corrective_action_pool_member",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.set_corrective_action_pool_member(${ids.pool!}, ${USERS.financeEmployee}, true, ${REASON})`,
+      },
+      {
+        fn: "set_corrective_action_owner_kind",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.set_corrective_action_owner_kind(${ids.correctiveAction!}, 'SHARED_POOL', null, ${ids.pool!},
+            null, ${REASON})`,
       },
       {
         fn: "record_corrective_action_progress",
@@ -1388,6 +1451,19 @@ describe("every state-changing command writes its audit event in the same transa
           s.tx`select api.record_defence_response(${ids.notice2!}, 'EMAIL', now(),
             'Synthetic: walk response received by email.', 'EMAIL-DEMO-WALK')`,
       },
+      // Migration 2040 (DEC-F18): a third notice's period is extended.
+      {
+        fn: "change_defence_deadline",
+        actor: "caseManager",
+        run: async (s) => {
+          const n = await one(
+            s,
+            s.tx`select api.issue_defence_notice(${ids.subject!}, 'Synthetic: walk notice (extended).',
+              ${[ids.allegation!]}::uuid[], now() + interval '10 days') as id`,
+          );
+          return s.tx`select api.change_defence_deadline(${n}, 'EXTENSION', now() + interval '20 days', ${REASON})`;
+        },
+      },
       // Kinds of employee notice (migration 1990): a rights notice to the walk subject; a decision notice of the
       // walk's authority decision (its corrective action applies to the whole case) to a second subject linked to
       // the same employee, who grieves it from the portal.
@@ -1401,6 +1477,21 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "issue_decision_notice",
         actor: "caseManager",
         run: async (s) => {
+          // Fixture (2040, AMB-141): a Grievance Committee rule version with a completion period (SOURCE_REQUIRED in
+          // the seed), in force from a second ago so later rule changes in the walk are not refused as scheduled.
+          await (s as OwnerScenario).asOwner();
+          await s.tx`
+            with cur as (
+              update committee.rule_set r set effective_to = now() - interval '1 second'
+              from committee.committee c
+              where c.id = r.committee_id and c.kind = 'GRIEVANCE' and r.effective_to is null returning r.*)
+            insert into committee.rule_set
+            select (jsonb_populate_record(null::committee.rule_set, to_jsonb(cur) || jsonb_build_object(
+              'id', gen_random_uuid(), 'effective_from', now() - interval '1 second', 'effective_to', null,
+              'grievance_completion_days', 10, 'source_status', 'APPROVED', 'reason', ${REASON}::text,
+              'created_by', ${USERS.platformAdmin}::uuid))).*
+            from cur`;
+          await s.as("caseManager");
           ids.subject2 = await one(
             s,
             s.tx`select api.add_case_subject(${caseA}, 'Employee Omicron Two (synthetic)', 'EMPLOYEE', null) as id`,
@@ -1415,9 +1506,49 @@ describe("every state-changing command writes its audit event in the same transa
       {
         fn: "file_grievance_on_decision_notice",
         actor: "employee",
+        run: async (s) =>
+          (ids.dnGrievance = await one(
+            s,
+            s.tx`select api.file_grievance_on_decision_notice(${ids.decisionNotice!},
+              'Synthetic: walk grievance on the decision notice.') as id`,
+          )),
+      },
+      // Migration 2040: the walk subject's decision notice is delivered and its sanction executed after the subject
+      // left employment, under a statement for its type (DEC-F15, AMB-109; DEC-AMB-004, -009 (owner, 2026-10-13)).
+      {
+        fn: "record_notice_delivery",
+        actor: "caseManager",
+        run: async (s) => {
+          const n = await one(
+            s,
+            s.tx`select api.issue_decision_notice(${ids.subject!}, ${ids.decision!}, 'Synthetic: walk sanction notice.') as id`,
+          );
+          return s.tx`select api.record_notice_delivery(${n}, 'HAND_DELIVERY', now(), 'HAND-DEMO-WALK')`;
+        },
+      },
+      {
+        fn: "set_sanction_rule",
+        actor: "platformAdmin",
         run: (s) =>
-          s.tx`select api.file_grievance_on_decision_notice(${ids.decisionNotice!},
-            'Synthetic: walk grievance on the decision notice.')`,
+          s.tx`select api.set_sanction_rule('WARNING', null, false, 'PROCEED', 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
+        fn: "flag_subject_left_employment",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.flag_subject_left_employment(${ids.subject!}, current_date, 'HR-DEMO-WALK')`,
+      },
+      {
+        fn: "record_employment_execution_statement",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.record_employment_execution_statement(${ids.subject!}, 'WARNING', 'HR-DEMO-WALK-2', ${REASON})`,
+      },
+      {
+        fn: "record_sanction_execution",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.record_sanction_execution(${ids.sanctionItem!}, ${ids.subject!}, now(), 'HR-DEMO-WALK-3')`,
       },
       {
         fn: "file_grievance",
@@ -1454,6 +1585,18 @@ describe("every state-changing command writes its audit event in the same transa
           await s.as("committeeSecretary");
           return s.tx`select api.assess_grievance_admissibility(${ids.grievance!}, 'ADMISSIBLE', null, ${REASON})`;
         },
+      },
+      // Migration 2040 (AMB-141): the decision-notice grievance is completed on request.
+      {
+        fn: "request_grievance_completion",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.request_grievance_completion(${ids.dnGrievance!}, ${REASON})`,
+      },
+      {
+        fn: "complete_grievance",
+        actor: "employee",
+        run: (s) =>
+          s.tx`select api.complete_grievance(${ids.dnGrievance!}, 'Synthetic: the walk grievance supplement.')`,
       },
       {
         // G2: the restricted case's owner names the GC secretary (cleared to SECRET earlier in the walk), who then
@@ -1493,36 +1636,51 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "record_grievance_outcome",
         actor: "committeeSecretary",
         run: async (s) => {
-          const cp = await one(
-            s,
-            s.tx`select committee_proceeding_id from grievance.grievance where id = ${ids.grievance!}`,
-          );
-          const m = await one(
-            s,
-            s.tx`select api.schedule_meeting(${cp}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
-              now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`,
-          );
-          const seats = await s.tx<{ id: string; user_id: string }[]>`
-            select id, user_id from committee.meeting_participant where meeting_id = ${m} and is_voting`;
-          for (const key of ["legal", "legalB"] as const) {
-            await s.as(key);
-            await s.tx`select api.declare_meeting_conflict(${seats.find((r) => r.user_id === USERS[key])!.id}, 'NO_CONFLICT', null)`;
-          }
-          await s.as("committeeSecretary");
-          await s.tx`select api.open_meeting(${m}, ${REASON})`;
-          for (const r of seats) await s.tx`select api.record_attendance(${r.id}, 'PRESENT')`;
-          const vi = await one(
-            s,
-            s.tx`select api.open_vote_item(${m}, 'OTHER', null, 'Grievance outcome (synthetic)') as id`,
-          );
-          for (const key of ["legal", "legalB"] as const) {
-            await s.as(key);
-            await s.tx`select api.cast_vote(${vi}, 'APPROVE', null)`;
-          }
-          await s.as("committeeSecretary");
-          await s.tx`select api.close_vote_item(${vi}, null)`;
+          const vi = await grievanceVote(s, ids.grievance!);
           return s.tx`select api.record_grievance_outcome(${ids.grievance!}, ${["UPHOLD"]}::text[], null, ${vi},
             'Synthetic: the walk grievance outcome.')`;
+        },
+      },
+      // Migration 2040, DEC-AMB-001 (owner, 2026-10-13): the one reconsideration of a decided grievance, recorded by
+      // the Secretary (then withdrawn by the grievant, AMB-140) and filed through the portal on new evidence.
+      {
+        fn: "record_grievance_reconsideration",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.reconsideration = await one(
+            s,
+            s.tx`select api.record_grievance_reconsideration(${ids.grievance!}, 'EMAIL', now(),
+              'Synthetic: walk reconsideration grounds.', 'EMAIL-DEMO-WALK4',
+              'Synthetic: walk new evidence description.', 'EVIDENCE-DEMO-WALK') as id`,
+          )),
+      },
+      {
+        fn: "withdraw_grievance",
+        actor: "employee",
+        run: (s) => s.tx`select api.withdraw_grievance(${ids.reconsideration!}, ${REASON})`,
+      },
+      {
+        fn: "file_grievance_reconsideration",
+        actor: "employee",
+        run: async (s) => {
+          // Fixture: the walk grievance's proceeding is concluded, and the decision-notice grievance is admitted and
+          // decided, so that it can be reconsidered.
+          await s.as("caseManager");
+          const p = await one(
+            s,
+            s.tx`select cp.proceeding_id from grievance.grievance g
+                 join committee.committee_proceeding cp on cp.id = g.committee_proceeding_id where g.id = ${ids.grievance!}`,
+          );
+          await s.tx`select api.close_proceeding(${p}, 'CONCLUDED', 'DECISION_RECORDED', ${REASON})`;
+          await s.as("committeeSecretary");
+          await s.tx`select api.assess_grievance_admissibility(${ids.dnGrievance!}, 'ADMISSIBLE', null, ${REASON})`;
+          const vi = await grievanceVote(s, ids.dnGrievance!);
+          await s.tx`select api.record_grievance_outcome(${ids.dnGrievance!}, ${["UPHOLD"]}::text[], null, ${vi},
+            'Synthetic: the walk decision-notice grievance outcome.')`;
+          await s.as("employee");
+          return s.tx`select api.file_grievance_reconsideration(${ids.dnGrievance!},
+            'Synthetic: walk reconsideration grounds.', 'Synthetic: walk new evidence description.',
+            'EVIDENCE-DEMO-WALK-2')`;
         },
       },
       {

@@ -16,6 +16,20 @@ import {
   seat,
   vote,
 } from "../support/committee";
+import { decidedForSubjects } from "../support/decision";
+import {
+  GRIEVANCE_GROUNDS,
+  GRIEVANCE_SEATS,
+  approvedGrievanceVote,
+  concludeGrievanceProceeding,
+  decisionNotice,
+  executeSanction,
+  fileOnNotice,
+  oldDeliveryNotice,
+  recordDelivery,
+  setSanctionRule,
+  thenUndo,
+} from "../support/grievance";
 
 let caseB: string, caseExec: string, ic: string, gc: string;
 
@@ -664,6 +678,453 @@ describe("AGENT-09 re-check of 1910 (G2b, G3b, approval checks)", () => {
       await s.as("grcDeputy");
       await s.expectError("CDF_FORBIDDEN", () => approve(USERS.grcDeputy));
       await s.expectError("CDF_FORBIDDEN", () => approve(USERS.grcSectorHead));
+    });
+  });
+});
+
+// Migration 2040, owner decisions of 2026-10-13 on grievances and sanctions: DEC-AMB-004 (the grievance effect on
+// execution, per sanction type), DEC-AMB-001 (one reconsideration on new evidence) and DEC-AMB-011 (an outcome never
+// makes a sanction more severe). The catalogue's configuration is SOURCE_REQUIRED; the tests configure synthetic values
+// through api.set_sanction_rule and never through the owner connection.
+describe("DEC-AMB-004, DEC-AMB-001, DEC-AMB-011 (owner, 2026-10-13)", () => {
+  const executability = async (s: Scenario) => {
+    await s.as("caseManager");
+    const [r] = await s.tx<{ v: { item_id: string; blocked_by: string | null; executable: boolean }[] }[]>`
+      select api.sanction_executability(${caseB}) as v`;
+    return r!.v.map((x) => ({ item_id: x.item_id, blocked_by: x.blocked_by, executable: x.executable }));
+  };
+  const outcomeWith = (s: Scenario, grievance: string, vi: string) => (outcomes: string[], subs: unknown) =>
+    s.tx`select api.record_grievance_outcome(${grievance}, ${outcomes}::text[], null, ${vi},
+      'Synthetic: outcome summary for the grievance.', ${subs === null ? null : s.tx.json(subs as never)}) as id`;
+  const reconsider = (s: Scenario, g: string, description: string | null, reference: string | null) =>
+    s.tx<{ id: string }[]>`
+      select api.file_grievance_reconsideration(${g}, ${GRIEVANCE_GROUNDS}, ${description}, ${reference}) as id`;
+  const EVIDENCE = "Synthetic: a payroll record not available at the first grievance.";
+
+  it("T-AMB-063: the sanction rule is configured per type by the committee administrator, SOURCE_REQUIRED by default", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      expect(
+        await s.tx`select code, severity_rank, is_irreversible, grievance_execution_rule, rule_source_status
+                   from decision.sanction_catalogue order by code collate "C"`,
+      ).toEqual(
+        ["DEMOTION", "SALARY_DEDUCTION", "SUSPENSION", "TERMINATION", "WARNING"].map((code) => ({
+          code,
+          severity_rank: null,
+          is_irreversible: code === "TERMINATION",
+          grievance_execution_rule: null,
+          rule_source_status: "SOURCE_REQUIRED",
+        })),
+      );
+      const set = (
+        code: string,
+        rank: number | null,
+        irreversible: boolean | null,
+        rule: string | null,
+        status = "APPROVED",
+      ) =>
+        s.tx`select api.set_sanction_rule(${code}, ${rank}::int, ${irreversible}::boolean, ${rule}, ${status},
+          'Synthetic: sanction rule for the test only.')`;
+      for (const u of ["caseManager", "committeeSecretary", "committee", "lead"] as const) {
+        await s.as(u);
+        await s.expectError("CDF_FORBIDDEN", () => set("WARNING", 2, false, "PROCEED"));
+      }
+      await s.as("platformAdmin");
+      await s.expectError("CDF_INVALID:code", () => set("NOPE_CODE", 2, false, "PROCEED"));
+      await s.expectError("CDF_INVALID:severity_rank", () => set("WARNING", 0, false, "PROCEED"));
+      await s.expectError("CDF_INVALID:is_irreversible", () => set("WARNING", 2, null, "PROCEED"));
+      await s.expectError("CDF_INVALID:grievance_execution_rule", () => set("WARNING", 2, false, null));
+      await s.expectError("CDF_INVALID:grievance_execution_rule", () =>
+        set("WARNING", 2, false, "SOMETIMES"),
+      );
+      await s.expectError("CDF_INVALID:source_status", () => set("WARNING", 2, false, "PROCEED", "GUESSED"));
+      await s.expectError("CDF_CONFLICT:IRREVERSIBLE_SANCTION_SUSPENDED", () =>
+        set("TERMINATION", 5, true, "PROCEED"),
+      );
+      await set("WARNING", 2, false, "PROCEED");
+      await s.asOwner();
+      const [row] = await s.tx<{ change: string; n: number }[]>`
+        select (select id::text from decision.sanction_rule_change) as change,
+               (select count(*)::int from audit.audit_event e
+                where e.action = 'SANCTION_RULE_SET' and e.object_id = 'WARNING'
+                  and e.metadata ->> 'previous_grievance_execution_rule' is null
+                  and e.metadata ->> 'grievance_execution_rule' = 'PROCEED') as n`;
+      expect(row!.n).toBe(1);
+      await s.expectError(
+        "decision.sanction_rule_change is append-only",
+        (tx) => tx`update decision.sanction_rule_change set severity_rank = 9`,
+      );
+      // The change history (with its reasons) is the committee administrator's; others read the catalogue only.
+      await s.as("caseManager");
+      expect(await s.tx`select id from decision.sanction_rule_change`).toEqual([]);
+      await s.as("platformAdmin");
+      expect(await s.tx`select id::text from decision.sanction_rule_change`).toEqual([{ id: row!.change }]);
+      // Database guard: an irreversible sanction never proceeds, whatever writes the catalogue.
+      await s.asOwner();
+      await s.expectError(
+        'new row for relation "sanction_catalogue" violates check constraint',
+        (tx) =>
+          tx`update decision.sanction_catalogue set grievance_execution_rule = 'PROCEED' where code = 'TERMINATION'`,
+      );
+    });
+  });
+
+  it("T-AMB-063: an irreversible type and a type with no rule are not executable in the grievance window; a reversible type follows its rule", async () => {
+    await ownerScenario(async (s) => {
+      const f = await decidedForSubjects(s, ic, caseB);
+      const n = await decisionNotice(s, f.sigma, f.decision);
+      await recordDelivery(s, n);
+      // No rule (SOURCE_REQUIRED): held as irreversible.
+      expect(await executability(s)).toEqual([
+        { item_id: f.sanction, blocked_by: "GRIEVANCE_WINDOW_OPEN", executable: false },
+      ]);
+      await s.expectError("CDF_CONFLICT:GRIEVANCE_WINDOW_OPEN", () =>
+        executeSanction(s, f.sanction, f.sigma),
+      );
+      // Irreversible: suspended.
+      await setSanctionRule(s, "WARNING", null, true, "SUSPEND_UNTIL_RESOLVED");
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:GRIEVANCE_WINDOW_OPEN", () =>
+        executeSanction(s, f.sanction, f.sigma),
+      );
+      // Reversible, configured to wait: suspended.
+      await setSanctionRule(s, "WARNING", null, false, "SUSPEND_UNTIL_RESOLVED");
+      await s.as("caseManager");
+      await s.expectError("CDF_CONFLICT:GRIEVANCE_WINDOW_OPEN", () =>
+        executeSanction(s, f.sanction, f.sigma),
+      );
+      // Reversible, configured to proceed: executable during the window.
+      await setSanctionRule(s, "WARNING", null, false, "PROCEED");
+      expect(await executability(s)).toEqual([{ item_id: f.sanction, blocked_by: null, executable: true }]);
+      await executeSanction(s, f.sanction, f.sigma);
+      // Who may read the executability: the case team, not the platform administrator or another case's team.
+      for (const u of ["platformAdmin", "investigatorA", "employee"] as const) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.sanction_executability(${caseB})`);
+      }
+    });
+  });
+
+  it("T-AMB-063: an irreversible type and a type with no rule are not executable while a grievance on it is open, after the window", async () => {
+    await ownerScenario(async (s) => {
+      const f = await decidedForSubjects(s, ic, caseB);
+      const old = await oldDeliveryNotice(s, caseB, gc, f.sigma, f.decision, 40);
+      await recordDelivery(s, old, 35);
+      await s.as("employee");
+      const [g] = await fileOnNotice(s, old);
+      // No rule: held as irreversible.
+      expect(await executability(s)).toEqual([
+        { item_id: f.sanction, blocked_by: "GRIEVANCE_OPEN", executable: false },
+      ]);
+      await s.expectError("CDF_CONFLICT:GRIEVANCE_OPEN", () => executeSanction(s, f.sanction, f.sigma));
+      for (const [irreversible, rule] of [
+        [true, "SUSPEND_UNTIL_RESOLVED"],
+        [false, "SUSPEND_UNTIL_RESOLVED"],
+      ] as const) {
+        await setSanctionRule(s, "WARNING", null, irreversible, rule);
+        await s.as("caseManager");
+        await s.expectError("CDF_CONFLICT:GRIEVANCE_OPEN", () => executeSanction(s, f.sanction, f.sigma));
+      }
+      await setSanctionRule(s, "WARNING", null, false, "PROCEED");
+      await s.as("caseManager");
+      await thenUndo(s, () => executeSanction(s, f.sanction, f.sigma));
+      // Resolved (here withdrawn): the irreversible type is executable once the window is over.
+      await setSanctionRule(s, "WARNING", null, true, "SUSPEND_UNTIL_RESOLVED");
+      await s.as("employee");
+      await s.tx`select api.withdraw_grievance(${g!.id}, ${REASON})`;
+      expect(await executability(s)).toEqual([{ item_id: f.sanction, blocked_by: null, executable: true }]);
+      await executeSanction(s, f.sanction, f.sigma);
+    });
+  });
+
+  it("T-AMB-085: exactly one reconsideration through the portal, on new evidence confirmed at admissibility; no third grievance", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, GRIEVANCE_SEATS);
+      const f = await decidedForSubjects(s, ic, caseB);
+      const n = await decisionNotice(s, f.sigma, f.decision);
+      await recordDelivery(s, n);
+      await s.as("employee");
+      const [g] = await fileOnNotice(s, n, [f.sanction]);
+      await s.expectError("CDF_CONFLICT:GRIEVANCE_NOT_DECIDED", () =>
+        reconsider(s, g!.id, EVIDENCE, "PAYROLL-DEMO-2040"),
+      );
+      await s.as("committeeSecretary");
+      await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
+      const vi = await approvedGrievanceVote(s, g!.id);
+      await outcomeWith(s, g!.id, vi)(["UPHOLD"], null);
+
+      // CDF-207 kept: a plain further grievance on the decided decision is refused.
+      await s.as("employee");
+      await s.expectError("CDF_CONFLICT:GRIEVANCE_ALREADY_DECIDED", () => fileOnNotice(s, n));
+      // No new evidence, no reconsideration.
+      await s.expectError("CDF_INVALID:new_evidence_description", () =>
+        reconsider(s, g!.id, null, "PAYROLL-DEMO-2040"),
+      );
+      await s.expectError("CDF_INVALID:new_evidence_reference", () => reconsider(s, g!.id, EVIDENCE, null));
+      await s.as("employeeB");
+      await s.expectError("CDF_NOT_FOUND", () => reconsider(s, g!.id, EVIDENCE, "PAYROLL-DEMO-2040"));
+      await s.as("caseManager");
+      await s.expectError("CDF_FORBIDDEN", () => reconsider(s, g!.id, EVIDENCE, "PAYROLL-DEMO-2040"));
+      await s.as("employee");
+      const [r] = await reconsider(s, g!.id, EVIDENCE, "PAYROLL-DEMO-2040");
+      await s.asOwner();
+      expect(
+        await s.tx`select reconsideration_of, status, is_late, channel, new_evidence_reference,
+                          contested_authority_decision_id,
+                          array(select item_id from grievance.contested_item c where c.grievance_id = g.id) as items
+                   from grievance.grievance g where id = ${r!.id}`,
+      ).toEqual([
+        {
+          reconsideration_of: g!.id,
+          status: "RECEIVED",
+          is_late: false,
+          channel: "EMPLOYEE_PORTAL",
+          new_evidence_reference: "PAYROLL-DEMO-2040",
+          contested_authority_decision_id: f.decision,
+          items: [f.sanction],
+        },
+      ]);
+
+      // A second one is refused, by any path, while the reconsideration is open and after it.
+      await s.as("employee");
+      await s.expectError("CDF_CONFLICT:RECONSIDERATION_USED", () =>
+        reconsider(s, g!.id, EVIDENCE, "PAYROLL-DEMO-2040-B"),
+      );
+      await s.expectError("CDF_CONFLICT:RECONSIDERATION_USED", () =>
+        reconsider(s, r!.id, EVIDENCE, "PAYROLL-DEMO-2040-B"),
+      );
+      await s.expectError("CDF_CONFLICT:RECONSIDERATION_USED", () => fileOnNotice(s, n));
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:RECONSIDERATION_USED",
+        (tx) => tx`select api.record_grievance_reconsideration(${g!.id}, 'EMAIL', now(), ${GRIEVANCE_GROUNDS},
+          'LETTER-DEMO-2040', ${EVIDENCE}, 'PAYROLL-DEMO-2040-C')`,
+      );
+
+      // Admissibility must confirm the evidence is new (fail closed).
+      await s.expectError(
+        "CDF_CONFLICT:NEW_EVIDENCE_NOT_CONFIRMED",
+        (tx) => tx`select api.assess_grievance_admissibility(${r!.id}, 'ADMISSIBLE', null, ${REASON})`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:NEW_EVIDENCE_NOT_CONFIRMED",
+        (tx) => tx`select api.assess_grievance_admissibility(${r!.id}, 'ADMISSIBLE', null, ${REASON}, false)`,
+      );
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:NEW_EVIDENCE_NOT_CONFIRMED",
+        (
+          tx,
+        ) => tx`insert into grievance.admissibility_assessment (grievance_id, stage, assessment, decided_by_role,
+                                                                    reason, recorded_by)
+                   values (${r!.id}, 'DECISION', 'ADMISSIBLE', 'SECRETARY', ${REASON}, ${USERS.committeeSecretary})`,
+      );
+      await s.expectError(
+        "CDF_INVALID:new_evidence_confirmed",
+        (
+          tx,
+        ) => tx`insert into grievance.admissibility_assessment (grievance_id, stage, assessment, decided_by_role,
+                                                                    reason, recorded_by, new_evidence_confirmed)
+                   values (${g!.id}, 'DECISION', 'ADMISSIBLE', 'SECRETARY', ${REASON}, ${USERS.committeeSecretary}, true)`,
+      );
+      await concludeGrievanceProceeding(s, g!.id);
+      await s.as("committeeSecretary");
+      expect(
+        await s.tx`select api.assess_grievance_admissibility(${r!.id}, 'ADMISSIBLE', null, ${REASON}, true) as r`,
+      ).toEqual([{ r: "ADMITTED" }]);
+      await s.as("employee");
+      await s.tx`select api.withdraw_grievance(${r!.id}, ${REASON})`;
+      await s.expectError("CDF_CONFLICT:RECONSIDERATION_USED", () => fileOnNotice(s, n));
+      await s.expectError("CDF_CONFLICT:RECONSIDERATION_USED", () =>
+        reconsider(s, g!.id, EVIDENCE, "PAYROLL-DEMO-2040-D"),
+      );
+    });
+  });
+
+  it("T-AMB-085: the Secretary records the one reconsideration received outside the portal, never dated before the decided grievance", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, GRIEVANCE_SEATS);
+      const [num] = await admin<
+        { n: string }[]
+      >`select case_number as n from case_mgmt.case_record where id = ${caseB}`;
+      await s.as("committeeSecretary");
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.record_grievance('LINKED', ${num!.n}, 'Employee Sigma (synthetic)', null, null, null, 'PHYSICAL_SUBMISSION',
+          now(), now(), 'Synthetic: grievance against the decision.', 'LETTER-DEMO-2040') as id`;
+      const record = (grievance: string, channel: string, submitted: string, description: string | null) =>
+        s.tx<{ id: string }[]>`
+          select api.record_grievance_reconsideration(${grievance}, ${channel}, now() - ${submitted}::interval,
+            ${GRIEVANCE_GROUNDS}, 'LETTER-DEMO-2040-R', ${description}, 'PAYROLL-DEMO-2040') as id`;
+      await s.expectError("CDF_CONFLICT:GRIEVANCE_NOT_DECIDED", () =>
+        record(g!.id, "EMAIL", "0 days", EVIDENCE),
+      );
+      await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
+      const vi = await approvedGrievanceVote(s, g!.id);
+      await outcomeWith(s, g!.id, vi)(["REJECT_ON_MERITS"], null);
+
+      await s.as("committeeSecretary");
+      await s.expectError("CDF_INVALID:channel", () => record(g!.id, "EMPLOYEE_PORTAL", "0 days", EVIDENCE));
+      await s.expectError("CDF_INVALID:new_evidence_description", () =>
+        record(g!.id, "EMAIL", "0 days", null),
+      );
+      // Received before the grievance it reconsiders was decided: not a reconsideration on new evidence.
+      await s.expectError("CDF_INVALID:original_submission_date", () =>
+        record(g!.id, "EMAIL", "1 day", EVIDENCE),
+      );
+      for (const u of ["caseManager", "employee"] as const) {
+        await s.as(u);
+        await s.expectError(u === "employee" ? "CDF_NOT_FOUND" : "CDF_FORBIDDEN", () =>
+          record(g!.id, "EMAIL", "0 days", EVIDENCE),
+        );
+      }
+      await s.as("employeeB");
+      await s.expectError("CDF_NOT_FOUND", () => record(g!.id, "EMAIL", "0 days", EVIDENCE));
+      await s.as("committeeSecretary");
+      const [r] = await record(g!.id, "EMAIL", "0 days", EVIDENCE);
+      await s.expectError("CDF_CONFLICT:RECONSIDERATION_USED", () =>
+        record(g!.id, "EMAIL", "0 days", EVIDENCE),
+      );
+      await s.expectError("CDF_CONFLICT:RECONSIDERATION_USED", () =>
+        record(r!.id, "EMAIL", "0 days", EVIDENCE),
+      );
+      await s.asOwner();
+      expect(
+        await s.tx`select reconsideration_of, grievant_subject_id, grievant_label, channel, recorded_by
+                   from grievance.grievance where id = ${r!.id}`,
+      ).toEqual([
+        {
+          reconsideration_of: g!.id,
+          grievant_subject_id: null,
+          grievant_label: "Employee Sigma (synthetic)",
+          channel: "EMAIL",
+          recorded_by: USERS.committeeSecretary,
+        },
+      ]);
+      const [audit] = await s.tx<{ metadata: Record<string, unknown> }[]>`
+        select metadata from audit.audit_event where action = 'GRIEVANCE_FILED' and object_id = ${r!.id}`;
+      expect(audit!.metadata).toMatchObject({ reconsideration_of: g!.id, channel: "EMAIL", is_late: false });
+      expect(JSON.stringify(audit!.metadata)).not.toContain("payroll record");
+    });
+  });
+
+  it("T-AMB-088: uphold, reduce, a modification no more severe and cancel are allowed; more severe or not comparable is refused", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, GRIEVANCE_SEATS);
+      const f = await decidedForSubjects(s, ic, caseB);
+      const n = await decisionNotice(s, f.sigma, f.decision);
+      await recordDelivery(s, n);
+      await s.as("employee");
+      const [g] = await fileOnNotice(s, n, [f.sanction]);
+      await s.as("committeeSecretary");
+      await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
+      const vi = await approvedGrievanceVote(s, g!.id);
+      const outcome = outcomeWith(s, g!.id, vi);
+      const sub = (code: string, within?: string) => [
+        { item_id: f.sanction, sanction_code: code, ...(within ? { within_type_change: within } : {}) },
+      ];
+
+      // Unranked (the seeded state): no change between types at all; within the same type, reduce or keep only.
+      await s.as("committeeSecretary");
+      await s.expectError("CDF_CONFLICT:SANCTION_NOT_COMPARABLE", () =>
+        outcome(["MODIFY"], sub("SALARY_DEDUCTION")),
+      );
+      await s.expectError("CDF_CONFLICT:SANCTION_MORE_SEVERE", () =>
+        outcome(["MODIFY"], sub("WARNING", "INCREASE")),
+      );
+      await s.expectError("CDF_INVALID:within_type_change", () => outcome(["MODIFY"], sub("WARNING")));
+      await thenUndo(s, () => outcome(["MODIFY"], sub("WARNING", "REDUCE")));
+      for (const allowed of [["UPHOLD"], ["REJECT_ON_MERITS"]]) {
+        await thenUndo(s, () => outcome(allowed, null));
+      }
+
+      // Synthetic ranks for the test (SANCTION_SEVERITY_RANK is SOURCE_REQUIRED): SALARY_DEDUCTION 1, WARNING and
+      // DEMOTION 2, TERMINATION 5; SUSPENSION stays unranked.
+      await setSanctionRule(s, "SALARY_DEDUCTION", 1, false, "PROCEED");
+      await setSanctionRule(s, "WARNING", 2, false, "SUSPEND_UNTIL_RESOLVED");
+      await setSanctionRule(s, "DEMOTION", 2, false, "SUSPEND_UNTIL_RESOLVED");
+      await setSanctionRule(s, "TERMINATION", 5, true, "SUSPEND_UNTIL_RESOLVED");
+      await s.as("committeeSecretary");
+      await s.expectError("CDF_CONFLICT:SANCTION_MORE_SEVERE", () => outcome(["MODIFY"], sub("TERMINATION")));
+      await s.expectError("CDF_CONFLICT:SANCTION_NOT_COMPARABLE", () =>
+        outcome(["MODIFY"], sub("SUSPENSION")),
+      );
+      await s.expectError("CDF_INVALID:within_type_change", () =>
+        outcome(["MODIFY"], sub("SALARY_DEDUCTION", "REDUCE")),
+      );
+      await s.expectError("CDF_INVALID:substitutions", () => outcome(["UPHOLD"], sub("SALARY_DEDUCTION")));
+      await s.expectError("CDF_INVALID:substitutions", () => outcome(["MODIFY"], sub("WARNING", "BIGGER")));
+      await s.expectError("CDF_INVALID:substitutions", () =>
+        outcome(["MODIFY"], [{ item_id: f.corrective, sanction_code: "SALARY_DEDUCTION" }]),
+      );
+      await s.expectError("CDF_INVALID:substitutions", () =>
+        outcome(["MODIFY"], [{ item_id: "not-a-uuid", sanction_code: "SALARY_DEDUCTION" }]),
+      );
+      await s.as("employee");
+      await s.expectError("CDF_FORBIDDEN", () => outcome(["MODIFY"], sub("SALARY_DEDUCTION")));
+      // Guarded in the database, whatever writes the row.
+      await s.asOwner();
+      for (const [code, error] of [
+        ["TERMINATION", "CDF_CONFLICT:SANCTION_MORE_SEVERE"],
+        ["SUSPENSION", "CDF_CONFLICT:SANCTION_NOT_COMPARABLE"],
+      ] as const) {
+        await s.expectError(
+          error,
+          (
+            tx,
+          ) => tx`insert into grievance.outcome_substitution (grievance_id, item_id, original_sanction_code,
+                                                                  substitute_sanction_code, recorded_by)
+                     values (${g!.id}, ${f.sanction}, 'WARNING', ${code}, ${USERS.committeeSecretary})`,
+        );
+      }
+
+      // Allowed: an equal rank (no more severe), and cancel, which sets the sanction aside for execution.
+      await s.as("committeeSecretary");
+      await thenUndo(s, () => outcome(["MODIFY"], sub("DEMOTION")));
+      await thenUndo(s, async () => {
+        await outcome(["CANCEL"], null);
+        expect(await executability(s)).toEqual([
+          { item_id: f.sanction, blocked_by: "SANCTION_SET_ASIDE_BY_GRIEVANCE", executable: false },
+        ]);
+        await s.expectError("CDF_CONFLICT:SANCTION_SET_ASIDE_BY_GRIEVANCE", () =>
+          executeSanction(s, f.sanction, f.sigma),
+        );
+      });
+      // Reduce between types: kept for the rest of the test.
+      await s.as("committeeSecretary");
+      await outcome(["MODIFY"], sub("SALARY_DEDUCTION"));
+      await s.asOwner();
+      expect(
+        await s.tx`select original_sanction_code, substitute_sanction_code, original_severity_rank,
+                          substitute_severity_rank, within_type_change
+                   from grievance.outcome_substitution where grievance_id = ${g!.id}`,
+      ).toEqual([
+        {
+          original_sanction_code: "WARNING",
+          substitute_sanction_code: "SALARY_DEDUCTION",
+          original_severity_rank: 2,
+          substitute_severity_rank: 1,
+          within_type_change: null,
+        },
+      ]);
+
+      // The reconsideration compares with the sanction now in effect (SALARY_DEDUCTION), not the decided WARNING.
+      await s.as("employee");
+      const [r] = await reconsider(s, g!.id, EVIDENCE, "PAYROLL-DEMO-2040");
+      await concludeGrievanceProceeding(s, g!.id);
+      await s.as("committeeSecretary");
+      await s.tx`select api.assess_grievance_admissibility(${r!.id}, 'ADMISSIBLE', null, ${REASON}, true)`;
+      const vi2 = await approvedGrievanceVote(s, r!.id);
+      const again = outcomeWith(s, r!.id, vi2);
+      await s.as("committeeSecretary");
+      await s.expectError("CDF_CONFLICT:SANCTION_MORE_SEVERE", () => again(["MODIFY"], sub("WARNING")));
+      await again(["MODIFY"], sub("SALARY_DEDUCTION", "NONE"));
+      // Executed as the sanction in effect; SALARY_DEDUCTION is configured to proceed.
+      await s.as("caseManager");
+      await executeSanction(s, f.sanction, f.sigma);
+      await s.asOwner();
+      expect(
+        await s.tx`select executed_sanction_code from decision.sanction_execution where item_id = ${f.sanction}`,
+      ).toEqual([{ executed_sanction_code: "SALARY_DEDUCTION" }]);
     });
   });
 });
