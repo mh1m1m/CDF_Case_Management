@@ -533,6 +533,19 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.withdraw_referral(${t.referral}, ${REASON})`,
   },
+  // Escalation after a repeated rejection (migration 2040, DEC-F09).
+  {
+    fn: "escalate_referral_rejection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.escalate_referral_rejection(${t.referral}, 'Synthetic: probe escalation text.')`,
+  },
+  {
+    fn: "decide_referral_escalation",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.decide_referral_escalation(${t.referral}, 'ACCEPT', null, null, ${self})`,
+  },
   {
     fn: "comment_on_referral",
     outcome: "NOT_FOUND",
@@ -1185,6 +1198,8 @@ const ADMIN_COMMANDS = [
   "set_corrective_action_pool_member",
   // Sanction catalogue rules (migration 2040; DEC-AMB-004, DEC-AMB-011): COMMITTEE_ADMIN only, no case.
   "set_sanction_rule",
+  // Referral escalation target (migration 2040, DEC-F09): COMMITTEE_ADMIN only, no referral or case.
+  "set_referral_escalation_target",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
@@ -1692,6 +1707,7 @@ describe("IDOR: referral commands give outsiders the same answer for real object
     "grcDirector",
     "committee",
     "committeeSecretary",
+    "committeeChair", // the owner-default escalation target (DEC-F09), with nothing escalated
     "internalAudit",
     "dpo",
     "complianceManager",

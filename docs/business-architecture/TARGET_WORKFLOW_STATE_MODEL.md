@@ -41,16 +41,18 @@ GRIEVANCE (LINKED to a decision, or STANDALONE / DIRECT_GRIEVANCE) ─▶ admiss
 
 ### 3.1 Referral (`intake.referral.status`)
 
-| From                            | Command                                                      | To                                            | Actor                          | Guard                                                      |
-| ------------------------------- | ------------------------------------------------------------ | --------------------------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| —                               | `api.create_referral`                                        | DRAFT                                         | sector member                  | active sector membership                                   |
-| DRAFT / RETURNED_FOR_COMPLETION | `api.submit_referral_to_head`                                | SUBMITTED_TO_HEAD                             | preparer                       | required fields                                            |
-| SUBMITTED_TO_HEAD               | `api.sector_approve_referral`                                | SUBMITTED_TO_SECRETARY                        | sector head or active delegate | delegate window covers now; approver ≠ preparer            |
-| SUBMITTED_TO_HEAD               | `api.sector_return_referral`                                 | DRAFT                                         | head / delegate                | reason                                                     |
-| SUBMITTED_TO_SECRETARY          | `api.secretary_decide_referral`                              | ACCEPTED / RETURNED_FOR_COMPLETION / REJECTED | IC secretary (effective seat)  | structured reasons for return / reject                     |
-| REJECTED                        | `api.resubmit_referral` / `api.object_to_referral_rejection` | SUBMITTED_TO_HEAD / OBJECTED                  | preparer / head                | rejection is not final                                     |
-| OBJECTED                        | `api.secretary_decide_referral`                              | ACCEPTED / REJECTED                           | IC secretary                   | objection recorded                                         |
-| ACCEPTED                        | (same transaction)                                           | case created                                  | system                         | `source_type = DIRECT_REFERRAL`, committee proceeding open |
+| From                            | Command                                                      | To                                            | Actor                          | Guard                                                                       |
+| ------------------------------- | ------------------------------------------------------------ | --------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------- |
+| —                               | `api.create_referral`                                        | DRAFT                                         | sector member                  | active sector membership                                                    |
+| DRAFT / RETURNED_FOR_COMPLETION | `api.submit_referral_to_head`                                | SUBMITTED_TO_HEAD                             | preparer                       | required fields                                                             |
+| SUBMITTED_TO_HEAD               | `api.sector_approve_referral`                                | SUBMITTED_TO_SECRETARY                        | sector head or active delegate | delegate window covers now; approver ≠ preparer                             |
+| SUBMITTED_TO_HEAD               | `api.sector_return_referral`                                 | DRAFT                                         | head / delegate                | reason                                                                      |
+| SUBMITTED_TO_SECRETARY          | `api.secretary_decide_referral`                              | ACCEPTED / RETURNED_FOR_COMPLETION / REJECTED | IC secretary (effective seat)  | structured reasons for return / reject                                      |
+| REJECTED                        | `api.resubmit_referral` / `api.object_to_referral_rejection` | SUBMITTED_TO_HEAD / OBJECTED                  | preparer / head                | rejection is not final                                                      |
+| OBJECTED                        | `api.secretary_decide_referral`                              | ACCEPTED / REJECTED                           | IC secretary                   | objection recorded                                                          |
+| REJECTED (second or later)      | `api.escalate_referral_rejection`                            | ESCALATED                                     | head / delegate (not preparer) | DEC-F09 (2040): text unchanged; once per rejection                          |
+| ESCALATED                       | `api.decide_referral_escalation`                             | ACCEPTED / REJECTED                           | escalation target seat holder  | DEC-F09: default IC Chair; excludes preparer, approver, rejecting secretary |
+| ACCEPTED                        | (same transaction)                                           | case created                                  | system                         | `source_type = DIRECT_REFERRAL`, committee proceeding open                  |
 
 ### 3.2 Preliminary review (`proceeding` type PRELIMINARY_REVIEW)
 
@@ -61,7 +63,7 @@ GRIEVANCE (LINKED to a decision, or STANDALONE / DIRECT_GRIEVANCE) ─▶ admiss
 | AWAITING_APPROVAL | `api.approve_preliminary_recommendation` | CONCLUDED / RETURNED         | GRC_SECTOR_HEAD                                          | approver ≠ preparer                               |
 | RETURNED          | `api.prepare_preliminary_recommendation` | AWAITING_REVIEW              | preparer                                                 | return reasons from a structured list             |
 
-Approval concludes the proceeding with the recommended outcome: INVESTIGATION_WARRANTED or REFERRED_TO_COMMITTEE to go on, or a closure (NO_ACTION, OUT_OF_SCOPE, DUPLICATE, TRANSFERRED, NON_PROCESSABLE, and since migration 1980 NOT_SERIOUS, NOT_SUBSTANTIATED, CHANNEL_ABUSE, NOT_FEASIBLE, NO_PERSONAL_JURISDICTION; ADR-036).
+Approval concludes the proceeding with the recommended outcome: INVESTIGATION_WARRANTED or REFERRED_TO_COMMITTEE to go on, or a closure (NO_ACTION, OUT_OF_SCOPE, DUPLICATE, TRANSFERRED, NON_PROCESSABLE, and since migration 1980 NOT_SERIOUS, NOT_SUBSTANTIATED, CHANNEL_ABUSE, NOT_FEASIBLE, NO_PERSONAL_JURISDICTION; ADR-036). Since migration 2040 (DEC-F10) NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are INACTIVE in the catalogue: refused for a new recommendation and for endorsement or approval, kept on existing records, until their authority and definitions are confirmed (SOURCE_REQUIRED).
 
 ### 3.3 Committee proceeding
 

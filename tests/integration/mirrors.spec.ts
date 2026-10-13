@@ -14,6 +14,9 @@ import {
   NOTIFICATION_TEMPLATES,
   PERMISSIONS,
   PRELIMINARY_OUTCOMES,
+  PRELIMINARY_OUTCOMES_NOT_ENABLED,
+  REFERRAL_EVENT_TYPES,
+  REFERRAL_STATUSES,
   STATUS_CODES,
 } from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES, FORM_DEFINITIONS, FORM_ENTITLEMENTS } from "@cdf/domain";
@@ -98,6 +101,25 @@ describe("mirrors", () => {
     const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
     expect(fromCheck).toEqual([...PRELIMINARY_OUTCOMES].sort());
     for (const code of PRELIMINARY_OUTCOMES) expect(STATUS_CODES.OUTCOME_CODE, code).toContain(code);
+  });
+
+  it("preliminary outcomes not enabled are exactly the INACTIVE catalogue values (DEC-F10, 2040)", async () => {
+    const rows = await admin<{ value: string }[]>`
+      select value from config.status_dimension_value
+      where dimension = 'PRELIMINARY_OUTCOME' and state = 'INACTIVE' order by value collate "C"`;
+    expect(rows.map((r) => r.value)).toEqual([...PRELIMINARY_OUTCOMES_NOT_ENABLED].sort());
+  });
+
+  it("referral statuses and event types match the referral's checks (1880, DEC-F09 2040)", async () => {
+    const defs = await admin<{ conname: string; def: string }[]>`
+      select conname, pg_get_constraintdef(oid) as def from pg_constraint
+      where (conrelid, conname) in (('intake.referral'::regclass, 'referral_status_check'),
+                                    ('intake.referral_event'::regclass, 'referral_event_event_type_check'))
+      order by conname collate "C"`;
+    const codes = (name: string) =>
+      [...defs.find((d) => d.conname === name)!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+    expect(codes("referral_status_check")).toEqual([...REFERRAL_STATUSES].sort());
+    expect(codes("referral_event_event_type_check")).toEqual([...REFERRAL_EVENT_TYPES].sort());
   });
 
   it("employee notice kinds match the notice's kind check (1990)", async () => {

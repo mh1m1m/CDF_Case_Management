@@ -1070,6 +1070,8 @@ export const REFERRAL_STATUSES = [
   "OBJECTED",
   "ACCEPTED",
   "WITHDRAWN",
+  // Migration 2040 (DEC-F09): escalated after a repeated rejection, awaiting the escalation target.
+  "ESCALATED",
 ] as const;
 export type ReferralStatus = (typeof REFERRAL_STATUSES)[number];
 
@@ -1087,6 +1089,9 @@ export const REFERRAL_EVENT_TYPES = [
   "OBJECTED",
   "WITHDRAWN",
   "COMMENTED",
+  // Migration 2040 (DEC-F09).
+  "ESCALATED",
+  "ESCALATION_DECIDED",
 ] as const;
 export type ReferralEventType = (typeof REFERRAL_EVENT_TYPES)[number];
 
@@ -1101,6 +1106,10 @@ export const REFERRAL_ACTIONS = [
   "REJECT",
   "RESUBMIT",
   "OBJECT",
+  // Migration 2040 (DEC-F09): the sector's approver after a repeated rejection; the escalation target's decision.
+  "ESCALATE",
+  "ACCEPT_ESCALATION",
+  "UPHOLD_REJECTION",
   "WITHDRAW",
   "COMMENT",
 ] as const;
@@ -1125,6 +1134,13 @@ export const PRELIMINARY_OUTCOMES = [
   "NO_PERSONAL_JURISDICTION",
 ] as const;
 export type PreliminaryOutcome = (typeof PRELIMINARY_OUTCOMES)[number];
+
+/** Outcomes kept for existing records but not enabled for a new recommendation until their authority and definitions
+ *  are confirmed (DEC-F10, migration 2040; the PRELIMINARY_OUTCOME catalogue value is INACTIVE). Never offer them. */
+export const PRELIMINARY_OUTCOMES_NOT_ENABLED: readonly PreliminaryOutcome[] = [
+  "NOT_FEASIBLE",
+  "NO_PERSONAL_JURISDICTION",
+];
 
 export const PRELIMINARY_RECOMMENDATION_STATUSES = [
   "AWAITING_REVIEW",

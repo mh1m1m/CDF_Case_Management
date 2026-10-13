@@ -3482,3 +3482,475 @@ create trigger form_definition_retirement before update on forms.form_definition
   for each row execute function config.guard_form_retirement();
 revoke all on function config.form_retirement_unmet(text), config.guard_form_retirement()
 from public, anon, authenticated;
+
+-- =============================================================================
+-- Item 12. Referral: the delegation limit (DEC-F08), escalation after a repeated rejection (DEC-F09, AMB-009) and the
+-- two preliminary closures that are not enabled (DEC-F10, CON-001)
+-- =============================================================================
+
+-- DEC-F08: delegation is always time-bound, but no maximum is invented. MAX_SECTOR_APPROVAL_DELEGATION_DAYS is
+-- SOURCE_REQUIRED; while it is not configured the 1880 rules alone apply (an end date, evidence, an audit trail). Once
+-- it is configured, a new delegation longer than that many days is refused, and a configured value that is not a
+-- whole number of days refuses every new delegation (fail closed).
+insert into config.setting (key, value, status, source_reference, description) values
+  ('MAX_SECTOR_APPROVAL_DELEGATION_DAYS', null, 'SOURCE_REQUIRED', null,
+   'DEC-F08: the longest period, in days, a sector head may delegate referral approval for. Not invented: no maximum '
+   'beyond the required end date applies until it is configured.');
+
+create function iam.check_delegation_length()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare v_s config.setting;
+begin
+  select * into v_s from config.setting s where s.key = 'MAX_SECTOR_APPROVAL_DELEGATION_DAYS';
+  if v_s.status = 'CONFIGURED' then
+    if v_s.value !~ '^[0-9]{1,4}$' or v_s.value::int < 1 then
+      perform api._fail('CONFLICT', 'DELEGATION_LIMIT_MISCONFIGURED');
+    end if;
+    if new.effective_to > new.effective_from + make_interval(days => v_s.value::int) then
+      perform api._fail('CONFLICT', 'DELEGATION_TOO_LONG');
+    end if;
+  end if;
+  return new;
+end;
+$$;
+create trigger sector_delegation_max_length before insert on iam.sector_delegation
+  for each row execute function iam.check_delegation_length();
+revoke all on function iam.check_delegation_length() from public, anon, authenticated;
+
+-- DEC-F09: a second rejection does not close a referral. The sector may still revise and resubmit (no maximum on
+-- resubmissions) or object as 1880 allows, and after a repeated rejection it may escalate the rejected text to a
+-- configured target, which accepts it (the case and its committee proceeding are created as on the secretary's
+-- acceptance) or upholds the rejection. The target is a committee seat, effective-dated; the owner default is the
+-- Investigation Committee Chair. The target in force when the escalation is raised is recorded on the referral, so a
+-- later change does not re-route an open escalation; whoever holds that seat decides, and sees the referral while
+-- seated (as the secretary does, 1880).
+alter table intake.referral drop constraint referral_status_check;
+alter table intake.referral add constraint referral_status_check check (status in (
+  'DRAFT', 'SUBMITTED_TO_HEAD', 'SUBMITTED_TO_SECRETARY', 'RETURNED_FOR_COMPLETION', 'REJECTED', 'OBJECTED', 'ACCEPTED',
+  'WITHDRAWN', 'ESCALATED'));
+alter table intake.referral_event drop constraint referral_event_event_type_check;
+alter table intake.referral_event add constraint referral_event_event_type_check check (event_type in (
+  'CREATED', 'UPDATED', 'SUBMITTED', 'SECTOR_APPROVED', 'SECTOR_RETURNED', 'ACCEPTED', 'RETURNED_FOR_COMPLETION',
+  'REJECTED', 'RESUBMITTED', 'OBJECTED', 'WITHDRAWN', 'COMMENTED', 'ESCALATED', 'ESCALATION_DECIDED'));
+
+create table intake.referral_escalation_target (
+  id               uuid primary key default gen_random_uuid(),
+  committee_id     uuid not null references committee.committee (id),
+  -- A single-holder deciding seat. The secretaries are left out: one of them made the rejection.
+  seat             text not null check (seat in ('CHAIR', 'DEPUTY_CHAIR')),
+  effective_from   timestamptz not null,
+  effective_to     timestamptz,
+  source_status    text not null check (source_status in ('OWNER_DEFAULT', 'APPROVED')),
+  source_reference text not null check (length(source_reference) between 3 and 200),
+  reason           text not null check (length(reason) between 5 and 2000),
+  -- Null only for the owner default this migration installs.
+  set_by           uuid references iam.user_profile (id),
+  set_at           timestamptz not null default now(),
+  check (effective_to is null or effective_to > effective_from),
+  check ((source_status = 'OWNER_DEFAULT') = (set_by is null))
+);
+create index referral_escalation_target_effective on intake.referral_escalation_target (effective_from);
+create index referral_escalation_target_committee on intake.referral_escalation_target (committee_id);
+create index referral_escalation_target_set_by on intake.referral_escalation_target (set_by);
+comment on table intake.referral_escalation_target is
+  'DEC-F09 (migration 2040): who decides a referral escalated after a repeated rejection. Effective-dated committee '
+  'seat; the owner default is the Investigation Committee Chair. A version is ended by shortening effective_to.';
+
+insert into intake.referral_escalation_target (committee_id, seat, effective_from, source_status, source_reference, reason)
+select c.id, 'CHAIR', now(), 'OWNER_DEFAULT', 'DEC-F09',
+       'Owner default (DEC-F09): the Investigation Committee Chair decides an escalated rejection.'
+from committee.committee c where c.kind = 'INVESTIGATION';
+
+alter table intake.referral add column escalation_target_id uuid references intake.referral_escalation_target (id);
+alter table intake.referral add column escalated_at timestamptz;
+alter table intake.referral add constraint referral_escalation_check
+  check (status <> 'ESCALATED' or (escalation_target_id is not null and escalated_at is not null));
+create index referral_escalation_target_ref on intake.referral (escalation_target_id);
+
+-- A target version is append-only; the one change allowed is ending it (effective_to from open to a time not in the
+-- past). No delete.
+create function intake.protect_escalation_target()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if (to_jsonb(new) - 'effective_to') <> (to_jsonb(old) - 'effective_to')
+     or old.effective_to is not null or new.effective_to is null or new.effective_to < now() then
+    raise exception 'intake.referral_escalation_target is append-only (update rejected)'
+      using errcode = 'insufficient_privilege';
+  end if;
+  return new;
+end;
+$$;
+create trigger referral_escalation_target_protect before update on intake.referral_escalation_target
+  for each row execute function intake.protect_escalation_target();
+create trigger no_delete before delete on intake.referral_escalation_target
+  for each row execute function committee.reject_mutation();
+create trigger no_truncate before truncate on intake.referral_escalation_target
+  for each statement execute function committee.reject_mutation();
+revoke all on function intake.protect_escalation_target() from public, anon, authenticated;
+
+alter table intake.referral_escalation_target enable row level security;
+-- Who decides escalations is not sensitive: any active user may read it (the sector needs to know where it goes).
+create policy referral_escalation_target_read on intake.referral_escalation_target for select to authenticated
+  using (authz.current_user_id() is not null);
+grant select on intake.referral_escalation_target to authenticated;
+
+-- The target version in force at an instant (a row of nulls when none). Internal.
+create function intake.referral_escalation_target_at(p_at timestamptz)
+returns intake.referral_escalation_target
+language sql stable security definer
+set search_path = ''
+as $$
+  select t.* from intake.referral_escalation_target t
+  where t.effective_from <= p_at and (t.effective_to is null or t.effective_to > p_at)
+  order by t.effective_from desc limit 1;
+$$;
+
+-- The user holds the seat a target version names, now. Internal.
+create function authz.holds_referral_escalation_target(p_user_id uuid, p_target_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select p_user_id is not null and exists (
+    select 1 from intake.referral_escalation_target t
+    where t.id = p_target_id and authz.user_committee_seat(p_user_id, t.committee_id, now()) = t.seat);
+$$;
+
+-- The people a referral's escalation must not reach (separation of duties): its preparer, its sector approver and
+-- the secretary who made the latest rejection.
+create function intake.referral_escalation_excluded(p_referral intake.referral, p_user_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select p_user_id = p_referral.prepared_by
+      or p_user_id is not distinct from p_referral.sector_approved_by
+      or p_user_id is not distinct from (select e.actor_id from intake.referral_event e
+                                         where e.referral_id = p_referral.id and e.event_type = 'REJECTED'
+                                         order by e.occurred_at desc, e.id desc limit 1);
+$$;
+
+-- Why the referral cannot be escalated now, or null: the single rule for the command and the available actions.
+-- Repeated rejection means at least two secretary rejections; the escalation stands for the text rejected (no edit
+-- since); one escalation per rejection; and the target in force has a holder now who may decide it (seated, active,
+-- cleared for the referral, not excluded). Fail closed when nobody can.
+create function intake.referral_escalation_block(p_referral intake.referral)
+returns text
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_last timestamptz;
+  v_t intake.referral_escalation_target;
+begin
+  if p_referral.status is distinct from 'REJECTED' then return 'REFERRAL_NOT_REJECTED'; end if;
+  if (select count(*) from intake.referral_event e where e.referral_id = p_referral.id and e.event_type = 'REJECTED') < 2 then
+    return 'ESCALATION_NOT_AVAILABLE';
+  end if;
+  select max(e.occurred_at) into v_last from intake.referral_event e
+  where e.referral_id = p_referral.id and e.event_type = 'REJECTED';
+  if exists (select 1 from intake.referral_event u
+             where u.referral_id = p_referral.id and u.event_type = 'UPDATED' and u.occurred_at > v_last) then
+    return 'REFERRAL_CHANGED_AFTER_REJECTION';
+  end if;
+  if exists (select 1 from intake.referral_event u
+             where u.referral_id = p_referral.id and u.event_type = 'ESCALATED' and u.occurred_at > v_last) then
+    return 'ESCALATION_ALREADY_DECIDED';
+  end if;
+  v_t := intake.referral_escalation_target_at(now());
+  if v_t.id is null then return 'ESCALATION_TARGET_NOT_CONFIGURED'; end if;
+  if not exists (
+    select 1 from committee.membership m
+    join iam.user_profile u on u.id = m.user_id and u.status = 'ACTIVE'
+    where m.committee_id = v_t.committee_id and m.seat = v_t.seat
+      and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())
+      and p_referral.classification <= u.clearance
+      and not intake.referral_escalation_excluded(p_referral, m.user_id)) then
+    return 'ESCALATION_TARGET_UNAVAILABLE';
+  end if;
+  return null;
+end;
+$$;
+revoke all on function intake.referral_escalation_target_at(timestamptz),
+  authz.holds_referral_escalation_target(uuid, uuid), intake.referral_escalation_excluded(intake.referral, uuid),
+  intake.referral_escalation_block(intake.referral)
+from public, anon, authenticated;
+
+-- Replaces 1880 (DEC-F09): the holder of the escalation target recorded on the referral also sees it, from the
+-- escalation on and while seated. Everything else, the clearance check above all, is as built.
+create or replace function authz.can_view_referral(p_referral_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and exists (
+    select 1
+    from intake.referral r
+    join iam.user_profile u on u.id = authz.current_user_id() and u.status = 'ACTIVE'
+    where r.id = p_referral_id
+      and r.classification <= u.clearance
+      and (r.prepared_by = u.id
+           or (r.submitted_at is not null and authz.user_referral_approval_basis(u.id, r.sector_id, now()) is not null)
+           or (r.reached_secretary_at is not null and authz.is_committee_secretary(r.committee_id))
+           or (r.case_id is not null and authz.can_view_case(r.case_id))
+           or (r.escalation_target_id is not null
+               and authz.holds_referral_escalation_target(u.id, r.escalation_target_id)))
+  );
+$$;
+
+-- The sector's approver (never the preparer, as for an objection) escalates a repeated rejection, with a comment.
+create function api.escalate_referral_rejection(p_referral_id uuid, p_comment text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_r intake.referral;
+  v_basis text;
+  v_block text;
+  v_t intake.referral_escalation_target;
+  v_comment text;
+begin
+  v_r := intake.lock_visible_referral(p_referral_id);
+  v_basis := authz.user_referral_approval_basis(v_actor, v_r.sector_id, now());
+  if v_basis is null or v_actor = v_r.prepared_by then perform api._fail('FORBIDDEN'); end if;
+  v_block := intake.referral_escalation_block(v_r);
+  if v_block is not null then perform api._fail('CONFLICT', v_block); end if;
+  v_comment := api._require_text(p_comment, 'comment', 10, 4000);
+  v_t := intake.referral_escalation_target_at(now());
+  update intake.referral set escalation_target_id = v_t.id, escalated_at = now() where id = v_r.id;
+  perform intake.record_referral_event(v_r, 'ESCALATED', 'ESCALATED', v_actor, null, v_comment,
+    jsonb_build_object('approval_basis', v_basis, 'escalation_target_id', v_t.id, 'committee_id', v_t.committee_id,
+                       'seat', v_t.seat,
+                       'rejections', (select count(*) from intake.referral_event e
+                                      where e.referral_id = v_r.id and e.event_type = 'REJECTED')));
+end;
+$$;
+
+-- The target's decision: ACCEPT (a case and its committee proceeding, exactly as the secretary's acceptance) or
+-- UPHOLD the rejection with structured reasons. An upheld referral is REJECTED again; the sector may still revise and
+-- resubmit it.
+create function api.decide_referral_escalation(
+  p_referral_id uuid, p_decision text, p_reason_codes text[], p_comment text, p_case_owner_id uuid
+)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_r intake.referral;
+  v_comment text := case_mgmt.optional_comment(p_comment);
+  v_codes text[];
+  v_case_id uuid;
+begin
+  v_r := intake.lock_visible_referral(p_referral_id);
+  if not authz.holds_referral_escalation_target(v_actor, v_r.escalation_target_id) then perform api._fail('FORBIDDEN'); end if;
+  if v_r.status is distinct from 'ESCALATED' then perform api._fail('CONFLICT', 'REFERRAL_NOT_ESCALATED'); end if;
+  if intake.referral_escalation_excluded(v_r, v_actor) then perform api._fail('CONFLICT', 'SEPARATION_OF_DUTIES'); end if;
+  if p_decision is distinct from 'ACCEPT' and p_case_owner_id is not null then perform api._fail('INVALID', 'case_owner_id'); end if;
+
+  if p_decision = 'ACCEPT' then
+    if p_reason_codes is not null and cardinality(p_reason_codes) > 0 then perform api._fail('INVALID', 'reason_codes'); end if;
+    v_case_id := intake.create_case_from_referral(v_r, p_case_owner_id, v_actor);
+    update intake.referral set case_id = v_case_id, status = 'ACCEPTED', decided_by = v_actor, decided_at = now(),
+                               updated_at = now(), row_version = row_version + 1
+     where id = v_r.id;
+    perform intake.record_referral_event(v_r, 'ESCALATION_DECIDED', 'ACCEPTED', v_actor, null, v_comment,
+      jsonb_build_object('decision', 'ACCEPT', 'case_id', v_case_id, 'escalation_target_id', v_r.escalation_target_id));
+    return v_case_id;
+  elsif p_decision = 'UPHOLD' then
+    v_codes := case_mgmt.require_return_reasons(p_reason_codes, v_comment);
+    update intake.referral set decided_by = v_actor, decided_at = now() where id = v_r.id;
+    perform intake.record_referral_event(v_r, 'ESCALATION_DECIDED', 'REJECTED', v_actor, v_codes, v_comment,
+      jsonb_build_object('decision', 'UPHOLD', 'escalation_target_id', v_r.escalation_target_id));
+  else
+    perform api._fail('INVALID', 'decision');
+  end if;
+  return null;
+end;
+$$;
+
+-- COMMITTEE_ADMIN sets the target from a future instant (no backdating), with its source. The version in force ends
+-- where the new one starts; a version already scheduled for later must not be overtaken.
+create function api.set_referral_escalation_target(
+  p_committee_id uuid, p_seat text, p_effective_from timestamptz, p_source_reference text, p_reason text
+)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_from timestamptz := coalesce(p_effective_from, now());
+  v_reason text;
+  v_ref text;
+  v_prev uuid;
+  v_id uuid;
+begin
+  if not authz.has_permission('COMMITTEE_ADMIN') then perform api._fail('FORBIDDEN'); end if;
+  if p_committee_id is null or not exists (select 1 from committee.committee c where c.id = p_committee_id and c.is_active) then
+    perform api._fail('INVALID', 'committee_id');
+  end if;
+  if p_seat is null or p_seat not in ('CHAIR', 'DEPUTY_CHAIR') then perform api._fail('INVALID', 'seat'); end if;
+  if v_from < now() then perform api._fail('INVALID', 'effective_from'); end if;
+  v_ref := api._require_text(p_source_reference, 'source_reference', 3, 200);
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  lock table intake.referral_escalation_target in share row exclusive mode;
+  if exists (select 1 from intake.referral_escalation_target t where t.effective_from >= v_from) then
+    perform api._fail('CONFLICT', 'ESCALATION_TARGET_SCHEDULED');
+  end if;
+  select t.id into v_prev from intake.referral_escalation_target t
+  where t.effective_from <= v_from and (t.effective_to is null or t.effective_to > v_from)
+  order by t.effective_from desc limit 1;
+  update intake.referral_escalation_target set effective_to = v_from where id = v_prev;
+  insert into intake.referral_escalation_target (committee_id, seat, effective_from, source_status, source_reference,
+                                                 reason, set_by)
+  values (p_committee_id, p_seat, v_from, 'APPROVED', v_ref, v_reason, v_actor)
+  returning id into v_id;
+  perform audit.record_event('REFERRAL_ESCALATION_TARGET_SET', 'ADMIN', 'SUCCESS', null, 'referral_escalation_target',
+    v_id::text, v_reason,
+    jsonb_build_object('committee_id', p_committee_id, 'seat', p_seat, 'effective_from', v_from,
+                       'previous_target_id', v_prev));
+  return v_id;
+end;
+$$;
+
+-- Replaces 1880 (DEC-F09): the guide also offers ESCALATE to the sector's approver after a repeated rejection, and
+-- ACCEPT_ESCALATION / UPHOLD_REJECTION to the target holder, and no longer offers OBJECT for a rejection already
+-- escalated. Each mirrors its command's checks; the rest is as built.
+create or replace function api.referral_available_actions(p_referral_id uuid)
+returns table (action text)
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_r intake.referral;
+  v_preparer boolean;
+  v_approver boolean;
+  v_secretary boolean;
+  v_target boolean;
+begin
+  if p_referral_id is null or not authz.can_view_referral(p_referral_id) then return; end if;
+  select * into v_r from intake.referral r where r.id = p_referral_id;
+  v_preparer := v_r.prepared_by = v_actor;
+  v_approver := authz.user_referral_approval_basis(v_actor, v_r.sector_id, now()) is not null and not v_preparer;
+  v_secretary := authz.is_committee_secretary(v_r.committee_id) and not v_preparer
+                 and v_r.sector_approved_by is distinct from v_actor;
+  v_target := v_r.status = 'ESCALATED' and authz.holds_referral_escalation_target(v_actor, v_r.escalation_target_id)
+              and not intake.referral_escalation_excluded(v_r, v_actor);
+  return query
+    select a from unnest(array[
+      case when v_preparer and v_r.status in ('DRAFT', 'RETURNED_FOR_COMPLETION', 'REJECTED') then 'UPDATE' end,
+      case when v_preparer and v_r.status in ('DRAFT', 'RETURNED_FOR_COMPLETION') then 'SUBMIT' end,
+      case when v_approver and v_r.status = 'SUBMITTED_TO_HEAD' then 'SECTOR_APPROVE' end,
+      case when v_approver and v_r.status = 'SUBMITTED_TO_HEAD' then 'SECTOR_RETURN' end,
+      case when v_secretary and v_r.status in ('SUBMITTED_TO_SECRETARY', 'OBJECTED') then 'ACCEPT' end,
+      case when v_secretary and v_r.status = 'SUBMITTED_TO_SECRETARY' then 'RETURN_FOR_COMPLETION' end,
+      case when v_secretary and v_r.status in ('SUBMITTED_TO_SECRETARY', 'OBJECTED') then 'REJECT' end,
+      case when (v_preparer or authz.user_referral_approval_basis(v_actor, v_r.sector_id, now()) is not null)
+                and v_r.status = 'REJECTED' then 'RESUBMIT' end,
+      case when authz.user_referral_approval_basis(v_actor, v_r.sector_id, now()) is not null and v_r.status = 'REJECTED'
+                and (select e.from_status from intake.referral_event e where e.referral_id = v_r.id and e.event_type = 'REJECTED'
+                     order by e.occurred_at desc, e.id desc limit 1) is distinct from 'OBJECTED'
+                and not v_preparer
+                and not exists (select 1 from intake.referral_event u
+                                where u.referral_id = v_r.id and u.event_type in ('UPDATED', 'ESCALATED')
+                                  and u.occurred_at > (select max(e.occurred_at) from intake.referral_event e
+                                                       where e.referral_id = v_r.id and e.event_type = 'REJECTED'))
+           then 'OBJECT' end,
+      case when v_approver and intake.referral_escalation_block(v_r) is null then 'ESCALATE' end,
+      case when v_target then 'ACCEPT_ESCALATION' end,
+      case when v_target then 'UPHOLD_REJECTION' end,
+      case when v_preparer and v_r.status in ('DRAFT', 'SUBMITTED_TO_HEAD', 'RETURNED_FOR_COMPLETION', 'REJECTED')
+           then 'WITHDRAW' end,
+      'COMMENT'
+    ]) a where a is not null;
+end;
+$$;
+
+-- Replaces 1880 (DEC-F09): a rejection whose escalation was decided cannot then be objected to (the target's decision
+-- is not reopened through the secretary); the sector may still revise and resubmit. Otherwise as built.
+create or replace function api.object_to_referral_rejection(p_referral_id uuid, p_comment text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_r intake.referral;
+  v_basis text;
+begin
+  v_r := intake.lock_visible_referral(p_referral_id);
+  v_basis := authz.user_referral_approval_basis(v_actor, v_r.sector_id, now());
+  -- Separation of duties (AGENT-09 P2): the objection is a sector approval of what was rejected, so the preparer
+  -- cannot make it, and it stands only for the text the secretary rejected.
+  if v_basis is null or v_actor = v_r.prepared_by then perform api._fail('FORBIDDEN'); end if;
+  if v_r.status <> 'REJECTED' then perform api._fail('CONFLICT', 'REFERRAL_NOT_REJECTED'); end if;
+  if exists (select 1 from intake.referral_event u
+             where u.referral_id = v_r.id and u.event_type = 'UPDATED'
+               and u.occurred_at > (select max(e.occurred_at) from intake.referral_event e
+                                    where e.referral_id = v_r.id and e.event_type = 'REJECTED')) then
+    perform api._fail('CONFLICT', 'REFERRAL_CHANGED_AFTER_REJECTION');
+  end if;
+  -- A rejection that answered an objection cannot be objected to again.
+  if (select e.from_status from intake.referral_event e
+      where e.referral_id = v_r.id and e.event_type = 'REJECTED' order by e.occurred_at desc, e.id desc limit 1) = 'OBJECTED' then
+    perform api._fail('CONFLICT', 'OBJECTION_ALREADY_DECIDED');
+  end if;
+  -- DEC-F09: nor can a rejection whose escalation the target already decided.
+  if exists (select 1 from intake.referral_event u
+             where u.referral_id = v_r.id and u.event_type = 'ESCALATED'
+               and u.occurred_at > (select max(e.occurred_at) from intake.referral_event e
+                                    where e.referral_id = v_r.id and e.event_type = 'REJECTED')) then
+    perform api._fail('CONFLICT', 'ESCALATION_ALREADY_DECIDED');
+  end if;
+  perform intake.record_referral_event(v_r, 'OBJECTED', 'OBJECTED', v_actor, null,
+    api._require_text(p_comment, 'comment', 10, 4000), jsonb_build_object('approval_basis', v_basis));
+end;
+$$;
+
+grant execute on function api.escalate_referral_rejection(uuid, text),
+  api.decide_referral_escalation(uuid, text, text[], text, uuid),
+  api.set_referral_escalation_target(uuid, text, timestamptz, text, text)
+to authenticated;
+
+-- DEC-F10: NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are not enabled as preliminary closures until their authority
+-- and definitions are confirmed. Catalogue state only: their PRELIMINARY_OUTCOME values become INACTIVE (held by
+-- existing records, refused for new ones; nothing is deleted), the recommendation's check keeps both codes so any
+-- existing row keeps its outcome, and both stay OUTCOME_CODE values (a proceeding may still conclude with them by
+-- another path). A new recommendation, whatever path inserts it, must name an ACTIVE value, and so must a
+-- recommendation that moves on (endorsed for approval, or approved): one prepared before this decision can only be
+-- returned, and its next version names an enabled outcome. Fail closed.
+alter table config.status_dimension_value drop constraint status_dimension_value_state_check;
+alter table config.status_dimension_value add constraint status_dimension_value_state_check
+  check (state in ('ACTIVE', 'PLANNED', 'INACTIVE'));
+update config.status_dimension_value set state = 'INACTIVE'
+ where dimension = 'PRELIMINARY_OUTCOME' and value in ('NOT_FEASIBLE', 'NO_PERSONAL_JURISDICTION');
+
+create function case_mgmt.require_enabled_preliminary_outcome()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if (tg_op = 'INSERT' or (new.status is distinct from old.status and new.status in ('AWAITING_APPROVAL', 'APPROVED')))
+     and not exists (select 1 from config.status_dimension_value v
+                     where v.dimension = 'PRELIMINARY_OUTCOME' and v.value = new.recommended_outcome
+                       and v.state = 'ACTIVE') then
+    perform api._fail('CONFLICT', 'OUTCOME_NOT_ENABLED');
+  end if;
+  return new;
+end;
+$$;
+create trigger preliminary_recommendation_outcome_enabled before insert or update on case_mgmt.preliminary_recommendation
+  for each row execute function case_mgmt.require_enabled_preliminary_outcome();
+revoke all on function case_mgmt.require_enabled_preliminary_outcome() from public, anon, authenticated;

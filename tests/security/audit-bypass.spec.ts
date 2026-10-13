@@ -1189,6 +1189,46 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "employee",
         run: (s) => s.tx`select api.withdraw_referral(${ids.referral2!}, ${REASON})`,
       },
+      // Migration 2040 (DEC-F09): a third referral rejected twice is escalated to the Investigation Committee Chair
+      // (owner default), who upholds the rejection; then COMMITTEE_ADMIN restates the target.
+      {
+        fn: "escalate_referral_rejection",
+        actor: "sectorHead",
+        run: async (s) => {
+          await s.as("employee");
+          ids.referral3 = await one(
+            s,
+            s.tx`select api.create_referral(${ids.sector!}, 'Third walk referral (synthetic)', 'Synthetic: third referral summary.',
+              'FRAUD', 'RESTRICTED'::core.classification_level) as id`,
+          );
+          await s.tx`select api.submit_referral(${ids.referral3!}, null)`;
+          for (let round = 0; round < 2; round += 1) {
+            if (round > 0) {
+              await s.as("employee");
+              await s.tx`select api.resubmit_referral(${ids.referral3!}, null)`;
+            }
+            await s.as("sectorHead");
+            await s.tx`select api.sector_decide_referral(${ids.referral3!}, 'APPROVE', null, null)`;
+            await s.as("committeeSecretary");
+            await s.tx`select api.secretary_decide_referral(${ids.referral3!}, 'REJECT', array['OUT_OF_SCOPE'], null, null)`;
+          }
+          await s.as("sectorHead");
+          return s.tx`select api.escalate_referral_rejection(${ids.referral3!}, 'Synthetic: the rejection misreads the scope.')`;
+        },
+      },
+      {
+        fn: "decide_referral_escalation",
+        actor: "committeeChair",
+        run: (s) =>
+          s.tx`select api.decide_referral_escalation(${ids.referral3!}, 'UPHOLD', array['OUT_OF_SCOPE'], null, null)`,
+      },
+      {
+        fn: "set_referral_escalation_target",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.set_referral_escalation_target((select id from committee.committee where code = 'IC'), 'CHAIR',
+            now(), 'DEMO-DEC-F09', ${REASON})`,
+      },
       {
         fn: "revoke_referral_delegation",
         actor: "sectorHead",
