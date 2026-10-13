@@ -18,6 +18,8 @@ const investigator: Actor = {
   permissions: ["CONFLICT_DECLARE", "EVIDENCE_UPLOAD", "EVIDENCE_DOWNLOAD"],
   clearance: "CONFIDENTIAL",
 };
+const ITEM = "33333333-3333-4333-8333-333333333333";
+const HIDDEN = "44444444-4444-4444-8444-444444444444";
 const pdf = new TextEncoder().encode("%PDF-1.7\n%synthetic invoice");
 const meta = {
   caseId: CASE,
@@ -53,7 +55,12 @@ function harness(opts: { scan?: ScanResult["status"]; putFails?: boolean; promot
             caseId: CASE,
           }
         : null,
+    setRestriction: async (_c, i) => {
+      if (i.evidenceId === HIDDEN) throw new Error("CDF_NOT_FOUND");
+      calls.push(`restrict:${i.evidenceId}:${i.restriction}`);
+    },
     listReportAttachments: async () => [],
+    listCaseReportAttachments: async () => [],
     openReportAttachment: async () => null,
   };
   const storage: EvidenceStorage = {
@@ -169,5 +176,44 @@ describe("evidence upload pipeline", () => {
     const d = await service.openDownload(ctx, "v1");
     expect(d?.fileName).toBe("a.pdf");
     expect(await service.openDownload(ctx, "v2")).toBeNull();
+  });
+});
+
+describe("evidence restriction (DEC-09)", () => {
+  const limit = { caseId: CASE, evidenceId: ITEM, restriction: "LEADS", reason: "Synthetic: leads only." };
+  const lead: Actor = { ...investigator, roles: ["LEAD_INVESTIGATOR"] };
+
+  it("passes a valid change to the database, which decides who may", async () => {
+    const { service, calls } = harness();
+    expect(await service.setRestriction(ctx, lead, limit)).toEqual({ ok: true, value: undefined });
+    expect(calls).toEqual([`restrict:${ITEM}:LEADS`]);
+  });
+
+  it("refuses without EVIDENCE_UPLOAD, which every lead holds, and records the denial", async () => {
+    const { service, calls, events } = harness();
+    const triage: Actor = { ...investigator, roles: ["TRIAGE_OFFICER"], permissions: ["INTAKE_VIEW"] };
+    const r = await service.setRestriction(ctx, triage, limit);
+    expect(!r.ok && "error" in r && r.error.kind).toBe("FORBIDDEN");
+    expect(calls).toEqual([]);
+    expect(events[0]?.metadata).toMatchObject({ command: "set_evidence_restriction", outcome: "FORBIDDEN" });
+  });
+
+  it("returns field errors for an unknown restriction or a short reason", async () => {
+    const { service, calls } = harness();
+    for (const bad of [
+      { ...limit, restriction: "NOBODY" },
+      { ...limit, reason: "short" },
+    ]) {
+      const r = await service.setRestriction(ctx, lead, bad);
+      expect(!r.ok && "fieldErrors" in r).toBe(true);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("records a denial when the database answers not found", async () => {
+    const { service, events } = harness();
+    const r = await service.setRestriction(ctx, lead, { ...limit, evidenceId: HIDDEN });
+    expect(!r.ok && "error" in r && r.error.kind).toBe("NOT_FOUND");
+    expect(events[0]?.metadata).toMatchObject({ command: "set_evidence_restriction", outcome: "NOT_FOUND" });
   });
 });

@@ -10,7 +10,10 @@ import {
   formContentHash,
   formDisplayNumber,
   formFinalStatus,
+  formNextStep,
   formSchemaHash,
+  formTabGroup,
+  formWaitingAction,
   getFormDefinition,
   isFormEntitled,
   validateFormData,
@@ -108,6 +111,66 @@ describe("form lifecycle helpers", () => {
   });
   it("formats display numbers", () => {
     expect(formDisplayNumber("WB-FRM-11", 2)).toBe("WB-FRM-11 #2");
+  });
+});
+
+describe("the case's Forms tab (UX-068, UX-086)", () => {
+  const none = { canSave: false, canPrepare: false, canReview: false, canApprove: false, canWithdraw: false };
+  const form = (
+    over: Partial<Parameters<typeof formTabGroup>[0]> = {},
+  ): Parameters<typeof formTabGroup>[0] => ({
+    status: "DRAFT",
+    finalStatus: "APPROVED",
+    capabilities: none,
+    returned: null,
+    ...over,
+  });
+  const returned = {
+    at: "2026-10-11T10:00:00Z",
+    byName: "Committee Chair Xi",
+    reason: "Synthetic",
+    toMe: true,
+  };
+
+  it("names the next step until the form completes", () => {
+    expect(formNextStep("DRAFT", "APPROVED")).toBe("PREPARE");
+    expect(formNextStep("PREPARED", "APPROVED")).toBe("REVIEW");
+    expect(formNextStep("REVIEWED", "APPROVED")).toBe("APPROVE");
+    expect(formNextStep("REVIEWED", "REVIEWED")).toBeNull();
+    expect(formNextStep("PREPARED", "PREPARED")).toBeNull();
+    expect(formNextStep("WITHDRAWN", "APPROVED")).toBeNull();
+  });
+
+  it("waits for the caller only when the database lets them decide, or it came back to them", () => {
+    expect(formWaitingAction(form({ status: "PREPARED", capabilities: { ...none, canReview: true } }))).toBe(
+      "REVIEW",
+    );
+    expect(formWaitingAction(form({ status: "REVIEWED", capabilities: { ...none, canApprove: true } }))).toBe(
+      "APPROVE",
+    );
+    expect(formWaitingAction(form({ capabilities: { ...none, canSave: true }, returned }))).toBe("REVISE");
+    // Returned to someone else, or to me without the right to edit it any more: not mine to act on.
+    expect(
+      formWaitingAction(
+        form({ capabilities: { ...none, canSave: true }, returned: { ...returned, toMe: false } }),
+      ),
+    ).toBeNull();
+    expect(formWaitingAction(form({ returned }))).toBeNull();
+    // An ordinary draft I may prepare is work in progress, not waiting.
+    expect(
+      formWaitingAction(form({ capabilities: { ...none, canSave: true, canPrepare: true } })),
+    ).toBeNull();
+  });
+
+  it("groups forms as waiting, in progress, completed or withdrawn", () => {
+    expect(formTabGroup(form({ status: "PREPARED", capabilities: { ...none, canReview: true } }))).toBe(
+      "WAITING",
+    );
+    expect(formTabGroup(form({ status: "PREPARED" }))).toBe("IN_PROGRESS");
+    expect(formTabGroup(form({ capabilities: { ...none, canSave: true }, returned }))).toBe("WAITING");
+    expect(formTabGroup(form({ status: "REVIEWED", finalStatus: "REVIEWED" }))).toBe("COMPLETED");
+    expect(formTabGroup(form({ status: "APPROVED" }))).toBe("COMPLETED");
+    expect(formTabGroup(form({ status: "WITHDRAWN" }))).toBe("WITHDRAWN");
   });
 });
 

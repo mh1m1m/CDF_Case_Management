@@ -126,10 +126,13 @@ export interface InterviewDetail extends InterviewListItem {
   currentStatementVersionId: string | null;
   formInstanceId: string | null;
   preparedBy: string | null;
+  preparedByName: string | null;
   preparedAt: string | null;
   reviewedBy: string | null;
+  reviewedByName: string | null;
   reviewedAt: string | null;
   approvedBy: string | null;
+  approvedByName: string | null;
   approvedAt: string | null;
   cancelledAt: string | null;
   rowVersion: number;

@@ -121,3 +121,28 @@ export async function transition(page: Page, code: string, reason?: string, conf
   if (confirm) await page.getByRole("dialog").getByTestId("confirm-submit").click();
   await expect(page.getByTestId("case-state")).not.toHaveText(before ?? "");
 }
+
+/**
+ * Opens the page of an evidence item on the case (UX-075), adding one synthetic PDF first when the case has none
+ * (the seed holds no evidence). The page's user must be on the case's investigation team and may upload.
+ */
+export async function openEvidenceItem(page: Page, caseUrl: string): Promise<string> {
+  await page.goto(`${caseUrl}/evidence`);
+  await expect(page.getByTestId("evidence-card")).toBeVisible();
+  if ((await page.locator('[data-testid^="evidence-row-"]').count()) === 0) {
+    const form = page.getByTestId("evidence-form");
+    await form.locator("#file").setInputFiles({
+      name: "synthetic-item-page.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.7\n% synthetic evidence item page\n"),
+    });
+    await form.locator("#evidenceTitle").fill("Synthetic item page check");
+    await form.locator('button[type="submit"]').click();
+    await expect(form.getByRole("status")).toBeVisible();
+    await page.reload();
+  }
+  await page.locator('[data-testid^="evidence-row-"]').first().click();
+  await page.waitForURL(/\/evidence\/items\/[0-9a-f-]{36}$/);
+  await expect(page.getByTestId("evidence-item")).toBeVisible();
+  return page.url();
+}

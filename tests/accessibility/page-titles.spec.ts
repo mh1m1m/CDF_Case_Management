@@ -1,7 +1,7 @@
 // CDF-56: every page has a title that says what it is, followed by the app name (WCAG 2.4.2).
 // Portal titles never carry a Report ID or secret; internal titles carry no case content.
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { APP, PORTAL, contextIn, sharedAnonymousReport, signIn } from "../e2e/support";
+import { APP, PORTAL, contextIn, openEvidenceItem, sharedAnonymousReport, signIn } from "../e2e/support";
 
 const appNames = {
   en: { app: "CDF Case Management & Investigation Platform", portal: "CDF Whistleblowing Portal" },
@@ -65,10 +65,32 @@ for (const locale of ["ar", "en"] as const) {
     expect(new Set(titles).size).toBe(titles.length);
   });
 
-  test(`${locale}: case sub-pages have their own titles (UX-082)`, async ({ browser }) => {
+  test(`${locale}: case tabs and sub-pages have their own titles (UX-082)`, async ({ browser }) => {
     const expected = {
-      en: ["Case", "Case forms", "Form details", "Case interviews", "Interview details"],
-      ar: ["قضية", "نماذج القضية", "تفاصيل النموذج", "مقابلات القضية", "تفاصيل المقابلة"],
+      en: [
+        "Case",
+        "Case forms",
+        "Form details",
+        "Case interviews",
+        "Interview details",
+        "Case allegations",
+        "Case evidence",
+        "Case people and access",
+        "Case history",
+        "Evidence item details",
+      ],
+      ar: [
+        "قضية",
+        "نماذج القضية",
+        "تفاصيل النموذج",
+        "مقابلات القضية",
+        "تفاصيل المقابلة",
+        "ادعاءات القضية",
+        "أدلة القضية",
+        "فريق القضية وصلاحياتها",
+        "مجريات القضية",
+        "تفاصيل الدليل",
+      ],
     }[locale];
     const lead = await signIn(browser, "lead@example.test", locale);
     await lead.goto("/cases");
@@ -76,22 +98,32 @@ for (const locale of ["ar", "en"] as const) {
     await lead.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
     const caseUrl = lead.url();
     const titles = [await pagePart(lead, names.app)];
-    await lead.getByTestId("case-forms-link").click();
+    await lead.getByTestId("case-tab-forms").click();
     await lead.waitForURL(/\/forms$/);
     titles.push(await pagePart(lead, names.app));
-    await lead.locator('[data-testid^="form-instance-"]').first().click();
+    // The first started form by its address: after the e2e suite every form on this case can sit in the closed
+    // "Completed" group (S2g), where its link is not visible until the group is opened.
+    const formHref = await lead.locator('[data-testid^="form-instance-"]').first().getAttribute("href");
+    await lead.goto(formHref!);
     await lead.waitForURL(/\/forms\/[0-9a-f-]{36}$/);
     titles.push(await pagePart(lead, names.app));
     await lead.goto(caseUrl);
-    await lead.getByTestId("case-interviews-link").click();
+    await lead.getByTestId("case-tab-interviews").click();
     await lead.waitForURL(/\/interviews$/);
     titles.push(await pagePart(lead, names.app));
     await lead.locator('[data-testid^="interview-"]').first().click();
     await lead.waitForURL(/\/interviews\/[0-9a-f-]{36}$/);
     titles.push(await pagePart(lead, names.app));
+    for (const tab of ["allegations", "evidence", "people", "history"]) {
+      await lead.goto(`${caseUrl}/${tab}`);
+      titles.push(await pagePart(lead, names.app));
+    }
+    // An evidence item's own page (UX-075): neither its number nor its title is in the page title.
+    await openEvidenceItem(lead, caseUrl);
+    titles.push(await pagePart(lead, names.app));
     expect(titles).toEqual(expected);
     // No case number or case content in any of them.
-    for (const title of titles) expect(title).not.toMatch(/CDF-DEMO-|WB-/);
+    for (const title of titles) expect(title).not.toMatch(/CDF-DEMO-|WB-|EV-|Synthetic/);
     await lead.context().close();
   });
 

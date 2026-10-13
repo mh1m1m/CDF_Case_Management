@@ -69,10 +69,14 @@ export class PostgresInterviewGateway implements InterviewGateway {
                i.rights_notice_version as "rightsNoticeVersion", i.rights_acknowledged_at as "rightsAcknowledgedAt",
                i.conducted_started_at as "conductedStartedAt", i.conducted_ended_at as "conductedEndedAt",
                i.current_statement_version_id as "currentStatementVersionId", i.form_instance_id as "formInstanceId",
-               i.prepared_by as "preparedBy", i.prepared_at as "preparedAt", i.reviewed_by as "reviewedBy",
-               i.reviewed_at as "reviewedAt", i.approved_by as "approvedBy", i.approved_at as "approvedAt",
+               i.prepared_by as "preparedBy", pu.display_name as "preparedByName", i.prepared_at as "preparedAt",
+               i.reviewed_by as "reviewedBy", ru.display_name as "reviewedByName", i.reviewed_at as "reviewedAt",
+               i.approved_by as "approvedBy", au.display_name as "approvedByName", i.approved_at as "approvedAt",
                i.cancelled_at as "cancelledAt", i.row_version as "rowVersion"
         from case_mgmt.interview i left join iam.user_profile u on u.id = i.created_by
+          left join iam.user_profile pu on pu.id = i.prepared_by
+          left join iam.user_profile ru on ru.id = i.reviewed_by
+          left join iam.user_profile au on au.id = i.approved_by
         where i.id = ${interviewId}`;
       if (!row) return null;
 
@@ -129,10 +133,13 @@ export class PostgresInterviewGateway implements InterviewGateway {
         currentStatementVersionId: row.currentStatementVersionId,
         formInstanceId: row.formInstanceId,
         preparedBy: row.preparedBy,
+        preparedByName: row.preparedByName,
         preparedAt: iso(row.preparedAt),
         reviewedBy: row.reviewedBy,
+        reviewedByName: row.reviewedByName,
         reviewedAt: iso(row.reviewedAt),
         approvedBy: row.approvedBy,
+        approvedByName: row.approvedByName,
         approvedAt: iso(row.approvedAt),
         cancelledAt: iso(row.cancelledAt),
         rowVersion: row.rowVersion,

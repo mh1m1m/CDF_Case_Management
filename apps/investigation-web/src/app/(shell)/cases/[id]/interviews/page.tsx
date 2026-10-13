@@ -1,11 +1,9 @@
 // Interview list and planning for one case (CDF-60). Lists what RLS returned; offers planning to users the
-// database would allow (hidden ≠ forbidden: api.plan_interview re-checks). Entry link from the case page is
-// added by the accessibility thread, which owns that page.
+// database would allow (hidden ≠ forbidden: api.plan_interview re-checks). It is the case workspace's
+// Interviews tab (UX redesign S2).
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { can } from "@cdf/authorization";
-import { CLASSIFICATION_LEVELS, INTERVIEWEE_KINDS, type InterviewListItem } from "@cdf/contracts";
+import { INTERVIEWEE_KINDS, type InterviewListItem } from "@cdf/contracts";
 import { interviewDisplayNumber } from "@cdf/domain";
 import { formatDateTime, type MessageKey } from "@cdf/i18n";
 import {
@@ -13,16 +11,16 @@ import {
   CDFCard,
   CDFCommandForm,
   CDFField,
-  CDFPageHeader,
   CDFTable,
   classificationTone,
   inputClass,
   textareaClass,
 } from "@cdf/ui";
-import { interviewService, investigationService, requireActor } from "@/server/container";
+import { interviewService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { planInterviewAction } from "./actions";
 import { interviewStatusTone } from "./status-tone";
+import { CaseWorkspace, loadCase } from "../workspace";
 
 /** Unique translated title (WCAG 2.4.2, UX-082); never a case number or case content. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -30,51 +28,23 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t("pageTitles.caseInterviews") };
 }
 
-const UUID = /^[0-9a-f-]{36}$/i;
 // Interview refusals have their own codes; fall back to the shared ones.
 const INTERVIEW_CODES = ["interviews.codes", "codes"] as const;
 
 export default async function InterviewsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  if (!UUID.test(id)) notFound();
-  const { actor, ctx } = await requireActor();
-  const t = await getTranslator();
-  const c = await investigationService().getCase(ctx, id);
-  if (!c) notFound();
+  const { actor, ctx, t, c } = await loadCase(id);
   const interviews = await interviewService().listInterviews(ctx, id);
 
-  // Mirrors authz.can_conduct_interviews for the UI only; the database decides (§19).
-  const canPlan =
-    c.recordsState === "ACTIVE" &&
-    (can(actor, "CASE_EDIT_ALL") ||
-      c.assignments.some(
-        (a) =>
-          a.userId === actor.userId &&
-          ["CASE_OWNER", "LEAD_INVESTIGATOR", "INVESTIGATOR"].includes(a.assignmentRole),
-      ));
-  const levels = CLASSIFICATION_LEVELS.filter(
-    (l) =>
-      CLASSIFICATION_LEVELS.indexOf(l) >= CLASSIFICATION_LEVELS.indexOf(c.classification) &&
-      CLASSIFICATION_LEVELS.indexOf(l) <= CLASSIFICATION_LEVELS.indexOf(actor.clearance),
-  );
+  // authz.can_conduct_interviews and the allowed levels, read with the case (UX-116); the database checks again.
+  const canPlan = c.can.conductInterviews;
+  const levels = c.can.classifications;
   const kinds = INTERVIEWEE_KINDS.filter((k) => k !== "REPORTER" || c.reporterWbId);
   const interviewee = (i: InterviewListItem) =>
     i.intervieweeKind === "REPORTER" ? t("interviews.reporterProtected") : (i.intervieweeLabel ?? "—");
 
   return (
-    <>
-      <CDFPageHeader
-        title={`${c.caseNumber} · ${t("interviews.title")}`}
-        actions={
-          <Link
-            href={`/cases/${c.id}`}
-            className="font-semibold underline underline-offset-4"
-            data-testid="back-to-case"
-          >
-            {t("interviews.backToCase")}
-          </Link>
-        }
-      />
+    <CaseWorkspace c={c} actor={actor} t={t} tab="interviews">
       <CDFCard title={t("interviews.title")} testId="interviews-card">
         <p className="mb-3 text-sm text-cdf-text-secondary">{t("interviews.intro")}</p>
         <CDFTable<InterviewListItem>
@@ -228,6 +198,6 @@ export default async function InterviewsPage({ params }: { params: Promise<{ id:
           </CDFCommandForm>
         </CDFCard>
       ) : null}
-    </>
+    </CaseWorkspace>
   );
 }

@@ -48,12 +48,14 @@ export function itemHref(i: WorkItem): string {
   const onCase = i.caseId ? `/cases/${i.caseId}` : null;
   switch (i.targetType) {
     case "REPORT":
-      // A reply on a report that already has a case is answered from the case.
-      return i.category === "REPORTER_REPLIED" && onCase ? onCase : `/intake/${i.targetId}`;
+      // A reply on a report that already has a case is answered on the case's Reporter tab (DEC-06).
+      return i.category === "REPORTER_REPLIED" && onCase ? `${onCase}/reporter` : `/intake/${i.targetId}`;
     case "CASE":
-      return i.category === "DECLARE_CONFLICT" ? `/cases/${i.targetId}#conflict` : `/cases/${i.targetId}`;
+      return i.category === "DECLARE_CONFLICT"
+        ? `/cases/${i.targetId}/people#conflict`
+        : `/cases/${i.targetId}`;
     case "CONFLICT":
-      return onCase ? `${onCase}#conflict-decisions` : "/my-work";
+      return onCase ? `${onCase}/people#conflict-decisions` : "/my-work";
     case "FORM_INSTANCE":
       return onCase ? `${onCase}/forms/${i.targetId}` : "/my-work";
     case "INTERVIEW":
@@ -63,6 +65,12 @@ export function itemHref(i: WorkItem): string {
       return i.caseId ? `/records/${i.caseId}` : "/records";
     case "HOLD_REQUEST":
       return "/records/legal-holds";
+    case "RECORD":
+      // ADR-016 D8: the record's retention form for the shared queue, or its routing form for a case the queue
+      // cannot take. Both re-check the purpose in the database.
+      return i.category === "RETENTION_TO_ROUTE"
+        ? `/records/${i.targetId}#route-retention`
+        : `/records/${i.targetId}#retention`;
     default:
       return "/my-work";
   }
@@ -92,4 +100,14 @@ export function overdueKeys(items: readonly WorkItem[], now: number = Date.now()
       .filter((i) => i.dueAt !== null && Date.parse(i.dueAt) < now)
       .map((i) => `${i.category}:${i.targetId}`),
   );
+}
+
+/** Whole days since a moment (an item's age in a queue); 0 for less than a day. */
+export function daysSince(iso: string, now: number = Date.now()): number {
+  return Math.max(0, Math.floor((now - Date.parse(iso)) / 86_400_000));
+}
+
+/** Whether a due date has passed (a case's stage target, for example). */
+export function isPast(iso: string | null, now: number = Date.now()): boolean {
+  return iso !== null && Date.parse(iso) < now;
 }

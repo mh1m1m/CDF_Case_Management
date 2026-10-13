@@ -11,6 +11,8 @@ const SEARCHED_FOREIGN_KEYS = [
   { table: "case_mgmt.case_person", columns: ["person_id"] },
   // api.request_break_glass: one open request per user and case
   { table: "case_mgmt.break_glass_access", columns: ["requested_by"] },
+  // authz.is_reporter_correspondent and the reporter_communication_delegation_read policy (DEC-06)
+  { table: "case_mgmt.reporter_communication_delegation", columns: ["case_id"] },
 ];
 
 describe("foreign-key indexes", () => {

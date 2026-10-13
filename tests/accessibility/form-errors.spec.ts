@@ -13,6 +13,7 @@ for (const locale of ["ar", "en"] as const) {
     const page = await signIn(browser, "casemanager@example.test", locale);
     await page.goto("/cases");
     await page.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
+    await page.getByTestId("case-tab-evidence").click();
     const form = page.getByTestId("evidence-form");
     await expect(form.locator('label[for="evidenceTitle"]')).toContainText(words[locale].required);
     await expect(form.locator('label[for="file"]')).toContainText(words[locale].required);
@@ -22,6 +23,7 @@ for (const locale of ["ar", "en"] as const) {
     // Date fields explain how to enter a date, since the native picker follows the browser's locale.
     await expect(form.locator("#collectedAt")).toHaveAttribute("aria-describedby", /\bcollectedAt-hint\b/);
     await expect(form.locator("#collectedAt-hint")).not.toBeEmpty();
+    await page.getByTestId("case-tab-people").click();
     const assign = page.getByTestId("assign-form");
     await expect(assign.locator('label[for="userId"]')).toContainText(words[locale].required);
     await expect(assign.locator('label[for="assignReason"]')).toContainText(words[locale].required);
@@ -32,6 +34,7 @@ for (const locale of ["ar", "en"] as const) {
     const page = await signIn(browser, "casemanager@example.test", locale);
     await page.goto("/cases");
     await page.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
+    await page.getByTestId("case-tab-people").click();
     const assign = page.getByTestId("assign-form");
     await assign.locator('button[type="submit"]').click();
 

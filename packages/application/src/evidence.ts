@@ -10,7 +10,7 @@ import type { Actor } from "@cdf/contracts";
 import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
 import { checkEvidenceFile } from "@cdf/domain";
-import { uploadEvidenceSchema } from "@cdf/validation";
+import { setEvidenceRestrictionSchema, uploadEvidenceSchema } from "@cdf/validation";
 import { AppError, toAppError } from "./errors";
 import type { CommandResult } from "./investigation";
 import type { EvidenceGateway, EvidenceStorage, MalwareScanner, UserRequestContext } from "./ports";
@@ -196,10 +196,48 @@ export function createEvidenceService(deps: EvidenceDeps) {
       };
     },
 
+    /**
+     * DEC-09: limit an item to the case leads, or open it to the team again. Every lead (case manager, owner,
+     * lead investigator) holds EVIDENCE_UPLOAD, so that is the pre-check; the database checks the relationship.
+     */
+    async setRestriction(ctx: UserRequestContext, actor: Actor, raw: unknown): Promise<CommandResult<void>> {
+      const parsed = setEvidenceRestrictionSchema.safeParse(raw);
+      if (!parsed.success) return { ok: false, fieldErrors: parsed.error };
+      const input = parsed.data;
+      if (!can(actor, "EVIDENCE_UPLOAD")) {
+        await securityEvent(ctx, "COMMAND_DENIED", input.evidenceId, {
+          command: "set_evidence_restriction",
+          outcome: "FORBIDDEN",
+        });
+        return { ok: false, error: new AppError("FORBIDDEN", ctx.requestId) };
+      }
+      try {
+        await gateway.setRestriction(ctx, input);
+        return { ok: true, value: undefined };
+      } catch (cause) {
+        const error = toAppError(cause, ctx.requestId);
+        if (error.kind === "FORBIDDEN" || error.kind === "NOT_FOUND")
+          await securityEvent(ctx, "COMMAND_DENIED", input.evidenceId, {
+            command: "set_evidence_restriction",
+            outcome: error.kind,
+          });
+        return { ok: false, error };
+      }
+    },
+
     /** Reporter attachments on a report the caller can view (CDF-72); RLS decides visibility. */
     listReportAttachments: async (ctx: UserRequestContext, reportId: string) => {
       try {
         return await gateway.listReportAttachments(ctx, reportId);
+      } catch (cause) {
+        throw toAppError(cause, ctx.requestId);
+      }
+    },
+
+    /** The reporter's files behind a case (DEC-09); RLS decides visibility. */
+    listCaseReportAttachments: async (ctx: UserRequestContext, caseId: string) => {
+      try {
+        return await gateway.listCaseReportAttachments(ctx, caseId);
       } catch (cause) {
         throw toAppError(cause, ctx.requestId);
       }

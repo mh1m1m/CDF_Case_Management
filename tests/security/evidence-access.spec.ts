@@ -1,5 +1,6 @@
-// §24–§27, ADR-006, threats T05/T10: evidence follows case access and clearance, content facts are
-// validated by the database, versions are immutable, downloads are gated and audited.
+// §24–§27, ADR-006, threats T05/T10: evidence follows the investigation team and clearance (DEC-09, migration 1850;
+// the full role matrix is in evidence-need-to-know.spec.ts), content facts are validated by the database, versions are
+// immutable, downloads are gated and audited.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
@@ -62,15 +63,15 @@ async function storedOnCaseA(s: Scenario): Promise<Registered> {
 }
 
 describe("evidence visibility", () => {
-  it("is limited to people who can view the case", async () => {
+  it("is limited to the investigation team on the case (DEC-09)", async () => {
     await scenario(async (s) => {
       const reg = await storedOnCaseA(s);
       const matrix: [UserKey, number][] = [
         ["investigatorA", 1],
         ["lead", 1],
         ["caseManager", 1],
-        ["grcDirector", 1],
-        ["triage", 1], // TRIAGE grant: may see the item exists, cannot download (below)
+        ["grcDirector", 0], // sees the case (CASE_VIEW_ALL), is not the team: evidence through a packet only (S5)
+        ["triage", 0], // TRIAGE grant: the reporter's files only (DEC-09)
         ["investigatorB", 0],
         ["committee", 0],
         ["platformAdmin", 0],

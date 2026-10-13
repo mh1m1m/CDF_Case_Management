@@ -3,10 +3,16 @@
 import type {
   Actor,
   AuditTimelineEntry,
+  CaseAccessRosterEntry,
   CaseAssignment,
+  CaseCapabilities,
   CaseDetail,
   CaseDiscoveryResult,
   CaseListItem,
+  CaseReporterView,
+  ConversationAccess,
+  EvidenceAccess,
+  CasePathStep,
   IntakeReportItem,
   LedgerEntry,
   MyAccessEntry,
@@ -15,7 +21,9 @@ import type {
   MyWorkSummary,
   PendingConflict,
   RecordsCatalogueEntry,
+  RetentionQueueEntry,
   ReportDetail,
+  ReportMessage,
   RestrictedCaseAuthority,
   TransitionOption,
   UserDirectoryEntry,
@@ -82,14 +90,22 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
                category_other as "categoryOther", willing_to_cooperate as "willingToCooperate", language
         from intake.report where id = ${reportId}`;
       if (!r) return null;
+      // DEC-06: row-level security returns the messages only to the conversation's readers.
       const messages = await tx<
         { direction: "FROM_REPORTER" | "TO_REPORTER"; body: string; createdAt: Date }[]
       >`
         select direction, body, created_at as "createdAt" from intake.report_message where report_id = ${reportId} order by created_at`;
+      const [access] = await tx<{ access: ConversationAccess; files: boolean }[]>`
+        select case when authz.can_message_reporter(${reportId}) then 'SEND'
+                    when authz.can_read_reporter_conversation(${reportId}) then 'READ'
+                    else 'NONE' end as access,
+               authz.can_view_report_files(${reportId}) as files`;
       return {
         ...(r as unknown as ReportDetail),
         receivedAt: iso(r.receivedAt as Date)!,
         messages: messages.map((m) => ({ ...m, createdAt: iso(m.createdAt)! })),
+        conversation: access?.access ?? "NONE",
+        filesVisible: access?.files ?? false,
       };
     });
   }
@@ -161,22 +177,66 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
       if (!opened?.ok) return null;
       const [c] = await tx<(CaseRow & Record<string, unknown>)[]>`
         select ${CASE_COLUMNS(tx)}, summary, source, source_report_id as "sourceReportId", reporter_wb_id as "reporterWbId",
-               records_state as "recordsState", created_at as "createdAt", opened_at as "openedAt", row_version as "rowVersion"
+               records_state as "recordsState", created_at as "createdAt", opened_at as "openedAt", row_version as "rowVersion",
+               entered_state_at as "enteredStateAt", legal_hold_status as "legalHoldStatus", owner_id as "ownerId"
         from case_mgmt.case_overview where id = ${caseId}`;
       if (!c) return null;
+      const [owner] = c.ownerId
+        ? await tx<NonNullable<CaseDetail["owner"]>[]>`
+            select id as "userId", display_name as "displayName", display_name_ar as "displayNameAr"
+            from iam.user_profile where id = ${c.ownerId as string}`
+        : [];
+      const path = await tx<(Omit<CasePathStep, "occurredAt"> & { occurredAt: Date })[]>`
+        select transition_code as "transitionCode", from_state as "fromState", to_state as "toState",
+               occurred_at as "occurredAt"
+        from workflow.workflow_transition_event where case_id = ${caseId} order by occurred_at, id`;
       const allegations = await tx<CaseDetail["allegations"]>`
         select id, category, description, status from case_mgmt.allegation where case_id = ${caseId} order by created_at`;
       const assignments = await tx<(Omit<CaseAssignment, "assignedAt"> & { assignedAt: Date })[]>`
         select a.id, a.user_id as "userId", coalesce(u.display_name, '—') as "displayName",
-               a.assignment_role as "assignmentRole", a.assigned_at as "assignedAt"
+               u.display_name_ar as "displayNameAr", a.assignment_role as "assignmentRole", a.assigned_at as "assignedAt"
         from case_mgmt.case_assignment a left join iam.user_profile u on u.id = a.user_id
         where a.case_id = ${caseId} and a.status = 'ACTIVE' order by a.assigned_at`;
+      // Disabled steps come back too, so the page can say "later in this case" instead of "no steps" (UX-006).
+      // Eligible roles are reference data (role_permission is readable by every signed-in user); never people.
       const transitions = await tx<TransitionOption[]>`
-        select code, to_state as "toState", name_en as "nameEn", name_ar as "nameAr", reason_required as "reasonRequired",
-               allowed, coalesce(blocking_reasons, '{}') as "blockingReasons"
-        from api.available_transitions(${caseId}) where is_enabled`;
+        select t.code, t.to_state as "toState", t.name_en as "nameEn", t.name_ar as "nameAr",
+               t.reason_required as "reasonRequired", t.is_enabled as enabled, t.allowed,
+               coalesce(t.blocking_reasons, '{}') as "blockingReasons",
+               coalesce((select array_agg(distinct rp.role_code order by rp.role_code)
+                           from workflow.workflow_instance wi
+                           join workflow.workflow_transition_definition d
+                             on d.workflow_code = wi.workflow_code and d.code = t.code
+                           join iam.role_permission rp on rp.permission_code = d.required_permission
+                           join iam.role r on r.code = rp.role_code and not r.is_technical
+                          where wi.case_id = ${caseId}), '{}') as "eligibleRoles"
+        from api.available_transitions(${caseId}) t`;
       const [conflict] = await tx<{ status: string }[]>`
         select status from case_mgmt.conflict_check where case_id = ${caseId} and user_id = authz.current_user_id() and is_current`;
+      // The caller's part in the reporter conversation (DEC-06), over the reports behind the case.
+      const [conversation] = await tx<{ access: ConversationAccess }[]>`
+        select case when bool_or(authz.can_message_reporter(r.id)) then 'SEND'
+                    when bool_or(authz.can_read_reporter_conversation(r.id)) then 'READ'
+                    else 'NONE' end as access
+        from intake.report r where r.case_id = ${caseId}`;
+      // The caller's evidence need-to-know (DEC-09): the register for the team, the reporter's files for triage.
+      const [evidence] = await tx<{ access: EvidenceAccess }[]>`
+        select case when authz.is_evidence_lead(${caseId}) then 'LEADS'
+                    when authz.is_evidence_team(${caseId}) then 'TEAM'
+                    when exists (select 1 from intake.report r
+                                  where r.case_id = ${caseId} and authz.can_view_report_files(r.id)) then 'REPORTER_FILES'
+                    else 'NONE' end as access`;
+      // What the caller may do here, from the database's own rules (UX-116); every command checks again.
+      const [can] = await tx<CaseCapabilities[]>`
+        select authz.can_edit_case(${caseId}) as edit, authz.can_assign_case(${caseId}) as assign,
+               authz.can_upload_evidence(${caseId}) as "uploadEvidence",
+               authz.can_conduct_interviews(${caseId}) as "conductInterviews",
+               authz.can_review_interviews(${caseId}) as "reviewInterviews",
+               authz.can_approve_interviews(${caseId}) as "approveInterviews",
+               coalesce((select array_agg(l::text order by l)
+                           from unnest(enum_range(null::core.classification_level)) l
+                          where l >= ${c.classification as string}::core.classification_level
+                            and l <= authz.current_clearance()), '{}') as classifications`;
       return {
         ...toCaseItem(c),
         summary: c.summary as string,
@@ -187,10 +247,17 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         createdAt: iso(c.createdAt as Date)!,
         openedAt: iso(c.openedAt as Date | null),
         rowVersion: c.rowVersion as number,
+        enteredStateAt: iso(c.enteredStateAt as Date | null),
+        owner: owner ?? null,
+        legalHoldStatus: c.legalHoldStatus === "ACTIVE" ? "ACTIVE" : "NONE",
+        path: path.map((p) => ({ ...p, occurredAt: iso(p.occurredAt)! })),
         allegations: [...allegations],
         assignments: assignments.map((a) => ({ ...a, assignedAt: iso(a.assignedAt)! })),
         transitions: [...transitions],
         myConflictStatus: conflict?.status ?? null,
+        reporterConversation: conversation?.access ?? "NONE",
+        evidenceAccess: evidence?.access ?? "NONE",
+        can: can!,
       };
     });
   }
@@ -257,15 +324,96 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
     });
   }
 
-  caseTimeline(ctx: UserRequestContext, caseId: string): Promise<AuditTimelineEntry[]> {
+  // The case's history for its team (ADR-016 D5, DEC-08/DEC-10). The database applies actor access, each
+  // action's audience, object entitlement and classification; page views stay in the ledger for Oversight.
+  caseTimeline(ctx: UserRequestContext, caseId: string, limit = 200): Promise<AuditTimelineEntry[]> {
     return this.run(ctx, async (tx) => {
       const rows = await tx<(Omit<AuditTimelineEntry, "occurredAt"> & { occurredAt: Date })[]>`
-        select e.seq::int as seq, e.occurred_at as "occurredAt", e.action, e.actor_id as "actorId",
-               u.display_name as "actorName", e.reason
-        from audit.audit_event e left join iam.user_profile u on u.id = e.actor_id
-        where e.case_id = ${caseId} and e.category = 'BUSINESS' and e.action <> 'CASE_VIEWED'
-        order by e.seq desc limit 200`;
+        select seq::int as seq, occurred_at as "occurredAt", action, actor_id as "actorId",
+               actor_name as "actorName", actor_name_ar as "actorNameAr", subject_name as "subjectName",
+               subject_name_ar as "subjectNameAr", reason, detail
+        from api.case_history(${caseId}, ${limit})`;
       return rows.map((r) => ({ ...r, occurredAt: iso(r.occurredAt)! }));
+    });
+  }
+
+  // Who has access and on what basis (DEC-08): the full roster only for those who manage the team.
+  caseAccessRoster(ctx: UserRequestContext, caseId: string): Promise<CaseAccessRosterEntry[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<
+        (Omit<CaseAccessRosterEntry, "sinceAt" | "untilAt" | "endedAt"> & {
+          sinceAt: Date;
+          untilAt: Date | null;
+          endedAt: Date | null;
+        })[]
+      >`
+        select user_id as "userId", display_name as "displayName", display_name_ar as "displayNameAr",
+               relationship, code, since_at as "sinceAt", until_at as "untilAt", ended_at as "endedAt", status,
+               is_self as "isSelf"
+        from api.case_access_roster(${caseId})`;
+      return rows.map((r) => ({
+        ...r,
+        sinceAt: iso(r.sinceAt)!,
+        untilAt: iso(r.untilAt),
+        endedAt: iso(r.endedAt),
+      }));
+    });
+  }
+
+  // The conversation with the reporter (DEC-06). The database decides who reads and who writes; row-level security
+  // filters the messages and the delegations again.
+  caseReporterView(ctx: UserRequestContext, caseId: string): Promise<CaseReporterView> {
+    return this.run(ctx, async (tx) => {
+      const reports = await tx<{ reportId: string; canSend: boolean }[]>`
+        select r.id as "reportId", authz.can_message_reporter(r.id) as "canSend"
+        from intake.report r
+        where r.case_id = ${caseId} and authz.can_read_reporter_conversation(r.id)
+        order by r.received_at, r.id`;
+      const ids = reports.map((r) => r.reportId);
+      const messages = ids.length
+        ? await tx<(Omit<ReportMessage, "createdAt"> & { reportId: string; createdAt: Date })[]>`
+            select report_id as "reportId", direction, body, created_at as "createdAt"
+            from intake.report_message where report_id = any(${ids}::uuid[]) order by created_at, id`
+        : [];
+      const delegations = await tx<
+        (Omit<CaseReporterView["delegations"][number], "delegatedAt"> & { delegatedAt: Date })[]
+      >`
+        select d.id, d.user_id as "userId", coalesce(u.display_name, '—') as "displayName",
+               u.display_name_ar as "displayNameAr", d.delegated_at as "delegatedAt"
+        from case_mgmt.reporter_communication_delegation d left join iam.user_profile u on u.id = d.user_id
+        where d.case_id = ${caseId} and d.ended_at is null order by d.delegated_at, d.id`;
+      const [manage] = await tx<{ ok: boolean }[]>`select authz.can_assign_case(${caseId}) as ok`;
+      return {
+        conversations: reports.map((r) => ({
+          reportId: r.reportId,
+          canSend: r.canSend,
+          messages: messages
+            .filter((m) => m.reportId === r.reportId)
+            .map(({ direction, body, createdAt }) => ({ direction, body, createdAt: iso(createdAt)! })),
+        })),
+        delegations: delegations.map((d) => ({ ...d, delegatedAt: iso(d.delegatedAt)! })),
+        canDelegate: manage?.ok === true,
+      };
+    });
+  }
+
+  delegateReporterCommunication(
+    ctx: UserRequestContext,
+    i: { caseId: string; userId: string; reason: string },
+  ) {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<{ id: string }[]>`
+        select api.delegate_reporter_communication(${i.caseId}, ${i.userId}, ${i.reason}) as id`;
+      return row!.id;
+    });
+  }
+
+  endReporterCommunication(
+    ctx: UserRequestContext,
+    i: { caseId: string; delegationId: string; reason: string },
+  ) {
+    return this.run(ctx, async (tx) => {
+      await tx`select api.end_reporter_communication(${i.delegationId}, ${i.reason})`;
     });
   }
 
@@ -359,6 +507,16 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
                case_number as "caseNumber", due_at as "dueAt", due_source as "dueSource", since_at as "sinceAt"
         from api.my_work_items()`;
       return rows.map((r) => ({ ...r, dueAt: iso(r.dueAt), sinceAt: iso(r.sinceAt) }));
+    });
+  }
+
+  retentionReviewQueue(ctx: UserRequestContext): Promise<RetentionQueueEntry[]> {
+    return this.run(ctx, async (tx) => {
+      const rows = await tx<(Omit<RetentionQueueEntry, "archivedAt"> & { archivedAt: Date | null })[]>`
+        select case_id as "caseId", case_number as "caseNumber", classification, archived_at as "archivedAt",
+               retention_class as "retentionClass", legal_hold_status as "legalHoldStatus"
+        from api.retention_review_queue()`;
+      return rows.map((r) => ({ ...r, archivedAt: iso(r.archivedAt) }));
     });
   }
 

@@ -157,6 +157,31 @@ export interface FormInstanceCapabilities {
   canWithdraw: boolean;
 }
 
+/**
+ * A started form as the case's Forms tab lists it (UX redesign S2g; audit §23.13, UX-068, UX-086): what the caller
+ * may do with it now, by the same database rules as the instance page, and who acts next.
+ */
+export interface FormInstanceListItem extends FormInstanceSummary {
+  /** The status that completes this form. */
+  finalStatus: FormStatus;
+  preparedByName: string | null;
+  preparedAt: string | null;
+  capabilities: FormInstanceCapabilities;
+  /** Roles the form's entitlements name for the next step (prepare, review or approve); empty when it is done. */
+  nextRoles: Role[];
+  /** While a returned form is a draft again: the latest return and its reason, and whether it came back to the caller. */
+  returned: FormReturn | null;
+}
+
+export interface FormReturn {
+  at: string;
+  byName: string | null;
+  /** Only for the person it was returned to; others read it on the form, where the view is audited. */
+  reason: string | null;
+  /** The caller prepared the version that was returned. */
+  toMe: boolean;
+}
+
 export interface FormInstanceDetail extends FormInstanceSummary {
   definition: {
     code: string;
