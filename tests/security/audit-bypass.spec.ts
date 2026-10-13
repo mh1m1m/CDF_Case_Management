@@ -2187,8 +2187,11 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "decide_restricted_export",
         actor: "grcDirector",
         run: async (s) => {
-          // Fixture: grcDirector, owner and Restricted Case Authority of case 0003, exports its summary internally.
+          // Fixture: a teammate granted case 0003 exports its summary internally; grcDirector, its owner and
+          // Restricted Case Authority, consents (never to their own request: CDF-208).
           const exec = await caseId("0003");
+          await s.tx`select api.grant_case_access(${exec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
+          await s.as("grcDeputy");
           const request = await one(
             s,
             s.tx`select api.create_export_request(${exec}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null) as id`,
@@ -2197,6 +2200,7 @@ describe("every state-changing command writes its audit event in the same transa
           const hash = await one(s, s.tx`select api.preview_export(${request}) ->> 'hash' as h`);
           await s.tx`select api.submit_export(${request}, ${hash},
             (select classification from case_mgmt.case_record where id = ${exec}))`;
+          await s.as("grcDirector");
           return s.tx`select api.decide_restricted_export(${request}, 'APPROVE', ${REASON}, ${hash})`;
         },
       },

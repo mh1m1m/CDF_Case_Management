@@ -1210,6 +1210,7 @@ describe("api.export_request_view (authz.can_view_export; DEC-F24)", () => {
         approvals_required: 1,
         authority_approval_required: false,
         next_stage: 1,
+        authority_consent_blocked: null,
       });
       expect(v.submitted_hash).toBe(p!.h);
       await s.as("grcDirector");
@@ -1275,6 +1276,35 @@ describe("api.export_request_view (authz.can_view_export; DEC-F24)", () => {
           grcDirector: ["may_approve", "may_preview", "may_reject"],
         }),
       );
+    });
+  });
+
+  it("CDF-208: the case's authority is never offered consent to an export they requested; the view says why it waits", async () => {
+    await scenario(async (s) => {
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.create_export_request(${caseExec}, 'PDF', 'INTERNAL', 'REGULATORY_OR_EXTERNAL_AUTHORITY', null, null) as id`;
+      await s.tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${caseExec})`;
+      const [p] = await s.tx<{ h: string }[]>`select api.preview_export(${r!.id}) ->> 'hash' as h`;
+      await s.tx`select api.submit_export(${r!.id}, ${p!.h}, 'SECRET'::core.classification_level)`;
+      const users: UserKey[] = ["grcDeputy", "grcDirector", "caseManager", "lead", "platformAdmin"];
+      // The requester (the case's owner and authority) is offered neither the stage nor the consent; the deputy, who
+      // can view the case, is offered the stage.
+      expect(
+        await matrix(s, EXPORT, r!.id, caseExec, users, exportProbes(r!.id, caseExec, "SECRET", false)),
+      ).toEqual(
+        offeredTo(users, {
+          grcDirector: ["may_cancel", "may_preview"],
+          grcDeputy: ["may_approve", "may_preview", "may_reject"],
+        }),
+      );
+      for (const u of ["grcDirector", "grcDeputy"] as const) {
+        const v = (await read(s, EXPORT, u, r!.id))!;
+        expect((v.current as Record<string, unknown>).authority_consent_blocked, u).toBe(
+          "REQUESTER_IS_CASE_AUTHORITY",
+        );
+      }
     });
   });
 });

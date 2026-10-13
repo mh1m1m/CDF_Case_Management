@@ -63,6 +63,7 @@
 --   * exchange.eligible_approvers: approver pools (DEC-F24).
 --   * api.set_export_rule: EXPORT_POLICY_ADMIN that approves no export (DEC-F24).
 --   * api.create_export_request: the governed purpose catalogue (DEC-F21).
+--   * api.decide_restricted_export: the requester never consents to their own export (CDF-208, DEC-F23, DEC-F24).
 --   * exchange.lock_bcp_batch, exchange.protect_bcp: the operator registry (DEC-F30) and the purge (DEC-F31).
 --   * authz.can_view_referral, api.referral_available_actions: the escalation target and ESCALATE (DEC-F09).
 --   * api.object_to_referral_rejection: no objection once an escalation is decided (DEC-F09).
@@ -3172,6 +3173,91 @@ grant execute on function
   api.revoke_export_approver(uuid, text), api.export_approval_config_warnings()
 to authenticated;
 
+-- The Restricted Case Authority's consent is an independent check (ADR-032, DEC-F23), and under DEC-F24 the requester
+-- is never an approver on any path, so the requester never consents to their own export (CDF-208, AGENT-09 pack 4,
+-- R5; 1930 had allowed it). When the case's owner is its only authority, their own export of the case needs a
+-- teammate to request it; the export view says so. Replaces 1930: same signature, owner and grants; one refusal added.
+create or replace function api.decide_restricted_export(p_request_id uuid, p_decision text, p_reason text,
+                                                        p_preview_hash text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v exchange.export_request;
+  v_case case_mgmt.case_record;
+  v_doc jsonb;
+  v_hash text;
+  v_reason text;
+  v_required int;
+  v_status text;
+begin
+  v := exchange.lock_request(p_request_id, false);
+  select * into v_case from case_mgmt.case_record c where c.id = v.case_id;
+  if not v_case.is_restricted then perform api._fail('CONFLICT', 'CASE_NOT_RESTRICTED'); end if;
+  if v_case.owner_id is distinct from v_actor
+     or not authz.is_restricted_case_authority(v_actor, v_case.classification) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  if v.requested_by = v_actor then perform api._fail('CONFLICT', 'REQUESTER_CANNOT_CONSENT'); end if;
+  if v.status <> 'SUBMITTED' then perform api._fail('CONFLICT', 'NOT_SUBMITTED'); end if;
+  if not exchange.authority_approval_required(v.id) then
+    perform api._fail('CONFLICT', 'AUTHORITY_APPROVAL_NOT_REQUIRED');
+  end if;
+  if exists (select 1 from exchange.restricted_export_approval a where a.request_id = v.id) then
+    perform api._fail('CONFLICT', 'ALREADY_DECIDED');
+  end if;
+  if p_decision is null or p_decision not in ('APPROVE', 'REJECT') then perform api._fail('INVALID', 'decision'); end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  v_doc := exchange.build_document(v.id);
+  v_hash := exchange.document_hash(v_doc);
+  if p_decision = 'APPROVE' then
+    if exchange.withheld_count(v_doc) > 0 then perform api._fail('CONFLICT', 'ITEMS_WITHHELD'); end if;
+    if v_hash <> v.submitted_hash or p_preview_hash is distinct from v.submitted_hash then
+      perform api._fail('CONFLICT', 'PREVIEW_CHANGED');
+    end if;
+    if exists (select 1 from exchange.matched_rules(v.id) m where m.action = 'REFUSE') then
+      perform api._fail('CONFLICT', 'REFUSED_BY_RULE');
+    end if;
+  end if;
+  insert into exchange.restricted_export_approval (request_id, case_id, decided_by, decision, reason, preview_hash)
+  values (v.id, v.case_id, v_actor, case p_decision when 'APPROVE' then 'APPROVED' else 'REJECTED' end, v_reason, v_hash);
+  v_required := greatest(v.approvals_required, exchange.approvals_required(v.id));
+  v_status := case when p_decision = 'REJECT' then 'REJECTED'
+                   when (select count(*) from exchange.export_approval a
+                         where a.request_id = v.id and a.decision = 'APPROVED') >= v_required then 'APPROVED'
+                   else 'SUBMITTED' end;
+  update exchange.export_request
+     set status = v_status, approvals_required = v_required, authority_approval_required = true,
+         decided_at = case when v_status <> 'SUBMITTED' then now() end, updated_at = now(),
+         row_version = row_version + 1
+   where id = v.id;
+  perform audit.record_event(case p_decision when 'APPROVE' then 'RESTRICTED_EXPORT_APPROVED'
+                                             else 'RESTRICTED_EXPORT_REJECTED' end,
+    'BUSINESS', 'SUCCESS', v.case_id, 'export_request', v.id::text, v_reason,
+    jsonb_build_object('classification', v_case.classification, 'approvals_required', v_required,
+                       'status', v_status, 'preview_hash', v_hash));
+  return v_status;
+end;
+$$;
+
+-- Table-level backstop for CDF-208, whatever path writes the authority's decision: never the request's requester.
+create function exchange.guard_restricted_export_consent()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if exists (select 1 from exchange.export_request q where q.id = new.request_id and q.requested_by = new.decided_by) then
+    perform api._fail('CONFLICT', 'REQUESTER_CANNOT_CONSENT');
+  end if;
+  return new;
+end;
+$$;
+create trigger restricted_export_approval_consent_guard before insert on exchange.restricted_export_approval
+  for each row execute function exchange.guard_restricted_export_consent();
+
 -- =============================================================================
 -- Item 10. Continuity workbook: authorized continuity operators (DEC-F30, AMB-198, CON-008; T-AMB-116) and staged
 -- data retention (DEC-F31, AMB-206)
@@ -4745,18 +4831,16 @@ begin
   v_stage := 1 + (select count(*)::int from exchange.export_approval a where a.request_id = v.id);
   v_required := greatest(v.approvals_required, exchange.approvals_required(v.id));
   v_authority := exchange.authority_approval_required(v.id);
-  -- api.decide_export's checks up to the decision, then exchange.guard_export_approval: never the requester
-  -- (DEC-F24), an earlier approver or a rule author (X1); the stage's permission and pool; a stage still to give.
-  v_approver := v.status = 'SUBMITTED'
-                and v.requested_by <> v_me
-                and not exists (select 1 from exchange.export_approval a where a.request_id = v.id and a.approver_id = v_me)
-                and not exchange.authored_rule_in_force(v.id, v_me)
-                and authz.has_permission(case v_stage when 1 then 'EXPORT_APPROVE' else 'EXPORT_SECOND_APPROVE' end)
-                and v_stage <= v_required
-                and (not exchange.pool_in_use(v_stage) or exchange.in_pool(v_me, v_stage));
-  -- api.decide_restricted_export: the restricted case's owner as its authority, once, while required.
+  -- api.decide_export's checks, by the same rule as the approval requests (exchange.eligible_approvers): active, never
+  -- the requester (DEC-F24), an earlier approver or a rule author (X1); the stage's permission, the case and the pool;
+  -- and a stage still to give (AGENT-09 pack 4).
+  v_approver := v.status = 'SUBMITTED' and v_stage <= v_required
+                and exists (select 1 from exchange.eligible_approvers(v.id, v_stage) e where e.user_id = v_me);
+  -- api.decide_restricted_export: the restricted case's owner as its authority, once, while required, and never on
+  -- their own request (CDF-208).
   v_rca := v_case.is_restricted and v_case.owner_id = v_me
            and authz.is_restricted_case_authority(v_me, v_case.classification)
+           and v.requested_by <> v_me
            and v.status = 'SUBMITTED' and v_authority
            and not exists (select 1 from exchange.restricted_export_approval a where a.request_id = v.id);
   v_metadata := authz.can_view_case_metadata(v.case_id);
@@ -4772,7 +4856,13 @@ begin
     'current', jsonb_build_object(
       'hash', v_hash, 'withheld', v_withheld, 'refused_by_rule', v_refused,
       'approvals_required', v_required, 'authority_approval_required', v_authority,
-      'next_stage', case when v.status = 'SUBMITTED' and v_stage <= v_required then v_stage end),
+      'next_stage', case when v.status = 'SUBMITTED' and v_stage <= v_required then v_stage end,
+      -- CDF-208, a staffing fact: the case's owner, its authority, requested this export and cannot consent to it, so
+      -- it waits until the case has another authority; a teammate requests the owner's exports.
+      'authority_consent_blocked',
+        case when v.status = 'SUBMITTED' and v_authority and v_case.is_restricted and v.requested_by = v_case.owner_id
+                  and not exists (select 1 from exchange.restricted_export_approval a where a.request_id = v.id)
+             then 'REQUESTER_IS_CASE_AUTHORITY' end),
     -- export_item_read: what is in it, and whether the caller may see each item.
     'items', coalesce((
       select jsonb_agg(jsonb_build_object(

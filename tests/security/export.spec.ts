@@ -527,10 +527,15 @@ describe("export builder (Q99, ADR-026)", () => {
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.preview_export(${internal})`);
       await s.as("grcDirector");
       await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
-      // The approval stage is given; the case's Restricted Case Authority (its owner, here also the requester:
-      // consent, not an approval stage) still decides.
+      // The approval stage is given; the case's Restricted Case Authority is its owner, here also the requester, who
+      // never consents to their own export (CDF-208): it waits for a teammate's request.
       expect(await decide(s, "grcDeputy", internal)).toBe("SUBMITTED");
-      expect(await authority(s, "grcDirector", internal)).toBe("APPROVED");
+      await s.as("grcDirector");
+      const own = await preview(s, internal);
+      await s.expectError(
+        "CDF_CONFLICT:REQUESTER_CANNOT_CONSENT",
+        (tx) => tx`select api.decide_restricted_export(${internal}, 'APPROVE', ${REASON}, ${own.hash})`,
+      );
 
       // Only EXPORT_POLICY_ADMIN sets rules, and never someone who approves exports (DEC-F24, migration 2040: the
       // director keeps the 1930 grant, which no longer lets them act; the platform administrator holds it now). A rule
@@ -661,6 +666,49 @@ describe("export builder (Q99, ADR-026)", () => {
       );
       await s.as("lead");
       await s.expectError("CDF_CONFLICT:REFUSED_BY_RULE", (tx) => tx`select api.generate_export(${req})`);
+    });
+  });
+
+  it("CDF-208 (AGENT-09 pack 4, R5): the authority never consents to an export they requested, on any path; a teammate's request is decided as usual", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
+      // The case's owner, its only Restricted Case Authority, requests an export of it.
+      const own = await draft(s, "grcDirector", caseExec);
+      await addItem(s, own, "CASE_SUMMARY", caseExec);
+      expect(await submit(s, own, "SECRET")).toBe("SUBMITTED");
+      expect(await decide(s, "grcDeputy", own)).toBe("SUBMITTED");
+      await s.as("grcDirector");
+      const p = await preview(s, own);
+      for (const decision of ["APPROVE", "REJECT"]) {
+        await s.expectError(
+          "CDF_CONFLICT:REQUESTER_CANNOT_CONSENT",
+          (tx) => tx`select api.decide_restricted_export(${own}, ${decision}, ${REASON}, ${p.hash})`,
+        );
+      }
+      // Nor on any other path: the table refuses the requester's decision, even written by the owner connection.
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:REQUESTER_CANNOT_CONSENT",
+        (
+          tx,
+        ) => tx`insert into exchange.restricted_export_approval (request_id, case_id, decided_by, decision, reason,
+                                                                   preview_hash)
+                   values (${own}, ${caseExec}, ${USERS.grcDirector}, 'APPROVED', ${REASON}, ${p.hash})`,
+      );
+      // The export waits (the accepted deadlock): it is never approved and cannot be generated.
+      const [row] = await s.tx<
+        { status: string }[]
+      >`select status from exchange.export_request where id = ${own}`;
+      expect(row!.status).toBe("SUBMITTED");
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:NOT_APPROVED", (tx) => tx`select api.generate_export(${own})`);
+      // A teammate's request of the same case is decided by the authority, as before.
+      const team = await draft(s, "grcDeputy", caseExec);
+      await addItem(s, team, "CASE_SUMMARY", caseExec);
+      expect(await submit(s, team, "SECRET")).toBe("SUBMITTED");
+      expect(await authority(s, "grcDirector", team)).toBe("SUBMITTED");
+      expect(await decide(s, "grcDirector", team)).toBe("APPROVED");
     });
   });
 

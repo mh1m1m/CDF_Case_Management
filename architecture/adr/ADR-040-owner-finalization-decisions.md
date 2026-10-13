@@ -267,6 +267,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
     - Approver pools.
     - The restricted case authority's consent is required for a restricted external export (DEC-F23).
     - The requester is never the second approver, and configuration warnings flag a pool that could deadlock (DEC-F24).
+    - The requester never consents to their own export as the Restricted Case Authority (CDF-208, AGENT-09 pack 4, R5): `api.decide_restricted_export` refuses with `REQUESTER_CANNOT_CONSENT`, and a trigger on `restricted_export_approval` backs it up. When the case's owner is its only authority, their own export of the case waits for a teammate's request (an accepted deadlock), and the export view says so (`authority_consent_blocked`). This replaces 1930's allowance.
     - Policy is administered by EXPORT_POLICY_ADMIN only.
 14. **The continuity workbook (DEC-F30, F31).**
     - Named continuity operators (`exchange.bcp_continuity_operator`).
