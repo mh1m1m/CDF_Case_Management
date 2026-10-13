@@ -18,6 +18,7 @@ export { MockMalwareScanner, EICAR_TEST_SIGNATURE } from "./scanning/mock-scanne
 export { PostgresFormsGateway } from "./db/forms-gateway";
 export { PostgresInterviewGateway } from "./db/interviews-gateway";
 export { PostgresRecordsGateway } from "./db/records-gateway";
+export { PostgresInboxGateway } from "./db/inbox-gateway";
 export {
   REDACTED,
   isDeniedKey,

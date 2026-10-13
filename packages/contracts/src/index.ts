@@ -1405,6 +1405,45 @@ export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
 export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
+/** What a notification points at (notify.outbox.object_type after migration 2040). */
+export const NOTIFICATION_OBJECT_TYPES = [
+  "COMMITTEE",
+  "MEETING",
+  "MINUTES",
+  "LEGAL_REVIEW",
+  "DEFENCE_NOTICE",
+  "GRIEVANCE",
+  "EXPORT",
+  "CORRECTIVE_ACTION",
+  "BCP_IMPORT",
+  "REFERRAL",
+  "PRELIMINARY_REVIEW",
+] as const;
+export type NotificationObjectType = (typeof NOTIFICATION_OBJECT_TYPES)[number];
+
+/** One of the caller's own in-app notifications (UX redesign S4): a template code, a link and times, never content. */
+export interface InboxNotification {
+  id: string;
+  template: NotificationTemplate;
+  objectType: NotificationObjectType;
+  /** A path with ids only (N18), written by the database. */
+  deepLink: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+/**
+ * The caller's setting for one template on one channel. A notification reaches them when the rule in force delivers
+ * it and they have not muted it; a mandatory template always delivers and cannot be muted (ADR-025).
+ */
+export interface NotificationSetting {
+  template: NotificationTemplate;
+  channel: NotificationChannel;
+  mandatory: boolean;
+  /** Whether the platform-wide rule (mandatory or event rule) delivers it today. A committee's own default may differ. */
+  ruleDelivers: boolean;
+  muted: boolean;
+}
 
 // ---- Export builder (ADR-026, migration 1930, Q99) ----------------------------------------------------------
 export const EXPORT_FORMATS = ["PDF", "XLSX", "EMAIL"] as const;

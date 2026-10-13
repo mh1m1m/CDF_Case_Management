@@ -36,3 +36,5 @@ export type {
   BcpWorkbookFile,
   StagedBcpImport,
 } from "./bcp-import";
+export { INBOX_PAGE, createInboxService } from "./inbox";
+export type { InboxDeps, InboxGateway, InboxService } from "./inbox";

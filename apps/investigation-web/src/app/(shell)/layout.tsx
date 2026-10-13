@@ -1,11 +1,12 @@
 // The signed-in shell (UX redesign S1; audit §20.1–§20.5, RC-06, RC-07; CDF-117). The sidebar lists at most the
 // areas api.my_areas() returns for this caller, which the database derives from permission AND a live
 // relationship, never from a role name; the application floor (shellAreas) can only remove one. Counts are the
-// caller's own actionable items, never case counts. The shell explains access; every page still enforces it.
+// caller's own actionable items, never case counts; the header bell counts the caller's own unread notices (S4).
+// The shell explains access; every page still enforces it.
 import type { ReactNode } from "react";
 import type { MessageKey } from "@cdf/i18n";
-import { CDFAppShell, CDFEnvironmentStrip, CDFUserMenu, buttonClass } from "@cdf/ui";
-import { myShellAreas, requireActor } from "@/server/container";
+import { CDFAppShell, CDFEnvironmentStrip, CDFNotificationBell, CDFUserMenu, buttonClass } from "@cdf/ui";
+import { myShellAreas, myUnreadCount, requireActor } from "@/server/container";
 import { env } from "@/server/env";
 import { getTranslator } from "@/server/locale";
 import { areaHref } from "@/server/work-routes";
@@ -28,7 +29,7 @@ const NAV_KEY = {
 
 export default async function ShellLayout({ children }: { children: ReactNode }) {
   const { actor } = await requireActor();
-  const [t, areas] = await Promise.all([getTranslator(), myShellAreas()]);
+  const [t, areas, unread] = await Promise.all([getTranslator(), myShellAreas(), myUnreadCount()]);
   const name = t.locale === "ar" ? actor.displayNameAr : actor.displayName;
   const items = areas.map((a) => ({
     key: NAV_KEY[a.area],
@@ -56,10 +57,18 @@ export default async function ShellLayout({ children }: { children: ReactNode })
         </a>
       }
       utilities={
-        <LanguageSwitch
-          locale={t.locale}
-          label={t.locale === "ar" ? t("common.switchToEnglish") : t("common.switchToArabic")}
-        />
+        <>
+          {/* S4: the caller's own unread notices; the count is never a case count. */}
+          <CDFNotificationBell
+            href="/notifications"
+            count={unread}
+            label={unread > 0 ? t("notifications.bellUnread", { count: unread }) : t("notifications.bell")}
+          />
+          <LanguageSwitch
+            locale={t.locale}
+            label={t.locale === "ar" ? t("common.switchToEnglish") : t("common.switchToArabic")}
+          />
+        </>
       }
       userMenu={
         <CDFUserMenu
@@ -79,6 +88,13 @@ export default async function ShellLayout({ children }: { children: ReactNode })
             data-testid="my-access-link"
           >
             {t("shell.myAccess")}
+          </a>
+          <a
+            href="/settings/notifications"
+            className="underline-offset-4 hover:underline"
+            data-testid="notification-settings-link"
+          >
+            {t("notifications.settingsLink")}
           </a>
           <form action={signOutAction}>
             <button type="submit" className={buttonClass("ghost")} data-testid="sign-out">

@@ -1,7 +1,7 @@
 // Fixtures for the records screens e2e and accessibility specs (CDF-71), also used by the command-form and
-// confirmation specs (UX-001, UX-019, UX-031). The seed has no case past closure, so each call files a fresh
-// synthetic report and moves a new case through the real database commands, acting as the synthetic users in
-// their own security context (no RLS bypass).
+// confirmation specs (UX-001, UX-019, UX-031) and the notification specs (UX redesign S4). The seed has no case
+// past closure, so each call files a fresh synthetic report and moves a new case through the real database
+// commands, acting as the synthetic users in their own security context (no RLS bypass).
 //
 // The one owner-level step adds TEST_ETE_RETENTION, a CONFIGURED class with a one-microsecond period, so a case
 // can reach disposition in a test. It is a TEST FIXTURE, not a CDF value: shipped classes stay SOURCE_REQUIRED
@@ -24,6 +24,10 @@ const USERS = {
   grcDirector: "a0000000-0000-4000-8000-000000000008",
   committeeChair: "a0000000-0000-4000-8000-000000000016",
   records: "a0000000-0000-4000-8000-000000000019",
+  // Notifications (UX redesign S4)
+  committee: "a0000000-0000-4000-8000-000000000007",
+  platformAdmin: "a0000000-0000-4000-8000-000000000009",
+  legalB: "a0000000-0000-4000-8000-000000000022",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -282,4 +286,46 @@ export async function formOnlyCase(
     await admin.end();
   }
   return { ...c, instanceId };
+}
+
+// ---- Notifications (UX redesign S4, ADR-025) ------------------------------------------------------------------
+
+/**
+ * A committee-seat notice for the user. The platform administrator appoints them through
+ * api.appoint_committee_member to a seat that lies wholly in the past (a unique one-millisecond range five years
+ * ago), so it notifies without seating anyone today. Returns the in-app notification id, read as the recipient.
+ */
+export async function seatNotice(user: "committee" | "legalB"): Promise<string> {
+  const [seat] = await as(
+    "platformAdmin",
+    (tx) => tx<{ id: string }[]>`
+      select api.appoint_committee_member((select id from committee.committee where code = 'IC'), ${USERS[user]},
+        'MEMBER', clock_timestamp() - interval '5 years', clock_timestamp() - interval '5 years' + interval '1 millisecond',
+        'DEMO-E2E-NOTICE') as id`,
+  );
+  const [notice] = await as(
+    user,
+    (tx) => tx<{ id: string }[]>`
+      select id from notify.outbox where dedupe_key like ${`seat-assigned:${seat!.id}:%`} and channel = 'IN_APP'`,
+  );
+  return notice!.id;
+}
+
+/** Whether the user's own notification is read, read as the user (no RLS bypass). */
+export async function noticeRead(user: "committee" | "legalB", id: string): Promise<boolean> {
+  const [row] = await as(
+    user,
+    (tx) => tx<{ read: boolean }[]>`select read_at is not null as read from notify.outbox where id = ${id}`,
+  );
+  return row!.read;
+}
+
+/** Sets the user's own choice for a template on a channel, through the command (tests restore the seed). */
+export async function setNoticePreference(
+  user: "committee" | "legalB",
+  template: string,
+  channel: "IN_APP" | "EMAIL",
+  muted: boolean,
+): Promise<void> {
+  await as(user, (tx) => tx`select api.set_notification_preference(${template}, ${channel}, ${muted})`);
 }

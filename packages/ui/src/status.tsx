@@ -27,6 +27,8 @@ interface Registry {
   records: Record<RecordsState, StatusTone>;
   holdRequest: Record<LegalHoldRequestStatus, StatusTone>;
   task: Record<CaseTaskStatus, StatusTone>;
+  /** Whether the caller has read one of their own notifications (S4). */
+  notification: Record<"UNREAD" | "READ", StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -77,6 +79,7 @@ export const STATUS_TONES: Registry = {
   },
   holdRequest: { SUBMITTED: "warning", ASSIGNED: "warning", APPLIED: "success", REJECTED: "neutral" },
   task: { OPEN: "info", IN_PROGRESS: "info", COMPLETED: "success", CANCELLED: "neutral", EXPIRED: "warning" },
+  notification: { UNREAD: "info", READ: "neutral" },
 };
 
 /** The tone for a status; an unknown code (a newer database value) falls back to neutral, never to red. */

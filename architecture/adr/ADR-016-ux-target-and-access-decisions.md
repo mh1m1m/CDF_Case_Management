@@ -411,6 +411,28 @@ The rebase (owner Q&A of 2026-10-12, ADR-017 to ADR-039) changed what several UX
 
 **Still open for the owner at the S3 gate.** DEC-04 (who prepares, reviews, approves and withdraws each form), the four open parts of DEC-05, DEC-19 (snapshot module content or reference it) and DEC-49 (which forms gate which transitions). S3 decides none of them; today's form entitlements and transition rules are unchanged.
 
+## S4 amendment: notifications in the shell (Phase 12 P12-0a, 2026-10-13)
+
+The shell gains the notifications the rebase queues (ADR-025, migration 1920). No migration: the screens read and
+write only what 1920 already grants.
+
+- **Bell.** The header carries a link to the caller's notifications with their own unread count (RC-06). It is never
+  a case count, and its accessible name carries the count.
+- **List.** Each notice shows its template wording, its kind and when it arrived, newest first, in two views (all,
+  unread). A notice links to its page only once that page has shipped (`LIVE_NOTIFICATION_ROOTS`, empty until the
+  Phase 12 purpose routes land), so nobody lands on a missing page; the page re-checks access. Marking read calls
+  `api.mark_notification_read`; another user's id answers the uniform NOT_FOUND and is recorded as a refusal.
+- **Settings.** Mandatory notices are listed as always sent and have no control. Each optional notice has a box per
+  channel where the platform-wide rule sends it (or where the caller muted it earlier). All changes save in one
+  transaction through `api.set_notification_preference`, so a refused change leaves every setting as it was. Email
+  is the ADR-025 stub (PRODUCTION_SUBSTITUTION_REQUIRED).
+- **Where access is enforced.** Reads are RLS selects on `notify.*`: own in-app rows and own mutes only; the template
+  catalogue and the rules hold no content. Commands are `api.*` and audit `NOTIFICATION_READ` and
+  `NOTIFICATION_PREFERENCE_SET` in the same transaction.
+- **Known limitation.** A committee's own default (`COMMITTEE_DEFAULT`) that turns a notice on for one committee is
+  not shown per committee. Where the platform-wide rule sends nothing the page offers no box, so a caller cannot mute
+  such a notice in advance; they can once it is on.
+
 ## Delivery governance
 
 - **Unit path.** Every unit of work follows Requirement → Decision → Linear → Branch → PR → Test → Hosted validation. Delivery goes through the redesign epics and coherent capabilities, not one ticket per debt item.

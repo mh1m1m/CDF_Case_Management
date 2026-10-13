@@ -8,12 +8,14 @@ import { join } from "node:path";
 import {
   createEvidenceService,
   createFormsService,
+  createInboxService,
   createInterviewService,
   createInvestigationService,
   createRecordsService,
   type EvidenceService,
   type EvidenceStorage,
   type FormsService,
+  type InboxService,
   type InterviewService,
   type InvestigationService,
   type RecordsService,
@@ -25,6 +27,7 @@ import {
   MockMalwareScanner,
   PostgresEvidenceGateway,
   PostgresFormsGateway,
+  PostgresInboxGateway,
   PostgresInterviewGateway,
   PostgresInvestigationGateway,
   PostgresRecordsGateway,
@@ -44,6 +47,7 @@ const globalForApp = globalThis as unknown as {
   cdfForms?: FormsService;
   cdfInterviews?: InterviewService;
   cdfRecords?: RecordsService;
+  cdfInbox?: InboxService;
 };
 
 function pool(): Sql {
@@ -111,6 +115,15 @@ export function recordsService(): RecordsService {
   return globalForApp.cdfRecords;
 }
 
+/** The caller's own in-app notifications and settings (UX redesign S4, ADR-025): RLS returns only their own rows. */
+export function inboxService(): InboxService {
+  globalForApp.cdfInbox ??= createInboxService({
+    gateway: new PostgresInboxGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfInbox;
+}
+
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */
 export async function cookieJar(): Promise<CookieJar> {
   const store = await cookies();
@@ -157,4 +170,10 @@ export const requireActor = cache(async (): Promise<RequestScope> => {
 export const myShellAreas = cache(async (): Promise<MyArea[]> => {
   const { actor, ctx } = await requireActor();
   return shellAreas(actor, await investigationService().myAreas(ctx));
+});
+
+/** The caller's unread in-app notifications for this request, read once for the header bell. */
+export const myUnreadCount = cache(async (): Promise<number> => {
+  const { ctx } = await requireActor();
+  return inboxService().unreadCount(ctx);
 });

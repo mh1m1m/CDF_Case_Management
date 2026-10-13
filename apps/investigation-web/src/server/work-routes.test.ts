@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MyArea, WorkItem } from "@cdf/contracts";
 import { safeLocaleReturnPath, safeReturnPath } from "./return-path";
-import { areaHref, areaOfPath, daysSince, itemHref, landingFor } from "./work-routes";
+import { areaHref, areaOfPath, daysSince, itemHref, landingFor, notificationHref } from "./work-routes";
 
 const area = (a: MyArea["area"], defaultView = "x"): MyArea => ({ area: a, actionableCount: 0, defaultView });
 const item = (over: Partial<WorkItem>): WorkItem => ({
@@ -123,5 +123,26 @@ describe("age in a queue (ADR-016 D8)", () => {
     expect(daysSince("2026-10-11T11:59:59Z", now)).toBe(1);
     expect(daysSince("2026-10-01T12:00:00Z", now)).toBe(11);
     expect(daysSince("2026-10-13T00:00:00Z", now)).toBe(0);
+  });
+});
+
+describe("notification links (UX redesign S4)", () => {
+  const id = "0b1f6f2e-6c7a-4d39-9d5e-1f6c2f0d9a11";
+  it("links nowhere while the page has not shipped", () => {
+    expect(notificationHref({ deepLink: `/committees/${id}` })).toBeNull();
+  });
+  it("links to a live root only, and only to an id-only path", () => {
+    expect(notificationHref({ deepLink: `/committees/${id}` }, ["/committees"])).toBe(`/committees/${id}`);
+    expect(notificationHref({ deepLink: `/committees-x/${id}` }, ["/committees"])).toBeNull();
+    expect(notificationHref({ deepLink: `/continuity/imports/${id}` }, ["/continuity/imports"])).toBe(
+      `/continuity/imports/${id}`,
+    );
+    for (const bad of [
+      `//evil.example/${id}`,
+      `/committees/${id}?x=1`,
+      `https://evil.example/committees/${id}`,
+      "",
+    ])
+      expect(notificationHref({ deepLink: bad }, ["/committees"]), bad).toBeNull();
   });
 });
