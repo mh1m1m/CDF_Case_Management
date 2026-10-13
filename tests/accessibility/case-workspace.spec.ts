@@ -6,7 +6,17 @@ import { expect, test } from "@playwright/test";
 import { audit } from "./axe";
 import { openEvidenceItem, signIn } from "../e2e/support";
 
-const TABS = ["", "/allegations", "/evidence", "/interviews", "/forms", "/reporter", "/people", "/history"];
+const TABS = [
+  "",
+  "/allegations",
+  "/proceedings",
+  "/evidence",
+  "/interviews",
+  "/forms",
+  "/reporter",
+  "/people",
+  "/history",
+];
 const WIDTHS = [1280, 390, 320] as const;
 
 for (const locale of ["ar", "en"] as const) {

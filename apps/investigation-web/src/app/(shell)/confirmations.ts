@@ -12,7 +12,10 @@ export type ConfirmAct =
   | "withdrawForm"
   | "cancelInterview"
   | "releaseHold"
-  | "declareConflict";
+  | "declareConflict"
+  | "closeProceeding"
+  | "referToCommittee"
+  | "approveRestrictedReferral";
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */
 const CASE_TRANSITIONS: Readonly<Record<string, ConfirmAct>> = {
@@ -32,13 +35,22 @@ export function transitionAct(code: string, toState: string): ConfirmAct | null 
 /** The verb that labels the act's trigger and its confirm button. */
 export const actLabel = (t: Translator, act: ConfirmAct) => t(`confirm.acts.${act}.action` as MessageKey);
 
-export function confirmation(t: Translator, act: ConfirmAct): CDFConfirmation {
+export function confirmation(
+  t: Translator,
+  act: ConfirmAct,
+  facts?: CDFConfirmation["facts"],
+): CDFConfirmation {
   const part = (name: string) => t(`confirm.acts.${act}.${name}` as MessageKey);
+  // "Who is told" only where the act's copy says it (Phase 12 consequence preview, ADR-030).
+  const notifiedKey = `confirm.acts.${act}.notified`;
+  const notified = t(notifiedKey as MessageKey);
   return {
     title: part("title"),
     whatHappens: part("body"),
     undo: part("undo"),
     affected: part("affected"),
+    ...(notified !== notifiedKey ? { notified } : {}),
+    ...(facts?.length ? { facts } : {}),
     confirmLabel: actLabel(t, act),
     // "Cancel" next to "Cancel interview" would be ambiguous, so that dialog says "Keep interview".
     cancelLabel: act === "cancelInterview" ? part("dismiss") : t("confirm.cancel"),

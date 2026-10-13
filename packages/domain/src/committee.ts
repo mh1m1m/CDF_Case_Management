@@ -3,6 +3,7 @@
  * happen and the application layer to refuse early. Migration 1870 and later committee migrations are the
  * authority and re-check every rule.
  */
+import { OPENABLE_PROCEEDING_TYPES } from "@cdf/contracts";
 import type {
   CommitteeSeat,
   GrievanceOutcome,
@@ -26,14 +27,7 @@ export const SINGLE_HOLDER_SEATS: readonly CommitteeSeat[] = [
 
 export const TERMINAL_PROCEEDING_STATUSES: readonly ProceedingStatus[] = ["CONCLUDED", "CANCELLED"];
 /** Types that api.open_proceeding opens; committee and grievance proceedings come from a referral. */
-export const DIRECTLY_OPENED_PROCEEDING_TYPES: readonly ProceedingType[] = [
-  "PRELIMINARY_REVIEW",
-  "INVESTIGATION",
-  "LEGAL_REVIEW",
-  "AUTHORITY_DECISION",
-  "CORRECTIVE_ACTION",
-  "REINVESTIGATION",
-];
+export const DIRECTLY_OPENED_PROCEEDING_TYPES: readonly ProceedingType[] = OPENABLE_PROCEEDING_TYPES;
 /** Types that may have more than one open proceeding in a case at a time. */
 export const PARALLEL_PROCEEDING_TYPES: readonly ProceedingType[] = ["CORRECTIVE_ACTION", "REINVESTIGATION"];
 
@@ -90,6 +84,92 @@ export function quorumThreshold(rule: QuorumRule, eligible: number): number | nu
 export function isQuorate(rule: QuorumRule, eligible: number, present: number): boolean | null {
   const needed = quorumThreshold(rule, eligible);
   return needed === null ? null : eligible > 0 && present >= needed;
+}
+
+// ---- Findings (ADR-017; AMB-029, AMB-105) -------------------------------------------------------------
+
+/** One recorded version of a finding. A line is one allegation, one subject (or the whole allegation), one proceeding. */
+export interface FindingVersion {
+  allegationId: string;
+  subjectId: string | null;
+  proceedingId: string;
+  versionNo: number;
+}
+
+const findingLine = (f: FindingVersion) => `${f.allegationId}|${f.subjectId ?? ""}|${f.proceedingId}`;
+
+/** The current version of each line: the highest version number. Earlier versions stay on record (append-only). */
+export function currentFindings<T extends FindingVersion>(findings: readonly T[]): T[] {
+  const latest = new Map<string, T>();
+  for (const f of findings) {
+    const k = findingLine(f);
+    const seen = latest.get(k);
+    if (!seen || f.versionNo > seen.versionNo) latest.set(k, f);
+  }
+  return [...latest.values()];
+}
+
+export interface ProceedingRef {
+  id: string;
+  sequenceNo: number;
+  proceedingType: ProceedingType;
+}
+
+/**
+ * AMB-029: findings are per proceeding, and the committee proceeding's finding is the one the decision uses; earlier
+ * findings stay on record. For one allegation and one subject (null: the allegation as a whole), the current finding
+ * recorded in the latest committee investigation, or null while there is none.
+ */
+export function governingFinding<T extends FindingVersion>(
+  current: readonly T[],
+  proceedings: readonly ProceedingRef[],
+  allegationId: string,
+  subjectId: string | null,
+): T | null {
+  const committee = new Map(
+    proceedings
+      .filter((p) => p.proceedingType === "COMMITTEE_INVESTIGATION")
+      .map((p) => [p.id, p.sequenceNo]),
+  );
+  let best: T | null = null;
+  for (const f of current) {
+    if (f.allegationId !== allegationId || f.subjectId !== subjectId) continue;
+    const seq = committee.get(f.proceedingId);
+    if (seq === undefined) continue;
+    if (!best || seq > committee.get(best.proceedingId)!) best = f;
+  }
+  return best;
+}
+
+export interface SubjectPath {
+  /** Allegations about the person that are not withdrawn: tied to them, or with a finding recorded for them. */
+  allegations: number;
+  /** Of those, how many have a current finding for the person in any proceeding. */
+  found: number;
+  /** Of those, how many have a committee finding for the person (the one the decision uses, AMB-029). */
+  committee: number;
+}
+
+/**
+ * AMB-105: each person the case is about has their own path. The decision, notice and grievance that follow are
+ * per person too, so one person can be decided while another is still being investigated.
+ */
+export function subjectPath<T extends FindingVersion>(
+  allegations: readonly { id: string; subjectId: string | null; status: string }[],
+  current: readonly T[],
+  proceedings: readonly ProceedingRef[],
+  subjectId: string,
+): SubjectPath {
+  const foundFor = (allegationId: string) =>
+    current.some((f) => f.allegationId === allegationId && f.subjectId === subjectId);
+  const about = allegations.filter(
+    (a) => a.status !== "WITHDRAWN" && (a.subjectId === subjectId || foundFor(a.id)),
+  );
+  return {
+    allegations: about.length,
+    found: about.filter((a) => foundFor(a.id)).length,
+    committee: about.filter((a) => governingFinding(current, proceedings, a.id, subjectId) !== null).length,
+  };
 }
 
 // ---- Meetings, voting and minutes (ADR-020, migration 1890) --------------------------------------------

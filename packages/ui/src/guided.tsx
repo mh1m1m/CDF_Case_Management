@@ -108,8 +108,11 @@ export function CDFPurposeBanner({
   );
 }
 
-/** Where a rule value comes from (configurable rules, values SOURCE_REQUIRED: DEC-F02, F08, F14, F18, F25). */
-export type CDFValueSource = "SOURCE_REQUIRED" | "CONFIGURED" | "UNSET";
+/**
+ * Where a rule value comes from (configurable rules, values SOURCE_REQUIRED: DEC-F02, F08, F14, F18, F25).
+ * OWNER_DEFAULT: the owner's decided default from the business architecture, not yet a CDF source document.
+ */
+export type CDFValueSource = "SOURCE_REQUIRED" | "OWNER_DEFAULT" | "CONFIGURED" | "UNSET";
 
 /**
  * A rule value with where it comes from, so a provisional default never reads as CDF policy: "30 days ·
@@ -131,7 +134,9 @@ export function CDFConfiguredValue({
   return (
     <span className="inline-flex flex-wrap items-center gap-2" data-testid={testId} data-source={source}>
       <span>{value}</span>
-      <CDFBadge tone={source === "CONFIGURED" ? "neutral" : "warning"}>{sourceLabel}</CDFBadge>
+      <CDFBadge tone={source === "CONFIGURED" || source === "OWNER_DEFAULT" ? "neutral" : "warning"}>
+        {sourceLabel}
+      </CDFBadge>
     </span>
   );
 }

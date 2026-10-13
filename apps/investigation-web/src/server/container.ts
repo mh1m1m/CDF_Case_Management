@@ -6,12 +6,14 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
+  createCaseStructureService,
   createEvidenceService,
   createFormsService,
   createInboxService,
   createInterviewService,
   createInvestigationService,
   createRecordsService,
+  type CaseStructureService,
   type EvidenceService,
   type EvidenceStorage,
   type FormsService,
@@ -25,6 +27,7 @@ import type { Actor, MyArea } from "@cdf/contracts";
 import {
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
+  PostgresCaseStructureGateway,
   PostgresEvidenceGateway,
   PostgresFormsGateway,
   PostgresInboxGateway,
@@ -48,6 +51,7 @@ const globalForApp = globalThis as unknown as {
   cdfInterviews?: InterviewService;
   cdfRecords?: RecordsService;
   cdfInbox?: InboxService;
+  cdfCaseStructure?: CaseStructureService;
 };
 
 function pool(): Sql {
@@ -122,6 +126,15 @@ export function inboxService(): InboxService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfInbox;
+}
+
+/** Proceedings, subjects, allegations, findings and committee referral (ADR-017 to ADR-019; Phase 12 P12-1). */
+export function caseStructureService(): CaseStructureService {
+  globalForApp.cdfCaseStructure ??= createCaseStructureService({
+    gateway: new PostgresCaseStructureGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfCaseStructure;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

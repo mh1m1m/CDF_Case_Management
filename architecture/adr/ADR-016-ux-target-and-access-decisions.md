@@ -446,6 +446,49 @@ Shared pieces the Phase 12 screens build on (no migration, no new command):
 - **Unsaved changes (AMB-243).** A long form (draft case form, interview statement) asks before the user leaves by a
   link or closes the page with changes not saved. An untouched or saved form never asks.
 
+## P12-1 amendment: case structure on the case (Phase 12, 2026-10-13)
+
+The case gains the structure the rebase built in migration 1870 (ADR-017 to ADR-019), on two tabs. No migration and no
+new command: the screens call the 1870 `api.*` commands, which check access again and audit in the same transaction.
+
+- **Allegations tab.** Who the case is about, what is alleged about each of them, and what each proceeding found. A
+  case editor names a person (synthetic labels only), adds an allegation and ties one to a person with optional policy
+  and law references. A finding is recorded for one allegation and one person (or the allegation as a whole when it is
+  tied to no one) in one open proceeding; recording again adds a version, and earlier versions stay on record.
+- **Governing finding (AMB-029).** The committee proceeding's current finding is the one the decision uses. The tab
+  marks it, keeps the investigation's findings on record, and says so while there is none.
+- **One path per person (AMB-105).** Each person shows their own progress: allegation recorded, finding recorded,
+  committee finding. A step is done only when every allegation about them has reached it. Decision, notice and
+  grievance join that path in later Phase 12 screens.
+- **Proceedings tab.** Open a proceeding, change its state (waiting and suspension reasons), close it after a
+  confirmation. A type that already has an open proceeding is not offered unless it may run in parallel; reason codes
+  are the active database codes this version knows; outcomes leave out the codes DEC-F10 does not offer.
+- **Referral (ADR-018).** Only the Investigation Committee is offered here; a grievance committee proceeding comes
+  from a grievance (ADR-024). The parent defaults to the latest investigation (ASK ONCE, DERIVE). A workflow guide
+  says what the referral waits for, who acts next and whether the caller can act.
+- **Restricted case (DEC-61).** The referral waits for the case owner's approval as Restricted Case Authority. Only the
+  owner sees the approval form; the database ties the approval to the owner's eligibility and lets one approval serve
+  one referral. Others see who acts next. Anyone off the restricted team gets the same 404 as a missing case.
+- **Preliminary review first (AMB-018, migration 2030).** A case that did not arrive as a direct referral or grievance
+  reaches the Investigation Committee only once its latest approved preliminary recommendation refers it there; the
+  database refuses any other referral (PRELIMINARY_REFERRAL_REQUIRED). The guide shows that step first and reads it as
+  the database does, over the rows RLS returns to the case team. The approval and referral forms appear only after it;
+  an approval already given still shows as given. The preliminary review's own screens are P12-4.
+- **Committee at referral (DEC-F19).** The copy taken at referral is shown as counts per seat, voting members, members
+  without a vote under the firewall and members not cleared for the case, with the rules in force then and their
+  source. It never names a member, and later changes to the committee do not reach it.
+- **Where access is enforced.** The tabs are case-homed: they read case-team data inside the case as RLS selects in the
+  caller's own context (`case_mgmt.*`, the committee proceeding as `authz.can_view_committee_proceeding` allows, and
+  seat counts with no member ids). Findings show only with a case-file basis (S3 `finding_read`). They are not purpose
+  views, so the coordinator ruling that purpose views read DB read models behind the shared gate (P12-0b, migration
+  2045, ADR-051) does not apply to them. Forms show only where the command would be accepted; every command checks
+  again.
+- **Known gaps, proposed for migration 2045.** (1) The referral confirmation cannot yet say how many current members
+  would be cleared and voting: the case team has no read of current seats. (2) The case history (migration 1830) does
+  not yet list the 1870 events (proceedings opened, changed and closed; people, allegations and links added; findings
+  recorded; committee referral and its approval). The stage on the overview does not move with these tabs yet; its
+  pending actions point to them.
+
 ## Delivery governance
 
 - **Unit path.** Every unit of work follows Requirement → Decision → Linear → Branch → PR → Test → Hosted validation. Delivery goes through the redesign epics and coherent capabilities, not one ticket per debt item.

@@ -28,6 +28,10 @@ const USERS = {
   committee: "a0000000-0000-4000-8000-000000000007",
   platformAdmin: "a0000000-0000-4000-8000-000000000009",
   legalB: "a0000000-0000-4000-8000-000000000022",
+  // Case structure and committee referral (Phase 12 P12-1)
+  committeeSecretary: "a0000000-0000-4000-8000-000000000015",
+  legal: "a0000000-0000-4000-8000-000000000021",
+  grcSectorHead: "a0000000-0000-4000-8000-000000000027",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -154,9 +158,15 @@ export async function reporterCase(
   return { caseId, caseNumber, reportId, message };
 }
 
-/** Ends Investigator Alpha's assignment on a fixture case, so the seed's "my cases" stay as they were. */
-export async function endInvestigatorAssignment(caseId: string): Promise<void> {
-  await as("caseManager", async (tx) => {
+/**
+ * Ends Investigator Alpha's assignment on a fixture case, so the seed's "my cases" stay as they were. A restricted
+ * case is cleaned up by its owner, the GRC Director: the case manager no longer sees it.
+ */
+export async function endInvestigatorAssignment(
+  caseId: string,
+  by: "caseManager" | "grcDirector" = "caseManager",
+): Promise<void> {
+  await as(by, async (tx) => {
     const rows = await tx<{ id: string }[]>`
       select id from case_mgmt.case_assignment
        where case_id = ${caseId} and user_id = ${USERS.investigatorA} and status = 'ACTIVE'`;
@@ -341,4 +351,153 @@ export async function setNoticePreference(
   muted: boolean,
 ): Promise<void> {
   await as(user, (tx) => tx`select api.set_notification_preference(${template}, ${channel}, ${muted})`);
+}
+
+// ---- Case structure and committee referral (Phase 12 P12-1; ADR-017 to ADR-019) -----------------------------
+
+const STRUCTURE_REASON = "Synthetic: case structure e2e fixture.";
+
+/** A new SCREENING case with Investigator Alpha on its team: the case manager edits it, the investigator finds. */
+export async function structureCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
+  const c = await screeningCase(label);
+  await as(
+    "caseManager",
+    (tx) =>
+      tx`select api.assign_case(${c.caseId}, ${USERS.investigatorA}, 'INVESTIGATOR', ${STRUCTURE_REASON})`,
+  );
+  return c;
+}
+
+/**
+ * AMB-018 (migration 2030): the case's preliminary review refers it to the Investigation Committee, as
+ * tests/support/committee.ts does it. The GRC Director prepares the recommendation (no review step, Q15) and the GRC
+ * Sector Head approves it. On a restricted case the approver sees nothing without an explicit grant (fail safe), so
+ * the owner grants case access for the approval and revokes it afterwards.
+ */
+export async function preliminaryReferral(caseId: string): Promise<void> {
+  const { recommendation, grant } = await as("grcDirector", async (tx) => {
+    const [c] = await tx<{ restricted: boolean }[]>`
+      select is_restricted as restricted from case_mgmt.case_record where id = ${caseId}`;
+    if (!c) throw new Error("preliminaryReferral: the GRC Director cannot see the case");
+    const [r] = await tx<{ id: string }[]>`
+      select api.prepare_preliminary_recommendation(${caseId}, 'REFERRED_TO_COMMITTEE',
+        'Synthetic: serious enough for the Investigation Committee.') as id`;
+    const [g] = c.restricted
+      ? await tx<{ id: string }[]>`
+          select api.grant_case_access(${caseId}, ${USERS.grcSectorHead}, 'CASE', ${STRUCTURE_REASON}, null) as id`
+      : [];
+    return { recommendation: r!.id, grant: g?.id };
+  });
+  await as(
+    "grcSectorHead",
+    (tx) => tx`select api.approve_preliminary_recommendation(${recommendation}, 'APPROVE', null, null)`,
+  );
+  if (grant)
+    await as("grcDirector", (tx) => tx`select api.revoke_case_access(${grant}, ${STRUCTURE_REASON})`);
+}
+
+/** An investigation proceeding on the case, opened by the case manager. */
+export async function openInvestigation(caseId: string): Promise<string> {
+  const [p] = await as(
+    "caseManager",
+    (tx) => tx<{ id: string }[]>`
+      select api.open_proceeding(${caseId}, 'INVESTIGATION', null, ${STRUCTURE_REASON}) as id`,
+  );
+  return p!.id;
+}
+
+/**
+ * Runs `fn` while the Investigation Committee can take a referral (a chair, a secretary and a voting member in
+ * office, all cleared to CONFIDENTIAL), then ends the seats it added. Seats already in office are kept as they are:
+ * on a seeded database the demo committee (30_synthetic_committee_seats.sql) holds all three, so nothing is added.
+ * The platform administrator appoints and ends seats through the api.* commands. A seat starts when it is appointed
+ * and ends when `fn` returns, so the next call's seats never overlap it (MEMBERSHIP_OVERLAP).
+ */
+export async function withSeatedInvestigationCommittee<T>(fn: () => Promise<T>): Promise<T> {
+  const wanted: [keyof typeof USERS, "CHAIR" | "SECRETARY" | "MEMBER"][] = [
+    ["committeeChair", "CHAIR"],
+    ["committeeSecretary", "SECRETARY"],
+    ["legal", "MEMBER"],
+  ];
+  const added = await as("platformAdmin", async (tx) => {
+    const current = await tx<{ seat: string }[]>`
+      select m.seat from committee.membership m join committee.committee c on c.id = m.committee_id
+       where c.code = 'IC' and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())`;
+    const ids: string[] = [];
+    for (const [user, seat] of wanted) {
+      if (current.some((m) => m.seat === seat)) continue;
+      const [m] = await tx<{ id: string }[]>`
+        select api.appoint_committee_member((select id from committee.committee where code = 'IC'), ${USERS[user]},
+          ${seat}, clock_timestamp(), null, 'DEMO-E2E-REFERRAL') as id`;
+      ids.push(m!.id);
+    }
+    return ids;
+  });
+  try {
+    return await fn();
+  } finally {
+    await as("platformAdmin", async (tx) => {
+      for (const id of added)
+        await tx`select api.end_committee_membership(${id}, clock_timestamp(), ${STRUCTURE_REASON})`;
+    });
+  }
+}
+
+/**
+ * A case with its structure built through the commands: a preliminary review that referred it (proceeding 1), one
+ * person, the report's allegation tied to them, an investigation with two versions of a finding (proceeding 2), and
+ * a referral to the Investigation Committee with the committee's own finding (proceeding 3). Used where a test needs
+ * every part of the two tabs on screen.
+ */
+export async function builtStructureCase(label: string): Promise<{ caseId: string; caseNumber: string }> {
+  const c = await structureCase(label);
+  await preliminaryReferral(c.caseId);
+  const investigation = await openInvestigation(c.caseId);
+  const allegation = await as("caseManager", async (tx) => {
+    const [subject] = await tx<{ id: string }[]>`
+      select api.add_case_subject(${c.caseId}, 'Employee Kappa (synthetic)', 'EMPLOYEE', null) as id`;
+    const [a] = await tx<{ id: string }[]>`
+      select id from case_mgmt.allegation where case_id = ${c.caseId} order by created_at, id limit 1`;
+    await tx`select api.link_allegation_subject(${a!.id}, ${subject!.id}, 'Code of Conduct art. 7 (synthetic)', null)`;
+    return a!.id;
+  });
+  await as("investigatorA", async (tx) => {
+    await tx`select api.record_finding(${allegation}, null, ${investigation}, 'SUBSTANTIATED',
+      'Synthetic: the first reading of the records.')`;
+    await tx`select api.record_finding(${allegation}, null, ${investigation}, 'PARTIALLY_SUBSTANTIATED',
+      'Synthetic: after the second interview, only part is supported.')`;
+  });
+  const committeeProceeding = await withSeatedInvestigationCommittee(() =>
+    as("caseManager", async (tx) => {
+      const [referral] = await tx<{ id: string }[]>`
+        select api.refer_case_to_committee(${c.caseId}, (select id from committee.committee where code = 'IC'),
+                                           ${investigation}, ${STRUCTURE_REASON}) as id`;
+      const [cp] = await tx<{ proceeding_id: string }[]>`
+        select proceeding_id from committee.committee_proceeding where id = ${referral!.id}`;
+      return cp!.proceeding_id;
+    }),
+  );
+  await as(
+    "investigatorA",
+    (tx) => tx`select api.record_finding(${allegation}, null, ${committeeProceeding}, 'SUBSTANTIATED',
+      'Synthetic: the committee finds the allegation substantiated.')`,
+  );
+  return c;
+}
+
+/**
+ * A new SCREENING case owned by the GRC Director (an eligible Restricted Case Authority) and restricted by them, with
+ * Investigator Alpha on its team (DEC-01, DEC-61). The case manager is not on its team.
+ */
+export async function restrictedStructureCase(
+  label: string,
+): Promise<{ caseId: string; caseNumber: string }> {
+  const c = await structureCase(label);
+  await as("caseManager", async (tx) => {
+    await tx`select api.assign_case(${c.caseId}, ${USERS.grcDirector}, 'CASE_OWNER', ${STRUCTURE_REASON})`;
+  });
+  await as("grcDirector", async (tx) => {
+    await tx`select api.change_case_classification(${c.caseId}, 'CONFIDENTIAL', true, ${STRUCTURE_REASON})`;
+  });
+  return c;
 }

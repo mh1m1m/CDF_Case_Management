@@ -74,6 +74,7 @@ for (const locale of ["ar", "en"] as const) {
         "Case interviews",
         "Interview details",
         "Case allegations",
+        "Case proceedings",
         "Case evidence",
         "Case people and access",
         "Case history",
@@ -86,6 +87,7 @@ for (const locale of ["ar", "en"] as const) {
         "مقابلات القضية",
         "تفاصيل المقابلة",
         "ادعاءات القضية",
+        "إجراءات القضية",
         "أدلة القضية",
         "فريق القضية وصلاحياتها",
         "مجريات القضية",
@@ -114,7 +116,7 @@ for (const locale of ["ar", "en"] as const) {
     await lead.locator('[data-testid^="interview-"]').first().click();
     await lead.waitForURL(/\/interviews\/[0-9a-f-]{36}$/);
     titles.push(await pagePart(lead, names.app));
-    for (const tab of ["allegations", "evidence", "people", "history"]) {
+    for (const tab of ["allegations", "proceedings", "evidence", "people", "history"]) {
       await lead.goto(`${caseUrl}/${tab}`);
       titles.push(await pagePart(lead, names.app));
     }
