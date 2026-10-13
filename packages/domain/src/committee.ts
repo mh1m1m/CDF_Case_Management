@@ -163,8 +163,10 @@ export function voteOutcome(
 }
 
 /**
- * Q74 (SOURCE_REQUIRED: the full rule): an adopted package needs legal review before the authority when any approved
- * item is a sanction, legal action or external referral. Mirrors decision.legal_review_required.
+ * Q74, DEC-F12 (CON-017): the item types the seeded Investigation Committee rules require legal review for. Since
+ * migration 2030 the database decides from decision.legal_review_rule (by item type, by the item's legal-justification
+ * flag, or by the item's sanction catalogue version), so this list is a UI hint of the seeded minimum, not the rule:
+ * decision.legal_review_required is authoritative and may require review for more.
  */
 export const LEGAL_REVIEW_REQUIRED_TYPES: readonly RecommendationItemType[] = [
   "DISCIPLINARY_SANCTION",

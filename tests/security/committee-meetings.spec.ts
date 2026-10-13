@@ -18,6 +18,7 @@ import {
   vote,
   type MeetingFixture,
 } from "../support/committee";
+import { caseFacts } from "../support/decision";
 
 let caseB: string, ic: string, gc: string;
 
@@ -651,6 +652,54 @@ describe("meeting records are append-only", () => {
           tx,
         ) => tx`insert into committee.vote (vote_item_id, participant_id, recorded_for, recorded_by, source, choice, reason, original_event_at)
                    values (${item}, ${f.participant.lead!}, ${USERS.lead}, ${USERS.committeeSecretary}, 'SECRETARY', 'APPROVE', 'Synthetic.', now())`,
+      );
+    });
+  });
+});
+
+describe("a finding vote binds one finding version (AMB-030, migration 2030)", () => {
+  it("T-AMB-012: a new finding version does not alter the version bound to a closed vote item", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const facts = await caseFacts(s, caseB);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await openWithPresent(s, f, VOTERS);
+      const [vi] = await s.tx<{ id: string }[]>`
+        select api.open_vote_item(${f.meeting}, 'FINDING', ${facts.finding}, 'Finding on the allegation (synthetic)') as id`;
+      for (const user of VOTERS) await vote(s, user, vi!.id, "APPROVE");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+
+      // Investigation goes on: a new version of the finding is recorded after the vote.
+      await s.as("investigatorB");
+      const [v2] = await s.tx<{ id: string }[]>`
+        select api.record_finding(${facts.allegation}, null, ${facts.proceeding}, 'NOT_SUBSTANTIATED',
+          'Synthetic: revised finding after new evidence.') as id`;
+      expect(v2!.id).not.toBe(facts.finding);
+
+      // The vote still names version 1, which is unchanged; version 2 is a separate row awaiting its own vote.
+      await s.as("committeeSecretary");
+      const [bound] = await s.tx<{ finding_id: string; status: string; result: string }[]>`
+        select finding_id, status, result from committee.vote_item where id = ${vi!.id}`;
+      expect(bound).toEqual({ finding_id: facts.finding, status: "CLOSED", result: "APPROVED" });
+      await s.as("investigatorB");
+      expect(
+        await s.tx`select version_no, result from case_mgmt.finding
+                   where allegation_id = ${facts.allegation} order by version_no`,
+      ).toEqual([
+        { version_no: 1, result: "SUBSTANTIATED" },
+        { version_no: 2, result: "NOT_SUBSTANTIATED" },
+      ]);
+
+      // Negative: neither the bound version nor the closed vote item can be changed, even by the table owner.
+      await s.asOwner();
+      await s.expectError(
+        "case_mgmt.finding is append-only",
+        (tx) => tx`update case_mgmt.finding set result = 'NOT_SUBSTANTIATED' where id = ${facts.finding}`,
+      );
+      await s.expectError(
+        `vote item ${vi!.id} is closed`,
+        (tx) => tx`update committee.vote_item set finding_id = ${v2!.id} where id = ${vi!.id}`,
       );
     });
   });

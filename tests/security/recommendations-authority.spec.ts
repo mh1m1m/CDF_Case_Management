@@ -181,7 +181,7 @@ async function draftPackageOnSameProceeding(s: Scenario, f: PackageFixture): Pro
 }
 
 describe("legal review packets (ADR-022, ADR-031, N14)", () => {
-  it("the assigned reviewer reaches the packet and nothing else of the case", async () => {
+  it("T-AMB-065: the assigned reviewer reaches the packet and nothing else of the case; a revised round needs its own opinion", async () => {
     await scenario(async (s) => {
       const f = await draftPackage(s, ic, caseB);
       expect(await voteOnPackage(s, f)).toBe("ADOPTED");
@@ -335,7 +335,7 @@ describe("authority decisions (ADR-023, N15)", () => {
     return f;
   }
 
-  it("needs the source document and the authority the rules name; partial approval names every item", async () => {
+  it("T-AMB-073: needs the source document and the authority the rules name; partial approval names every item", async () => {
     await ownerScenario(async (s) => {
       const f = await awaitingAuthority(s);
       await s.as("legal");
@@ -903,7 +903,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
   });
 
   describe("legal review rules (DEC-F12, CON-017)", () => {
-    it("AMB-113: the owner minimums cannot be switched off; the rule table, not a fixed list, decides", async () => {
+    it("T-AMB-065 (AMB-113): the owner minimums cannot be switched off; the rule table, not a fixed list, decides", async () => {
       await scenario(async (s) => {
         await s.as("caseManager");
         const open = await s.tx<{ k: string }[]>`
@@ -958,7 +958,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
       });
     });
 
-    it("AMB-113: without a required rule the package goes straight to the authority; the secretary may still elect a review", async () => {
+    it("T-AMB-065 (AMB-113): without a required rule the package goes straight to the authority; the secretary may still elect a review", async () => {
       await scenario(async (s) => {
         await s.as("platformAdmin");
         await s.tx`select api.set_legal_review_rule('INVESTIGATION', 'ITEM_TYPE', 'DISCIPLINARY_SANCTION', 'NOT_REQUIRED',
@@ -972,7 +972,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
       });
     });
 
-    it("AMB-113: a sanction catalogue version that requires review counts as a rule for items adopted under it", async () => {
+    it("T-AMB-065 (AMB-113): a sanction catalogue version that requires review counts as a rule for items adopted under it", async () => {
       await scenario(async (s) => {
         await s.as("platformAdmin");
         await s.tx`select api.set_legal_review_rule('INVESTIGATION', 'ITEM_TYPE', 'DISCIPLINARY_SANCTION', 'NOT_REQUIRED',
