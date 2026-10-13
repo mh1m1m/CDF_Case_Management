@@ -10,8 +10,14 @@
 -- Section 4, purpose read models. The meeting and minutes screens are reached by participants, deciders and reviewers
 -- who are not on the case team (DEC-02: COMMITTEE, REVIEW and TRIAGE access is never full-case). The BFF must not read
 -- the committee tables part by part, nor call the full-case read, to draw them. Two reads answer one object each:
---   * api.meeting_view(meeting): NOT_FOUND unless authz.can_view_meeting (an excluded witness included, DEC-F07).
---     Each part follows the predicate of the table it comes from, evaluated for the caller:
+--   * api.meeting_view(meeting): the full view under authz.can_view_meeting. A caller who fails it but may see at
+--     least one concern of the meeting (authz.can_view_meeting_concern: the committee's conflict authority, or a
+--     seated deputy who may reverse, neither of whom is in the meeting) gets the concern-only view: the meeting's id
+--     and status, the case under authz.can_view_case_metadata, and exactly those concerns with may_decide and
+--     may_reverse. That widens nothing: each concern row already carries its meeting_id and is readable by exactly
+--     those users. Everyone else gets NOT_FOUND (an excluded witness included, DEC-F07), the same error as a meeting
+--     that does not exist. In the full view each part follows the predicate of the table it comes from, evaluated for
+--     the caller:
 --       logistics          authz.can_view_meeting (meeting_read): status, purpose, mode, provider, times, location,
 --                          online link. Never the emergency reason.
 --       me                 the caller's own participant row (meeting_participant_read, own branch) and their own
@@ -40,7 +46,8 @@
 --     notice follows the decision rule itself. Never the raiser or the subject.
 --   * MEETING_VOTE_OPENED, when a vote item opens: to the members who may cast on it now (api.cast_vote's checks: a
 --     counting seat, present, no conflict, no vote yet).
---   Every recipient passes authz.user_case_gate and has no meeting conflict in the proceeding. Both are mandatory, as
+--   Every recipient passes authz.user_case_gate and has no meeting conflict in the proceeding. The deep link reaches
+--   a conflict authority through the concern-only view. Both are mandatory, as
 --   MEETING_INVITATION and the minutes review notices are (they ask the recipient to act).
 --
 -- Controls:
@@ -81,9 +88,58 @@ declare
   v_acknowledged boolean;
   v_current_minutes text;
   v_q record;
+  v_full boolean;
+  v_case jsonb;
+  v_concerns jsonb;
 begin
   select * into v_m from committee.meeting m where m.id = p_meeting_id;
-  if v_m.id is null or not authz.can_view_meeting(v_m.id) then perform api._fail('NOT_FOUND'); end if;
+  if v_m.id is null then perform api._fail('NOT_FOUND'); end if;
+  v_full := authz.can_view_meeting(v_m.id);
+  -- Concern-only reader: someone who may not see the meeting but may see one of its concerns (the committee's
+  -- conflict authority, or a seated deputy who reverses), reached by MEETING_CONFLICT_DECISION_REQUESTED. Everyone
+  -- else gets the same NOT_FOUND as a meeting that does not exist.
+  if not v_full and not exists (select 1 from committee.meeting_conflict_concern c
+                                where c.meeting_id = v_m.id and authz.can_view_meeting_concern(c.id)) then
+    perform api._fail('NOT_FOUND');
+  end if;
+
+  v_case_active := exists (select 1 from case_mgmt.case_record c where c.id = v_m.case_id and c.records_state = 'ACTIVE');
+  v_metadata := authz.can_view_case_metadata(v_m.case_id);
+  v_items_undecided := exists (select 1 from committee.vote_item vi where vi.meeting_id = v_m.id and vi.status <> 'CLOSED');
+  v_active := v_m.status in ('SCHEDULED', 'OPEN');
+  -- As in 1820: the case is named only to whoever may see its metadata.
+  v_case := jsonb_build_object(
+    'case_id', case when v_metadata then v_m.case_id end,
+    'case_number', case when v_metadata then (select c.case_number from case_mgmt.case_record c where c.id = v_m.case_id) end);
+  -- meeting_conflict_concern_read and meeting_conflict_reversal_read: the rows passing authz.can_view_meeting_concern.
+  v_concerns := coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'concern_id', c.id, 'participant_id', c.participant_id, 'raised_by', c.raised_by,
+             'raised_as', c.raised_as, 'reason', c.reason, 'raised_at', c.raised_at, 'status', c.status,
+             'decided_by', c.decided_by, 'decided_as', c.decided_as, 'decision_reason', c.decision_reason,
+             'decided_at', c.decided_at,
+             'reversal', (select jsonb_build_object('reversal_id', r.id, 'reversed_by', r.reversed_by,
+                                                    'reversed_as', r.reversed_as, 'reason', r.reason,
+                                                    'reversed_at', r.reversed_at)
+                          from committee.meeting_conflict_reversal r where r.concern_id = c.id),
+             'capabilities', jsonb_build_object(
+               -- api.decide_meeting_conflict.
+               'may_decide', authz.meeting_concern_decider_seat(c.id) is not null and v_case_active
+                             and c.status = 'OPEN' and v_active and not v_items_undecided,
+               -- api.reverse_meeting_conflict_determination.
+               'may_reverse', c.status = 'UPHELD'
+                              and not exists (select 1 from committee.meeting_conflict_reversal r where r.concern_id = c.id)
+                              and committee.concern_reverser_seat(c.id, v_me) is not null and v_case_active))
+           order by c.raised_at, c.id)
+    from committee.meeting_conflict_concern c
+    where c.meeting_id = v_m.id and authz.can_view_meeting_concern(c.id)), '[]'::jsonb);
+
+  if not v_full then
+    -- The concern-only view: the meeting's id and status, the case under its metadata predicate, and the concerns
+    -- the caller may see with their two capabilities. No logistics, roster, vote, acting role, exclusion or minutes.
+    return jsonb_build_object('meeting_id', v_m.id, 'status', v_m.status, 'case', v_case, 'concerns', v_concerns);
+  end if;
+
   select * into v_cp from committee.committee_proceeding cp where cp.id = v_m.committee_proceeding_id;
   select * into v_committee from committee.committee c where c.id = v_cp.committee_id;
   select p.status into v_proceeding_status from case_mgmt.proceeding p where p.id = v_cp.proceeding_id;
@@ -92,13 +148,9 @@ begin
   v_roster := authz.can_view_meeting_roster(v_m.id);
   v_delib := authz.can_view_meeting_deliberation(v_m.id);
   v_runs := authz.can_manage_meeting(v_m.id);
-  v_case_active := exists (select 1 from case_mgmt.case_record c where c.id = v_m.case_id and c.records_state = 'ACTIVE');
   -- committee.lock_managed_meeting: running the meeting, on an active case.
   v_manage := v_runs and v_case_active;
-  v_metadata := authz.can_view_case_metadata(v_m.case_id);
   v_secret := coalesce(v_cp.rule_snapshot ->> 'ballot_secrecy', 'COMMITTEE_AFTER_CLOSE') = 'SECRET_BALLOT';
-  v_items_undecided := exists (select 1 from committee.vote_item vi where vi.meeting_id = v_m.id and vi.status <> 'CLOSED');
-  v_active := v_m.status in ('SCHEDULED', 'OPEN');
   v_acknowledged := v_own.id is not null
                     and exists (select 1 from committee.confidentiality_ack a where a.participant_id = v_own.id);
   select mi.status into v_current_minutes from committee.minutes mi where mi.meeting_id = v_m.id and mi.status <> 'SUPERSEDED';
@@ -108,10 +160,7 @@ begin
     'meeting_id', v_m.id,
     'committee_proceeding_id', v_m.committee_proceeding_id,
     'committee', jsonb_build_object('committee_id', v_committee.id, 'code', v_committee.code, 'kind', v_committee.kind),
-    -- As in 1820: the case is named only to whoever may see its metadata.
-    'case', jsonb_build_object(
-      'case_id', case when v_metadata then v_m.case_id end,
-      'case_number', case when v_metadata then (select c.case_number from case_mgmt.case_record c where c.id = v_m.case_id) end),
+    'case', v_case,
     'logistics', jsonb_build_object(
       'sequence_no', v_m.sequence_no, 'purpose', v_m.purpose, 'mode', v_m.mode, 'provider', v_m.provider,
       'status', v_m.status, 'location', v_m.location, 'online_url', v_m.online_url,
@@ -180,27 +229,7 @@ begin
                  'exclusion_id', x.id, 'participant_id', x.participant_id, 'reason', x.reason,
                  'excluded_by', x.excluded_by, 'excluded_at', x.excluded_at) order by x.excluded_at, x.id)
         from committee.witness_exclusion x where x.meeting_id = v_m.id), '[]'::jsonb)) end,
-    'concerns', coalesce((
-      select jsonb_agg(jsonb_build_object(
-               'concern_id', c.id, 'participant_id', c.participant_id, 'raised_by', c.raised_by,
-               'raised_as', c.raised_as, 'reason', c.reason, 'raised_at', c.raised_at, 'status', c.status,
-               'decided_by', c.decided_by, 'decided_as', c.decided_as, 'decision_reason', c.decision_reason,
-               'decided_at', c.decided_at,
-               'reversal', (select jsonb_build_object('reversal_id', r.id, 'reversed_by', r.reversed_by,
-                                                      'reversed_as', r.reversed_as, 'reason', r.reason,
-                                                      'reversed_at', r.reversed_at)
-                            from committee.meeting_conflict_reversal r where r.concern_id = c.id),
-               'capabilities', jsonb_build_object(
-                 -- api.decide_meeting_conflict.
-                 'may_decide', authz.meeting_concern_decider_seat(c.id) is not null and v_case_active
-                               and c.status = 'OPEN' and v_active and not v_items_undecided,
-                 -- api.reverse_meeting_conflict_determination.
-                 'may_reverse', c.status = 'UPHELD'
-                                and not exists (select 1 from committee.meeting_conflict_reversal r where r.concern_id = c.id)
-                                and committee.concern_reverser_seat(c.id, v_me) is not null and v_case_active))
-             order by c.raised_at, c.id)
-      from committee.meeting_conflict_concern c
-      where c.meeting_id = v_m.id and authz.can_view_meeting_concern(c.id)), '[]'::jsonb),
+    'concerns', v_concerns,
     'acting_roles', coalesce((
       select jsonb_agg(jsonb_build_object(
                'acting_role_id', a.id, 'acting_role', a.acting_role, 'user_id', a.user_id,
@@ -259,8 +288,9 @@ end;
 $$;
 comment on function api.meeting_view(uuid) is
   'Purpose read model of one meeting (migration 2030 section 4, DEC-02): each part under the predicate of its table, '
-  'capabilities from the checks of the matching commands. No individual choice, no case content. NOT_FOUND unless '
-  'authz.can_view_meeting.';
+  'capabilities from the checks of the matching commands. No individual choice, no case content. Under '
+  'authz.can_view_meeting the full view; otherwise, to a caller who may see one of its concerns, the concern-only view '
+  '(meeting id and status, case under its metadata predicate, those concerns); otherwise NOT_FOUND.';
 
 -- -----------------------------------------------------------------------------
 -- 4.2 Minutes, as their caller may see them

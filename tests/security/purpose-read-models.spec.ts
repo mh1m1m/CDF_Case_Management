@@ -146,7 +146,14 @@ interface MeetingView {
     }[];
     witness_exclusions: { participant_id: string; reason: string }[];
   } | null;
-  concerns: { concern_id: string; status: string; reason: string; reversal: unknown; capabilities: Caps }[];
+  concerns: {
+    concern_id: string;
+    status: string;
+    reason: string;
+    decided_as: string | null;
+    reversal: unknown;
+    capabilities: Caps;
+  }[];
   acting_roles: unknown[];
   minutes: { minutes_id: string; version_no: number; status: string }[];
   capabilities: Caps;
@@ -190,6 +197,68 @@ async function meetingView(s: Scenario, user: UserKey, meeting: string): Promise
   expectBooleans(v.capabilities, user);
   for (const i of v.deliberation?.vote_items ?? []) expectBooleans(i.capabilities, `${user} vote item`);
   for (const c of v.concerns) expectBooleans(c.capabilities, `${user} concern`);
+  return v;
+}
+
+interface ConcernOnlyView {
+  meeting_id: string;
+  status: string;
+  case: { case_id: string | null; case_number: string | null };
+  concerns: MeetingView["concerns"];
+}
+const CONCERN_KEYS = [
+  "capabilities",
+  "concern_id",
+  "decided_as",
+  "decided_at",
+  "decided_by",
+  "decision_reason",
+  "participant_id",
+  "raised_as",
+  "raised_at",
+  "raised_by",
+  "reason",
+  "reversal",
+  "status",
+];
+/** Every key the concern-only view may hold, at any depth: nothing of logistics, roster, votes or minutes. */
+const CONCERN_ONLY_KEYS = new Set([
+  "meeting_id",
+  "status",
+  "case",
+  "case_id",
+  "case_number",
+  "concerns",
+  ...CONCERN_KEYS,
+  "may_decide",
+  "may_reverse",
+  "reversal_id",
+  "reversed_by",
+  "reversed_as",
+  "reversed_at",
+]);
+
+/** The concern-only view (DEC-F04): the meeting's id and status, the case, and the concerns the caller may see. */
+async function concernOnlyView(s: Scenario, user: UserKey, meeting: string): Promise<ConcernOnlyView> {
+  await s.as(user);
+  const [r] = await s.tx<{ v: ConcernOnlyView }[]>`select api.meeting_view(${meeting}) as v`;
+  const v = r!.v;
+  expect(Object.keys(v).sort(), user).toEqual(["case", "concerns", "meeting_id", "status"]);
+  expect(
+    [...keysDeep(v)].filter((k) => !CONCERN_ONLY_KEYS.has(k)),
+    user,
+  ).toEqual([]);
+  for (const c of v.concerns) {
+    expect(Object.keys(c).sort(), user).toEqual(CONCERN_KEYS);
+    expect(Object.keys(c.capabilities).sort(), user).toEqual(["may_decide", "may_reverse"]);
+    expectBooleans(c.capabilities, `${user} concern`);
+  }
+  expectNoCaseContent(v);
+  // The case is named only under its metadata predicate, as in the full view.
+  const [m] = await s.tx<{ ok: boolean }[]>`select authz.can_view_case_metadata(${caseB}) as ok`;
+  expect(v.case, user).toEqual(
+    m!.ok ? { case_id: caseB, case_number: caseNumberB } : { case_id: null, case_number: null },
+  );
   return v;
 }
 
@@ -954,7 +1023,7 @@ describe("meeting notifications: ids only, to exactly who may act (ADR-025, DEC-
   const appointAuthority = (s: Scenario, user: UserKey) =>
     s.tx`select api.appoint_conflict_authority(${ic}, ${USERS[user]}, now(), null, 'DEMO-CA-2036', 'SOURCE_REQUIRED', ${REASON})`;
 
-  it("when neither chair nor deputy can decide, the committee's conflict authority is notified", async () => {
+  it("when neither chair nor deputy can decide, the committee's conflict authority is notified and its link opens the concern-only view", async () => {
     await ownerScenario(async (s) => {
       const f = await noDeciderInMeeting(s);
       await s.as("platformAdmin");
@@ -964,11 +1033,88 @@ describe("meeting notifications: ids only, to exactly who may act (ADR-025, DEC-
       expect(await recipients(s, "MEETING_CONFLICT_DECISION_REQUESTED", `meeting-concern:${k}`)).toEqual([
         "complianceManager",
       ]);
-      // The authority reaches the concern, decides it, and sees nothing else of the meeting (2030, DEC-F04).
+      // The authority has no seat and is not in the meeting: it may not see the meeting (2030, DEC-F04), only the
+      // concern. Its deep link opens the concern-only view: no logistics, roster, votes, acting roles, exclusions or
+      // minutes, and may_decide offered.
       await s.as("complianceManager");
+      expect(await s.tx`select authz.can_view_meeting(${f.meeting}) as ok`).toEqual([{ ok: false }]);
+      expect(await s.tx`select id from committee.meeting where id = ${f.meeting}`).toEqual([]);
       expect(await s.tx`select id from committee.meeting_conflict_concern`).toEqual([{ id: k }]);
-      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.meeting_view(${f.meeting})`);
+      const v = await concernOnlyView(s, "complianceManager", f.meeting);
+      expect(v).toMatchObject({ meeting_id: f.meeting, status: "OPEN" });
+      expect(v.concerns.map((c) => [c.concern_id, c.status, c.reason, c.capabilities])).toEqual([
+        [k, "OPEN", CONCERN, { may_decide: true, may_reverse: false }],
+      ]);
+      // Offered, the command accepts; decided, nothing more is offered.
       await decide(s.tx, k, "DISMISSED");
+      const after = await concernOnlyView(s, "complianceManager", f.meeting);
+      expect(after.concerns.map((c) => [c.concern_id, c.status, c.decided_as, c.capabilities])).toEqual([
+        [k, "DISMISSED", "CONFLICT_AUTHORITY", { may_decide: false, may_reverse: false }],
+      ]);
+    });
+  });
+
+  it("the concern-only view opens to nobody else: an outsider and the concern's subject get NOT_FOUND", async () => {
+    await ownerScenario(async (s) => {
+      const f = await noDeciderInMeeting(s);
+      await s.as("platformAdmin");
+      await appointAuthority(s, "complianceManager");
+      await s.as("legal");
+      const k = await raise(s.tx, f.participant.committeeChair!);
+      for (const u of [
+        "investigatorA",
+        "platformAdmin",
+        "employee",
+        "internalAudit",
+        "dpo",
+        "revoked",
+      ] as const) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.meeting_view(${f.meeting})`);
+      }
+      // The subject, while in the meeting, has the full view, without the concern about them.
+      const full = await meetingView(s, "committeeChair", f.meeting);
+      expect(full.concerns).toEqual([]);
+      // Once the subject loses the meeting (a case conflict: the case gate fails), the concern about them does not
+      // open the concern-only view: they never pass authz.can_view_meeting_concern for it.
+      await s.asOwner();
+      await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
+                 values (${caseB}, ${USERS.committeeChair}, 'CONFLICT_DECLARED', 'Synthetic declared conflict')`;
+      await s.as("committeeChair");
+      expect(await s.tx`select id from committee.meeting_conflict_concern where id = ${k}`).toEqual([]);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.meeting_view(${f.meeting})`);
+      // The authority keeps its view.
+      const v = await concernOnlyView(s, "complianceManager", f.meeting);
+      expect(v.concerns.map((c) => c.concern_id)).toEqual([k]);
+    });
+  });
+
+  it("a deputy seated after the referral, outside the meeting, reverses through the concern-only view (DEC-AMB-010)", async () => {
+    await ownerScenario(async (s) => {
+      const f = await ready(s);
+      await s.as("legal");
+      const k = await raise(s.tx, f.participant.legalB!);
+      await s.as("committeeChair");
+      await decide(s.tx, k, "UPHELD");
+      // Seated now, the deputy is no member of this proceeding and cannot see the meeting, but is the concern's
+      // next decider: the concern-only view offers the reversal, and the command accepts it.
+      await s.as("platformAdmin");
+      await s.tx`select api.appoint_committee_member(${ic}, ${USERS.committee}, 'DEPUTY_CHAIR', now(), null, 'DEMO-DEPUTY-2036')`;
+      await s.as("committee");
+      expect(await s.tx`select authz.can_view_meeting(${f.meeting}) as ok`).toEqual([{ ok: false }]);
+      const v = await concernOnlyView(s, "committee", f.meeting);
+      expect(v.concerns.map((c) => [c.concern_id, c.status, c.capabilities])).toEqual([
+        [k, "UPHELD", { may_decide: false, may_reverse: true }],
+      ]);
+      await reverse(s.tx, k);
+      const after = await concernOnlyView(s, "committee", f.meeting);
+      expect(after.concerns.map((c) => [c.concern_id, c.capabilities])).toEqual([
+        [k, { may_decide: false, may_reverse: false }],
+      ]);
+      expect(after.concerns[0]!.reversal).toMatchObject({
+        reversed_by: USERS.committee,
+        reversed_as: "DEPUTY_CHAIR",
+      });
     });
   });
 
