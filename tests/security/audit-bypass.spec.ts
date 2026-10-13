@@ -557,6 +557,13 @@ describe("every state-changing command writes its audit event in the same transa
             'NO_DECISION', 'SOURCE_REQUIRED', ${REASON})`,
       },
       {
+        fn: "revise_committee_rule_set",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.revise_committee_rule_set(${ids.committee!}, now() + interval '1 day',
+            ${s.tx.json({ acting_chair_casting_vote: true })}, 'SOURCE_REQUIRED', ${REASON})`,
+      },
+      {
         fn: "refer_case_to_committee",
         actor: "caseManager",
         run: async (s) =>

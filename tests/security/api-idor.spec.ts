@@ -1085,6 +1085,8 @@ const ADMIN_COMMANDS = [
   "appoint_committee_member",
   "end_committee_membership",
   "set_committee_rule_set",
+  // Rule-set options of the owner's Finalization Set (migration 2030): COMMITTEE_ADMIN only, no case.
+  "revise_committee_rule_set",
   // Recommendation authority rules (migration 1900): COMMITTEE_ADMIN only, no case.
   "set_action_authority_rule",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
