@@ -257,6 +257,9 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
 12. **Corrective actions (DEC-F26, F27, F28; CON-009).**
     - Escalation steps, evidence types and owner kinds, including pools. Pools are acted for through `decision.acts_for_action`.
     - The policy is set by its administrator.
+    - On a restricted case only its Restricted Case Authority names who acts, so a unit or a pool never owns an action there (`RESTRICTED_CASE_OWNER_KIND`). As a backstop, `decision.acts_for_action` admits a unit or pool member on a restricted case only if the case's own access rules already do (AGENT-09 pack 3, R2).
+    - Reminders and escalation steps go to the accountable owner, the managers and the role holders who can see the case. They never go to unit or pool members.
+    - A pool's creator and reason are read only by its members, the policy administrator and the action managers (R3).
     - DEC-F29 is unchanged.
 13. **Export (DEC-F21–F24).**
     - A purpose catalogue (`exchange.export_purpose`); OTHER needs a justification.
@@ -274,6 +277,7 @@ Where a decision leaves a value SOURCE_REQUIRED, 2040 stores null and either ref
 16. **Referral and preliminary outcomes (DEC-F08, F09, F10).**
     - **DEC-F08.** The delegation maximum is SOURCE_REQUIRED (null enforces none; an end date is always required).
     - **DEC-F09, escalation.** After repeated rejection the sector approver may escalate to a configurable target, by default the IC chair seat. A vacant or involved target refuses (fail closed); no deputy stands in. The target accepts, which creates the case, or upholds. A chair who accepted may still vote, since acceptance is an admission decision.
+    - **DEC-F09, the target's record.** Its reason, author and source are read by committee registry administrators only (AGENT-09 pack 3, R4). The escalation rule, the available actions and the commands are SECURITY DEFINER, and a referral screen shows only the target's committee and seat.
     - **DEC-F09, objection.** An objection is refused once an escalation is decided.
     - **DEC-F10.** NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are INACTIVE. They are refused on insert and on endorsement or approval; an existing one can only be returned.
 

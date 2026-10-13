@@ -2156,13 +2156,21 @@ create trigger corrective_action_pool_member_protect before update on decision.c
   for each row execute function decision.protect_pool_records();
 create policy corrective_action_escalation_step_read on decision.corrective_action_escalation_step for select
   to authenticated using (authz.current_user_id() is not null);
+-- A pool's creator and reason reach only the people who read its membership (AGENT-09 pack 3, R3): its members,
+-- the policy administrator and the action managers.
 create policy corrective_action_pool_read on decision.corrective_action_pool for select to authenticated
-  using (authz.current_user_id() is not null);
+  using (authz.has_permission('CORRECTIVE_ACTION_POLICY_ADMIN') or authz.has_permission('CORRECTIVE_ACTION_MANAGE')
+         or exists (select 1 from decision.corrective_action_pool_member m
+                    where m.pool_id = corrective_action_pool.id and m.user_id = authz.current_user_id()));
 create policy corrective_action_pool_member_read on decision.corrective_action_pool_member for select to authenticated
   using (user_id = authz.current_user_id() or authz.has_permission('CORRECTIVE_ACTION_POLICY_ADMIN')
          or authz.has_permission('CORRECTIVE_ACTION_MANAGE'));
 
--- Whether a user acts for an action: its accountable owner, or a current member of its unit or pool.
+-- Whether a user acts for an action: its accountable owner, or a current member of its unit or pool. On a restricted
+-- case only its Restricted Case Authority names who acts (require_owner_naming), and unit or pool membership changes
+-- without that authority, so a member acts there only if the case's own access rules already admit them (AGENT-09
+-- pack 3, R2; fail closed). api.set_corrective_action_owner_kind refuses those kinds on a restricted case; this is the
+-- table-level backstop, for an action whose case is restricted later or a row written another way.
 create function decision.acts_for_action(p_action decision.corrective_action, p_user_id uuid)
 returns boolean
 language sql stable
@@ -2170,14 +2178,16 @@ set search_path = ''
 as $$
   select p_user_id is not null
      and (p_action.owner_id = p_user_id
-          or (p_action.owner_kind = 'SHARED_POOL'
-              and exists (select 1 from decision.corrective_action_pool_member m
-                          join decision.corrective_action_pool p on p.id = m.pool_id and p.is_active
-                          where m.pool_id = p_action.owner_pool_id and m.user_id = p_user_id and m.removed_at is null))
-          or (p_action.owner_kind = 'ORG_UNIT'
-              and exists (select 1 from iam.sector_membership sm
-                          where sm.sector_id = p_action.owner_sector_id and sm.user_id = p_user_id
-                            and sm.effective_from <= now() and (sm.effective_to is null or sm.effective_to > now()))));
+          or (((p_action.owner_kind = 'SHARED_POOL'
+                and exists (select 1 from decision.corrective_action_pool_member m
+                            join decision.corrective_action_pool p on p.id = m.pool_id and p.is_active
+                            where m.pool_id = p_action.owner_pool_id and m.user_id = p_user_id and m.removed_at is null))
+               or (p_action.owner_kind = 'ORG_UNIT'
+                   and exists (select 1 from iam.sector_membership sm
+                               where sm.sector_id = p_action.owner_sector_id and sm.user_id = p_user_id
+                                 and sm.effective_from <= now() and (sm.effective_to is null or sm.effective_to > now()))))
+              and (not exists (select 1 from case_mgmt.case_record c where c.id = p_action.case_id and c.is_restricted)
+                   or authz.user_can_view_case(p_user_id, p_action.case_id))));
 $$;
 
 -- Replaced from 1940: members of the owning unit or pool see the action on the same terms as its owner
@@ -2484,6 +2494,12 @@ begin
   end if;
   if (p_owner_kind = 'EXTERNAL_PARTY') <> (p_external_party_label is not null) then
     perform api._fail('INVALID', 'external_party_label');
+  end if;
+  -- On a restricted case a unit or a pool would let people act whom its Restricted Case Authority never named
+  -- (AGENT-09 pack 3, R2). The accountable user or an external party stays possible.
+  if p_owner_kind in ('ORG_UNIT', 'SHARED_POOL')
+     and exists (select 1 from case_mgmt.case_record c where c.id = v.case_id and c.is_restricted) then
+    perform api._fail('CONFLICT', 'RESTRICTED_CASE_OWNER_KIND');
   end if;
   v_reason := api._require_text(p_reason, 'reason', 5, 2000);
   update decision.corrective_action
@@ -3628,9 +3644,11 @@ create trigger no_truncate before truncate on intake.referral_escalation_target
 revoke all on function intake.protect_escalation_target() from public, anon, authenticated;
 
 alter table intake.referral_escalation_target enable row level security;
--- Who decides escalations is not sensitive: any active user may read it (the sector needs to know where it goes).
+-- The target's reason, author and source reach committee registry administrators only (AGENT-09 pack 3, R4). The
+-- escalation rule, the available actions and the commands are SECURITY DEFINER, so no referral screen reads this
+-- table; a referral read model shows the target's committee and seat, never these columns.
 create policy referral_escalation_target_read on intake.referral_escalation_target for select to authenticated
-  using (authz.current_user_id() is not null);
+  using (authz.has_permission('COMMITTEE_ADMIN'));
 grant select on intake.referral_escalation_target to authenticated;
 
 -- The target version in force at an instant (a row of nulls when none). Internal.

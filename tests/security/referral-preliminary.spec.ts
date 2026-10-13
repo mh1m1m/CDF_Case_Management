@@ -1162,6 +1162,26 @@ describe("owner decisions DEC-F08, DEC-F09 and DEC-F10 (migration 2040)", () => 
     });
   });
 
+  it("AGENT-09 pack 3, R4: the escalation target's reason, author and source reach committee administrators only", async () => {
+    await ownerScenario(async (s) => {
+      const reads = async (u: UserKey) => {
+        await s.as(u);
+        return (await s.tx`select reason, set_by, source_reference from intake.referral_escalation_target`)
+          .length;
+      };
+      for (const u of ["platformAdmin", "grcDirector", "complianceManager"] as const)
+        expect(await reads(u), u).toBeGreaterThan(0);
+      for (const u of [
+        "sectorHead",
+        "employee",
+        "committeeChair",
+        "committeeSecretary",
+        "caseManager",
+      ] as const)
+        expect(await reads(u), u).toBe(0);
+    });
+  });
+
   it("DEC-F10: NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are refused for a new recommendation; an existing one keeps its code and can only be returned", async () => {
     await ownerScenario(async (s) => {
       for (const outcome of ["NOT_FEASIBLE", "NO_PERSONAL_JURISDICTION"]) {

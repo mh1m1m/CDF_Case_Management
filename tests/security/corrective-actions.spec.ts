@@ -1165,4 +1165,101 @@ describe("owner decisions DEC-F26, DEC-F27 and DEC-F28 (migration 2040)", () => 
       );
     });
   });
+
+  it("AGENT-09 pack 3, R2: on a restricted case no unit or pool acts for an action; the authority's own choices stay", async () => {
+    await ownerScenario(async (s) => {
+      await implementationOwners(s, "employeeB", "employee", "financeEmployee");
+      await s.as("grcDirector");
+      const [pool] = await s.tx<{ id: string }[]>`
+        select api.create_corrective_action_pool('POOL_DEMO', 'Synthetic pool', ${REASON}) as id`;
+      await s.tx`select api.set_corrective_action_pool_member(${pool!.id}, ${USERS.employee}, true, ${REASON})`;
+      const f = await decidedPackage(s, "APPROVE_AS_RECOMMENDED");
+      const id = await open(s, "caseManager", f.corrective, "employeeB");
+      // The case becomes restricted, owned and staffed by its Restricted Case Authority (owner fixture).
+      await s.asOwner();
+      await s.tx`update case_mgmt.case_record set is_restricted = true, owner_id = ${USERS.grcDirector}
+                 where id = ${caseB}`;
+      await s.tx`insert into case_mgmt.case_assignment (case_id, user_id, assignment_role, reason, assigned_by)
+                 values (${caseB}, ${USERS.grcDirector}, 'CASE_OWNER', ${REASON}, ${USERS.grcDirector})`;
+      const kind = (k: string, sector: string | null, p: string | null, label: string | null = null) =>
+        s.tx`select api.set_corrective_action_owner_kind(${id}, ${k}, ${sector}::uuid, ${p}::uuid, ${label}, ${REASON})`;
+      // The command refuses a unit or a pool, even from the authority; an external party stays possible.
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:RESTRICTED_CASE_OWNER_KIND", () =>
+        kind("SHARED_POOL", null, pool!.id),
+      );
+      await s.expectError("CDF_CONFLICT:RESTRICTED_CASE_OWNER_KIND", () =>
+        kind("ORG_UNIT", FIN_SECTOR, null),
+      );
+      await kind("EXTERNAL_PARTY", null, null, "Synthetic external contractor");
+      await kind("USER", null, null);
+
+      // The table-level backstop: a unit or a pool written another way admits nobody the case does not.
+      const actsAs = async (user: UserKey) => {
+        await s.asOwner();
+        const [r] = await s.tx<{ acts: boolean }[]>`
+          select decision.acts_for_action(a, ${USERS[user]}) as acts from decision.corrective_action a where a.id = ${id}`;
+        return r!.acts;
+      };
+      for (const [k, sector, p, member] of [
+        ["SHARED_POOL", null, pool!.id, "employee"],
+        ["ORG_UNIT", FIN_SECTOR, null, "financeEmployee"],
+      ] as const) {
+        await s.asOwner();
+        await s.tx`update decision.corrective_action
+                   set owner_kind = ${k}, owner_sector_id = ${sector}::uuid, owner_pool_id = ${p}::uuid
+                   where id = ${id}`;
+        expect(await actsAs(member), member).toBe(false);
+        await s.as(member);
+        expect(await s.tx`select id from decision.corrective_action where id = ${id}`, member).toEqual([]);
+        await s.expectError("CDF_NOT_FOUND", () => progress(s, id, 30));
+        // require_owner itself, with the member's claims: FORBIDDEN.
+        await s.tx`reset role`;
+        await s.expectError(
+          "CDF_FORBIDDEN",
+          (tx) => tx`select decision.require_owner(a) from decision.corrective_action a where a.id = ${id}`,
+        );
+        // The accountable owner still acts, as the authority named them.
+        expect(await actsAs("employeeB")).toBe(true);
+      }
+
+      // Reminders and escalation steps go to the accountable owner, the managers and role holders who can see the
+      // case, never to unit or pool members: none reaches the member here.
+      await s.as("grcDirector");
+      await setPolicy2040(s, "NOTE_ONLY", 7, {
+        overdue: 1,
+        steps: [{ after_days_overdue: 0, recipient_kind: "OWNER" }],
+      });
+      await backdate(s, id, 3);
+      await emitReminders(s);
+      const told = await notified(s, "CORRECTIVE_ACTION_OVERDUE", id);
+      expect(told).not.toContain("employee");
+      expect(told).not.toContain("financeEmployee");
+      await recipientsSeeActions(s);
+
+      // Unrestricted again, the forced unit admits its member (the backstop narrows restricted cases only).
+      await s.asOwner();
+      await s.tx`update case_mgmt.case_record set is_restricted = false where id = ${caseB}`;
+      expect(await actsAs("financeEmployee")).toBe(true);
+    });
+  });
+
+  it("AGENT-09 pack 3, R3: a pool's creator and reason reach only its members, the policy administrator and managers", async () => {
+    await ownerScenario(async (s) => {
+      await implementationOwners(s, "employee", "employeeB");
+      await s.as("grcDirector");
+      const [pool] = await s.tx<{ id: string }[]>`
+        select api.create_corrective_action_pool('POOL_DEMO', 'Synthetic pool', ${REASON}) as id`;
+      await s.tx`select api.set_corrective_action_pool_member(${pool!.id}, ${USERS.employee}, true, ${REASON})`;
+      const reads = async (u: UserKey) => {
+        await s.as(u);
+        return (
+          await s.tx`select created_by, reason from decision.corrective_action_pool where id = ${pool!.id}`
+        ).length;
+      };
+      for (const u of ["grcDirector", "caseManager", "employee"] as const) expect(await reads(u), u).toBe(1);
+      for (const u of ["employeeB", "investigatorA", "committee", "platformAdmin", "internalAudit"] as const)
+        expect(await reads(u), u).toBe(0);
+    });
+  });
 });
