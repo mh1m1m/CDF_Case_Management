@@ -1537,7 +1537,7 @@ describe("every state-changing command writes its audit event in the same transa
           return (ids.grievance2 = await one(
             s,
             s.tx`select api.record_grievance('STANDALONE', null, 'Employee Phi (synthetic)', 'Walk grievance (synthetic)',
-              'CONFIDENTIAL'::core.classification_level, ${USERS.caseManager}, 'EMAIL', now(), now() - interval '5 days',
+              'CONFIDENTIAL'::core.classification_level, ${USERS.caseManager}, 'EMAIL', now(), now(),
               'Synthetic: walk standalone grievance.', 'EMAIL-DEMO-WALK2') as id`,
           ));
         },
@@ -1549,7 +1549,8 @@ describe("every state-changing command writes its audit event in the same transa
           await s.as("committeeSecretary");
           await s.tx`select api.assess_grievance_admissibility(${ids.grievance2!}, 'INADMISSIBLE', null, ${REASON})`;
           await s.as("legal");
-          return s.tx`select api.decide_grievance_admissibility(${ids.grievance2!}, 'INADMISSIBLE', null, ${REASON})`;
+          // 2040 (DEC-F17): a non-admission is the committee's, recorded by the chair with its reference.
+          return s.tx`select api.decide_grievance_admissibility(${ids.grievance2!}, 'INADMISSIBLE', 'GC-DEMO-WALK', ${REASON})`;
         },
       },
       // Export builder (migration 1930): an external email export of case A's summary, approved, generated and

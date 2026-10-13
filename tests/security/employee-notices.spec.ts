@@ -61,6 +61,22 @@ async function decided(s: Scenario, outcome = "APPROVE_AS_RECOMMENDED"): Promise
   return { ...f, ...subjects, decision: d!.id };
 }
 
+/** Fixture: a Grievance Committee rule version whose window starts at ISSUE, in force from a second ago (owner insert,
+ *  so a rule change at now() stays possible afterwards). */
+async function issueBasisRule(s: Scenario): Promise<void> {
+  await s.asOwner();
+  await s.tx`
+    with cur as (
+      update committee.rule_set set effective_to = now() - interval '1 second'
+      where committee_id = ${gc} and effective_to is null returning *)
+    insert into committee.rule_set
+    select (jsonb_populate_record(null::committee.rule_set, to_jsonb(cur) || jsonb_build_object(
+      'id', gen_random_uuid(), 'effective_from', now() - interval '1 second', 'effective_to', null,
+      'grievance_window_start_basis', 'ISSUE', 'source_status', 'APPROVED', 'reason', ${REASON}::text,
+      'created_by', ${USERS.platformAdmin}::uuid))).*
+    from cur`;
+}
+
 const rightsNotice = (s: Scenario, subject: string, allegations: string[]) =>
   s.tx<{ id: string }[]>`select api.issue_rights_notice(${subject}, ${TEXT}, ${allegations}::uuid[]) as id`;
 const decisionNotice = (s: Scenario, subject: string, decision: string) =>
@@ -213,6 +229,9 @@ describe("kinds of employee notice (migration 1990, P11-G5, ADR-037)", () => {
     await ownerScenario(async (s) => {
       const f = await decided(s);
       await s.asOwner();
+      // Fixture (2040, DEC-F15): an ISSUE-basis rule, so the window starts at issue as 1990 built it. Under the default
+      // DELIVERY basis it waits for the delivery instead (T-AMB-081, migration 2040 suite).
+      await issueBasisRule(s);
       const [rule] = await s.tx<{ id: string }[]>`
         select id from committee.rule_set where committee_id = ${gc} and effective_to is null`;
 

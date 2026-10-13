@@ -309,20 +309,23 @@ describe("grievances (Q91–Q96, N9)", () => {
   it("under a CHAIR rule the chair decides admissibility; the secretary only assesses", async () => {
     await ownerScenario(async (s) => {
       await seat(s, gc, GC_SEATS);
+      // 2040 (DEC-F16): the rule in force at the contested decision applies, so the CHAIR rule is in force from now and
+      // the contested decision is dated now; the chair also decides a non-admission (DEC-F17).
       await s.as("platformAdmin");
-      await s.tx`select api.set_committee_rule_set(${gc}, now(), 'MAJORITY_ELIGIBLE', null, true, 3, true, 10, 'CHAIR',
-                   'NO_DECISION', 'APPROVED', ${REASON})`;
+      await s.tx`select api.revise_committee_rule_set(${gc}, now(),
+                   '{"grievance_window_days": 10, "admissibility_decider": "CHAIR", "non_admission_decider": "CHAIR"}'::jsonb,
+                   'APPROVED', ${REASON})`;
       await s.as("committeeSecretary");
       const [num] = await admin<
         { n: string }[]
       >`select case_number as n from case_mgmt.case_record where id = ${caseB}`;
       const [g] = await s.tx<{ id: string }[]>`
         select api.record_grievance('LINKED', ${num!.n}, 'Employee Sigma (synthetic)', null, null, null, 'PHYSICAL_SUBMISSION',
-          now(), now() - interval '12 days', 'Synthetic: grievance against the decision.',
+          now(), now(), 'Synthetic: grievance against the decision.',
           'LETTER-DEMO-0001') as id`;
       const [row] = await s.tx<{ is_late: boolean; window_days: number; admissibility_decider: string }[]>`
         select is_late, window_days, admissibility_decider from grievance.grievance where id = ${g!.id}`;
-      expect(row).toEqual({ is_late: true, window_days: 10, admissibility_decider: "CHAIR" });
+      expect(row).toEqual({ is_late: false, window_days: 10, admissibility_decider: "CHAIR" });
       expect(
         (
           await s.tx<{ r: string }[]>`
@@ -448,7 +451,7 @@ describe("AGENT-09 review of 1910 (G1–G3, outcome vote binding)", () => {
       await s.as("committeeSecretary");
       const [g] = await s.tx<{ id: string }[]>`
         select api.record_grievance('LINKED', ${num!.n}, 'Employee Sigma (synthetic)', null, null, null, 'EMAIL',
-          now(), now() - interval '2 days', 'Synthetic: grievance grounds.', 'EMAIL-DEMO-0010') as id`;
+          now(), now(), 'Synthetic: grievance grounds.', 'EMAIL-DEMO-0010') as id`;
       await s.tx`select api.assess_grievance_admissibility(${g!.id}, 'ADMISSIBLE', null, ${REASON})`;
       await s.as("committee");
       await s.expectError(
