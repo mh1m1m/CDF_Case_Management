@@ -56,7 +56,9 @@ jobs:
   hosted-dev:
     name: Migrate, seed and test DEV
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The suites cross regions statement by statement: run 38334615873 took 8.7 s per test over the pooler
+    # (485 tests in 71 minutes), so the 770 tests at migration 2010 need about 112 minutes. 240 leaves room.
+    timeout-minutes: 240
     environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
