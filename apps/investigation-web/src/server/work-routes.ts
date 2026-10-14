@@ -7,7 +7,7 @@ const AREA_HOME: Record<WorkArea, string> = {
   MY_WORK: "/my-work",
   INTAKE: "/intake",
   CASES: "/cases",
-  COMMITTEE: "/my-work", // S5
+  COMMITTEE: "/committees", // My Committees (Phase 12 P12-2b, ADR-055)
   RECORDS: "/records",
   OVERSIGHT: "/oversight",
   ADMINISTRATION: "/admin/users",
@@ -38,7 +38,8 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
       return "OVERSIGHT";
     case "admin":
       return "ADMINISTRATION";
-    // A meeting and its minutes are the committee's work (Phase 12 P12-2a); the area lists them from S5.
+    // My Committees (P12-2b), and a meeting and its minutes, which are the committee's work (P12-2a).
+    case "committees":
     case "meetings":
     case "minutes":
       return "COMMITTEE";
@@ -52,10 +53,10 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
  * a My Work row's target (2045); the inbox and My Work link to them only once the page has shipped, so nobody lands
  * on a missing page. The purpose routes of Phase 12 join this list as each one ships, under the root
  * notify.deep_link writes, and that page re-checks access in the database: meetings and minutes since P12-2a
- * (ADR-054); committees, legal reviews, my defence, grievances, exports, actions, continuity imports, referrals and
- * preliminary reviews to come.
+ * (ADR-054), committees since P12-2b (ADR-055); legal reviews, my defence, grievances, exports, actions, continuity
+ * imports, referrals and preliminary reviews to come.
  */
-export const LIVE_PURPOSE_ROOTS: readonly string[] = ["/meetings", "/minutes"];
+export const LIVE_PURPOSE_ROOTS: readonly string[] = ["/committees", "/meetings", "/minutes"];
 
 /**
  * The purpose page of each Phase 12 target (plan §3 routes; P12-2 to P12-6), by the root `notify.deep_link` writes.

@@ -2,10 +2,13 @@
 // attendance and confidentiality acknowledgement, and the two things a participant does for themself. The declaration
 // offers only the statuses the meeting-level capabilities allow (2065 narrowed them to the command's checks: an ended
 // seat or an excluded witness declares nothing); a declared conflict is confirmed first because it ends one's part.
+// P12-2b (2085, ADR-055): the caller's own accommodations, which an invitee reads here because they see no roster,
+// and recording one while the meeting is active.
 import type { MeetingCapabilities, MeetingSelfView } from "@cdf/contracts";
 import type { MessageKey, Translator } from "@cdf/i18n";
 import { CDFCard, CDFCommandForm, CDFDescriptionList, CDFField, textareaClass } from "@cdf/ui";
 import { confirmation } from "../../confirmations";
+import { AccommodationForm, AccommodationList } from "./accommodations";
 import { acknowledgeConfidentialityAction, declareConflictAction } from "./actions";
 
 export function MeetingMyPart({
@@ -129,6 +132,30 @@ export function MeetingMyPart({
             testId="acknowledge-form"
             successMessage={t("meetings.acknowledged")}
           />
+        </div>
+      ) : null}
+
+      {me.accommodations.length > 0 || cap.mayRecordAccommodation ? (
+        <div className="mt-4 border-t border-cdf-border pt-3" data-testid="my-accommodations">
+          <h3 className="mb-1 font-semibold">{t("meetings.myAccommodationsTitle")}</h3>
+          <p className="mb-3 text-sm text-cdf-text-secondary">{t("meetings.accommodationsIntro")}</p>
+          {me.accommodations.length > 0 ? (
+            <AccommodationList t={t} items={me.accommodations} testId="my-accommodation-list" />
+          ) : (
+            <p className="text-sm text-cdf-text-secondary" data-testid="my-no-accommodations">
+              {t("meetings.noAccommodations")}
+            </p>
+          )}
+          {cap.mayRecordAccommodation ? (
+            <div className="mt-3">
+              <AccommodationForm
+                t={t}
+                meetingId={meetingId}
+                participantId={me.participantId}
+                idBase="my-accommodation"
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </CDFCard>

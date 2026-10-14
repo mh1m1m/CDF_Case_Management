@@ -1,6 +1,6 @@
 // Every confirmation has its whole copy in both languages (UX-031; Phase 12 consequence preview, ADR-030): a missing
-// message would show its key in the dialog. The meeting and minutes acts (P12-2a, ADR-054) are listed so that a
-// rename in the catalogue fails here, not on the screen.
+// message would show its key in the dialog. The meeting and minutes acts (P12-2a, ADR-054) and the committee and
+// logistics acts (P12-2b, ADR-055) are listed so that a rename in the catalogue fails here, not on the screen.
 import { describe, expect, it } from "vitest";
 import { createTranslator, messagesFor, type Locale } from "@cdf/i18n";
 import { confirmation, type ConfirmAct } from "./confirmations";
@@ -25,6 +25,16 @@ const MEETING_ACTS: ConfirmAct[] = [
   "remindReviewers",
   "applyDeemedApproval",
   "overruleObjection",
+  // My Committees and the meeting's logistics (P12-2b, ADR-055).
+  "scheduleMeeting",
+  "amendProceedingSnapshot",
+  "excludeWitness",
+  "recordAccommodation",
+  "declareForParticipant",
+  "acknowledgeForParticipant",
+  "activateActingChair",
+  "activateActingSecretary",
+  "activateAlternateMember",
 ];
 
 describe("confirmations", () => {
@@ -57,9 +67,14 @@ describe("confirmations", () => {
       "openVoteItem",
       "generateMinutes",
       "remindReviewers",
+      "scheduleMeeting",
     ]) {
       expect(confirmation(t, act as ConfirmAct).notified, act).not.toMatch(/^No one/);
     }
+    // Adding a member after referral sends no invitation: they join the meetings scheduled from then on (2085).
+    expect(confirmation(t, "amendProceedingSnapshot").notified).toMatch(/^No one/);
+    expect(confirmation(t, "scheduleMeeting").tone).toBe("primary");
+    expect(confirmation(t, "excludeWitness").tone).toBeUndefined();
     expect(confirmation(t, "castVote").tone).toBe("primary");
     expect(confirmation(t, "cancelMeeting").tone).toBeUndefined();
     expect(confirmation(t, "cancelMeeting").cancelLabel).toBe("Keep meeting");

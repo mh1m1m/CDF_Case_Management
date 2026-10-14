@@ -45,6 +45,9 @@ describe("routes", () => {
     expect(areaOfPath("/admin/users")).toBe("ADMINISTRATION");
     expect(areaOfPath("/meetings/abc")).toBe("COMMITTEE");
     expect(areaOfPath("/minutes/abc")).toBe("COMMITTEE");
+    expect(areaOfPath("/committees")).toBe("COMMITTEE");
+    expect(areaOfPath("/committees/abc")).toBe("COMMITTEE");
+    expect(areaHref(area("COMMITTEE", "committees"))).toBe("/committees");
     expect(areaOfPath("/settings/access")).toBeUndefined();
   });
   it("leads each item to the page where its work is done", () => {
@@ -166,7 +169,12 @@ describe("age in a queue (ADR-016 D8)", () => {
 describe("notification links (UX redesign S4)", () => {
   const id = "0b1f6f2e-6c7a-4d39-9d5e-1f6c2f0d9a11";
   it("links nowhere while the page has not shipped", () => {
-    expect(notificationHref({ deepLink: `/committees/${id}` })).toBeNull();
+    expect(notificationHref({ deepLink: `/legal-reviews/${id}` })).toBeNull();
+    expect(notificationHref({ deepLink: `/grievances/${id}` })).toBeNull();
+  });
+  it("links a seat's notice to the committee's page (P12-2b)", () => {
+    expect(notificationHref({ deepLink: `/committees/${id}` })).toBe(`/committees/${id}`);
+    expect(notificationHref({ deepLink: `/committees/${id}?tab=1` })).toBeNull();
   });
   it("links a meeting's and minutes' notices to their pages (P12-2a)", () => {
     expect(notificationHref({ deepLink: `/meetings/${id}` })).toBe(`/meetings/${id}`);

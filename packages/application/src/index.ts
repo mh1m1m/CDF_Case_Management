@@ -42,3 +42,5 @@ export { createCaseStructureService } from "./case-structure";
 export type { CaseStructureDeps, CaseStructureGateway, CaseStructureService } from "./case-structure";
 export { createMeetingsService } from "./meetings";
 export type { MeetingsDeps, MeetingsGateway, MeetingsService } from "./meetings";
+export { createCommitteesService } from "./committees";
+export type { CommitteesDeps, CommitteesGateway, CommitteesService } from "./committees";

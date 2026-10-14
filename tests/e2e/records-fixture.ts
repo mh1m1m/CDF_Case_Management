@@ -38,6 +38,8 @@ const USERS = {
   icSecretary: "a0000000-0000-4000-8000-000000000103",
   icMemberA: "a0000000-0000-4000-8000-000000000104",
   icMemberB: "a0000000-0000-4000-8000-000000000105",
+  // Appointed to the demo committee after a referral, then ended (Phase 12 P12-2b; no other browser spec uses it)
+  dpo: "a0000000-0000-4000-8000-000000000012",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -624,11 +626,27 @@ const meetingAs = async (user: keyof typeof USERS, meetingId: string): Promise<R
 const demoUser = (userId: string | null) =>
   (Object.keys(IC_DEMO) as IcDemoUser[]).find((u) => USERS[u] === userId);
 
+/** The demo Investigation Committee's id. */
+export async function demoCommitteeId(): Promise<string> {
+  const [c] = await as(
+    "platformAdmin",
+    (tx) => tx<{ id: string }[]>`select id from committee.committee where code = 'IC'`,
+  );
+  return c!.id;
+}
+
+export interface ReferralFixture {
+  caseId: string;
+  caseNumber: string;
+  /** The proceeding the referral opened in the demo Investigation Committee. */
+  committeeProceedingId: string;
+}
+
 /**
- * A new case referred to the demo Investigation Committee after its preliminary review referred it (AMB-018), with
- * an in-person deliberation the secretary scheduled for tomorrow. Fails unless the demo committee holds its seats.
+ * A new case referred to the demo Investigation Committee after its preliminary review referred it (AMB-018). Fails
+ * unless the demo committee holds its seats.
  */
-export async function scheduledMeeting(label: string): Promise<MeetingFixture> {
+export async function referredCase(label: string): Promise<ReferralFixture> {
   const seated = await as(
     "platformAdmin",
     (tx) => tx<{ user_id: string }[]>`
@@ -650,10 +668,19 @@ export async function scheduledMeeting(label: string): Promise<MeetingFixture> {
       select api.refer_case_to_committee(${c.caseId}, (select id from committee.committee where code = 'IC'), null,
                                          ${MEETING_REASON}) as id`,
   );
+  return { ...c, committeeProceedingId: referral!.id };
+}
+
+/**
+ * A new case referred to the demo Investigation Committee (referredCase), with an in-person deliberation the
+ * secretary scheduled for tomorrow.
+ */
+export async function scheduledMeeting(label: string): Promise<MeetingFixture> {
+  const { committeeProceedingId, ...c } = await referredCase(label);
   const meetingId = await as("icSecretary", async (tx) => {
     const [m] = await tx<{ id: string }[]>`
-      select api.schedule_meeting(${referral!.id}, 'DELIBERATION', 'IN_PERSON', 'Meeting room 2 (synthetic)', null,
-        now() + interval '1 day', now() + interval '1 day 2 hours', ${MEETING_REASON}) as id`;
+      select api.schedule_meeting(${committeeProceedingId}, 'DELIBERATION', 'IN_PERSON', 'Meeting room 2 (synthetic)',
+        null, now() + interval '1 day', now() + interval '1 day 2 hours', ${MEETING_REASON}) as id`;
     return m!.id;
   });
   const roster = (await meetingAs("icSecretary", meetingId)).roster ?? [];
@@ -665,6 +692,68 @@ export async function scheduledMeeting(label: string): Promise<MeetingFixture> {
     }),
   ) as Record<IcDemoUser, string>;
   return { ...c, meetingId, participant };
+}
+
+/**
+ * A person on the case without an account (a case subject the case manager adds), whom the secretary invites as a
+ * witness: the invitation form comes with P12-2c, so the fixture calls the command. Returns their participant id.
+ */
+export async function invitedWitness(m: MeetingFixture): Promise<string> {
+  const person = await as("caseManager", async (tx) => {
+    const [subject] = await tx<{ id: string }[]>`
+      select api.add_case_subject(${m.caseId}, 'Witness Omega (synthetic)', 'EMPLOYEE', null) as id`;
+    const [row] = await tx<{ person_id: string }[]>`
+      select person_id from case_mgmt.case_subject where id = ${subject!.id}`;
+    return row!.person_id;
+  });
+  const [p] = await as(
+    "icSecretary",
+    (tx) => tx<{ id: string }[]>`
+      select api.invite_to_meeting(${m.meetingId}, 'WITNESS', null, ${person}, true, ${MEETING_REASON}) as id`,
+  );
+  return p!.id;
+}
+
+/**
+ * The deputy chair and both members declare no conflict, the secretary opens the meeting, records them present and
+ * the chair absent: the deputy chair may then act as chair (DEC-F03).
+ */
+export async function openWithChairAbsent(m: MeetingFixture): Promise<void> {
+  const present: IcDemoUser[] = ["icDeputy", "icMemberA", "icMemberB"];
+  await declareNoConflict(m, present);
+  await as("icSecretary", async (tx) => {
+    await tx`select api.open_meeting(${m.meetingId}, ${MEETING_REASON})`;
+    for (const u of present) await tx`select api.record_attendance(${m.participant[u]}, 'PRESENT')`;
+    await tx`select api.record_attendance(${m.participant.icChair}, 'ABSENT')`;
+  });
+}
+
+const LATE_MEMBER_REFERENCE = "E2E-DEMO-IC-MEMBER-AFTER-REFERRAL";
+
+/** Ends the late member's seat on the demo committee, if they hold one, so no later referral copies them. */
+export async function endLateMember(): Promise<void> {
+  await as(
+    "platformAdmin",
+    (tx) => tx`
+      select api.end_committee_membership(m.id, clock_timestamp(), ${MEETING_REASON})
+      from committee.membership m join committee.committee c on c.id = m.committee_id
+      where c.code = 'IC' and m.user_id = ${USERS.dpo} and m.ended_at is null
+        and (m.effective_to is null or m.effective_to > clock_timestamp())`,
+  );
+}
+
+/**
+ * Appoints a member to the demo committee after a referral (AMB-038), whom the secretary may then add to that
+ * proceeding. Call endLateMember afterwards: the seat would otherwise join every later referral.
+ */
+export async function appointLateMember(): Promise<void> {
+  await endLateMember();
+  await as(
+    "platformAdmin",
+    (tx) => tx`
+      select api.appoint_committee_member((select id from committee.committee where code = 'IC'), ${USERS.dpo},
+        'MEMBER', clock_timestamp(), null, ${`${LATE_MEMBER_REFERENCE}-${randomUUID().slice(0, 8)}`})`,
+  );
 }
 
 /** The listed members declare no conflict, each as themself. */
@@ -803,12 +892,19 @@ export async function settleMeeting(meetingId: string): Promise<void> {
   }
   if (latest?.status !== "IN_REVIEW") return;
   for (const u of IC_VOTERS) {
-    const [row] = await as(
+    // A member who did not sit (absent, for example) may not read the minutes in review: nothing to review.
+    const row = await as(
       u,
       (tx) => tx<{ v: { capabilities: { may_review: boolean } | null } }[]>`
         select api.minutes_view(${latest.minutes_id}) as v`,
+    ).then(
+      ([r]) => r,
+      (e: unknown) => {
+        if (e instanceof Error && e.message.includes("CDF_NOT_FOUND")) return undefined;
+        throw e;
+      },
     );
-    if (row!.v.capabilities?.may_review)
+    if (row?.v.capabilities?.may_review)
       await as(u, (tx) => tx`select api.review_minutes(${latest.minutes_id}, 'APPROVE', null)`);
   }
 }

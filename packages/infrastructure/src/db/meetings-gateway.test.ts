@@ -1,6 +1,7 @@
-// The meeting read models' mapping (Phase 12 P12-2a; ADR-054). The gateway renames keys and decides nothing, so these
-// pin the three things a screen relies on: the concern-only view stays concern-only, a capability the database left
-// out or null reads as false (fail closed), and an individual choice is never carried (AMB-083, rule 5).
+// The meeting read models' mapping (Phase 12 P12-2a and P12-2b; ADR-054 and ADR-055). The gateway renames keys and
+// decides nothing, so these pin the three things a screen relies on: the concern-only view stays concern-only, a
+// capability or list the database left out or null reads as false or empty (fail closed, which is also what a page
+// sees against 2065's read model before 2085), and an individual choice is never carried (AMB-083, rule 5).
 import { describe, expect, it } from "vitest";
 import { toMeetingView, toMinutesView, toVoteItemProgress } from "./meetings-gateway";
 
@@ -97,7 +98,7 @@ describe("meeting read model mapping", () => {
     expect(v.logistics.isEmergency).toBe(false);
     expect(v.logistics.scheduledStart).toBe("2026-10-14T06:30:00.000Z");
     expect([v.me, v.roster, v.deliberation]).toEqual([null, null, null]);
-    expect([v.concerns, v.actingRoles, v.minutes]).toEqual([[], [], []]);
+    expect([v.concerns, v.actingRoles, v.minutes, v.inviteeRoles]).toEqual([[], [], [], []]);
     expect(v.capabilities).toEqual({
       canManage: true,
       mayOpen: false,
@@ -109,6 +110,10 @@ describe("meeting read model mapping", () => {
       mayDeclareConflict: false,
       mayDeclareNoConflict: false,
       mayAcknowledgeConfidentiality: false,
+      mayInvite: false,
+      mayRecordAccommodation: false,
+      mayActivateActingChair: false,
+      mayActivateActingSecretary: false,
     });
   });
 
@@ -191,7 +196,14 @@ describe("meeting read model mapping", () => {
       mayRecordExcusedConflict: false,
       mayRecordExcusedAbsence: false,
       mayRaiseConcern: false,
+      mayExcludeWitness: false,
+      mayRecordAccommodation: false,
+      mayDeclareConflict: false,
+      mayDeclareNoConflict: false,
+      mayAcknowledgeConfidentiality: false,
+      mayActivateAlternate: false,
     });
+    expect([v.roster?.[0]?.alternateFor, v.roster?.[0]?.arrangements]).toEqual([[], null]);
     const item = v.deliberation?.voteItems[0];
     expect(item).toMatchObject({ iHaveVoted: false, iHaveNoted: true, recordVoteFor: [], tally: null });
     expect(item?.capabilities).toEqual({
@@ -203,6 +215,108 @@ describe("meeting read model mapping", () => {
       mayRecordNote: false,
     });
     expect(v.deliberation?.witnessExclusions).toEqual([]);
+  });
+
+  it("2085's logistics map through: accommodations, arrangements, alternates, invitee roles and the new flags", () => {
+    const accommodation = {
+      accommodation_id: "77777777-7777-4777-8777-777777777777",
+      details: "Synthetic: step-free access.",
+      source: "SECRETARY",
+      recorded_at: AT,
+    };
+    const raw = {
+      meeting_id: M,
+      committee_proceeding_id: M,
+      committee: { committee_id: M, code: "IC", kind: "INVESTIGATION" },
+      case: null,
+      logistics: {
+        sequence_no: 1,
+        purpose: "HEARING",
+        mode: "HYBRID",
+        provider: "MANUAL",
+        status: "SCHEDULED",
+        location: "Room 2 (synthetic)",
+        online_url: "https://meet.example.test/synthetic",
+        scheduled_start: AT,
+        scheduled_end: AT,
+        is_emergency: false,
+        opened_at: null,
+        closed_at: null,
+      },
+      me: {
+        participant_id: P,
+        participant_kind: "INVITEE",
+        seat: null,
+        invitee_role: "WITNESS",
+        is_voting: false,
+        requires_coi: true,
+        coi_status: "PENDING",
+        attendance: "NOT_RECORDED",
+        confidentiality_ack_required: true,
+        confidentiality_acknowledged: false,
+        accommodations: [accommodation],
+      },
+      roster: [
+        {
+          participant_id: P,
+          participant_kind: "MEMBER",
+          user_id: U,
+          person_id: null,
+          display_name: "Alternate Delta",
+          display_name_ar: null,
+          seat: "ALTERNATE_MEMBER",
+          invitee_role: null,
+          is_voting: false,
+          requires_coi: true,
+          coi_status: "NO_CONFLICT",
+          attendance: "PRESENT",
+          alternate_for: [M],
+          arrangements: { confidentiality_acknowledged: null, accommodations: [accommodation] },
+          capabilities: {
+            may_activate_alternate: true,
+            may_record_accommodation: true,
+            may_exclude_witness: null,
+          },
+        },
+      ],
+      deliberation: null,
+      concerns: [],
+      acting_roles: [],
+      minutes: [],
+      invitee_roles: [
+        { invitee_role: "WITNESS", confidentiality_ack_required: true, source_status: "OWNER_DEFAULT" },
+        { invitee_role: "INTERPRETER", confidentiality_ack_required: null, source_status: "SOURCE_REQUIRED" },
+      ],
+      capabilities: { may_invite: true, may_record_accommodation: true, may_activate_acting_chair: false },
+    } as unknown as RawMeeting;
+    const v = toMeetingView(raw);
+    if (v.view !== "FULL") throw new Error("expected the full view");
+    const mapped = {
+      accommodationId: accommodation.accommodation_id,
+      details: "Synthetic: step-free access.",
+      source: "SECRETARY",
+      recordedAt: "2026-10-14T06:30:00.000Z",
+    };
+    expect(v.me?.accommodations).toEqual([mapped]);
+    const row = v.roster?.[0];
+    expect(row?.alternateFor).toEqual([M]);
+    expect(row?.arrangements).toEqual({ confidentialityAcknowledged: false, accommodations: [mapped] });
+    expect(row?.capabilities).toMatchObject({
+      mayActivateAlternate: true,
+      mayRecordAccommodation: true,
+      mayExcludeWitness: false,
+      mayDeclareConflict: false,
+    });
+    expect(v.inviteeRoles).toEqual([
+      { inviteeRole: "WITNESS", confidentialityAckRequired: true, sourceStatus: "OWNER_DEFAULT" },
+      { inviteeRole: "INTERPRETER", confidentialityAckRequired: false, sourceStatus: "SOURCE_REQUIRED" },
+    ]);
+    expect(v.capabilities).toMatchObject({
+      mayInvite: true,
+      mayRecordAccommodation: true,
+      mayActivateActingChair: false,
+      mayActivateActingSecretary: false,
+    });
   });
 
   it("vote progress says who has voted and never carries a choice, even where the read model returns one", () => {

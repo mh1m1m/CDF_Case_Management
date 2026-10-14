@@ -610,6 +610,60 @@ requirements:
       ]
     notes: "Database half (P12-2b); the pages follow with no migration. The committee page shows proceedings on the seat basis only, never through the case, with the committee as counts (DEC-F19) and the case number only under case-metadata visibility. The amendment's candidates are not filtered by clearance: the command answers NOT_CLEARED_FOR_CASE at submit. Not in this slice: inviting a case person (waits for 2060's label mode) and the runner's work in My Work (a later item)."
 
+  - id: CDF-UX-016
+    title: "My Committees, the committee page and the meeting's logistics: purpose routes on the committee and meeting read models, a seat's work only, forms only where the command would accept them, one 404 without a seat, in Arabic and English"
+    source:
+      [
+        Phase 12 plan P12-2,
+        UX-116,
+        ADR-016 D0 and D2,
+        DEC-02,
+        DEC-F19,
+        DEC-22,
+        AMB-038,
+        AMB-047,
+        AMB-157,
+        ADR-055 P12-2b amendment,
+      ]
+    external_ids: []
+    linear_issues: [CDF-220]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.my_committees,
+        api.committee_view,
+        api.meeting_view,
+        packages/application/src/committees.ts,
+        packages/application/src/meetings.ts,
+        packages/authorization/src/index.ts,
+        "apps/investigation-web/src/app/(shell)/committees/page.tsx",
+        "apps/investigation-web/src/app/(shell)/committees/[committeeId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/committees/[committeeId]/actions.ts",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/participants.tsx",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/my-part.tsx",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/actions.ts",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/integration/committees.spec.ts,
+        tests/integration/meetings.spec.ts,
+        tests/e2e/committees.spec.ts,
+        tests/e2e/shell.spec.ts,
+        tests/e2e/notifications.spec.ts,
+        tests/accessibility/committees.spec.ts,
+        packages/application/src/committees.test.ts,
+        packages/application/src/meetings.test.ts,
+        packages/validation/src/meetings.test.ts,
+        packages/infrastructure/src/db/committees-gateway.test.ts,
+        packages/infrastructure/src/db/meetings-gateway.test.ts,
+        packages/authorization/src/index.test.ts,
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+      ]
+    notes: "No migration. The pages read only the purpose read models, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. The Committee area shows for a current seat alone (AMB-047): the application's floor is lifted and the database decides. An accommodation's text may concern health: never logged, never in an event, shown only where the view carries it. Not in this change: the invite form and case-person invitations (P12-2c), the runner's work in My Work (a later item)."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

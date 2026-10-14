@@ -1,5 +1,5 @@
-// Phase 12 P12-2a meeting and minutes screens (ADR-054, migration 2065) through the real service, gateway, database,
-// RLS and audit, the way the pages call them. Each test runs in one owner-connection transaction that is rolled back:
+// Phase 12 P12-2a and P12-2b meeting and minutes screens (ADR-054 and ADR-055, migrations 2065 and 2085) through the
+// real service, gateway, database, RLS and audit, the way the pages call them. Each test runs in one owner-connection transaction that is rolled back:
 // the gateway runs its security context inside a savepoint of that transaction, exactly as it does on its own pool, so
 // no seat, meeting, vote or minutes reaches the seed. Who may act is pinned by the security specs
 // (meeting-screen-capabilities, committee-meetings, meeting-excuses-concerns); these pin that the screens' path carries
@@ -144,15 +144,18 @@ describe("meeting and minutes screens through the service (Phase 12 P12-2a)", ()
       const opened = full(await ms.meeting(secretary, f.meeting));
       const legalRow = opened.roster!.find((r) => r.participantId === f.participant.legal)!;
       expect(legalRow.capabilities).toMatchObject({ mayRecordPresent: true, mayRecordAbsent: true });
-      // On someone else's row a member has nothing to record (the meeting-level raise is theirs, ADR-054).
+      // On someone else's row a member has nothing to record (the meeting-level raise is theirs, ADR-054), and
+      // no flag there is computed for them (2085 adds its own, false the same way).
       const asLegal = full(await ms.meeting(ctxFor("legal"), f.meeting));
-      expect(asLegal.roster!.find((r) => r.participantId === f.participant.lead)!.capabilities).toEqual({
+      const leadRow = asLegal.roster!.find((r) => r.participantId === f.participant.lead)!;
+      expect(leadRow.capabilities).toMatchObject({
         mayRecordPresent: false,
         mayRecordAbsent: false,
         mayRecordExcusedConflict: false,
         mayRecordExcusedAbsence: false,
         mayRaiseConcern: false,
       });
+      expect(Object.values(leadRow.capabilities).every((flag) => flag === false)).toBe(true);
       for (const u of VOTERS) {
         const r = await ms.recordAttendance(secretary, {
           participantId: f.participant[u],
@@ -365,6 +368,93 @@ describe("meeting and minutes screens through the service (Phase 12 P12-2a)", ()
         reason: "Synthetic: on the member's behalf.",
       });
       expect(outcome(forMember)).toBe("fieldErrors");
+    });
+  });
+
+  it("the meeting's logistics (P12-2b): the secretary's path for a witness without an account, an accommodation, exclusion and a handover", async () => {
+    await ownerScenario(async (s) => {
+      const ms = meetingsIn(s);
+      // A person of case B without an account, added by the case manager, to invite as a witness.
+      await s.as("caseManager");
+      const [subject] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Witness Omega (synthetic)', 'EMPLOYEE', null) as id`;
+      const [person] = await s.tx<{ person_id: string }[]>`
+        select person_id from case_mgmt.case_subject where id = ${subject!.id}`;
+      await seat(s, ic, [...IC_SEATS, ["employee", "ALTERNATE_SECRETARY"]]);
+      const f = await scheduleMeeting(s, ic, caseB);
+      // Inviting has no form until P12-2c: the invitation is made here through the command itself.
+      await s.as("committeeSecretary");
+      const [invited] = await s.tx<{ id: string }[]>`
+        select api.invite_to_meeting(${f.meeting}, 'WITNESS', null, ${person!.person_id}, true, ${REASON}) as id`;
+      const witness = invited!.id;
+      const secretary = ctxFor("committeeSecretary");
+      const rowOf = async (u: UserKey) =>
+        full(await ms.meeting(ctxFor(u), f.meeting)).roster?.find((r) => r.participantId === witness);
+
+      // The secretary answers for the person on their row (ADR-054 §5): declaration, acknowledgement, accommodation.
+      expect((await rowOf("committeeSecretary"))?.capabilities).toMatchObject({
+        mayDeclareConflict: true,
+        mayDeclareNoConflict: true,
+        mayAcknowledgeConfidentiality: true,
+        mayRecordAccommodation: true,
+        mayExcludeWitness: true,
+      });
+      expect(
+        outcome(await ms.declareConflict(secretary, { participantId: witness, status: "NO_CONFLICT" })),
+      ).toBe("ok");
+      expect(outcome(await ms.acknowledgeConfidentiality(secretary, { participantId: witness }))).toBe("ok");
+      const details = "Synthetic: step-free access, for the screen test.";
+      value<string>(await ms.recordAccommodation(secretary, { participantId: witness, details }));
+      expect((await rowOf("committeeSecretary"))?.arrangements).toEqual({
+        confidentialityAcknowledged: true,
+        accommodations: [expect.objectContaining({ details, source: "SECRETARY" })],
+      });
+
+      // A member reads the roster, never the witness's arrangements, and may record nothing for them; the refusal
+      // carries no details (they may concern health, AMB-157).
+      const member = await rowOf("legal");
+      expect(member?.arrangements).toBeNull();
+      expect(Object.values(member!.capabilities).every((flag) => flag === false)).toBe(true);
+      const legal = ctxFor("legal");
+      expect(outcome(await ms.recordAccommodation(legal, { participantId: witness, details }))).toBe(
+        "FORBIDDEN",
+      );
+      const denied = await eventsOf(s, legal.requestId);
+      expect(denied.map((e) => [e.action, e.metadata])).toEqual([
+        ["COMMAND_DENIED", { command: "record_meeting_accommodation", outcome: "FORBIDDEN" }],
+      ]);
+      expect(JSON.stringify(denied)).not.toContain("step-free");
+
+      // Excluded, the witness takes no further arrangement.
+      value<string>(
+        await ms.excludeWitness(secretary, {
+          participantId: witness,
+          reason: "Synthetic: heard and released, for the screen test.",
+        }),
+      );
+      expect((await rowOf("committeeSecretary"))?.capabilities).toMatchObject({
+        mayExcludeWitness: false,
+        mayRecordAccommodation: false,
+      });
+
+      // The secretary hands the meeting over to the alternate secretary, once.
+      expect(full(await ms.meeting(secretary, f.meeting)).capabilities.mayActivateActingSecretary).toBe(true);
+      value<string>(
+        await ms.activateActingSecretary(secretary, {
+          meetingId: f.meeting,
+          reason: "Synthetic: handing over, for the screen test.",
+        }),
+      );
+      const after = full(await ms.meeting(secretary, f.meeting));
+      expect(after.actingRoles).toEqual([
+        expect.objectContaining({
+          actingRole: "ACTING_SECRETARY",
+          userId: USERS.employee,
+          basis: "HANDOVER",
+          activatedAs: "SECRETARY",
+        }),
+      ]);
+      expect(after.capabilities.mayActivateActingSecretary).toBe(false);
     });
   });
 });
