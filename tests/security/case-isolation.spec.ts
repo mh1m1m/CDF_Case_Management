@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
-import { USERS, caseId, ownerScenario, scenario, type UserKey } from "../support/db";
+import { USERS, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
 import { IC_SEATS, committeeIds, openWithPresent, scheduleMeeting, seat } from "../support/committee";
 
 const SEED_CASES = ["0001", "0002", "0003", "0004"];
@@ -289,6 +289,88 @@ describe("ambiguity register: cross-case discovery and search (CDF-205)", () => 
         ).toEqual([]);
         expect((await caseIdsReachable(s)).has(caseConflict), member).toBe(false);
       }
+    });
+  });
+
+  it("T-AMB-015: the secretary's extract shows only the subject's prior final sanctions; a restricted source needs its authority", async () => {
+    const { ic, gc } = await committeeIds();
+    const { priorFinalSanction, requestExtract } = await import("../support/evidence");
+    type Extract = { sanctions: Record<string, unknown>[] } & Record<string, unknown>;
+    const view = async (s: { tx: Scenario["tx"] }, extract: string) =>
+      (await s.tx<{ v: Extract }[]>`select api.sanction_extract_view(${extract}) as v`)[0]!.v;
+
+    await ownerScenario(async (s) => {
+      const p = await priorFinalSanction(s, { ic, gc, caseB, requestingCase: caseConflict });
+      const extract = await requestExtract(s, p);
+      const doc = await view(s, extract);
+      // Sanction code and dates only: no case id or number, no allegation, finding, evidence or history.
+      expect(doc.sanctions).toEqual([
+        {
+          position: 1,
+          sanction_code: "WARNING",
+          catalogue_sanction: true,
+          decided_on: expect.any(String),
+          effective_from: expect.any(String),
+        },
+      ]);
+      const keys = new Set<string>();
+      const walk = (v: unknown) => {
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === "object")
+          for (const [k, x] of Object.entries(v)) {
+            keys.add(k);
+            walk(x);
+          }
+      };
+      walk(doc);
+      expect(
+        [...keys].filter((k) =>
+          /case|allegation|finding|evidence|investigation|history|execution|decision_id/i.test(k),
+        ),
+      ).toEqual([]);
+      await s.asOwner();
+      const [cb] = await s.tx<
+        { n: string }[]
+      >`select case_number as n from case_mgmt.case_record where id = ${caseB}`;
+      const text = JSON.stringify(doc);
+      for (const hidden of [caseB, cb!.n, p.sigma, p.decision, p.execution])
+        expect(text).not.toContain(hidden);
+      // Seated members of the proceeding read it; anyone else cannot tell it exists.
+      for (const member of ["committeeChair", "legal"] as const) {
+        await s.as(member);
+        expect((await view(s, extract)).sanctions, member).toHaveLength(1);
+      }
+      for (const u of [
+        "legalB",
+        "caseManager",
+        "investigatorB",
+        "grcDirector",
+        "employee",
+        "platformAdmin",
+      ] as const) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.sanction_extract_view(${extract})`);
+      }
+    });
+
+    await ownerScenario(async (s) => {
+      const p = await priorFinalSanction(s, { ic, gc, caseB, requestingCase: caseConflict }, true);
+      const extract = await requestExtract(s, p);
+      // Nothing from the restricted case shows until its Restricted Case Authority approves the row, and they are told.
+      expect((await view(s, extract)).sanctions).toEqual([]);
+      await s.asOwner();
+      const [row] = await s.tx<{ id: string }[]>`
+        select id from decision.sanction_extract_row where extract_id = ${extract} and status = 'AWAITING_AUTHORITY'`;
+      expect(
+        await s.tx`select recipient_id, object_type, object_id from notify.outbox
+                   where template_code = 'SANCTION_EXTRACT_APPROVAL_REQUESTED' and channel = 'IN_APP'`,
+      ).toEqual([
+        { recipient_id: USERS.grcDirector, object_type: "SANCTION_EXTRACT_APPROVAL", object_id: row!.id },
+      ]);
+      await s.as("grcDirector");
+      await s.tx`select api.decide_sanction_extract_row(${row!.id}, 'APPROVE', 'Synthetic: relevant to the committee.')`;
+      await s.as("committeeSecretary");
+      expect((await view(s, extract)).sanctions.map((x) => x.sanction_code)).toEqual(["WARNING"]);
     });
   });
 

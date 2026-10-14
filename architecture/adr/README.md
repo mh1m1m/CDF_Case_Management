@@ -42,6 +42,7 @@
 | [ADR-038](ADR-038-meeting-excuses-raised-conflicts.md)          | Excused attendance; conflicts raised by another meeting participant             | Proposed |
 | [ADR-039](ADR-039-meeting-witness-exclusion.md)                 | Excluding a witness from a committee meeting                                    | Proposed |
 | [ADR-040](ADR-040-owner-finalization-decisions.md)              | Applying the owner's Finalization Set and ambiguity decisions                   | Proposed |
+| [ADR-041](ADR-041-evidence-half-and-defence-packet.md)          | The evidence half of P11-G4, the Defence Packet and the prior-sanctions extract | Proposed |
 | [ADR-051](ADR-051-areas-and-my-work-phase-12.md)                | Areas and My Work for Phase 12                                                  | Proposed |
 
 **Decision IDs DEC-61 and DEC-62 (CON-011).** Each ID names two different things. In ADR-018 §7 and ADR-022 they are owner card decisions: DEC-61 (owner card, restricted referral) and DEC-62 (owner card, restricted legal review). In the UX audit register O17 §17.7, the source of ADR-016, they are audit items, cited here as UX DEC-61 (the Stitch project) and UX DEC-62 (new case entities).

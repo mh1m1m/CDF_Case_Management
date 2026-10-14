@@ -181,6 +181,29 @@ const PROBES: Probe[] = [
     outcome: "EMPTY",
     call: (tx, t) => tx`select * from api.open_evidence_version(${t.version})`,
   },
+  // Migration 2050 (ADR-041): exclusion, custody exceptions, renditions and integrity reports on an item or version.
+  {
+    fn: "exclude_evidence",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.exclude_evidence(${t.evidence}, ${REASON})`,
+  },
+  {
+    fn: "record_custody_exception",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_custody_exception(${t.evidence}, ${t.version}, 'EXTERNAL_TRANSFER', ${REASON}, 'EXT-PROBE-1')`,
+  },
+  {
+    fn: "register_evidence_rendition",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select * from api.register_evidence_rendition(${t.version}, 'probe.pdf', 'application/pdf', 10, ${SHA})`,
+  },
+  {
+    fn: "report_evidence_integrity_failure",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.report_evidence_integrity_failure(${t.version}, ${SHA})`,
+  },
   {
     fn: "open_form_instance",
     outcome: "FALSE",
@@ -1315,6 +1338,89 @@ const BCP_PROBES: Probe<BcpTargets>[] = [
   },
 ];
 
+// Migration 2050 (ADR-041): the exclusion record, the Defence Packet and the prior-sanctions extract.
+interface EvidenceHalfTargets {
+  exclusion: string;
+  notice: string;
+  packet: string;
+  item: string;
+  version: string;
+  committeeProceeding: string;
+  subject: string;
+  extract: string;
+  row: string;
+}
+
+const EVIDENCE_HALF_PROBES: Probe<EvidenceHalfTargets>[] = [
+  {
+    fn: "evidence_exclusion_record",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.evidence_exclusion_record(${t.exclusion})`,
+  },
+  {
+    fn: "create_defence_packet",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.create_defence_packet(${t.notice})`,
+  },
+  {
+    fn: "add_defence_packet_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.add_defence_packet_item(${t.packet}, ${t.version})`,
+  },
+  {
+    fn: "review_defence_packet_item",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.review_defence_packet_item(${t.item}, 'WITHHELD', null, null, ${["REPORTER"]}::text[], ${REASON})`,
+  },
+  {
+    fn: "submit_defence_packet",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.submit_defence_packet(${t.packet})`,
+  },
+  {
+    fn: "decide_restricted_defence_packet",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_restricted_defence_packet(${t.packet}, 'APPROVE', ${REASON})`,
+  },
+  {
+    fn: "withdraw_defence_packet",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_defence_packet(${t.packet}, ${REASON})`,
+  },
+  {
+    fn: "defence_packet_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.defence_packet_view(${t.packet})`,
+  },
+  {
+    fn: "my_defence_packet",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.my_defence_packet(${t.notice})`,
+  },
+  {
+    fn: "open_defence_packet_item",
+    outcome: "EMPTY",
+    call: (tx, t) => tx`select * from api.open_defence_packet_item(${t.item})`,
+  },
+  {
+    fn: "request_sanction_extract",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.request_sanction_extract(${t.committeeProceeding}, ${t.subject}, ${REASON})`,
+  },
+  {
+    fn: "sanction_extract_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.sanction_extract_view(${t.extract})`,
+  },
+  {
+    fn: "decide_sanction_extract_row",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_sanction_extract_row(${t.row}, 'APPROVE', ${REASON})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1401,6 +1507,8 @@ const GLOBAL_COMMANDS = [
   // (purpose-read-models-2040.spec.ts).
   "referral_queue",
   "grievance_queue",
+  // Migration 2050: the sanction extract rows awaiting the caller as a restricted source case's authority.
+  "my_sanction_extract_approvals",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -1617,6 +1725,7 @@ describe("catalog guard", () => {
       ...EXPORT_PROBES.map((p) => p.fn),
       ...CORRECTIVE_ACTION_PROBES.map((p) => p.fn),
       ...BCP_PROBES.map((p) => p.fn),
+      ...EVIDENCE_HALF_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -2341,6 +2450,90 @@ describe("IDOR: continuity workbook imports (migration 1960)", () => {
       expect(mismatches).toEqual([]);
       for (const table of ["bcp_import_batch", "bcp_import_row", "bcp_provenance"]) {
         expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: exclusion records, Defence Packets and sanction extracts (migration 2050)", () => {
+  // On case 0004 (investigator B; investigator A declared a conflict): an excluded item, and a released Defence Packet
+  // for a subject linked to employee's portal account. Case 0004 is also referred to the Investigation Committee, whose
+  // secretary asked for the subject's prior sanctions; the one from case B, restricted, awaits the GRC Director. None
+  // of these sees case 0004, holds a seat or is the subject.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    const ev = await import("../support/evidence");
+    const case4 = await caseId("0004");
+    const { ic, gc } = await committeeIds();
+    await ownerScenario(async (s) => {
+      await ev.setPacketPolicy(s);
+      const p = await ev.priorFinalSanction(s, { ic, gc, caseB, requestingCase: case4 }, true);
+      const extract = await ev.requestExtract(s, p);
+      await s.asOwner();
+      const [row] = await s.tx<{ id: string }[]>`
+        select id from decision.sanction_extract_row where extract_id = ${extract}`;
+      await s.as("caseManager");
+      await s.tx`select api.assign_case(${case4}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
+      const kept = await ev.storeEvidence(s, "investigatorB", case4);
+      const dropped = await ev.storeEvidence(s, "investigatorB", case4);
+      await s.as("lead");
+      const [x] = await s.tx<{ id: string }[]>`
+        select api.exclude_evidence(${dropped.evidenceId}, ${REASON}) as id`;
+      const n = await ev.defenceNotice(s, case4);
+      const { packet, items } = await ev.packetWith(s, "lead", n.notice, [kept.versionId]);
+      await ev.clearAsIs(s, "caseManager", items[0]!);
+      await s.as("lead");
+      await s.tx`select api.submit_defence_packet(${packet})`;
+
+      await s.as(actor);
+      const real: EvidenceHalfTargets = {
+        exclusion: x!.id,
+        notice: n.notice,
+        packet,
+        item: items[0]!,
+        version: kept.versionId,
+        committeeProceeding: p.committeeProceeding,
+        subject: p.requestingSubject,
+        extract,
+        row: row!.id,
+      };
+      const random: EvidenceHalfTargets = {
+        exclusion: randomUUID(),
+        notice: randomUUID(),
+        packet: randomUUID(),
+        item: randomUUID(),
+        version: randomUUID(),
+        committeeProceeding: randomUUID(),
+        subject: randomUUID(),
+        extract: randomUUID(),
+        row: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of EVIDENCE_HALF_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select api.my_sanction_extract_approvals() as v`).toEqual([{ v: [] }]);
+      for (const table of [
+        "evidence.exclusion",
+        "grievance.defence_packet",
+        "grievance.defence_packet_item",
+        "grievance.defence_packet_review",
+      ]) {
+        expect(await s.tx`select id from ${s.tx(table)}`, table).toEqual([]);
       }
     });
   });

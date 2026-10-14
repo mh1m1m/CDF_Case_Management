@@ -6,7 +6,7 @@
  * Every database step is a command that writes its own custody and audit records; the file content
  * never reaches the database, the audit ledger or any log.
  */
-import type { Actor } from "@cdf/contracts";
+import { EVIDENCE_MAX_BYTES, type Actor } from "@cdf/contracts";
 import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
 import { checkEvidenceFile } from "@cdf/domain";
@@ -45,6 +45,30 @@ export interface EvidenceDownload {
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>);
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Reads a stored object into memory, stopping once past the evidence limit (a larger object cannot be intact). */
+async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total <= EVIDENCE_MAX_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    bytes.set(c, offset);
+    offset += c.byteLength;
+  }
+  return bytes;
 }
 
 export function createEvidenceService(deps: EvidenceDeps) {
@@ -281,18 +305,31 @@ export function createEvidenceService(deps: EvidenceDeps) {
         throw toAppError(cause, ctx.requestId);
       }
       if (!record) return null;
+      let bytes: Uint8Array;
       try {
-        const stream = await storage.openReadStream(record.objectKey);
-        return {
-          stream,
-          fileName: record.fileName,
-          contentType: record.contentType,
-          sizeBytes: record.sizeBytes,
-          sha256: record.sha256,
-        };
+        bytes = await readAll(await storage.openReadStream(record.objectKey));
       } catch (cause) {
         throw new AppError("UNAVAILABLE", ctx.requestId, "STORAGE_FAILURE", { cause });
       }
+      // AMB-165: only content that still matches its recorded SHA-256 is served. A mismatch is reported, which blocks
+      // the version for every reader, and the reader gets a generic error. PRODUCTION_SUBSTITUTION_REQUIRED: in
+      // production the object store verifies on read (ADR-041).
+      const observed = await sha256Hex(bytes);
+      if (observed !== record.sha256) {
+        try {
+          await gateway.reportIntegrityFailure(ctx, versionId, observed);
+        } catch (cause) {
+          throw new AppError("UNAVAILABLE", ctx.requestId, "EVIDENCE_INTEGRITY_FAILED", { cause });
+        }
+        throw new AppError("UNAVAILABLE", ctx.requestId, "EVIDENCE_INTEGRITY_FAILED");
+      }
+      return {
+        stream: new Blob([bytes as Uint8Array<ArrayBuffer>]).stream() as ReadableStream<Uint8Array>,
+        fileName: record.fileName,
+        contentType: record.contentType,
+        sizeBytes: bytes.byteLength,
+        sha256: record.sha256,
+      };
     },
   };
 }

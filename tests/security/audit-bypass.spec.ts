@@ -17,6 +17,15 @@ import {
 } from "../support/db";
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 import { preliminaryReferral, unseatDemoSeats } from "../support/committee";
+import {
+  clearAsIs,
+  defenceNotice,
+  newSha,
+  packetWith,
+  setPacketPolicy,
+  storeEvidence,
+  type StoredVersion,
+} from "../support/evidence";
 
 let caseA: string, caseB: string;
 let receivedReport: string, infoReport: string;
@@ -106,6 +115,15 @@ const NOT_STATE_CHANGING = new Set([
   "bcp_import_batch_view",
   // Migration 2045 (P12-0b, ADR-051): what a committee referral would copy now, as counts; nothing is opened.
   "committee_referral_preview",
+  // Migration 2050 (ADR-041): reads. The exclusion record and the leads' packet view show rows their readers can select
+  // already; the subject's packet read and item opening, and the extract view, are audited as views (the opening also
+  // records custody, like open_evidence_version).
+  "evidence_exclusion_record",
+  "defence_packet_view",
+  "my_defence_packet",
+  "open_defence_packet_item",
+  "sanction_extract_view",
+  "my_sanction_extract_approvals",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -160,6 +178,16 @@ describe("every state-changing command writes its audit event in the same transa
       const rows = await q;
       return Object.values(rows[0] ?? {})[0] as string;
     };
+    /** Runs a step's fixture under a request id of its own, so only the command's own events count for the step. */
+    const apart = async <T>(s: Scenario, fixture: () => Promise<T>, actor: UserKey): Promise<T> => {
+      const [r] = await s.tx<{ id: string }[]>`select current_setting('cdf.request_id') as id`;
+      await s.tx`select set_config('cdf.request_id', ${randomUUID()}, true)`;
+      const value = await fixture();
+      await s.tx`select set_config('cdf.request_id', ${r!.id}, true)`;
+      await s.as(actor);
+      return value;
+    };
+    const stored: Record<string, StoredVersion> = {};
     /** The seated Grievance Committee approves one vote item in the admitted grievance's proceeding. */
     const grievanceVote = async (s: Scenario, grievance: string) => {
       const cp = await one(
@@ -2381,6 +2409,176 @@ describe("every state-changing command writes its audit event in the same transa
           await s.as("caseManager");
           return s.tx`select api.dispose_superseded_corrective_action(${action}, 'RE_ADOPT', 'MEMO-DEMO-WALK-D2',
             ${REASON}, null, null, null, null)`;
+        },
+      },
+      // Migration 2050 (ADR-041), on case 0004: the lead investigator becomes its second evidence lead, beside the case
+      // manager (investigator B is suspended by now); the Defence Packet policy records a synthetic
+      // LEGAL_PRIVILEGE_RULE (owner fixture, rolled back).
+      {
+        fn: "exclude_evidence",
+        actor: "lead",
+        run: async (s) => {
+          const case4 = await apart(
+            s,
+            async () => {
+              const c = await caseId("0004");
+              ids.case4 = c;
+              await setPacketPolicy(s as OwnerScenario);
+              await s.as("caseManager");
+              await s.tx`select api.assign_case(${c}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
+              stored.kept = await storeEvidence(s, "caseManager", c);
+              stored.dropped = await storeEvidence(s, "caseManager", c);
+              stored.failed = await storeEvidence(s, "caseManager", c);
+              return c;
+            },
+            "lead",
+          );
+          expect(case4).toBe(ids.case4);
+          return s.tx`select api.exclude_evidence(${stored.dropped!.evidenceId}, ${REASON})`;
+        },
+      },
+      {
+        fn: "record_custody_exception",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.record_custody_exception(${stored.kept!.evidenceId}, ${stored.kept!.versionId},
+            'EXTERNAL_TRANSFER', ${REASON}, 'EXT-DEMO-WALK')`,
+      },
+      {
+        fn: "register_evidence_rendition",
+        actor: "lead",
+        run: async (s) => {
+          const [r] = await s.tx<{ v: string }[]>`
+            select o_version_id as v from api.register_evidence_rendition(${stored.kept!.versionId}, 'walk-redacted.pdf',
+              'application/pdf', 256, ${newSha()})`;
+          ids.rendition = r!.v;
+          await apart(
+            s,
+            () => s.tx`select api.complete_evidence_version(${ids.rendition!}, 'CLEAN', 'walk-scanner')`,
+            "lead",
+          );
+          return r;
+        },
+      },
+      {
+        fn: "report_evidence_integrity_failure",
+        actor: "lead",
+        run: (s) =>
+          s.tx`select api.report_evidence_integrity_failure(${stored.failed!.versionId}, ${newSha()})`,
+      },
+      {
+        fn: "create_defence_packet",
+        actor: "caseManager",
+        run: async (s) => {
+          const n = await apart(
+            s,
+            () => defenceNotice(s, ids.case4!, "caseManager", "employeeB"),
+            "caseManager",
+          );
+          return (ids.defencePacket = await one(
+            s,
+            s.tx`select api.create_defence_packet(${n.notice}) as id`,
+          ));
+        },
+      },
+      {
+        fn: "add_defence_packet_item",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.defenceItem = await one(
+            s,
+            s.tx`select api.add_defence_packet_item(${ids.defencePacket!}, ${stored.kept!.versionId}) as id`,
+          )),
+      },
+      {
+        fn: "review_defence_packet_item",
+        actor: "lead",
+        run: (s) =>
+          s.tx`select api.review_defence_packet_item(${ids.defenceItem!}, 'CLEARED_REDACTED', ${ids.rendition!},
+            'Walk item (redacted)', ${[
+              "REPORTER",
+              "WITNESS",
+              "CONFIDENTIALITY",
+              "PRIVILEGE",
+              "RESTRICTED_INFORMATION",
+              "OTHER_PROTECTED",
+            ]}::text[], null)`,
+      },
+      {
+        fn: "submit_defence_packet",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.submit_defence_packet(${ids.defencePacket!})`,
+      },
+      {
+        fn: "withdraw_defence_packet",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.withdraw_defence_packet(${ids.defencePacket!}, ${REASON})`,
+      },
+      // A restricted case's packet (case 0003): its Restricted Case Authority decides it.
+      {
+        fn: "decide_restricted_defence_packet",
+        actor: "grcDirector",
+        run: async (s) => {
+          const packet = await apart(
+            s,
+            async () => {
+              const exec = await caseId("0003");
+              await (s as OwnerScenario).asOwner();
+              await s.tx`update iam.user_profile set clearance = 'SECRET' where id in (${USERS.lead}, ${USERS.employeeB})`;
+              await s.as("grcDirector");
+              await s.tx`select api.assign_case(${exec}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
+              const n = await defenceNotice(
+                s,
+                exec,
+                "grcDirector",
+                "employeeB",
+                "Employee Upsilon (synthetic)",
+              );
+              const v = await storeEvidence(s, "grcDirector", exec, { classification: "SECRET" });
+              const k = await packetWith(s, "lead", n.notice, [v.versionId]);
+              await clearAsIs(s, "grcDirector", k.items[0]!);
+              await s.as("lead");
+              await s.tx`select api.submit_defence_packet(${k.packet})`;
+              return k.packet;
+            },
+            "grcDirector",
+          );
+          return s.tx`select api.decide_restricted_defence_packet(${packet}, 'APPROVE', ${REASON})`;
+        },
+      },
+      // The prior-sanctions extract: the committee secretary asks for the walk subject's prior final sanctions.
+      {
+        fn: "request_sanction_extract",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.extract = await one(
+            s,
+            s.tx`select api.request_sanction_extract(${ids.committeeProceeding!}, ${ids.subject!}, ${REASON}) as id`,
+          )),
+      },
+      // A row from the restricted case 0003 awaiting its authority (owner fixture: the walk has no final sanction there).
+      {
+        fn: "decide_sanction_extract_row",
+        actor: "grcDirector",
+        run: async (s) => {
+          const row = await apart(
+            s,
+            async () => {
+              await (s as OwnerScenario).asOwner();
+              const exec = await caseId("0003");
+              return one(
+                s,
+                s.tx`insert into decision.sanction_extract_row (extract_id, position, source_execution_id, source_case_id,
+                       source_classification, source_restricted, sanction_code, decided_on, effective_from, status)
+                     select ${ids.extract!}, 99, x.id, ${exec}, 'SECRET', true, 'WARNING', current_date - 40,
+                            current_date - 2, 'AWAITING_AUTHORITY'
+                     from decision.sanction_execution x order by x.recorded_at desc limit 1
+                     returning id`,
+              );
+            },
+            "grcDirector",
+          );
+          return s.tx`select api.decide_sanction_extract_row(${row}, 'APPROVE', ${REASON})`;
         },
       },
     ];
