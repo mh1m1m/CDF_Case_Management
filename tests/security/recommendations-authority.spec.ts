@@ -2657,7 +2657,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
               }[]
             >`select api.meeting_view(${m!.id}) as v`;
             const c = r!.v.deliberation.vote_items.find((i) => i.vote_item_id === vi!.id)!.capabilities;
-            // may_recuse_for_conflict since 2055 (ADR-054).
+            // may_recuse_for_conflict since 2065 (ADR-054).
             return { vote: c.may_vote, recuse: c.may_recuse_for_conflict };
           };
           expect(await offered("lead")).toEqual({ vote: false, recuse: false });
@@ -2701,7 +2701,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
         });
       });
 
-      it("T-AMB-028: the secretary is offered no vote to record for an absent conflicted member on the re-vote, only on other business (migration 2055)", async () => {
+      it("T-AMB-028: the secretary is offered no vote to record for an absent conflicted member on the re-vote, only on other business (migration 2065)", async () => {
         await ownerScenario(async (s) => {
           const { f } = await decidedByLead(s);
           await upheldOnLead(s, f);

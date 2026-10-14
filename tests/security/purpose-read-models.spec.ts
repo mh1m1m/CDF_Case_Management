@@ -699,7 +699,7 @@ describe("api.meeting_view: votes without choices (DEC-F01, DEC-F03, AMB-083)", 
           status: "OPEN",
           tally: null,
           i_have_voted: false,
-          // may_revise, may_recuse_for_conflict and may_record_note since 2055 (ADR-054).
+          // may_revise, may_recuse_for_conflict and may_record_note since 2065 (ADR-054).
           capabilities: {
             may_vote: true,
             may_close: false,

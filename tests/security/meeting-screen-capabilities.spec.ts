@@ -1,4 +1,4 @@
-// UX redesign Phase 12, slice P12-2a, migration 2055 (ADR-054; Linear CDF-158): the meeting screen's capabilities.
+// UX redesign Phase 12, slice P12-2a, migration 2065 (ADR-054; Linear CDF-158): the meeting screen's capabilities.
 // api.meeting_view gains, on each roster row, whether the caller may record that participant present, absent or
 // excused for a conflict (api.record_attendance), excuse them (api.record_excused_absence) or raise a concern about
 // them (api.raise_meeting_conflict); and on each vote item, whether the caller may revise their vote
@@ -11,7 +11,7 @@
 //   * a roster row's flags are computed for the meeting's runner on any row and on the caller's own row, and are false
 //     on anyone else's (a member raises a concern from the meeting-level flag, and the command answers);
 //   * every flag is a boolean and every list a list, never null or absent;
-//   * the view equals migration 2030's api.meeting_view, run side by side, apart from the keys 2055 adds.
+//   * the view equals migration 2030's api.meeting_view, run side by side, apart from the keys 2065 adds.
 // Every step runs through the api.* commands as `authenticated`; the owner connection only installs the two
 // definitions for the side-by-side run and counts the ledger.
 import { readFileSync } from "node:fs";
@@ -57,7 +57,7 @@ const NONE: RosterFlags = {
   may_record_excused_conflict: false,
   may_record_present: false,
 };
-/** The meeting-level flags 2055 narrows to their commands: CDF-212's ended seat and the excluded-witness trigger. */
+/** The meeting-level flags 2065 narrows to their commands: CDF-212's ended seat and the excluded-witness trigger. */
 const OWN_FLAGS = [
   "may_declare_conflict",
   "may_declare_no_conflict",
@@ -101,7 +101,7 @@ const CALLERS: UserKey[] = [
   "platformAdmin",
 ];
 
-// ---- api.meeting_view as 2030 and 2055 created it, side by side ---------------------------------------------------
+// ---- api.meeting_view as 2030 and 2065 created it, side by side ---------------------------------------------------
 const MIGRATIONS = "infrastructure/supabase/migrations";
 
 /** The api.meeting_view a migration created, renamed into pg_temp so that both definitions run in one transaction. */
@@ -122,7 +122,7 @@ async function install(s: OwnerScenario): Promise<void> {
   await s.tx.unsafe(
     definition("20261007002030_owner_decisions_committee_and_decisions.sql", "meeting_view_2030"),
   );
-  await s.tx.unsafe(definition("20261007002055_meeting_screen_capabilities.sql", "meeting_view_2055"));
+  await s.tx.unsafe(definition("20261007002065_meeting_screen_capabilities.sql", "meeting_view_2065"));
 }
 
 /** One definition's answer for the user whose claims are set: the view, or the error it raised. */
@@ -143,8 +143,8 @@ async function runAs(
   return { view };
 }
 
-/** A 2055 view without the keys 2055 adds. */
-function without2055(view: unknown): unknown {
+/** A 2065 view without the keys 2065 adds. */
+function without2065(view: unknown): unknown {
   const v = structuredClone(view) as View;
   for (const r of v.roster ?? []) delete (r as Partial<Row>).capabilities;
   for (const i of v.deliberation?.vote_items ?? []) {
@@ -158,23 +158,23 @@ function without2055(view: unknown): unknown {
   return withoutNarrowed(v);
 }
 
-/** A view without the three meeting-level flags 2055 narrows; sameAs2030 checks those apart. */
+/** A view without the three meeting-level flags 2065 narrows; sameAs2030 checks those apart. */
 function withoutNarrowed(view: unknown): View {
   const v = structuredClone(view) as View;
   for (const f of OWN_FLAGS) delete v.capabilities?.[f];
   return v;
 }
 
-/** AGENT-09: 2055's view is 2030's apart from the new keys, for this caller, in this state. True if a view (not a
+/** AGENT-09: 2065's view is 2030's apart from the new keys, for this caller, in this state. True if a view (not a
  *  refusal) was compared. */
 async function sameAs2030(s: OwnerScenario, user: UserKey, meeting: string): Promise<boolean> {
   await s.asOwner();
   await s.tx`select set_config('request.jwt.claims', ${JSON.stringify({ sub: USERS[user], role: "authenticated" })}, true)`;
   const before = await runAs(s, "meeting_view_2030", meeting);
-  const after = await runAs(s, "meeting_view_2055", meeting);
+  const after = await runAs(s, "meeting_view_2065", meeting);
   expect(after.error, `${user}: the same refusal`).toBe(before.error);
   if (before.error !== undefined) return false;
-  expect(without2055(after.view), `${user}: 2030's view`).toEqual(withoutNarrowed(before.view));
+  expect(without2065(after.view), `${user}: 2030's view`).toEqual(withoutNarrowed(before.view));
   // The three narrowed flags only ever turn true into false.
   for (const f of OWN_FLAGS) {
     if ((after.view as View).capabilities?.[f]) {
@@ -380,7 +380,7 @@ async function ledger(s: OwnerScenario): Promise<number> {
   return r!.n;
 }
 
-describe("api.meeting_view roster capabilities (migration 2055, ADR-054)", () => {
+describe("api.meeting_view roster capabilities (migration 2065, ADR-054)", () => {
   it("attendance and excuses follow api.record_attendance and api.record_excused_absence, for the runner only; a view writes nothing", async () => {
     await ownerScenario(async (s) => {
       await install(s);
@@ -555,7 +555,7 @@ describe("api.meeting_view roster capabilities (migration 2055, ADR-054)", () =>
   });
 });
 
-describe("api.meeting_view declaration flags (migration 2055, CDF-212)", () => {
+describe("api.meeting_view declaration flags (migration 2065, CDF-212)", () => {
   it("a member whose seat has ended declares nothing, and an excluded witness who still sees the meeting neither declares nor acknowledges; 2030's flags offered both", async () => {
     await ownerScenario(async (s) => {
       await install(s);
@@ -614,7 +614,7 @@ describe("api.meeting_view declaration flags (migration 2055, CDF-212)", () => {
         (tx) => tx`select api.declare_meeting_conflict(${P.legal!}, 'CONFLICT_DECLARED', ${REASON})`,
       );
 
-      // 2030's view offered each of them: the narrowing is 2055's.
+      // 2030's view offered each of them: the narrowing is 2065's.
       const offered2030 = [
         ["caseManager", "may_declare_conflict"],
         ["caseManager", "may_acknowledge_confidentiality"],
@@ -630,7 +630,7 @@ describe("api.meeting_view declaration flags (migration 2055, CDF-212)", () => {
   });
 });
 
-describe("api.meeting_view vote item capabilities (migration 2055, AMB-077, AMB-081, AMB-082)", () => {
+describe("api.meeting_view vote item capabilities (migration 2065, AMB-077, AMB-081, AMB-082)", () => {
   it("revise, recuse and note follow their commands through a vote, a revision, a note, a recusal and the close", async () => {
     await ownerScenario(async (s) => {
       await install(s);

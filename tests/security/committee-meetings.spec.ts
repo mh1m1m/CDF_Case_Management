@@ -875,7 +875,7 @@ describe("ambiguity register: meetings (CDF-205)", () => {
       await s.as("committeeSecretary");
       const [w] = await s.tx<{ id: string }[]>`
         select api.invite_to_meeting(${a.meeting}, 'WITNESS', ${USERS.employeeB}, null, true, ${REASON}) as id`;
-      // The witness takes part in meeting A (2030 purpose read model, migration 2055's screen).
+      // The witness takes part in meeting A (2030 purpose read model, migration 2065's screen).
       await s.as("employeeB");
       const [mine] = await s.tx<{ v: { meeting_id: string; me: { participant_id: string } } }[]>`
         select api.meeting_view(${a.meeting}) as v`;

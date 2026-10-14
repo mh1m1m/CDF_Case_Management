@@ -1,10 +1,10 @@
 -- =============================================================================
--- 2055 The meeting screen's capabilities (UX redesign Phase 12, slice P12-2a; ADR-054)
+-- 2065 The meeting screen's capabilities (UX redesign Phase 12, slice P12-2a; ADR-054)
 -- Requirements: Phase 12 plan §2 (rules 1, 5 and 6) and §4 (P12-2); DEC-02 and ADR-016 D2 (purpose routes, never the
 -- full case); UX-116 (a screen offers an action from server capabilities, never from a page mirror); AMB-077 (recusal
 -- for a conflict), AMB-081 (revising a vote), AMB-082 (a note on one's own vote); DEC-AMB-013 (a re-vote excludes the
 -- conflicted member); T-AMB-037; CDF-212. Linear CDF-158. Number allocated by the coordinator (2047 at first, 2055
--- since migration 2050 merged ahead of it), with the conditions of 2026-10-14 11:50, 11:53, 11:55 and 12:44 (below).
+-- after migration 2050, 2065 after 2060), with the conditions of 2026-10-14 11:50, 11:53, 11:55 and 12:44 (below).
 --
 -- Before: api.meeting_view (2030 section 4) answered whether the caller may open, close or cancel the meeting, open
 -- or close a vote, cast a vote or the deciding vote, raise or decide a concern, declare a conflict, acknowledge
@@ -136,7 +136,7 @@ begin
   v_runs := authz.can_manage_meeting(v_m.id);
   -- committee.lock_managed_meeting: running the meeting, on an active case.
   v_manage := v_runs and v_case_active;
-  -- 2055. api.record_attendance and api.record_excused_absence: committee.lock_managed_meeting, then the meeting OPEN
+  -- 2065. api.record_attendance and api.record_excused_absence: committee.lock_managed_meeting, then the meeting OPEN
   -- and no vote item undecided.
   v_attendance_open := coalesce(v_manage and v_m.status = 'OPEN' and not v_items_undecided, false);
   v_secret := coalesce(v_cp.rule_snapshot ->> 'ballot_secrecy', 'COMMITTEE_AFTER_CLOSE') = 'SECRET_BALLOT';
@@ -167,7 +167,7 @@ begin
                'person_id', mp.person_id, 'display_name', u.display_name, 'display_name_ar', u.display_name_ar,
                'seat', mp.seat, 'invitee_role', mp.invitee_role, 'is_voting', mp.is_voting,
                'requires_coi', mp.requires_coi, 'coi_status', mp.coi_status, 'attendance', mp.attendance,
-               -- 2055: what the caller may record about this participant now. Computed only for the meeting's runner
+               -- 2065: what the caller may record about this participant now. Computed only for the meeting's runner
                -- (any row) or on the caller's own row (the commands a participant runs on themself); on anyone else's
                -- row every flag is false, so no flag tells one participant about another.
                'capabilities', case when v_runs or mp.user_id = v_me then jsonb_build_object(
@@ -232,10 +232,10 @@ begin
                    'excluded', vi.excluded_count) end,
                  'i_have_voted', v_own.id is not null and exists (
                    select 1 from committee.vote v where v.vote_item_id = vi.id and v.participant_id = v_own.id),
-                 -- 2055: the caller's own note on this item exists (never its text).
+                 -- 2065: the caller's own note on this item exists (never its text).
                  'i_have_noted', v_own.id is not null and exists (
                    select 1 from committee.vote_note n where n.vote_item_id = vi.id and n.participant_id = v_own.id),
-                 -- 2055. api.record_vote_for_member, for the meeting's runner only (empty for anyone else): the members
+                 -- 2065. api.record_vote_for_member, for the meeting's runner only (empty for anyone else): the members
                  -- for whom it would record ABSENT, UNABLE_TO_VOTE or RECUSED now. A counting seat that is not
                  -- replaced, never the runner themself, not present, no vote yet, the item OPEN, and
                  -- decision.refuse_excluded_vote on the vote's insert.
@@ -276,7 +276,7 @@ begin
                    'may_cast_casting_vote', v_m.status = 'OPEN' and vi.status = 'AWAITING_CASTING_VOTE'
                                             and exists (select 1 from committee.meeting_participant c
                                                         where c.id = committee.casting_voter(vi.id) and c.user_id = v_me),
-                   -- 2055. api.revise_vote: api.cast_vote's checks up to the item being OPEN, then the rule snapshot
+                   -- 2065. api.revise_vote: api.cast_vote's checks up to the item being OPEN, then the rule snapshot
                    -- allows a revision (AMB-081) and the caller has their own vote on the item.
                    'may_revise', coalesce(v_m.status = 'OPEN' and v_own.id is not null and v_own.participant_kind = 'MEMBER'
                                           and (v_own.is_voting or committee.is_activated_alternate(v_own.id))
@@ -356,7 +356,7 @@ begin
                                          and v_own.coi_status = 'NO_CONFLICT'
                                          and authz.user_case_gate(v_me, v_m.case_id)))
                                     and v_case_active and v_active and not v_items_undecided, false),
-      -- api.declare_meeting_conflict on the caller's own row. 2055 adds two of the command's checks that 2030's flags
+      -- api.declare_meeting_conflict on the caller's own row. 2065 adds two of the command's checks that 2030's flags
       -- left out: a member's seat must be current (CONFLICT:SEAT_ENDED, added to the command by 2050 for CDF-212),
       -- and the participant's update is refused for an excluded witness (committee.refuse_excluded_participant,
       -- 2010), who may still see the meeting through the case.
@@ -379,7 +379,7 @@ begin
                                      and committee.conflict_counts(prior.id)))
                                  and not exists (select 1 from committee.witness_exclusion x
                                                  where x.participant_id = v_own.id), false),
-      -- api.acknowledge_meeting_confidentiality on the caller's own row. 2055 adds the trigger that refuses the
+      -- api.acknowledge_meeting_confidentiality on the caller's own row. 2065 adds the trigger that refuses the
       -- acknowledgement of an excluded witness (committee.refuse_excluded_participant, 2030).
       'may_acknowledge_confidentiality', coalesce(v_own.id is not null and v_active
                                          and v_own.confidentiality_ack_required and not v_acknowledged
@@ -388,7 +388,7 @@ begin
 end;
 $$;
 comment on function api.meeting_view(uuid) is
-  'Purpose read model of one meeting (migration 2030 section 4, DEC-02; capabilities added in 2055, ADR-054): each '
+  'Purpose read model of one meeting (migration 2030 section 4, DEC-02; capabilities added in 2065, ADR-054): each '
   'part under the predicate of its table, capabilities from the checks of the matching commands. No individual choice, '
   'no case content. Under authz.can_view_meeting the full view; otherwise, to a caller who may see one of its concerns, '
   'the concern-only view (meeting id and status, case under its metadata predicate, those concerns); otherwise '

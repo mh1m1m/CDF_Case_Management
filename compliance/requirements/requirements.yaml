@@ -530,7 +530,7 @@ requirements:
     linear_issues: [CDF-158]
     status: IN_PROGRESS
     enforcement:
-      [infrastructure/supabase/migrations/20261007002055_meeting_screen_capabilities.sql, api.meeting_view]
+      [infrastructure/supabase/migrations/20261007002065_meeting_screen_capabilities.sql, api.meeting_view]
     tests:
       [
         tests/security/meeting-screen-capabilities.spec.ts,

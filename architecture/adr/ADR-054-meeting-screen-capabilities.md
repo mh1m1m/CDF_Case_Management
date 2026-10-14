@@ -1,6 +1,6 @@
 # ADR-054: The meeting screen's capabilities
 
-- **Status:** Proposed (2026-10-14). Linear CDF-158. Migration `20261007002055_meeting_screen_capabilities.sql`,
+- **Status:** Proposed (2026-10-14). Linear CDF-158. Migration `20261007002065_meeting_screen_capabilities.sql`,
   number allocated by the project coordinator with the conditions below. UX redesign Phase 12, step P12-2 (slice
   P12-2a).
 - **Protocol:** §19 (authorization twice), §20 (security tests for an authorization change), §40 (authorise before
@@ -27,9 +27,10 @@ command is false, never null or absent; and the view's existing rows and columns
 keys.
 
 The number was 2047 at first. When migration 2050 (ADR-041) merged ahead of it, the coordinator renumbered it 2055
-(12:44). Migration 2050 also narrows `api.declare_meeting_conflict`: a member whose seat has ended declares nothing
-(`CONFLICT:SEAT_ENDED`, CDF-212). The coordinator asked that the view's declaration flag reuse that check, with a test
-that the flag equals the command's answer.
+(12:44), and 2065 when migration 2060 (ADR-042) merged ahead of it (23:27). Migration 2050 also narrows
+`api.declare_meeting_conflict`: a member whose seat has ended declares nothing (`CONFLICT:SEAT_ENDED`, CDF-212). The
+coordinator asked that the view's declaration flag reuse that check, with a test that the flag equals the command's
+answer. Migration 2060 does not change `api.meeting_view`.
 
 ## Decision
 
@@ -119,7 +120,7 @@ without an account (the secretary's path in those commands) comes with the invit
   - every other flag is `false`, and the runner-only commands refuse that caller;
   - every flag is a boolean and every list a list, never null or absent;
   - `record_vote_for` equals the set the command accepts;
-  - the view equals migration 2030's `api.meeting_view`, run side by side, apart from the keys 2055 adds and the
+  - the view equals migration 2030's `api.meeting_view`, run side by side, apart from the keys 2065 adds and the
     three flags of §4, which may only turn from `true` to `false`.
 
   Mutants that drop the ended-seat check or the excluded-witness check from a flag fail these tests.
