@@ -34,6 +34,17 @@ function harness(refusal?: string) {
     closeProceeding: answer("closeProceeding"),
     referToCommittee: answer("referToCommittee"),
     approveRestrictedReferral: answer("approveRestrictedReferral"),
+    referralPreview: async (_: unknown, caseId: string, committeeId: string) => {
+      calls.push(["referralPreview", caseId, committeeId]);
+      if (refusal) throw new Error(refusal);
+      return {
+        seats: [{ seat: "CHAIR", count: 1 }],
+        voting: 1,
+        cleared: 1,
+        notCleared: 0,
+        firewallRestricted: 0,
+      };
+    },
   } as unknown as CaseStructureGateway;
   const service = createCaseStructureService({
     gateway,
@@ -103,6 +114,31 @@ describe("case structure service", () => {
       "AUTHORITY_APPROVAL_REQUIRED",
     ]);
     expect(events).toEqual([]);
+  });
+
+  it("the referral preview (2045) is counts only, and a refusal shows no preview without a security event", async () => {
+    const ok = harness();
+    expect(await ok.service.referralPreview(ctx, CASE, IC)).toEqual({
+      seats: [{ seat: "CHAIR", count: 1 }],
+      voting: 1,
+      cleared: 1,
+      notCleared: 0,
+      firewallRestricted: 0,
+    });
+    for (const refusal of [
+      "CDF_NOT_FOUND",
+      "CDF_FORBIDDEN",
+      "CDF_CONFLICT:CASE_NOT_ACTIVE",
+      "CDF_INVALID:committee_id",
+    ]) {
+      const { service, events } = harness(refusal);
+      expect(await service.referralPreview(ctx, CASE, IC), refusal).toBeNull();
+      expect(events).toEqual([]);
+    }
+    // Anything else is not a refusal: it surfaces as the generic failure.
+    await expect(harness("connection reset").service.referralPreview(ctx, CASE, IC)).rejects.toMatchObject({
+      kind: "UNAVAILABLE",
+    });
   });
 
   it("a finding's rationale never reaches the security event", async () => {

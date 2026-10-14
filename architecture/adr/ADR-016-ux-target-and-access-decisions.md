@@ -419,8 +419,9 @@ write only what 1920 already grants.
 - **Bell.** The header carries a link to the caller's notifications with their own unread count (RC-06). It is never
   a case count, and its accessible name carries the count.
 - **List.** Each notice shows its template wording, its kind and when it arrived, newest first, in two views (all,
-  unread). A notice links to its page only once that page has shipped (`LIVE_NOTIFICATION_ROOTS`, empty until the
-  Phase 12 purpose routes land), so nobody lands on a missing page; the page re-checks access. Marking read calls
+  unread). A notice links to its page only once that page has shipped (`LIVE_PURPOSE_ROOTS`, empty until the
+  Phase 12 purpose routes land, and shared with My Work since migration 2045), so nobody lands on a missing page; the
+  page re-checks access. Marking read calls
   `api.mark_notification_read`; another user's id answers the uniform NOT_FOUND and is recorded as a refusal.
 - **Settings.** Mandatory notices are listed as always sent and have no control. Each optional notice has a box per
   channel where the platform-wide rule sends it (or where the caller muted it earlier). All changes save in one
@@ -483,13 +484,13 @@ new command: the screens call the 1870 `api.*` commands, which check access agai
   views, so the coordinator ruling that purpose views read DB read models behind the shared gate (P12-0b, migration
   2045, ADR-051) does not apply to them. Forms show only where the command would be accepted; every command checks
   again.
-- **Known gaps, allocated to migration 2045 (ADR-051) by the coordinator.** (1) The referral confirmation cannot yet
-  say how many current members would be cleared and voting: the case team has no read of current seats; 2045 adds
-  counts per seat type only, behind the case gate. (2) The case history (migration 1830) does not yet list the 1870
-  events (proceedings opened, changed and closed; people, allegations and links added; findings recorded; committee
-  referral and its approval); 2045 adds them under the History tab's audience, and the restricted referral approval
-  only for the case owner and the Restricted Case Authority. The stage on the overview does not move with these tabs
-  yet; its pending actions point to them.
+- **Known gaps, closed by migration 2045 (ADR-051).** (1) What a referral would copy now: the referral step and the
+  restricted referral approval show the members in office as holders per seat and four totals (voting, cleared, not
+  cleared, firewall restricted), behind the referral command's own checks, and the confirmation repeats the totals;
+  never an id, a name or a flag per seat (coordinator ruling, 2026-10-14). (2) The case history lists the 1870 events
+  as codes and times, each to whoever may read what it is about, and the restricted referral approval only to the
+  case owner as Restricted Case Authority and whoever recorded it. The stage on the overview does not move with these
+  tabs yet; its pending actions point to them.
 
 ## Phase 12 owner decisions (2026-10-13)
 

@@ -104,6 +104,8 @@ const NOT_STATE_CHANGING = new Set([
   "export_request_view",
   "corrective_action_view",
   "bcp_import_batch_view",
+  // Migration 2045 (P12-0b, ADR-051): what a committee referral would copy now, as counts; nothing is opened.
+  "committee_referral_preview",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's

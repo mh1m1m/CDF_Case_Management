@@ -61,7 +61,11 @@ describe("sidebar areas: permission AND live relationship, never a role name (G7
       committeeSecretary: ["MY_WORK"],
       committeeChair: ["MY_WORK"],
       legal: ["MY_WORK", "RECORDS"], // no Cases from CONFLICT_DECLARE or CASE_DISCOVER
-      grcDirector: ["MY_WORK", "CASES", "RECORDS"],
+      // Since 2045 Administration also shows for the business administration permissions (COMMITTEE_ADMIN,
+      // CORRECTIVE_ACTION_POLICY_ADMIN), and it opens no case: the Compliance Section Manager gets no Cases.
+      grcDirector: ["MY_WORK", "CASES", "RECORDS", "ADMINISTRATION"],
+      grcDeputy: ["MY_WORK", "CASES", "RECORDS", "ADMINISTRATION"],
+      complianceManager: ["MY_WORK", "ADMINISTRATION"],
       records: ["MY_WORK", "RECORDS"],
       internalAudit: ["OVERSIGHT"], // ARCHIVE_RECORD_VIEW with no catalogue row today: no Records
       soc: ["OVERSIGHT"],
@@ -143,6 +147,9 @@ describe("work items exist only where the caller passes the command's own check"
           "due_at",
           "due_source",
           "since_at",
+          // 2045 (DEC-22): a non-sensitive code or type, and the structured reasons of returned work.
+          "code",
+          "reason_codes",
         ].sort(),
       );
     });

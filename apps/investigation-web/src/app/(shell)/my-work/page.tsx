@@ -10,7 +10,7 @@ import { buttonClass, CDFEmptyState, CDFPageHeader, CDFViewTabs, CDFWorkList } f
 import { investigationService, myShellAreas, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { overdueKeys } from "@/server/work-routes";
-import { WorkItemRow } from "../work-item-row";
+import { WorkItemRow, someOpenLater } from "../work-item-row";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -114,6 +114,11 @@ export default async function MyWorkPage({
           })}
         </div>
       )}
+      {someOpenLater(rows) ? (
+        <p className="mt-4 text-sm text-cdf-text-secondary" data-testid="my-work-page-later">
+          {t("myWork.pageLater")}
+        </p>
+      ) : null}
       {hasProvisional ? (
         <p className="mt-4 text-sm text-cdf-text-secondary">{t("myWork.provisionalNote")}</p>
       ) : null}

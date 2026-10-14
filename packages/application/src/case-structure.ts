@@ -9,7 +9,7 @@
  *   4. maps failures to safe AppErrors and records refusals as COMMAND_DENIED SECURITY events (§30).
  * Finding rationales and allegation text are case content: they are never logged.
  */
-import type { CaseStructure } from "@cdf/contracts";
+import type { CaseStructure, CommitteeReferralPreview } from "@cdf/contracts";
 import type { SecurityEventSink } from "@cdf/audit";
 import {
   addAllegationSchema,
@@ -33,6 +33,12 @@ type In<S extends z.ZodType> = z.output<S>;
 export interface CaseStructureGateway {
   /** What RLS shows the caller on one case they can already open (the page has opened it). */
   structure(ctx: UserRequestContext, caseId: string): Promise<CaseStructure>;
+  /** What a referral of the case to the committee would copy now, as counts (2045); the referral's own checks. */
+  referralPreview(
+    ctx: UserRequestContext,
+    caseId: string,
+    committeeId: string,
+  ): Promise<CommitteeReferralPreview>;
   addSubject(ctx: UserRequestContext, input: In<typeof addCaseSubjectSchema>): Promise<string>;
   addAllegation(ctx: UserRequestContext, input: In<typeof addAllegationSchema>): Promise<string>;
   linkAllegationSubject(
@@ -103,6 +109,25 @@ export function createCaseStructureService(deps: CaseStructureDeps) {
         return await gateway.structure(ctx, caseId);
       } catch (cause) {
         throw toAppError(cause, ctx.requestId);
+      }
+    },
+
+    /**
+     * The counts a referral would copy, for whoever may refer the case now; null when the database refuses (the
+     * referral's own refusals: not visible, not editable, not active, no such committee). A read, so a refusal is
+     * not a denied command: the page shows no preview, and the referral form, if any, gets the same answer.
+     */
+    referralPreview: async (
+      ctx: UserRequestContext,
+      caseId: string,
+      committeeId: string,
+    ): Promise<CommitteeReferralPreview | null> => {
+      try {
+        return await gateway.referralPreview(ctx, caseId, committeeId);
+      } catch (cause) {
+        const error = toAppError(cause, ctx.requestId);
+        if (error.kind === "UNAVAILABLE" || error.kind === "UNAUTHENTICATED") throw error;
+        return null;
       }
     },
 

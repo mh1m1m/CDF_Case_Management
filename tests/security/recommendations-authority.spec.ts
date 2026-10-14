@@ -2948,6 +2948,42 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             may_verify: false,
             may_dispose: true,
           });
+          // My Work (migration 2045) offers the disposition to exactly whoever the command accepts, and nothing else of
+          // a frozen action: no progress for its owner, no verification of a2.
+          const work = async (as: UserKey, action: string) => {
+            await s.as(as);
+            const rows = await s.tx<{ category: string }[]>`
+              select category from api.my_work_items() where target_id = ${action}`;
+            return rows.map((r) => r.category);
+          };
+          const disposers: UserKey[] = [];
+          for (const u of [
+            "caseManager",
+            "grcDirector",
+            "grcDeputy",
+            "investigatorB",
+            "lead",
+            "committeeSecretary",
+            "financeEmployee",
+          ] as const) {
+            const offered = await work(u, a1!);
+            let accepted = true;
+            try {
+              await thenUndo(
+                s,
+                (tx) => tx`
+                select api.dispose_superseded_corrective_action(${a1!}, 'RE_ADOPT', ${REPLACEMENT_SOURCE}, ${DISPOSAL},
+                  null, null, null, null)`,
+              );
+            } catch (error) {
+              if (!(error as Error).message.startsWith("CDF_")) throw error;
+              accepted = false;
+            }
+            expect(offered, u).toEqual(accepted ? ["ACTION_TO_DISPOSE"] : []);
+            if (accepted) disposers.push(u);
+          }
+          expect(disposers).toEqual(["caseManager", "grcDirector", "grcDeputy"]);
+          expect(await work("caseManager", a2!)).toEqual(["ACTION_TO_DISPOSE"]);
 
           // 2. Nothing but the disposition moves it, on any path: progress, completion, verification, an ordinary waiver
           //    (CORRECTIVE_ACTION_WAIVE is SOURCE_REQUIRED and held by no role; granted here for the test only), a direct
@@ -3095,6 +3131,10 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             disposition_options: [],
           });
           expect(resumed.capabilities.may_dispose).toBe(false);
+          // My Work follows: the disposition is no longer work and the owner has the action back; a2 still waits.
+          expect(await work("caseManager", a1!)).toEqual([]);
+          expect(await work("financeEmployee", a1!)).toEqual(["ACTION_ASSIGNED"]);
+          expect(await work("caseManager", a2!)).toEqual(["ACTION_TO_DISPOSE"]);
           await s.as("financeEmployee");
           await s.tx`select api.record_corrective_action_progress(${a1!}, 40, 'Synthetic: progress note.')`;
           // Each action is disposed of on its own: a2 is still frozen, and so is the case.

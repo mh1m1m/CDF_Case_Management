@@ -25,7 +25,7 @@ import { investigationService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { overdueKeys } from "@/server/work-routes";
 import { confirmation, transitionAct } from "../../confirmations";
-import { WorkItemRow } from "../../work-item-row";
+import { WorkItemRow, someOpenLater } from "../../work-item-row";
 import { transitionAction, updateDetailsAction } from "./actions";
 import {
   CaseWorkspace,
@@ -391,6 +391,11 @@ export default async function CaseOverviewPage({
                 ))}
               </CDFWorkList>
             )}
+            {someOpenLater(mine) ? (
+              <p className="mt-3 text-sm text-cdf-text-secondary" data-testid="your-items-page-later">
+                {t("myWork.pageLater")}
+              </p>
+            ) : null}
           </CDFCard>
 
           <CDFCard

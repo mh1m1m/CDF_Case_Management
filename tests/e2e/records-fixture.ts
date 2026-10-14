@@ -421,6 +421,54 @@ export async function preliminaryReferral(caseId: string): Promise<void> {
     await as("grcDirector", (tx) => tx`select api.revoke_case_access(${grant}, ${STRUCTURE_REASON})`);
 }
 
+// ---- Phase 12 purpose kinds in My Work (P12-0b; migration 2045, ADR-051) ----------------------------------
+
+/** The comment the GRC Sector Head returns a recommendation with; My Work never shows it, only the reason codes. */
+export const RETURN_COMMENT = "Synthetic: add the dates of the meetings.";
+
+/**
+ * A preliminary recommendation the GRC Director prepared, waiting for the GRC Sector Head's approval (no review
+ * step, Q15), so it is in the sector head's My Work. Returns its id.
+ */
+export async function awaitingPreliminaryApproval(caseId: string): Promise<string> {
+  const [r] = await as(
+    "grcDirector",
+    (tx) => tx<{ id: string }[]>`
+      select api.prepare_preliminary_recommendation(${caseId}, 'REFERRED_TO_COMMITTEE',
+        'Synthetic: serious enough for the Investigation Committee.') as id`,
+  );
+  return r!.id;
+}
+
+/** The GRC Sector Head returns it with two structured reasons and a comment (AMB-250). */
+export async function returnPreliminary(recommendationId: string): Promise<void> {
+  await as(
+    "grcSectorHead",
+    (tx) => tx`
+      select api.approve_preliminary_recommendation(${recommendationId}, 'RETURN',
+        array['MISSING_INFORMATION', 'UNCLEAR_ALLEGATION'], ${RETURN_COMMENT})`,
+  );
+}
+
+/**
+ * Ends the case's preliminary review approved, from whichever step a test left it in, so no row stays in anyone's
+ * My Work: one awaiting approval is approved; one returned gets a next version, approved.
+ */
+export async function settlePreliminary(caseId: string): Promise<void> {
+  const [last] = await as(
+    "grcDirector",
+    (tx) => tx<{ id: string; status: string }[]>`
+      select id, status from case_mgmt.preliminary_recommendation where case_id = ${caseId}
+       order by prepared_at desc, id desc limit 1`,
+  );
+  if (last?.status === "AWAITING_APPROVAL")
+    await as(
+      "grcSectorHead",
+      (tx) => tx`select api.approve_preliminary_recommendation(${last.id}, 'APPROVE', null, null)`,
+    );
+  else if (last?.status === "RETURNED") await preliminaryReferral(caseId);
+}
+
 /** An investigation proceeding on the case, opened by the case manager. */
 export async function openInvestigation(caseId: string): Promise<string> {
   const [p] = await as(

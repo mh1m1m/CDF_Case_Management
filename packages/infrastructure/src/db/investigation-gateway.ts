@@ -504,7 +504,8 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         (Omit<WorkItem, "dueAt" | "sinceAt"> & { dueAt: Date | null; sinceAt: Date | null })[]
       >`
         select area, view, category, target_type as "targetType", target_id as "targetId", case_id as "caseId",
-               case_number as "caseNumber", due_at as "dueAt", due_source as "dueSource", since_at as "sinceAt"
+               case_number as "caseNumber", due_at as "dueAt", due_source as "dueSource", since_at as "sinceAt",
+               code, reason_codes as "reasonCodes"
         from api.my_work_items()`;
       return rows.map((r) => ({ ...r, dueAt: iso(r.dueAt), sinceAt: iso(r.sinceAt) }));
     });
