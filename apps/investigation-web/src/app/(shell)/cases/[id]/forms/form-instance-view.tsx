@@ -16,6 +16,7 @@ import {
   CDFFieldError,
   CDFIdentifier,
   CDFPageHeader,
+  CDFPurposeBanner,
   CDFTimeline,
   classificationTone,
   inputClass,
@@ -87,9 +88,11 @@ export function FormInstanceView({ f, t, userId }: { f: FormInstanceDetail; t: T
 
       {f.caseId ? null : (
         // The purpose view (S3, ADR-016 D2, path (a)): say plainly what is open, and that the case is not.
-        <CDFAlert tone="info" title={t("forms.purposeView.title")} testId="form-purpose-banner">
-          <p>{t("forms.purposeView.body")}</p>
-        </CDFAlert>
+        <CDFPurposeBanner
+          title={t("forms.purposeView.title")}
+          purpose={t("forms.purposeView.body")}
+          testId="form-purpose-banner"
+        />
       )}
 
       {returned ? (
@@ -125,6 +128,7 @@ export function FormInstanceView({ f, t, userId }: { f: FormInstanceDetail; t: T
                 testId="draft-form"
                 fieldLabels={labels}
                 successMessage={t("forms.saved", { message: "{message}" })}
+                leaveWarning={t("common.leaveWarning")}
               >
                 <FormFields sections={f.definition.sections} data={f.data} editable t={t} />
               </CDFCommandForm>

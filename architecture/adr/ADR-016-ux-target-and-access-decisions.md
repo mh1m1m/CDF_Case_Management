@@ -411,6 +411,112 @@ The rebase (owner Q&A of 2026-10-12, ADR-017 to ADR-039) changed what several UX
 
 **Still open for the owner at the S3 gate.** DEC-04 (who prepares, reviews, approves and withdraws each form), the four open parts of DEC-05, DEC-19 (snapshot module content or reference it) and DEC-49 (which forms gate which transitions). S3 decides none of them; today's form entitlements and transition rules are unchanged.
 
+## S4 amendment: notifications in the shell (Phase 12 P12-0a, 2026-10-13)
+
+The shell gains the notifications the rebase queues (ADR-025, migration 1920). No migration: the screens read and
+write only what 1920 already grants.
+
+- **Bell.** The header carries a link to the caller's notifications with their own unread count (RC-06). It is never
+  a case count, and its accessible name carries the count.
+- **List.** Each notice shows its template wording, its kind and when it arrived, newest first, in two views (all,
+  unread). A notice links to its page only once that page has shipped (`LIVE_NOTIFICATION_ROOTS`, empty until the
+  Phase 12 purpose routes land), so nobody lands on a missing page; the page re-checks access. Marking read calls
+  `api.mark_notification_read`; another user's id answers the uniform NOT_FOUND and is recorded as a refusal.
+- **Settings.** Mandatory notices are listed as always sent and have no control. Each optional notice has a box per
+  channel where the platform-wide rule sends it (or where the caller muted it earlier). All changes save in one
+  transaction through `api.set_notification_preference`, so a refused change leaves every setting as it was. Email
+  is the ADR-025 stub (PRODUCTION_SUBSTITUTION_REQUIRED).
+- **Where access is enforced.** Reads are RLS selects on `notify.*`: own in-app rows and own mutes only; the template
+  catalogue and the rules hold no content. Commands are `api.*` and audit `NOTIFICATION_READ` and
+  `NOTIFICATION_PREFERENCE_SET` in the same transaction.
+- **Known limitation.** A committee's own default (`COMMITTEE_DEFAULT`) that turns a notice on for one committee is
+  not shown per committee. Where the platform-wide rule sends nothing the page offers no box, so a caller cannot mute
+  such a notice in advance; they can once it is on.
+
+Shared pieces the Phase 12 screens build on (no migration, no new command):
+
+- **Consequence preview.** The confirmation dialog (ADR-030) can also say who is told and list facts the command
+  will record. The page passes only what the caller may already read; the database still decides.
+- **Workflow guide.** A step path, what happens now, who acts next and whether the caller can act. The action form
+  renders only when the server says the caller can act; the command re-checks.
+- **Purpose banner.** Says why a purpose-bound view shows what it shows and what it leaves out (D2). It explains
+  access; it does not grant it.
+- **Configured value.** Shows a rule value with its source; a SOURCE_REQUIRED or unset value is marked as such, never
+  presented as decided.
+- **Unsaved changes (AMB-243).** A long form (draft case form, interview statement) asks before the user leaves by a
+  link or closes the page with changes not saved. An untouched or saved form never asks.
+
+## P12-1 amendment: case structure on the case (Phase 12, 2026-10-13)
+
+The case gains the structure the rebase built in migration 1870 (ADR-017 to ADR-019), on two tabs. No migration and no
+new command: the screens call the 1870 `api.*` commands, which check access again and audit in the same transaction.
+
+- **Allegations tab.** Who the case is about, what is alleged about each of them, and what each proceeding found. A
+  case editor names a person (synthetic labels only), adds an allegation and ties one to a person with optional policy
+  and law references. A finding is recorded for one allegation and one person (or the allegation as a whole when it is
+  tied to no one) in one open proceeding; recording again adds a version, and earlier versions stay on record.
+- **Governing finding (AMB-029).** The committee proceeding's current finding is the one the decision uses. The tab
+  marks it, keeps the investigation's findings on record, and says so while there is none.
+- **One path per person (AMB-105).** Each person shows their own progress: allegation recorded, finding recorded,
+  committee finding. A step is done only when every allegation about them has reached it. Decision, notice and
+  grievance join that path in later Phase 12 screens.
+- **Proceedings tab.** Open a proceeding, change its state (waiting and suspension reasons), close it after a
+  confirmation. A type that already has an open proceeding is not offered unless it may run in parallel; reason codes
+  are the active database codes this version knows; outcomes leave out the codes DEC-F10 does not offer.
+- **Referral (ADR-018).** Only the Investigation Committee is offered here; a grievance committee proceeding comes
+  from a grievance (ADR-024). The parent defaults to the latest investigation (ASK ONCE, DERIVE). A workflow guide
+  says what the referral waits for, who acts next and whether the caller can act.
+- **Restricted case (DEC-61).** The referral waits for the case owner's approval as Restricted Case Authority. Only the
+  owner sees the approval form; the database ties the approval to the owner's eligibility and lets one approval serve
+  one referral. Others see who acts next. Anyone off the restricted team gets the same 404 as a missing case.
+- **Preliminary review first (AMB-018, migration 2030).** A case that did not arrive as a direct referral or grievance
+  reaches the Investigation Committee only once its latest approved preliminary recommendation refers it there; the
+  database refuses any other referral (PRELIMINARY_REFERRAL_REQUIRED). The guide shows that step first and reads it as
+  the database does, over the rows RLS returns to the case team. The approval and referral forms appear only after it;
+  an approval already given still shows as given. The preliminary review's own screens are P12-4.
+- **Committee at referral (DEC-F19).** The copy taken at referral is shown as counts per seat, voting members, members
+  without a vote under the firewall and members not cleared for the case, with the rules in force then and their
+  source. It never names a member, and later changes to the committee do not reach it.
+- **Where access is enforced.** The tabs are case-homed: they read case-team data inside the case as RLS selects in the
+  caller's own context (`case_mgmt.*`, the committee proceeding as `authz.can_view_committee_proceeding` allows, and
+  seat counts with no member ids). Findings show only with a case-file basis (S3 `finding_read`). They are not purpose
+  views, so the coordinator ruling that purpose views read DB read models behind the shared gate (P12-0b, migration
+  2045, ADR-051) does not apply to them. Forms show only where the command would be accepted; every command checks
+  again.
+- **Known gaps, allocated to migration 2045 (ADR-051) by the coordinator.** (1) The referral confirmation cannot yet
+  say how many current members would be cleared and voting: the case team has no read of current seats; 2045 adds
+  counts per seat type only, behind the case gate. (2) The case history (migration 1830) does not yet list the 1870
+  events (proceedings opened, changed and closed; people, allegations and links added; findings recorded; committee
+  referral and its approval); 2045 adds them under the History tab's audience, and the restricted referral approval
+  only for the case owner and the Restricted Case Authority. The stage on the overview does not move with these tabs
+  yet; its pending actions point to them.
+
+## Phase 12 owner decisions (2026-10-13)
+
+The owner decided the whole Phase 12 owner pack on 2026-10-13 at 14:43 UTC, and DEC-AMB-013 at 14:40 UTC. His
+messages are the record. They are quoted in full in the Phase 12 plan (project files,
+`uiux/impl/phase12/PHASE12_PLAN.md`, appendices A and B), and the owner-decision register and the rebase ADRs record
+them through the rebase thread. This amendment says only what each decision means for the UX target; where it and his
+text differ, his text governs. None of these rows is open any more.
+
+| Decision                            | For the UX target                                                                                                                                                                                                                                                                                            | Built in                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| DEC-04 Form RACI and withdrawal     | Capability-based RACI stays. A draft is withdrawn under normal draft handling. After formal submission, a withdrawal request records who asked, when, why, the workflow state and the accepting authority where one is required. Nothing is erased, and a proceeding that has materially begun is not ended  | Migration 2150 (ADR-052)                       |
+| DEC-05, four open parts             | Today's rules stay. Only a specific contradiction with a later confirmed decision, a security invariant or a purpose-bound rule is raised                                                                                                                                                                    | No change                                      |
+| DEC-19 Snapshot or reference        | Decision-relevant data is snapshotted at material events; live reference stays only for non-material metadata where safe. A snapshot never widens who may read a module's content                                                                                                                            | Each screen that shows a completed decision    |
+| DEC-49 Form gating and ownership    | Today's gates stay. Work belongs to the case, proceeding, task or action owner, never to a form; the 274-form catalogue is a control catalogue                                                                                                                                                               | No gate change                                 |
+| DEC-22 My Work row fields           | Approved as built (S1, S3): action label, object id, a non-sensitive code or type, status, dates and priority where authorized or configured; the case number only with case-metadata visibility; never a subject name, allegation text, reporter identity, sensitive title or a restricted case's existence | Migration 2045 adds the form code to form rows |
+| DEC-18 Server-side drafts           | Controlled server drafts for authenticated internal users, purpose-bound, under the owner's requirement list. Never for anonymous or unauthenticated flows, evidence binaries, or where an approved security rule forbids them. Restricted-case gates apply                                                  | Migration 2150 (ADR-052)                       |
+| DEC-48 Finding vocabularies         | Governed, effective-dated vocabularies; SOURCE_REQUIRED where no authoritative source exists; an authorized OTHER finding only with a mandatory rationale; additive, so recorded findings keep their codes                                                                                                   | Migration 2150 (ADR-052)                       |
+| DEC-51 Hijri dates                  | Gregorian first and Hijri second on formal generated records only; storage stays canonical; the platform's Umm al-Qura calendar, never a hand-written conversion                                                                                                                                             | Application only                               |
+| DEC-11 Oversight free text          | The general free-text field stays hidden; a controlled `OVERSIGHT_NOTE` where narrative is genuinely needed                                                                                                                                                                                                  | Migration 2160 (ADR-053)                       |
+| DEC-12 Dual control on grants       | Dual control on grants that materially expand access; the requester never approves; no self-approval; revocation is never delayed                                                                                                                                                                            | Migration 2160 (ADR-053)                       |
+| DEC-13 Clearance command, owner     | A dedicated `CLEARANCE_ADMIN`: elevation approved, lowering immediate, history kept. Its organisational owner is SOURCE_REQUIRED, so it stays fail closed until a holder is configured. `ROLE_ADMIN`, technical and committee administration never change clearance                                          | Migration 2160 (ADR-053)                       |
+| DEC-36 Reporting role and KPIs      | Explicit reporting permissions and aggregate read models, never a role that opens cases. Reporting shows inside Oversight; a standalone area only for principally-reporting users within five areas                                                                                                          | Migration 2160 (ADR-053)                       |
+| DEC-AMB-013 conflict after decision | Option A: re-vote without the conflicted member, the authority decides again, and the earlier decision is kept and marked SUPERSEDED. The committee and authority screens show it                                                                                                                            | Migration 2030 (rebase)                        |
+
+Every piece keeps D0's rule: the database decides, and the screen explains.
+
 ## Delivery governance
 
 - **Unit path.** Every unit of work follows Requirement → Decision → Linear → Branch → PR → Test → Hosted validation. Delivery goes through the redesign epics and coherent capabilities, not one ticket per debt item.
@@ -429,12 +535,14 @@ The rebase (owner Q&A of 2026-10-12, ADR-017 to ADR-039) changed what several UX
 - S0 and the shared foundation start at once. S1 and S2 follow without waiting for S3–S6 decisions.
 - D2–D6 each need their own migration, allocated one at a time above the highest number on `main`, plus a security review before merge.
 - **Still OPEN.** These decisions are not made here. Each is raised when its gate is reached (audit O28 §28.10):
-  - DEC-22 (My Work row fields, S1);
   - DEC-47, DEC-20, DEC-16, DEC-14, DEC-29 and DEC-32 (S1);
   - DEC-54, DEC-38, DEC-40, DEC-41 and DEC-25 (S2), and the open parts of DEC-37 (D8);
-  - DEC-04, the open parts of DEC-05, DEC-19 and DEC-49 (S3; see the S3 amendment for DEC-31, DEC-35 and DEC-50);
-  - the S4–S6 and portal-track decisions;
+  - DEC-31, DEC-35 and DEC-50, as the S3 amendment records them;
+  - the portal-track decisions;
   - DEC-59 and DEC-60 (verification).
+- **Decided since.** DEC-22, DEC-04, the four open parts of DEC-05, DEC-19, DEC-49 and the S4–S6 decisions of the
+  Phase 12 owner pack (DEC-18, DEC-48, DEC-51, DEC-11, DEC-12, DEC-13, DEC-36), on 2026-10-13: see the Phase 12 owner
+  decisions amendment.
 
 ## Production mapping
 

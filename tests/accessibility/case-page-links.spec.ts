@@ -10,6 +10,7 @@ const text = {
     tabs: [
       "Overview",
       "Allegations",
+      "Proceedings",
       "Evidence",
       "Interviews",
       "Forms",
@@ -23,6 +24,7 @@ const text = {
     tabs: [
       "نظرة عامة",
       "الادعاءات",
+      "الإجراءات",
       "الأدلة",
       "المقابلات",
       "النماذج",
@@ -32,7 +34,17 @@ const text = {
     ],
   },
 } as const;
-const PATHS = ["", "/allegations", "/evidence", "/interviews", "/forms", "/reporter", "/people", "/history"];
+const PATHS = [
+  "",
+  "/allegations",
+  "/proceedings",
+  "/evidence",
+  "/interviews",
+  "/forms",
+  "/reporter",
+  "/people",
+  "/history",
+];
 
 for (const locale of ["ar", "en"] as const) {
   test(`${locale}: every case section is a link in one labelled navigation`, async ({ browser }) => {

@@ -358,6 +358,7 @@ export default async function InterviewDetailPage({
       submitLabel={t("interviews.saveStatement")}
       testId="statement-form"
       successMessage={t("interviews.statementSaved")}
+      leaveWarning={t("common.leaveWarning")}
       fieldLabels={{
         content: t("interviews.contentLabel"),
         language: t("interviews.languageLabel"),

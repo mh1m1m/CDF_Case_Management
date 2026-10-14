@@ -36,6 +36,57 @@ export function CDFCountBadge({ count, label }: { count: number; label: string }
   );
 }
 
+/**
+ * The header link to the caller's own notifications (UX redesign S4), with their unread count. A plain link, so it
+ * works without JavaScript; the accessible name carries the count ("Notifications, 3 unread").
+ */
+export function CDFNotificationBell({
+  href,
+  label,
+  count,
+  current,
+}: {
+  href: string;
+  /** The accessible name, for example "Notifications" or "Notifications, 3 unread". */
+  label: string;
+  count: number;
+  /** The page shown is the notifications list. */
+  current?: boolean;
+}) {
+  return (
+    <a
+      href={href}
+      aria-current={current ? "page" : undefined}
+      data-testid="notification-bell"
+      data-unread={count}
+      className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-cdf-md hover:bg-cdf-hover aria-[current=page]:bg-cdf-selected"
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        className="size-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+      </svg>
+      <span className="sr-only">{label}</span>
+      {count > 0 ? (
+        <span
+          aria-hidden="true"
+          className="absolute end-0.5 top-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-cdf-primary px-1 text-xs font-semibold text-cdf-primary-text tabular-nums"
+        >
+          {countText(count)}
+        </span>
+      ) : null}
+    </a>
+  );
+}
+
 /** The area links. `current` is the key of the area the page belongs to (the app derives it from the path). */
 export function CDFSideNav({
   label,

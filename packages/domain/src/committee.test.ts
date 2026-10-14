@@ -3,6 +3,8 @@ import { COMMITTEE_SEATS } from "@cdf/contracts";
 import {
   SINGLE_HOLDER_SEATS,
   addBusinessDays,
+  currentFindings,
+  governingFinding,
   grievanceOutcomesValid,
   isBusinessDay,
   isCaseWide,
@@ -14,6 +16,7 @@ import {
   periodsOverlap,
   proceedingDisplayNumber,
   quorumThreshold,
+  subjectPath,
   tallyVotes,
   voteOutcome,
 } from "./committee";
@@ -154,5 +157,90 @@ describe("grievances (ADR-024)", () => {
     expect(grievanceOutcomesValid(["INADMISSIBLE"])).toBe(false);
     expect(grievanceOutcomesValid(["UPHOLD", "UPHOLD"])).toBe(false);
     expect(grievanceOutcomesValid([])).toBe(false);
+  });
+});
+
+describe("findings (AMB-029)", () => {
+  const P1 = { id: "p1", sequenceNo: 1, proceedingType: "INVESTIGATION" as const };
+  const P2 = { id: "p2", sequenceNo: 2, proceedingType: "COMMITTEE_INVESTIGATION" as const };
+  const P3 = { id: "p3", sequenceNo: 3, proceedingType: "COMMITTEE_INVESTIGATION" as const };
+  const f = (id: string, proceedingId: string, versionNo: number, subjectId: string | null = "s1") => ({
+    id,
+    allegationId: "a1",
+    subjectId,
+    proceedingId,
+    versionNo,
+  });
+
+  it("the current version of each line is the highest; earlier versions stay out of the current set", () => {
+    const current = currentFindings([
+      f("v1", "p1", 1),
+      f("v2", "p1", 2),
+      f("w1", "p2", 1),
+      f("x1", "p1", 1, null),
+    ]);
+    expect(current.map((x) => x.id).sort()).toEqual(["v2", "w1", "x1"]);
+  });
+
+  it("the committee proceeding's finding governs; the investigation's stays on record only", () => {
+    const current = currentFindings([f("v2", "p1", 2), f("w1", "p2", 1)]);
+    expect(governingFinding(current, [P1, P2], "a1", "s1")?.id).toBe("w1");
+  });
+
+  it("with no committee finding yet, nothing governs", () => {
+    expect(governingFinding(currentFindings([f("v1", "p1", 1)]), [P1, P2], "a1", "s1")).toBeNull();
+  });
+
+  it("a later committee proceeding governs over an earlier one, per subject", () => {
+    const current = currentFindings([f("w1", "p2", 1), f("z1", "p3", 1), f("y1", "p3", 1, "s2")]);
+    expect(governingFinding(current, [P1, P2, P3], "a1", "s1")?.id).toBe("z1");
+    expect(governingFinding(current, [P1, P2, P3], "a1", "s2")?.id).toBe("y1");
+    expect(governingFinding(current, [P1, P2, P3], "a1", null)).toBeNull();
+  });
+});
+
+describe("one path per person (AMB-105)", () => {
+  const P1 = { id: "p1", sequenceNo: 1, proceedingType: "INVESTIGATION" as const };
+  const P2 = { id: "p2", sequenceNo: 2, proceedingType: "COMMITTEE_INVESTIGATION" as const };
+  const a = (id: string, subjectId: string | null, status = "OPEN") => ({ id, subjectId, status });
+  const f = (allegationId: string, subjectId: string | null, proceedingId: string) => ({
+    allegationId,
+    subjectId,
+    proceedingId,
+    versionNo: 1,
+  });
+
+  it("counts the person's allegations, those with a finding and those with a committee finding", () => {
+    const allegations = [a("a1", "s1"), a("a2", "s1"), a("a3", "s2")];
+    const current = [f("a1", "s1", "p1"), f("a1", "s1", "p2"), f("a2", "s1", "p1"), f("a3", "s2", "p2")];
+    expect(subjectPath(allegations, current, [P1, P2], "s1")).toEqual({
+      allegations: 2,
+      found: 2,
+      committee: 1,
+    });
+    expect(subjectPath(allegations, current, [P1, P2], "s2")).toEqual({
+      allegations: 1,
+      found: 1,
+      committee: 1,
+    });
+  });
+
+  it("a finding for the person on an allegation tied to someone else puts that allegation on their path", () => {
+    const allegations = [a("a1", "s1")];
+    expect(subjectPath(allegations, [f("a1", "s2", "p1")], [P1, P2], "s2")).toEqual({
+      allegations: 1,
+      found: 1,
+      committee: 0,
+    });
+  });
+
+  it("withdrawn allegations and findings for the allegation as a whole are not on anyone's path", () => {
+    const allegations = [a("a1", "s1", "WITHDRAWN"), a("a2", null)];
+    const current = [f("a1", "s1", "p2"), f("a2", null, "p2")];
+    expect(subjectPath(allegations, current, [P1, P2], "s1")).toEqual({
+      allegations: 0,
+      found: 0,
+      committee: 0,
+    });
   });
 });

@@ -6,14 +6,18 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
+  createCaseStructureService,
   createEvidenceService,
   createFormsService,
+  createInboxService,
   createInterviewService,
   createInvestigationService,
   createRecordsService,
+  type CaseStructureService,
   type EvidenceService,
   type EvidenceStorage,
   type FormsService,
+  type InboxService,
   type InterviewService,
   type InvestigationService,
   type RecordsService,
@@ -23,8 +27,10 @@ import type { Actor, MyArea } from "@cdf/contracts";
 import {
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
+  PostgresCaseStructureGateway,
   PostgresEvidenceGateway,
   PostgresFormsGateway,
+  PostgresInboxGateway,
   PostgresInterviewGateway,
   PostgresInvestigationGateway,
   PostgresRecordsGateway,
@@ -44,6 +50,8 @@ const globalForApp = globalThis as unknown as {
   cdfForms?: FormsService;
   cdfInterviews?: InterviewService;
   cdfRecords?: RecordsService;
+  cdfInbox?: InboxService;
+  cdfCaseStructure?: CaseStructureService;
 };
 
 function pool(): Sql {
@@ -111,6 +119,24 @@ export function recordsService(): RecordsService {
   return globalForApp.cdfRecords;
 }
 
+/** The caller's own in-app notifications and settings (UX redesign S4, ADR-025): RLS returns only their own rows. */
+export function inboxService(): InboxService {
+  globalForApp.cdfInbox ??= createInboxService({
+    gateway: new PostgresInboxGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfInbox;
+}
+
+/** Proceedings, subjects, allegations, findings and committee referral (ADR-017 to ADR-019; Phase 12 P12-1). */
+export function caseStructureService(): CaseStructureService {
+  globalForApp.cdfCaseStructure ??= createCaseStructureService({
+    gateway: new PostgresCaseStructureGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfCaseStructure;
+}
+
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */
 export async function cookieJar(): Promise<CookieJar> {
   const store = await cookies();
@@ -157,4 +183,10 @@ export const requireActor = cache(async (): Promise<RequestScope> => {
 export const myShellAreas = cache(async (): Promise<MyArea[]> => {
   const { actor, ctx } = await requireActor();
   return shellAreas(actor, await investigationService().myAreas(ctx));
+});
+
+/** The caller's unread in-app notifications for this request, read once for the header bell. */
+export const myUnreadCount = cache(async (): Promise<number> => {
+  const { ctx } = await requireActor();
+  return inboxService().unreadCount(ctx);
 });

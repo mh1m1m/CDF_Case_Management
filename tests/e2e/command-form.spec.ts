@@ -2,16 +2,31 @@
 // - UX-001: a refused submit keeps every typed value and every choice (text, textarea, select, radio);
 // - UX-019: a decision has no default, and a submit without a choice gets a translated field error and runs
 //   nothing;
-// - UX-030: the case-details form sends only what the user changed.
+// - UX-030: the case-details form sends only what the user changed;
+// - AMB-243: leaving a long form with unsaved changes asks first, and a saved form leaves without asking.
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "./support";
-import { closeFixtureConnections, receivedReport, reportStatus, screeningCase } from "./records-fixture";
+import {
+  closeFixtureConnections,
+  draftFormCase,
+  receivedReport,
+  reportStatus,
+  screeningCase,
+} from "./records-fixture";
 
 test.afterAll(closeFixtureConnections);
 
 const TEXT = {
-  en: { chooseOne: "Choose one option.", noDeclaration: "You have not declared yet." },
-  ar: { chooseOne: "اختر أحد الخيارات.", noDeclaration: "لم تقدم إقرارك بعد." },
+  en: {
+    chooseOne: "Choose one option.",
+    noDeclaration: "You have not declared yet.",
+    leave: "You have changes that are not saved. Leave this page and lose them?",
+  },
+  ar: {
+    chooseOne: "اختر أحد الخيارات.",
+    noDeclaration: "لم تقدم إقرارك بعد.",
+    leave: "لديك تغييرات لم تُحفظ. هل تغادر هذه الصفحة وتفقدها؟",
+  },
 } as const;
 
 async function openSeedCase(page: Page, suffix: string) {
@@ -170,3 +185,50 @@ test("the details form sends only the fields the user changed (UX-030)", async (
   await expect(details.locator("#priority")).toHaveValue("MEDIUM");
   await manager.context().close();
 });
+
+for (const locale of ["ar", "en"] as const) {
+  test(`${locale}: leaving a long form with unsaved changes asks first (AMB-243)`, async ({ browser }) => {
+    const c = await draftFormCase(`leave-warning-${locale}`);
+    const manager = await signIn(browser, "casemanager@example.test", locale);
+    const formUrl = `/cases/${c.caseId}/forms/${c.instanceId}`;
+    await manager.goto(formUrl);
+    const draft = manager.getByTestId("draft-form");
+    await expect(draft).toBeVisible();
+    const toForms = manager.getByTestId("breadcrumbs").locator(`a[href="/cases/${c.caseId}/forms"]`);
+
+    let asked = 0;
+    manager.on("dialog", (d) => {
+      asked += 1;
+      expect(d.type()).toBe("confirm");
+      expect(d.message()).toBe(TEXT[locale].leave);
+      void (asked === 1 ? d.dismiss() : d.accept());
+    });
+    // Untouched: leaving asks nothing.
+    await toForms.click();
+    await expect(manager).toHaveURL(new RegExp(`/cases/${c.caseId}/forms$`));
+    expect(asked).toBe(0);
+    await manager.goto(formUrl);
+    await draft.locator("textarea, input[type=text]").first().fill(`Synthetic unsaved text (${locale}).`);
+    // Dismissed: the user stays, and what they typed is still there.
+    await toForms.click();
+    await expect.poll(() => asked).toBe(1);
+    await expect(manager).toHaveURL(new RegExp(`${formUrl}$`));
+    await expect(draft.locator("textarea, input[type=text]").first()).toHaveValue(
+      `Synthetic unsaved text (${locale}).`,
+    );
+    // Accepted: the user leaves.
+    await toForms.click();
+    await expect.poll(() => asked).toBe(2);
+    await expect(manager).toHaveURL(new RegExp(`/cases/${c.caseId}/forms$`));
+
+    // Saved: nothing is lost, so leaving asks nothing.
+    await manager.goto(formUrl);
+    await draft.locator("textarea, input[type=text]").first().fill(`Synthetic saved text (${locale}).`);
+    await draft.locator('button[type="submit"]').click();
+    await expect(draft.getByRole("status")).toBeVisible();
+    await toForms.click();
+    await expect(manager).toHaveURL(new RegExp(`/cases/${c.caseId}/forms$`));
+    expect(asked).toBe(2);
+    await manager.context().close();
+  });
+}

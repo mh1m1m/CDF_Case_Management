@@ -5,8 +5,10 @@ import type {
   EvidenceStatus,
   EvidenceVersionStatus,
   FormStatus,
+  FindingResult,
   InterviewStatus,
   LegalHoldRequestStatus,
+  ProceedingStatus,
   RecordsState,
   ReportAttachmentStatus,
   ReportStatus,
@@ -27,6 +29,13 @@ interface Registry {
   records: Record<RecordsState, StatusTone>;
   holdRequest: Record<LegalHoldRequestStatus, StatusTone>;
   task: Record<CaseTaskStatus, StatusTone>;
+  /** Whether the caller has read one of their own notifications (S4). */
+  notification: Record<"UNREAD" | "READ", StatusTone>;
+  /** A proceeding inside a case (ADR-017; Phase 12). */
+  proceeding: Record<ProceedingStatus, StatusTone>;
+  allegation: Record<"OPEN" | "SUBSTANTIATED" | "UNSUBSTANTIATED" | "WITHDRAWN", StatusTone>;
+  /** A finding is a decision, never a failure, so every result is neutral; the words carry it. */
+  finding: Record<FindingResult, StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -77,6 +86,24 @@ export const STATUS_TONES: Registry = {
   },
   holdRequest: { SUBMITTED: "warning", ASSIGNED: "warning", APPLIED: "success", REJECTED: "neutral" },
   task: { OPEN: "info", IN_PROGRESS: "info", COMPLETED: "success", CANCELLED: "neutral", EXPIRED: "warning" },
+  notification: { UNREAD: "info", READ: "neutral" },
+  proceeding: {
+    OPEN: "info",
+    IN_PROGRESS: "info",
+    AWAITING_REVIEW: "warning",
+    AWAITING_APPROVAL: "warning",
+    RETURNED: "warning",
+    SUSPENDED: "warning",
+    CONCLUDED: "success",
+    CANCELLED: "neutral",
+  },
+  allegation: { OPEN: "info", SUBSTANTIATED: "neutral", UNSUBSTANTIATED: "neutral", WITHDRAWN: "neutral" },
+  finding: {
+    SUBSTANTIATED: "neutral",
+    PARTIALLY_SUBSTANTIATED: "neutral",
+    NOT_SUBSTANTIATED: "neutral",
+    INCONCLUSIVE: "neutral",
+  },
 };
 
 /** The tone for a status; an unknown code (a newer database value) falls back to neutral, never to red. */

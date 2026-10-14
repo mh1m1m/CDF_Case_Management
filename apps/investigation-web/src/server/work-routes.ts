@@ -1,7 +1,7 @@
 // Where each shell area and each My Work item leads (UX redesign S1; audit §20.5–§20.6, RC-07, RC-08). Pure
 // functions: the database decides which areas and items exist; this only maps them to routes. Every route
 // re-checks access in the database and answers the uniform not-found when the caller may not see it.
-import type { MyArea, WorkArea, WorkItem } from "@cdf/contracts";
+import type { InboxNotification, MyArea, WorkArea, WorkItem } from "@cdf/contracts";
 
 const AREA_HOME: Record<WorkArea, string> = {
   MY_WORK: "/my-work",
@@ -112,4 +112,24 @@ export function daysSince(iso: string, now: number = Date.now()): number {
 /** Whether a due date has passed (a case's stage target, for example). */
 export function isPast(iso: string | null, now: number = Date.now()): boolean {
   return iso !== null && Date.parse(iso) < now;
+}
+
+/**
+ * Deep-link roots whose pages exist in this app (UX redesign S4). The database writes a notification's link (N18);
+ * the inbox links to it only once its page has shipped, so nobody lands on a missing page. The purpose routes of
+ * Phase 12 (committees, meetings, minutes, legal reviews, my defence, grievances, exports, actions, continuity
+ * imports, and since migration 2040 referrals and preliminary reviews) join this list as each one ships, under the
+ * root notify.deep_link writes, and that page re-checks access in the database.
+ */
+export const LIVE_NOTIFICATION_ROOTS: readonly string[] = [];
+
+const NOTIFICATION_LINK = /^(\/[a-z0-9-]+)+$/;
+
+/** Where a notification leads, or null while its page has not shipped. Never anything but an id-only path. */
+export function notificationHref(
+  n: Pick<InboxNotification, "deepLink">,
+  live: readonly string[] = LIVE_NOTIFICATION_ROOTS,
+): string | null {
+  if (!NOTIFICATION_LINK.test(n.deepLink)) return null;
+  return live.some((root) => n.deepLink.startsWith(`${root}/`)) ? n.deepLink : null;
 }
