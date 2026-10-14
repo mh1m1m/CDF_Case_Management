@@ -294,7 +294,7 @@ describe("ambiguity register: clearance changes (CDF-205)", () => {
   });
 });
 
-describe("lifting a restriction is not decided, so nobody can (CDF-206, AMB-234, DEC-AMB-012)", () => {
+describe("nobody can lift a restriction until the two-person lift (2130) is built (CDF-206, AMB-234, DEC-AMB-012)", () => {
   const LEVEL = "Synthetic: reclassification within the restricted case.";
 
   it("T-AMB-145: a staffed Case Manager cannot lift the restriction, by false or by null", async () => {
