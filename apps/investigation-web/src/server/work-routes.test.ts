@@ -15,6 +15,8 @@ const item = (over: Partial<WorkItem>): WorkItem => ({
   dueAt: null,
   dueSource: null,
   sinceAt: null,
+  code: null,
+  reasonCodes: null,
   ...over,
 });
 
@@ -71,6 +73,37 @@ describe("routes", () => {
     expect(
       itemHref(item({ category: "RETENTION_TO_ROUTE", targetType: "RECORD", targetId: "c", caseId: "c" })),
     ).toBe("/records/c#route-retention");
+  });
+  it("opens a Phase 12 purpose item nowhere until its page ships, then on that page (migration 2045)", () => {
+    const roots = {
+      REFERRAL: "/referrals",
+      PRELIMINARY_REVIEW: "/preliminary-reviews",
+      MEETING: "/meetings",
+      MINUTES: "/minutes",
+      LEGAL_REVIEW: "/legal-reviews",
+      DEFENCE_NOTICE: "/my-defence",
+      GRIEVANCE: "/grievances",
+      EXPORT: "/exports",
+      CORRECTIVE_ACTION: "/actions",
+      BCP_IMPORT: "/continuity/imports",
+    } as const;
+    const all = Object.values(roots);
+    for (const [targetType, root] of Object.entries(roots) as [keyof typeof roots, string][]) {
+      const i = item({ area: "MY_WORK", targetType, targetId: "x", caseId: "c" });
+      expect(itemHref(i), targetType).toBeNull();
+      expect(itemHref(i, [root]), targetType).toBe(`${root}/x`);
+      expect(
+        itemHref(
+          i,
+          all.filter((r) => r !== root),
+        ),
+        targetType,
+      ).toBeNull();
+    }
+    // A restricted case's approval of a recommendation package has no page of its own yet (P12-3).
+    expect(
+      itemHref(item({ targetType: "RECOMMENDATION_PACKAGE", targetId: "x", caseId: "c" }), all),
+    ).toBeNull();
   });
 });
 

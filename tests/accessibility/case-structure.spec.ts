@@ -1,7 +1,8 @@
 // WCAG 2.2 AA on the Phase 12 P12-1 case structure tabs (ADR-017 to ADR-019) in Arabic and English, at a desktop and
 // a phone width and at 320 px: the Allegations tab with a person, their path and findings in two proceedings, and the
 // Proceedings tab with the concluded preliminary review and the committee as copied at referral, every disclosure
-// open. The restricted referral approval and its confirmation are checked too. Synthetic cases only.
+// open. The restricted referral approval, with what the referral would copy now (migration 2045) at the same three
+// widths, and its confirmation are checked too. Synthetic cases only.
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { audit } from "./axe";
@@ -55,21 +56,31 @@ for (const locale of ["ar", "en"] as const) {
     await page.context().close();
   });
 
-  test(`${locale}: the restricted referral approval and its confirmation pass axe`, async ({ browser }) => {
+  test(`${locale}: the restricted referral approval, its preview and its confirmation pass axe`, async ({
+    browser,
+  }) => {
     const c = await restrictedStructureCase(`restricted-a11y-${locale}-${randomUUID().slice(0, 8)}`);
     joined.push({ caseId: c.caseId, by: "grcDirector" });
     // The approval is offered once the preliminary review has referred the case (AMB-018).
     await preliminaryReferral(c.caseId);
     const owner = await signIn(browser, "grc.director@example.test", locale);
-    await owner.goto(`/cases/${c.caseId}/proceedings`);
-    await expect(owner.getByTestId("approve-referral-form")).toBeVisible();
-    await audit(owner);
+    for (const width of WIDTHS) {
+      await owner.setViewportSize({ width, height: 900 });
+      await owner.goto(`/cases/${c.caseId}/proceedings`);
+      await expect(owner.getByTestId("approve-referral-form")).toBeVisible();
+      await expect(owner.getByTestId("referral-preview")).toBeVisible();
+      if (width !== 320) await audit(owner);
+      const overflow = await owner.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+      expect(overflow, `horizontal overflow at ${width}px`).toBe(false);
+    }
+    await owner.setViewportSize({ width: 1280, height: 900 });
     await owner
       .locator("#approveReason")
       .fill("Synthetic: accessibility check of the approval confirmation.");
     await owner.getByTestId("approve-referral-form").locator('button[type="submit"]').click();
     const dialog = owner.getByRole("dialog");
-    await expect(dialog.getByTestId("confirm-fact")).toHaveCount(2);
+    // What an uncleared member cannot do, the single use, and the three totals the referral would copy now.
+    await expect(dialog.getByTestId("confirm-fact")).toHaveCount(5);
     await audit(owner);
     // Cancelling keeps the case waiting for the approval.
     await dialog.getByTestId("confirm-cancel").click();

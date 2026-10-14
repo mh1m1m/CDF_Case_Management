@@ -15,6 +15,7 @@
 
 - **Shared S1 contract `api.my_areas` (migration 1870, acknowledged by the UX thread).** The My Work gate ignores `AUDIT_VIEW`, `SECURITY_EVENT_VIEW`, `ARCHIVE_RECORD_VIEW` and every permission matching `*_ADMIN`, so administration-only permissions (COMMITTEE_ADMIN, SECTOR_ADMIN, NOTIFICATION_ADMIN, and USER_ADMIN and ROLE_ADMIN as before) do not show an empty My Work. The pattern also matches RECORDS_LIFECYCLE_ADMIN. That is harmless today because records officers keep My Work through their other permissions. A future role whose only work permission ends in `_ADMIN` would need an explicit exception.
 - My Committees will be gated on an effective seat or a proceeding membership, never on a role name. The gate is the UX thread's change; the rebase supplies the predicate (`UX_S3_PLUS_GAP_MAP.md` in the project files).
+- **My Committees gate, as built (migration 2045, ADR-051).** A current seat only: since migration 2030 a place in a proceeding's snapshot opens the proceeding only while its holder is still seated (AMB-039), so it alone would show an empty area.
 
 ## Requirements
 

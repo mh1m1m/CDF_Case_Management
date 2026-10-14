@@ -448,6 +448,13 @@ const PROBES: Probe[] = [
     call: (tx, t) =>
       tx`select api.refer_case_to_committee(${t.case}, (select id from committee.committee where code = 'IC'), null, ${REASON})`,
   },
+  // Migration 2045 (P12-0b, ADR-051): what that referral would copy, behind the referral command's own checks.
+  {
+    fn: "committee_referral_preview",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.committee_referral_preview(${t.case}, (select id from committee.committee where code = 'IC'))`,
+  },
   {
     fn: "withdraw_form",
     outcome: "NOT_FOUND",

@@ -11,6 +11,7 @@ import type {
   CaseSubjectView,
   CommitteeOption,
   CommitteeProceedingView,
+  CommitteeReferralPreview,
   CommitteeSeat,
   FindingView,
   ProceedingView,
@@ -173,6 +174,34 @@ export class PostgresCaseStructureGateway implements CaseStructureGateway {
         committees: [...committees],
         statusCodes,
         canRecordFindings: can!.canRecordFindings,
+      };
+    });
+  }
+
+  referralPreview(
+    ctx: UserRequestContext,
+    caseId: string,
+    committeeId: string,
+  ): Promise<CommitteeReferralPreview> {
+    return this.run(ctx, async (tx) => {
+      const [row] = await tx<
+        {
+          p: {
+            seats: { seat: CommitteeSeat; count: number }[];
+            voting: number;
+            cleared: number;
+            not_cleared: number;
+            firewall_restricted: number;
+          };
+        }[]
+      >`select api.committee_referral_preview(${caseId}, ${committeeId}) as p`;
+      const p = row!.p;
+      return {
+        seats: p.seats.map((s) => ({ seat: s.seat, count: s.count })),
+        voting: p.voting,
+        cleared: p.cleared,
+        notCleared: p.not_cleared,
+        firewallRestricted: p.firewall_restricted,
       };
     });
   }

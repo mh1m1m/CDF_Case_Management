@@ -818,6 +818,35 @@ export const WORK_CATEGORIES = [
   "MY_HOLD_RELEASE_REQUEST",
   "RETENTION_CLASSIFICATION",
   "RETENTION_TO_ROUTE",
+  // Phase 12 (migration 2045, ADR-051): the purpose kinds. Each leads to its purpose page, which ships with its slice
+  // (P12-2 to P12-6); until then the row names the work and opens nothing.
+  "REFERRAL_TO_APPROVE",
+  "REFERRAL_TO_ACCEPT",
+  "REFERRAL_ESCALATION_TO_DECIDE",
+  "REFERRAL_RETURNED",
+  "PRELIMINARY_TO_REVIEW",
+  "PRELIMINARY_TO_APPROVE",
+  "PRELIMINARY_RETURNED",
+  /** A restricted case's authority approval; `code` says which: EXPORT, LEGAL_REVIEW or GRIEVANCE_HANDLING. */
+  "RESTRICTED_APPROVAL",
+  "MEETING_TO_ATTEND",
+  "COI_TO_DECLARE",
+  "CONFLICT_CONCERN_TO_DECIDE",
+  "VOTE_OPEN",
+  "MINUTES_TO_REVIEW",
+  "LEGAL_REVIEW_ASSIGNED",
+  "NOTICE_TO_ACKNOWLEDGE",
+  "DEFENCE_DUE",
+  "GRIEVANCE_RECEIVED",
+  "ADMISSIBILITY_TO_DECIDE",
+  "GRIEVANCE_OUTCOME_TO_RECORD",
+  "EXPORT_TO_APPROVE",
+  "ACTION_ASSIGNED",
+  "ACTION_RETURNED",
+  "ACTION_TO_VERIFY",
+  /** A corrective action frozen by a superseded decision, to dispose of under the replacement (DEC-AMB-014). */
+  "ACTION_TO_DISPOSE",
+  "IMPORT_TO_APPROVE",
   ...CASE_TASK_TYPES.map((t) => `TASK_${t.code}` as const),
 ] as const;
 export type WorkCategory = (typeof WORK_CATEGORIES)[number];
@@ -832,7 +861,32 @@ export type WorkTargetType =
   | "HOLD_REQUEST"
   | "HOLD_RELEASE"
   /** A case's records page (lifecycle metadata only). */
-  | "RECORD";
+  | "RECORD"
+  // Phase 12 (2045): purpose objects, each opened on its own page once its slice ships.
+  | "REFERRAL"
+  | "PRELIMINARY_REVIEW"
+  | "MEETING"
+  | "MINUTES"
+  | "LEGAL_REVIEW"
+  | "RECOMMENDATION_PACKAGE"
+  | "DEFENCE_NOTICE"
+  | "GRIEVANCE"
+  | "EXPORT"
+  | "CORRECTIVE_ACTION"
+  | "BCP_IMPORT";
+
+/** Where a work item's due date comes from. */
+export type WorkDueSource =
+  | "TASK"
+  | "SCHEDULE"
+  /** Until an approved SLA source exists (DEC-43). */
+  | "WORKFLOW_SLA_PROVISIONAL"
+  /** 2045: a defence notice's response deadline. */
+  | "NOTICE"
+  /** 2045: the minutes' configured review period. */
+  | "MINUTES_REVIEW"
+  /** 2045: a corrective action's due date (a calendar date). */
+  | "ACTION";
 
 /**
  * One item of the caller's work. Ids, codes and dates only: never a title, name or narrative (DEC-22 decides
@@ -847,9 +901,15 @@ export interface WorkItem {
   caseId: string | null;
   caseNumber: string | null;
   dueAt: string | null;
-  /** TASK, SCHEDULE, or WORKFLOW_SLA_PROVISIONAL until an approved SLA source exists (DEC-43). */
-  dueSource: "TASK" | "SCHEDULE" | "WORKFLOW_SLA_PROVISIONAL" | null;
+  dueSource: WorkDueSource | null;
   sinceAt: string | null;
+  /**
+   * 2045 (DEC-22): a non-sensitive code or type, or null: a form's code, a notice's or grievance's kind, a corrective
+   * action's type, which restricted-case approval it is, or why a defence has no due date (SUSPENDED).
+   */
+  code: string | null;
+  /** 2045 (AMB-250): the structured reasons returned work came back with (RETURN_REASON codes), or null. */
+  reasonCodes: string[] | null;
 }
 
 /**
@@ -1210,6 +1270,20 @@ export interface CommitteeProceedingView {
   voting: number;
   firewallRestricted: number;
   notCleared: number;
+}
+
+/**
+ * What a referral to a committee would copy now (`api.committee_referral_preview`, migration 2045; DEC-F19): holders
+ * per seat type and four totals, behind the referral command's own checks. Never a person, and never a cleared,
+ * voting or firewall flag per seat, which on a single-holder seat would disclose that person's standing
+ * (coordinator ruling, 2026-10-14). The referral copies exactly these counts, as of its own moment.
+ */
+export interface CommitteeReferralPreview {
+  seats: { seat: CommitteeSeat; count: number }[];
+  voting: number;
+  cleared: number;
+  notCleared: number;
+  firewallRestricted: number;
 }
 
 /** DEC-61: the Restricted Case Authority's approval to refer this restricted case to one committee, used once. */

@@ -339,18 +339,26 @@ requirements:
     title: "Work-led shell: at most five areas from permission and relationship, a landing where the user's work is, and My Work listing only the user's own actionable items"
     source: [UX audit 2026-10-10 RC-06, RC-07, RC-08, RC-12, ADR-016]
     external_ids: []
-    linear_issues: [CDF-117, CDF-118, CDF-121, CDF-171, CDF-172]
+    linear_issues: [CDF-117, CDF-118, CDF-121, CDF-171, CDF-172, CDF-211]
     status: IN_PROGRESS
     enforcement:
       [
         infrastructure/supabase/migrations/20261007001820_my_work_read_models.sql,
+        infrastructure/supabase/migrations/20261007002045_phase12_areas_and_my_work.sql,
         apps/investigation-web/src/app/(shell)/layout.tsx,
         apps/investigation-web/src/app/(shell)/my-work,
         apps/investigation-web/src/server/work-routes.ts,
       ]
     tests:
-      [tests/security/my-work-read-models.spec.ts, tests/e2e/shell.spec.ts, tests/accessibility/shell.spec.ts]
-    notes: "Committee (S5) and Reporting (S6) areas, pools and Done recently (S4), break-glass and reveal items (DEC-16) and further item fields (DEC-22) are not built yet."
+      [
+        tests/security/my-work-read-models.spec.ts,
+        tests/security/my-work-phase12.spec.ts,
+        tests/e2e/shell.spec.ts,
+        tests/e2e/my-work-purpose.spec.ts,
+        tests/accessibility/shell.spec.ts,
+        tests/accessibility/my-work-purpose.spec.ts,
+      ]
+    notes: "Migration 2045 (ADR-051) lists the Phase 12 committee and decision work with DEC-22's fields, a code and the structured reasons of returned work, and opens My Committees for a current seat and Administration for each business administration permission. The application floor keeps both areas hidden until their pages ship (P12-2, P12-8), and purpose rows show without a link until then. Reporting (S6), pools and Done recently (S4), and break-glass and reveal items (DEC-16) are not built yet."
 
   - id: CDF-UX-006
     title: "A declared conflict is decided from My Work on the case, explicitly and with a reason"
@@ -387,16 +395,22 @@ requirements:
     title: "Case history and access roster keep their audience: no page views, hold status without its details, full roster only for those who manage the team"
     source: [UX audit 2026-10-10 UX-011, UX-092; ADR-016 D5; DEC-08, DEC-10]
     external_ids: []
-    linear_issues: [CDF-127]
+    linear_issues: [CDF-127, CDF-211]
     status: IN_PROGRESS
     enforcement:
       [
         infrastructure/supabase/migrations/20261007001830_case_history_and_roster.sql,
+        infrastructure/supabase/migrations/20261007002045_phase12_areas_and_my_work.sql,
         "apps/investigation-web/src/app/(shell)/cases/[id]/history/page.tsx",
         "apps/investigation-web/src/app/(shell)/cases/[id]/people/page.tsx",
       ]
-    tests: [tests/security/case-history-roster.spec.ts, tests/e2e/case-workspace.spec.ts]
-    notes: "The audit_event_read table policy still admits every BUSINESS row of a viewable case to direct SQL; the app reads only through api.case_history. Narrowing the policy is a follow-up decision. Packet-bound reviewer evidence (DEC-09, S5) will narrow authz.can_view_evidence, which history already follows."
+    tests:
+      [
+        tests/security/case-history-roster.spec.ts,
+        tests/security/my-work-phase12.spec.ts,
+        tests/e2e/case-workspace.spec.ts,
+      ]
+    notes: "The audit_event_read table policy still admits every BUSINESS row of a viewable case to direct SQL; the app reads only through api.case_history. Narrowing the policy is a follow-up decision. Packet-bound reviewer evidence (DEC-09, S5) will narrow authz.can_view_evidence, which history already follows. Migration 2045 (ADR-051) lists the 1870 events, codes and times only, each to whoever may read what it is about; events added by 2030 and 2040 are not listed yet."
 
   - id: CDF-UX-009
     title: "The reporter conversation belongs to the case: the case manager, owner and lead write, an investigator only when delegated, the GRC Director reads; seeing the case is never enough"
@@ -475,6 +489,27 @@ requirements:
         tests/e2e/evidence.spec.ts,
       ]
     notes: "Hosted DEV reconciliation evidence comes after merge. Decision packets for committee and review users are S5 / Phase 12. DEC-04, DEC-05 (four parts), DEC-19 and DEC-49 stay open with the owner."
+
+  - id: CDF-UX-012
+    title: "Before a committee referral, whoever may make or approve it sees what it would copy now: holders per seat and totals, never a person or a per-seat flag"
+    source: [Phase 12 plan P12-1; DEC-F19; coordinator note 2026-10-13 and ruling 2026-10-14; ADR-051 §3]
+    external_ids: []
+    linear_issues: [CDF-123, CDF-211]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002045_phase12_areas_and_my_work.sql,
+        api.committee_referral_preview,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/proceedings/page.tsx",
+      ]
+    tests:
+      [
+        tests/security/my-work-phase12.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/e2e/case-structure.spec.ts,
+        tests/accessibility/case-structure.spec.ts,
+      ]
+    notes: "The preview runs the referral command's own checks first and audits nothing. On a seat one person holds, a not-cleared total above zero may narrow down who; the committee snapshot after referral carries the same totals (DEC-F19)."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"

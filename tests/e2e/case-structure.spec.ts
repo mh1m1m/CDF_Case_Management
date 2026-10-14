@@ -2,11 +2,12 @@
 // Arabic (RTL) and English (LTR). The case manager names a person, ties the report's allegation to them and opens an
 // investigation; the investigator records a finding twice, and both versions stay on record. The case manager moves
 // a proceeding along and cancels one after confirming. The referral to the Investigation Committee waits for the
-// preliminary review to refer the case (AMB-018) and offers no form until then; the case manager then refers it and
-// sees the committee as copied at referral, in counts and never names. On a restricted case the referral also waits
-// for the case owner's approval as Restricted Case Authority, offered only once the preliminary review referred the
-// case; the investigator sees why and cannot approve; the case manager, off the restricted team, gets the same 404 as
-// a missing case. Synthetic data only.
+// preliminary review to refer the case (AMB-018) and offers no form until then; the case manager then refers it,
+// after seeing what the referral would copy now (migration 2045), and sees the committee as copied at referral, both
+// in counts and never names. On a restricted case the referral also waits for the case owner's approval as Restricted
+// Case Authority, offered only once the preliminary review referred the case, with the same counts; the investigator
+// sees why and cannot approve, and gets no counts; the case manager, off the restricted team, gets the same 404 as a
+// missing case. Synthetic data only.
 import { randomUUID } from "node:crypto";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
@@ -116,6 +117,10 @@ async function submitConfirmed(page: Page, form: Locator) {
 
 const states = (tracker: Locator) =>
   tracker.locator("li").evaluateAll((li) => li.map((x) => x.getAttribute("data-state")));
+
+// What a referral would copy now on a seeded database (migration 2045): the demo committee in office, per seat
+// (chair, deputy chair, secretary, two members), then four voting, five cleared and none without access.
+const PREVIEW = ["1", "1", "1", "2", "4", "5", "0"];
 
 for (const locale of ["ar", "en"] as const) {
   const text = TEXT[locale];
@@ -256,6 +261,7 @@ for (const locale of ["ar", "en"] as const) {
       "upcoming",
     ]);
     await expect(manager.getByTestId("refer-form")).toHaveCount(0);
+    await expect(manager.getByTestId("referral-preview")).toHaveCount(0);
 
     await preliminaryReferral(c.caseId);
     await withSeatedInvestigationCommittee(async () => {
@@ -272,8 +278,17 @@ for (const locale of ["ar", "en"] as const) {
       await expect(manager.getByTestId("proceeding-2-outcome")).toBeVisible();
       // ASK ONCE, DERIVE: the referral follows the open investigation.
       await expect(manager.locator("#referParent")).toHaveValue(investigation);
+      // Before referring: what the referral would copy now, in counts, never a name.
+      const preview = manager.getByTestId("referral-preview");
+      await expect(manager.getByTestId("referral-preview-seats").locator("dd")).toHaveText(PREVIEW);
+      for (const name of MEMBERS) await expect(preview).not.toContainText(name);
       await manager.locator("#referReason").fill(REASON);
-      await submitConfirmed(manager, manager.getByTestId("refer-form"));
+      await manager.getByTestId("refer-form").locator('button[type="submit"]').click();
+      const dialog = manager.getByRole("dialog");
+      // The confirmation repeats the totals: voting, cleared, without access.
+      await expect(dialog.getByTestId("confirm-fact").locator("dd")).toHaveText(PREVIEW.slice(-3));
+      await dialog.getByTestId("confirm-submit").click();
+      await expect(dialog).toBeHidden();
       await expect(manager.getByTestId("committee-snapshot-3")).toBeVisible();
     });
 
@@ -301,6 +316,7 @@ for (const locale of ["ar", "en"] as const) {
     expect(await states(manager.getByTestId("referral-guide-path"))).toEqual(["done", "done", "current"]);
     await expect(manager.getByTestId("referral-guide-you")).toHaveText(text.withCommittee);
     await expect(manager.getByTestId("refer-form")).toHaveCount(0);
+    await expect(manager.getByTestId("referral-preview")).toHaveCount(0);
     await manager.context().close();
   });
 
@@ -325,6 +341,7 @@ for (const locale of ["ar", "en"] as const) {
       "upcoming",
     ]);
     await expect(owner.getByTestId("approve-referral-form")).toHaveCount(0);
+    await expect(owner.getByTestId("referral-preview")).toHaveCount(0);
     await preliminaryReferral(c.caseId);
 
     // The investigator sees what the referral waits for, and who acts; they cannot approve.
@@ -341,16 +358,22 @@ for (const locale of ["ar", "en"] as const) {
     ]);
     await expect(investigator.getByTestId("approve-referral-form")).toHaveCount(0);
     await expect(investigator.getByTestId("refer-form")).toHaveCount(0);
+    await expect(investigator.getByTestId("referral-preview")).toHaveCount(0);
     await investigator.context().close();
 
     // The case owner approves as Restricted Case Authority, after a confirmation that says what follows.
     await owner.reload();
     await expect(owner.getByTestId("referral-guide")).toHaveAttribute("data-can-act", "true");
     await expect(owner.getByTestId("referral-guide-you")).toHaveText(text.canApprove);
+    // The authority sees what the referral would copy now before approving it (DEC-F19), and the confirmation
+    // repeats the totals after what an uncleared member cannot do and the single use.
+    await expect(owner.getByTestId("referral-preview-seats").locator("dd")).toHaveText(PREVIEW);
     await owner.locator("#approveReason").fill(REASON);
     await owner.getByTestId("approve-referral-form").locator('button[type="submit"]').click();
     const dialog = owner.getByRole("dialog");
-    await expect(dialog.getByTestId("confirm-fact")).toHaveCount(2);
+    const facts = dialog.getByTestId("confirm-fact").locator("dd");
+    await expect(facts).toHaveCount(5);
+    for (const [i, n] of PREVIEW.slice(-3).entries()) await expect(facts.nth(2 + i)).toHaveText(n);
     await dialog.getByTestId("confirm-submit").click();
     await expect(owner.getByTestId("referral-approval-1")).toHaveAttribute("data-used", "false");
     await expect(owner.getByTestId("referral-now")).toContainText(text.approved);

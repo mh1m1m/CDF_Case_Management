@@ -107,6 +107,10 @@ const CATALOGUE = new Set([
   ],
   ...["DISPOSITION_APPROVED", "DISPOSITION_REJECTED", "DISPOSITION_BLOCKED_BY_HOLD", "DISPOSITION_EXECUTED"],
   "DISPOSITION_CERTIFICATE_ISSUED",
+  // Migration 2045: the 1870 events, as codes and times (my-work-phase12.spec.ts covers their audiences).
+  ...["PROCEEDING_OPENED", "PROCEEDING_STATE_CHANGED", "PROCEEDING_CLOSED", "COMMITTEE_PROCEEDING_OPENED"],
+  ...["CASE_SUBJECT_ADDED", "ALLEGATION_ADDED", "ALLEGATION_SUBJECT_LINKED", "FINDING_RECORDED"],
+  ...["EVIDENCE_LINKED", "RESTRICTED_COMMITTEE_REFERRAL_APPROVED"],
 ]);
 
 const history = (tx: Tx, id: string) => tx<HistoryRow[]>`select * from api.case_history(${id}, 500)`;

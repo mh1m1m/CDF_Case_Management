@@ -1,9 +1,9 @@
 // Proceedings «الإجراءات» (Phase 12 P12-1; ADR-017 to ADR-019, migration 1870). The work on a case, one proceeding at
 // a time, and its referral to the Investigation Committee (after the preliminary review referred it, AMB-018; DEC-61
-// for a restricted case). It shows what RLS returned to the caller; the committee snapshot arrives as counts per seat
-// and standing, never as people. A form appears only where the database would accept its command
-// (authz.can_edit_case on an active case; the case owner as Restricted Case Authority for the approval), and every
-// command checks again.
+// for a restricted case). It shows what RLS returned to the caller; the committee snapshot, and what a referral would
+// copy now (migration 2045), arrive as counts per seat and standing, never as people. A form appears only where the
+// database would accept its command (authz.can_edit_case on an active case; the case owner as Restricted Case
+// Authority for the approval), and every command checks again.
 import type { Metadata } from "next";
 import {
   CLOSED_PROCEEDING_STATUSES,
@@ -14,6 +14,7 @@ import {
   type CaseDetail,
   type CaseStructure,
   type CommitteeProceedingView,
+  type CommitteeReferralPreview,
   type ProceedingView,
   type StatusCodeDimension,
 } from "@cdf/contracts";
@@ -36,7 +37,7 @@ import {
   type CDFProgressState,
   type CDFValueSource,
 } from "@cdf/ui";
-import { caseStructureService } from "@/server/container";
+import { caseStructureService, type RequestScope } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { confirmation } from "../../../confirmations";
 import {
@@ -159,7 +160,16 @@ export default async function CaseProceedingsPage({ params }: { params: Promise<
         </div>
       ) : null}
 
-      <Referral t={t} s={s} c={c} actorId={actor.userId} canEdit={canEdit} active={active} name={name} />
+      <Referral
+        t={t}
+        s={s}
+        c={c}
+        ctx={ctx}
+        actorId={actor.userId}
+        canEdit={canEdit}
+        active={active}
+        name={name}
+      />
 
       {s.referralApprovals.length > 0 ? (
         <CDFCard title={t("caseStructure.approvalsTitle")} testId="referral-approvals">
@@ -450,13 +460,14 @@ function Proceeding({
  * Referral to the Investigation Committee (ADR-018; DEC-61 and DEC-F19; AMB-018). A case that did not arrive as a
  * direct referral or grievance goes there only once its preliminary review referred it, approved (migration 2030). A
  * restricted case also needs its Restricted Case Authority's approval, which the database ties to the case owner and
- * checks again; one approval serves one referral. A step's form appears only once the steps before it are done.
- * Grievance proceedings come from a grievance, not from here.
+ * checks again; one approval serves one referral. A step's form appears only once the steps before it are done,
+ * with what the referral would copy now. Grievance proceedings come from a grievance, not from here.
  */
-function Referral({
+async function Referral({
   t,
   s,
   c,
+  ctx,
   actorId,
   canEdit,
   active,
@@ -465,6 +476,7 @@ function Referral({
   t: Translator;
   s: CaseStructure;
   c: CaseDetail;
+  ctx: RequestScope["ctx"];
   actorId: string;
   canEdit: boolean;
   active: boolean;
@@ -526,6 +538,11 @@ function Referral({
         : t("caseStructure.next.caseTeam");
   const canApprove = current === "APPROVAL" && isOwner && active;
   const canRefer = current === "REFERRAL" && canEdit;
+  // Asked only of whoever can act on the referral here; the database answers with the referral's own checks, and
+  // null (no preview) when it refuses.
+  const preview =
+    canApprove || canRefer ? await caseStructureService().referralPreview(ctx, c.id, ic.id) : null;
+  const facts = preview ? previewFacts(t, preview) : [];
   const you = withCommittee
     ? t("caseStructure.you.withCommittee")
     : !active
@@ -575,6 +592,7 @@ function Referral({
         you: t("caseStructure.guide.you"),
       }}
     >
+      {preview ? <ReferralPreview t={t} preview={preview} /> : null}
       {canApprove ? (
         <div className="w-full">
           <CDFCommandForm
@@ -593,6 +611,7 @@ function Referral({
                   term: t("confirm.acts.approveRestrictedReferral.singleUse"),
                   value: t("confirm.acts.approveRestrictedReferral.singleUseValue"),
                 },
+                ...facts,
               ]),
               tone: "primary",
             }}
@@ -611,7 +630,7 @@ function Referral({
             submitLabel={t("caseStructure.refer")}
             successMessage={t("caseStructure.referred")}
             variant="primary"
-            confirm={{ ...confirmation(t, "referToCommittee"), tone: "primary" }}
+            confirm={{ ...confirmation(t, "referToCommittee", facts), tone: "primary" }}
             testId="refer-form"
             fieldLabels={{
               parentProceedingId: t("caseStructure.parentLabel"),
@@ -624,6 +643,60 @@ function Referral({
         </div>
       ) : null}
     </CDFWorkflowGuide>
+  );
+}
+
+/** A referral preview's totals, as the confirmation's facts: counts only (DEC-AMB-012 preview rule). */
+function previewFacts(t: Translator, v: CommitteeReferralPreview): { term: string; value: string }[] {
+  return [
+    { term: t("caseStructure.voting"), value: String(v.voting) },
+    { term: t("caseStructure.preview.cleared"), value: String(v.cleared) },
+    { term: t("caseStructure.preview.notCleared"), value: String(v.notCleared) },
+    ...(v.firewallRestricted > 0
+      ? [{ term: t("caseStructure.firewall"), value: String(v.firewallRestricted) }]
+      : []),
+  ];
+}
+
+/**
+ * What the referral would copy now (migration 2045; DEC-F19): the committee's members in office, counted per seat,
+ * and the voting, cleared, not cleared and firewall totals. Counts only: no person, and no flag per seat, since a
+ * flag on a seat one person holds would tell that person's clearance or conflict (coordinator ruling, 2026-10-14).
+ * The referral copies the committee as it is when it is made.
+ */
+function ReferralPreview({ t, preview: v }: { t: Translator; preview: CommitteeReferralPreview }) {
+  return (
+    <section className="w-full" aria-labelledby="referral-preview-title" data-testid="referral-preview">
+      <h3 id="referral-preview-title" className="mb-1 font-semibold">
+        {t("caseStructure.preview.title")}
+      </h3>
+      <p className="mb-3 text-sm text-cdf-text-secondary">{t("caseStructure.preview.intro")}</p>
+      {v.seats.length === 0 ? (
+        <p className="text-sm" data-testid="referral-preview-empty">
+          {t("caseStructure.preview.empty")}
+        </p>
+      ) : (
+        <div data-testid="referral-preview-seats">
+          <CDFDescriptionList
+            items={[
+              ...v.seats.map((x) => ({
+                term: t.code("committeeSeat", x.seat, "common.none"),
+                value: String(x.count),
+              })),
+              { term: t("caseStructure.voting"), value: String(v.voting) },
+              { term: t("caseStructure.preview.cleared"), value: String(v.cleared) },
+              {
+                term: t("caseStructure.preview.notCleared"),
+                value: <span data-testid="referral-preview-not-cleared">{v.notCleared}</span>,
+              },
+              ...(v.firewallRestricted > 0
+                ? [{ term: t("caseStructure.firewall"), value: String(v.firewallRestricted) }]
+                : []),
+            ]}
+          />
+        </div>
+      )}
+    </section>
   );
 }
 

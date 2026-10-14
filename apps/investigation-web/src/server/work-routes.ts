@@ -1,7 +1,7 @@
 // Where each shell area and each My Work item leads (UX redesign S1; audit §20.5–§20.6, RC-07, RC-08). Pure
 // functions: the database decides which areas and items exist; this only maps them to routes. Every route
 // re-checks access in the database and answers the uniform not-found when the caller may not see it.
-import type { InboxNotification, MyArea, WorkArea, WorkItem } from "@cdf/contracts";
+import type { InboxNotification, MyArea, WorkArea, WorkItem, WorkTargetType } from "@cdf/contracts";
 
 const AREA_HOME: Record<WorkArea, string> = {
   MY_WORK: "/my-work",
@@ -43,8 +43,38 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
   }
 }
 
-/** The page where the item's work is done. */
-export function itemHref(i: WorkItem): string {
+/**
+ * Purpose roots whose pages exist in this app (UX redesign S4). The database writes a notification's link (N18) and
+ * a My Work row's target (2045); the inbox and My Work link to them only once the page has shipped, so nobody lands
+ * on a missing page. The purpose routes of Phase 12 (committees, meetings, minutes, legal reviews, my defence,
+ * grievances, exports, actions, continuity imports, and since migration 2040 referrals and preliminary reviews) join
+ * this list as each one ships, under the root notify.deep_link writes, and that page re-checks access in the
+ * database.
+ */
+export const LIVE_PURPOSE_ROOTS: readonly string[] = [];
+
+/**
+ * The purpose page of each Phase 12 target (plan §3 routes; P12-2 to P12-6), by the root `notify.deep_link` writes.
+ * A restricted-case approval of a recommendation package has no root yet: its card comes with P12-3.
+ */
+const PURPOSE_ROOT: Partial<Record<WorkTargetType, string>> = {
+  REFERRAL: "/referrals",
+  PRELIMINARY_REVIEW: "/preliminary-reviews",
+  MEETING: "/meetings",
+  MINUTES: "/minutes",
+  LEGAL_REVIEW: "/legal-reviews",
+  DEFENCE_NOTICE: "/my-defence",
+  GRIEVANCE: "/grievances",
+  EXPORT: "/exports",
+  CORRECTIVE_ACTION: "/actions",
+  BCP_IMPORT: "/continuity/imports",
+};
+
+/**
+ * The page where the item's work is done, or null while that page has not shipped (migration 2045's purpose kinds):
+ * the row then names the work and opens nothing, as a notification does.
+ */
+export function itemHref(i: WorkItem, live: readonly string[] = LIVE_PURPOSE_ROOTS): string | null {
   const onCase = i.caseId ? `/cases/${i.caseId}` : null;
   switch (i.targetType) {
     case "REPORT":
@@ -73,8 +103,10 @@ export function itemHref(i: WorkItem): string {
       return i.category === "RETENTION_TO_ROUTE"
         ? `/records/${i.targetId}#route-retention`
         : `/records/${i.targetId}#retention`;
-    default:
-      return "/my-work";
+    default: {
+      const root = PURPOSE_ROOT[i.targetType];
+      return root && live.includes(root) ? `${root}/${i.targetId}` : null;
+    }
   }
 }
 
@@ -114,21 +146,12 @@ export function isPast(iso: string | null, now: number = Date.now()): boolean {
   return iso !== null && Date.parse(iso) < now;
 }
 
-/**
- * Deep-link roots whose pages exist in this app (UX redesign S4). The database writes a notification's link (N18);
- * the inbox links to it only once its page has shipped, so nobody lands on a missing page. The purpose routes of
- * Phase 12 (committees, meetings, minutes, legal reviews, my defence, grievances, exports, actions, continuity
- * imports, and since migration 2040 referrals and preliminary reviews) join this list as each one ships, under the
- * root notify.deep_link writes, and that page re-checks access in the database.
- */
-export const LIVE_NOTIFICATION_ROOTS: readonly string[] = [];
-
 const NOTIFICATION_LINK = /^(\/[a-z0-9-]+)+$/;
 
 /** Where a notification leads, or null while its page has not shipped. Never anything but an id-only path. */
 export function notificationHref(
   n: Pick<InboxNotification, "deepLink">,
-  live: readonly string[] = LIVE_NOTIFICATION_ROOTS,
+  live: readonly string[] = LIVE_PURPOSE_ROOTS,
 ): string | null {
   if (!NOTIFICATION_LINK.test(n.deepLink)) return null;
   return live.some((root) => n.deepLink.startsWith(`${root}/`)) ? n.deepLink : null;
