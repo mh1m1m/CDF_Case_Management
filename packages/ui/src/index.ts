@@ -5,6 +5,7 @@ export * from "./components";
 export * from "./confirm-dialog";
 export * from "./decision-panel";
 export * from "./field-errors";
+export * from "./guided";
 export * from "./identifier";
 export * from "./scroll-region";
 export * from "./shell";

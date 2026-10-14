@@ -435,3 +435,9 @@ export const decideConflictSchema = z.object({
   reason: text(10, 2000),
 });
 export * from "./bcp";
+
+// ---- In-app notifications (ADR-025, migration 1920; UX redesign S4) --------------------------------
+export * from "./notifications";
+
+// ---- Case structure (ADR-017 to ADR-019, migration 1870; UX redesign Phase 12 P12-1) ----------------------
+export * from "./case-structure";

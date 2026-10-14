@@ -1078,6 +1078,151 @@ export const STATUS_CODES = {
 } as const satisfies Record<string, readonly string[]>;
 export type StatusCodeDimension = keyof typeof STATUS_CODES;
 
+/** Proceeding types the case team opens directly; committee and grievance proceedings come from a referral. */
+export const OPENABLE_PROCEEDING_TYPES = [
+  "PRELIMINARY_REVIEW",
+  "INVESTIGATION",
+  "LEGAL_REVIEW",
+  "AUTHORITY_DECISION",
+  "CORRECTIVE_ACTION",
+  "REINVESTIGATION",
+] as const satisfies readonly ProceedingType[];
+export type OpenableProceedingType = (typeof OPENABLE_PROCEEDING_TYPES)[number];
+
+/** States an open proceeding can be moved to (api.update_proceeding_state); closing is api.close_proceeding. */
+export const OPEN_PROCEEDING_STATUSES = [
+  "OPEN",
+  "IN_PROGRESS",
+  "AWAITING_REVIEW",
+  "AWAITING_APPROVAL",
+  "RETURNED",
+  "SUSPENDED",
+] as const satisfies readonly ProceedingStatus[];
+export const CLOSED_PROCEEDING_STATUSES = [
+  "CONCLUDED",
+  "CANCELLED",
+] as const satisfies readonly ProceedingStatus[];
+
+/**
+ * Outcome codes not offered to users (DEC-F10): their authority and definitions are not confirmed, so they stay in
+ * the catalogue without being exposed. A proceeding already closed with one still shows it.
+ */
+export const OUTCOME_CODES_NOT_OFFERED = ["NOT_FEASIBLE", "NO_PERSONAL_JURISDICTION"] as const;
+
+/**
+ * Where the preliminary review leaves a referral to the Investigation Committee (AMB-018, migration 2030):
+ * NOT_REQUIRED for a direct referral or grievance; REFERRED once the case's latest approved preliminary
+ * recommendation refers it to the committee; AWAITED otherwise. The database decides again on every referral.
+ */
+export const PRELIMINARY_REFERRAL_STATES = ["NOT_REQUIRED", "AWAITED", "REFERRED"] as const;
+export type PreliminaryReferralState = (typeof PRELIMINARY_REFERRAL_STATES)[number];
+
+/**
+ * The case structure for the case team (ADR-017; UX redesign Phase 12 P12-1). Every list is what RLS returns to the
+ * caller; findings need the whole case file (`findingsVisible`, authz.has_case_file_basis). Committee seats come as
+ * counts per seat and standing only, never as people.
+ */
+export interface CaseStructure {
+  proceedings: ProceedingView[];
+  subjects: CaseSubjectView[];
+  allegations: AllegationView[];
+  findings: FindingView[];
+  findingsVisible: boolean;
+  committeeProceedings: CommitteeProceedingView[];
+  referralApprovals: ReferralApprovalView[];
+  /** What the preliminary review leaves for a referral to the Investigation Committee (AMB-018). */
+  preliminaryReferral: PreliminaryReferralState;
+  committees: CommitteeOption[];
+  /** Active codes from config.status_code, by dimension, in code order. */
+  statusCodes: Record<StatusCodeDimension, string[]>;
+  /** authz.can_record_findings: case editors and assigned investigators, on an active case. */
+  canRecordFindings: boolean;
+}
+
+export interface ProceedingView {
+  id: string;
+  sequenceNo: number;
+  proceedingType: ProceedingType;
+  parentProceedingId: string | null;
+  status: ProceedingStatus;
+  waitingReason: string | null;
+  suspensionReason: string | null;
+  outcomeCode: string | null;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+export interface CaseSubjectView {
+  id: string;
+  displayName: string;
+  subjectCategory: SubjectCategory;
+  addedAt: string;
+}
+
+export interface AllegationView {
+  id: string;
+  category: string;
+  description: string;
+  status: string;
+  subjectId: string | null;
+  policyReference: string | null;
+  lawReference: string | null;
+  createdAt: string;
+}
+
+export interface FindingView {
+  id: string;
+  allegationId: string;
+  subjectId: string | null;
+  proceedingId: string;
+  versionNo: number;
+  result: FindingResult;
+  rationale: string;
+  recordedAt: string;
+  recordedByName: string | null;
+  recordedByNameAr: string | null;
+}
+
+export interface CommitteeOption {
+  id: string;
+  code: string;
+  kind: CommitteeKind;
+  isActive: boolean;
+}
+
+export interface CommitteeProceedingView {
+  id: string;
+  proceedingId: string;
+  committeeId: string;
+  status: "OPEN" | "CONCLUDED" | "CANCELLED";
+  referredAt: string;
+  /** The rule set copied at referral (later rule changes never reach the proceeding). */
+  rules: {
+    quorumType: QuorumType;
+    quorumValue: number | null;
+    castingVoteEnabled: boolean;
+    minutesReviewBusinessDays: number;
+    deemedApprovalEnabled: boolean;
+    sourceStatus: "OWNER_DEFAULT" | "SOURCE_REQUIRED" | "APPROVED";
+  };
+  /** The snapshot as counts: per seat, and by standing (voting, non-voting, grievance firewall, not cleared). */
+  seats: { seat: CommitteeSeat; count: number }[];
+  voting: number;
+  firewallRestricted: number;
+  notCleared: number;
+}
+
+/** DEC-61: the Restricted Case Authority's approval to refer this restricted case to one committee, used once. */
+export interface ReferralApprovalView {
+  id: string;
+  committeeId: string;
+  approvedAt: string;
+  approvedByName: string | null;
+  approvedByNameAr: string | null;
+  usedAt: string | null;
+  committeeProceedingId: string | null;
+}
+
 // ---- Direct referral and preliminary review (migration 1880; Q1–Q20) ------------------------------
 /** Status of a direct referral (intake.referral.status). */
 export const REFERRAL_STATUSES = [
@@ -1405,6 +1550,45 @@ export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
 export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
+/** What a notification points at (notify.outbox.object_type after migration 2040). */
+export const NOTIFICATION_OBJECT_TYPES = [
+  "COMMITTEE",
+  "MEETING",
+  "MINUTES",
+  "LEGAL_REVIEW",
+  "DEFENCE_NOTICE",
+  "GRIEVANCE",
+  "EXPORT",
+  "CORRECTIVE_ACTION",
+  "BCP_IMPORT",
+  "REFERRAL",
+  "PRELIMINARY_REVIEW",
+] as const;
+export type NotificationObjectType = (typeof NOTIFICATION_OBJECT_TYPES)[number];
+
+/** One of the caller's own in-app notifications (UX redesign S4): a template code, a link and times, never content. */
+export interface InboxNotification {
+  id: string;
+  template: NotificationTemplate;
+  objectType: NotificationObjectType;
+  /** A path with ids only (N18), written by the database. */
+  deepLink: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+/**
+ * The caller's setting for one template on one channel. A notification reaches them when the rule in force delivers
+ * it and they have not muted it; a mandatory template always delivers and cannot be muted (ADR-025).
+ */
+export interface NotificationSetting {
+  template: NotificationTemplate;
+  channel: NotificationChannel;
+  mandatory: boolean;
+  /** Whether the platform-wide rule (mandatory or event rule) delivers it today. A committee's own default may differ. */
+  ruleDelivers: boolean;
+  muted: boolean;
+}
 
 // ---- Export builder (ADR-026, migration 1930, Q99) ----------------------------------------------------------
 export const EXPORT_FORMATS = ["PDF", "XLSX", "EMAIL"] as const;

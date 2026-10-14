@@ -29,6 +29,7 @@ import { WorkItemRow } from "../../work-item-row";
 import { transitionAction, updateDetailsAction } from "./actions";
 import {
   CaseWorkspace,
+  type CaseTab,
   contentOpen,
   historyItems,
   loadCase,
@@ -43,6 +44,12 @@ export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
   return { title: t("pageTitles.caseDetail") };
 }
+
+// Steps the workflow does not take yet whose work already happens in a tab (Phase 12 P12-1): say where.
+const LATER_IN: Readonly<Record<string, CaseTab>> = {
+  REFER_TO_COMMITTEE: "proceedings",
+  SUBMIT_FINDINGS: "allegations",
+};
 
 export default async function CaseOverviewPage({
   params,
@@ -232,7 +239,18 @@ export default async function CaseOverviewPage({
                 <ul className="list-disc ps-5 text-sm text-cdf-text-secondary">
                   {later.map((tr) => (
                     <li key={tr.code} data-testid={`later-${tr.code}`}>
-                      {stepName(tr)}: {t("caseWorkspace.laterNote")}
+                      {stepName(tr)}:{" "}
+                      {LATER_IN[tr.code] ? (
+                        <a
+                          href={tabHref(c.id, LATER_IN[tr.code]!)}
+                          className="underline underline-offset-4"
+                          data-testid={`later-${tr.code}-where`}
+                        >
+                          {t(`caseStructure.laterIn.${tr.code}` as MessageKey)}
+                        </a>
+                      ) : (
+                        t("caseWorkspace.laterNote")
+                      )}
                     </li>
                   ))}
                 </ul>

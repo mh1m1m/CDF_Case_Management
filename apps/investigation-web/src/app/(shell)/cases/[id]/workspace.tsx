@@ -32,6 +32,7 @@ import { transitionAct } from "../../confirmations";
 export const CASE_TABS = [
   "overview",
   "allegations",
+  "proceedings",
   "evidence",
   "interviews",
   "forms",

@@ -13,6 +13,7 @@ import type { CommandFormState } from "@cdf/contracts";
 import { createTranslator, type Locale, type MessageKey } from "@cdf/i18n";
 import {
   clearSecretControls,
+  isUnchanged,
   pruneUnchanged,
   restoreEcho,
   type CommandFormControl,
@@ -72,6 +73,11 @@ export interface CDFCommandFormProps {
   changedOnly?: readonly string[];
   /** Asks before the command runs (UX-031). With `when`, only when that field holds that value. */
   confirm?: CDFConfirmation & { when?: { field: string; equals: string } };
+  /**
+   * Asks before the user leaves the page with unsaved changes (AMB-243): the browser's own prompt on reload or
+   * close, and this text on a link inside the app. Nothing is kept in the browser; drafts live on the server.
+   */
+  leaveWarning?: string;
   children?: ReactNode;
 }
 
@@ -88,6 +94,7 @@ export interface CDFCommandFormProps {
  * - While the command runs the button stays focusable (`aria-disabled`), so focus does not fall to the page (UX-077).
  * - Forms that confirm or send only changed fields wait for hydration (fail closed): without the client handler
  *   the browser would skip the confirmation or send stale values.
+ * - A long form can ask before the user leaves with unsaved changes (`leaveWarning`, AMB-243).
  */
 export function CDFCommandForm(props: CDFCommandFormProps) {
   const t = createTranslator(props.locale);
@@ -113,6 +120,49 @@ export function CDFCommandForm(props: CDFCommandFormProps) {
     el.addEventListener("reset", guard);
     return () => el.removeEventListener("reset", guard);
   }, []);
+
+  // AMB-243: unsaved changes are not lost by accident. Dirty means any control differs from what the page rendered,
+  // so a saved draft (the form resets to the new values) or an untouched form never asks.
+  const { leaveWarning } = props;
+  useEffect(() => {
+    const el = form.current;
+    if (!el || !leaveWarning) return;
+    const dirty = () => controlsOf(el).some((c) => !isUnchanged(c));
+    // Set once the user agreed to leave through a link, so a full page load does not ask a second time.
+    let agreed = false;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (agreed || !dirty()) return;
+      event.preventDefault();
+      event.returnValue = ""; // older browsers need it set to show their prompt
+    };
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey)
+        return;
+      const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(link instanceof HTMLAnchorElement) || link.target === "_blank" || el.contains(link)) return;
+      const to = new URL(link.href, window.location.href);
+      if (to.pathname === window.location.pathname && to.search === window.location.search) return;
+      if (!dirty()) return;
+      if (window.confirm(leaveWarning)) {
+        agreed = true;
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    // A page brought back with the browser's Back button asks again.
+    const onPageShow = () => {
+      agreed = false;
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [leaveWarning]);
 
   // A submit made before hydration came back as a full page: put the user's values back (never a secret).
   useEffect(() => {

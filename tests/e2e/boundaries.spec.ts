@@ -44,6 +44,7 @@ for (const locale of ["ar", "en"] as const) {
     for (const suffix of [
       "",
       "/allegations",
+      "/proceedings",
       "/evidence",
       "/interviews",
       "/forms",
