@@ -11,12 +11,14 @@ import {
   REASON,
   committeeIds,
   openItem,
+  preliminaryReferral,
   openWithPresent,
   scheduleMeeting,
   seat,
   vote,
   type MeetingFixture,
 } from "../support/committee";
+import { caseFacts } from "../support/decision";
 
 let caseB: string, ic: string, gc: string;
 
@@ -149,6 +151,7 @@ describe("meetings: scheduling and visibility", () => {
         ["legal", "MEMBER"],
         ["investigatorA", "MEMBER"],
       ]);
+      await preliminaryReferral(s, caseB); // AMB-018 (migration 2030)
       await s.as("caseManager");
       const [icp] = await s.tx<
         { id: string }[]
@@ -385,13 +388,29 @@ describe("voting (N6, N7, N8)", () => {
     });
   });
 
-  it("closing needs every present eligible member's vote, and quorum from the rule snapshot", async () => {
+  it("no vote opens without quorum (AMB-067, migration 2030)", async () => {
     await scenario(async (s) => {
       // Four eligible voters, two present: majority quorum is three.
       const f = await ready(s);
       await s.as("committeeSecretary");
       await s.tx`select api.record_attendance(${f.participant.legalB!}, 'ABSENT')`;
       await s.tx`select api.record_attendance(${f.participant.lead!}, 'ABSENT')`;
+      await s.expectError(
+        "CDF_CONFLICT:NO_QUORUM",
+        (tx) => tx`select api.open_vote_item(${f.meeting}, 'OTHER', null, 'No quorum (synthetic)')`,
+      );
+      await s.tx`select api.close_meeting(${f.meeting}, ${REASON})`;
+    });
+  });
+
+  it("closing needs every present eligible member's vote, and quorum from the rule snapshot", async () => {
+    await scenario(async (s) => {
+      // A fixed quorum of three. Four eligible, three present: the vote opens; a recusal mid-vote leaves two.
+      await s.as("platformAdmin");
+      await s.tx`select api.set_committee_rule_set(${ic}, now(), 'FIXED_NUMBER', 3, false, 5, false, null, null, 'NO_DECISION', 'APPROVED', ${REASON})`;
+      const f = await ready(s);
+      await s.as("committeeSecretary");
+      await s.tx`select api.record_attendance(${f.participant.legalB!}, 'ABSENT')`;
       const item = await openItem(s, f.meeting);
       await vote(s, "legal", item, "APPROVE");
       await s.as("committeeSecretary");
@@ -403,13 +422,15 @@ describe("voting (N6, N7, N8)", () => {
         "CDF_INVALID:custom_quorum_attested",
         (tx) => tx`select api.close_vote_item(${item}, true)`,
       );
+      await s.as("lead");
+      await s.tx`select api.recuse_for_conflict(${item}, 'Synthetic: related to a party.')`;
       await vote(s, "committeeChair", item, "APPROVE");
       await s.as("committeeSecretary");
       expect((await s.tx<{ r: string }[]>`select api.close_vote_item(${item}, null) as r`)[0]!.r).toBe(
         "NO_QUORUM",
       );
       const r = await itemRow(s, item);
-      expect(r).toMatchObject({ status: "CLOSED", eligible_count: 4, present_count: 2, quorum_required: 3 });
+      expect(r).toMatchObject({ status: "CLOSED", eligible_count: 3, present_count: 2, quorum_required: 3 });
       // A closed item takes no more votes and the meeting can close.
       await s.as("legalB");
       await s.expectError(
@@ -654,6 +675,71 @@ describe("meeting records are append-only", () => {
   });
 });
 
+describe("committee meetings are not recorded (T-AMB-040, DEC-AMB-007, migration 2030)", () => {
+  it("no meeting recording command or field exists; minutes are the record", async () => {
+    await ownerScenario(async (s) => {
+      await s.asOwner();
+      expect(
+        await s.tx`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname in ('api', 'committee') and p.proname ~ 'recording'
+                     and p.proname ~ '(meeting|committee|minutes|vote)'`,
+      ).toEqual([]);
+      expect(
+        await s.tx`select table_name, column_name from information_schema.columns
+                   where table_schema = 'committee' and column_name ~ '(recording|audio|video)'`,
+      ).toEqual([]);
+    });
+  });
+});
+
+describe("a finding vote binds one finding version (AMB-030, migration 2030)", () => {
+  it("T-AMB-012: a new finding version does not alter the version bound to a closed vote item", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const facts = await caseFacts(s, caseB);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await openWithPresent(s, f, VOTERS);
+      const [vi] = await s.tx<{ id: string }[]>`
+        select api.open_vote_item(${f.meeting}, 'FINDING', ${facts.finding}, 'Finding on the allegation (synthetic)') as id`;
+      for (const user of VOTERS) await vote(s, user, vi!.id, "APPROVE");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+
+      // Investigation goes on: a new version of the finding is recorded after the vote.
+      await s.as("investigatorB");
+      const [v2] = await s.tx<{ id: string }[]>`
+        select api.record_finding(${facts.allegation}, null, ${facts.proceeding}, 'NOT_SUBSTANTIATED',
+          'Synthetic: revised finding after new evidence.') as id`;
+      expect(v2!.id).not.toBe(facts.finding);
+
+      // The vote still names version 1, which is unchanged; version 2 is a separate row awaiting its own vote.
+      await s.as("committeeSecretary");
+      const [bound] = await s.tx<{ finding_id: string; status: string; result: string }[]>`
+        select finding_id, status, result from committee.vote_item where id = ${vi!.id}`;
+      expect(bound).toEqual({ finding_id: facts.finding, status: "CLOSED", result: "APPROVED" });
+      await s.as("investigatorB");
+      expect(
+        await s.tx`select version_no, result from case_mgmt.finding
+                   where allegation_id = ${facts.allegation} order by version_no`,
+      ).toEqual([
+        { version_no: 1, result: "SUBSTANTIATED" },
+        { version_no: 2, result: "NOT_SUBSTANTIATED" },
+      ]);
+
+      // Negative: neither the bound version nor the closed vote item can be changed, even by the table owner.
+      await s.asOwner();
+      await s.expectError(
+        "case_mgmt.finding is append-only",
+        (tx) => tx`update case_mgmt.finding set result = 'NOT_SUBSTANTIATED' where id = ${facts.finding}`,
+      );
+      await s.expectError(
+        `vote item ${vi!.id} is closed`,
+        (tx) => tx`update committee.vote_item set finding_id = ${v2!.id} where id = ${vi!.id}`,
+      );
+    });
+  });
+});
+
 describe("ambiguity register: meetings (CDF-205)", () => {
   it("T-AMB-029: a member who declares a conflict about one subject votes on no item of the meeting", async () => {
     await scenario(async (s) => {
@@ -726,7 +812,8 @@ describe("ambiguity register: meetings (CDF-205)", () => {
       select table_schema || '.' || table_name || '.' || column_name as c from information_schema.columns
       where table_schema in ('committee', 'decision', 'grievance')
         and column_name ~* '(recording|audio|video|transcript|media)'`;
-    expect(columns).toEqual([]);
+    // The one match is a conflict re-media-tion (migration 2030, DEC-AMB-013), not media.
+    expect(columns.map((x) => x.c)).toEqual(["decision.authority_decision_supersession.remediation_id"]);
   });
 
   it("T-AMB-047: a present member who voted cannot vote again once the item is CLOSED", async () => {

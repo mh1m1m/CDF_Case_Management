@@ -7,6 +7,7 @@ import {
   EXPORT_FORMATS,
   EXPORT_OBJECT_TYPES,
   EXPORT_PURPOSES,
+  EXPORT_PURPOSES_REQUIRING_JUSTIFICATION,
 } from "@cdf/contracts";
 
 const uuid = z.uuid({ message: "validation.invalid" });
@@ -25,7 +26,8 @@ const optionalText = (max: number) =>
     .transform((v) => (v ? v : undefined));
 const previewHash = z.string().regex(/^[0-9a-f]{64}$/, { message: "validation.invalid" });
 
-/** External exports always name the receiving party and carry a justification (Q99). */
+/** External exports always name the receiving party and carry a justification (Q99); so does any export whose purpose
+ *  requires one (OTHER, DEC-F21). Purposes come from the governed catalogue (migration 2040). */
 export const createExportRequestSchema = z
   .object({
     caseId: uuid,
@@ -53,7 +55,9 @@ export const createExportRequestSchema = z
     } else {
       if (v.externalParty)
         ctx.addIssue({ code: "custom", path: ["externalParty"], message: "validation.invalid" });
-      if (tooShort(v.justification, 20))
+      if (EXPORT_PURPOSES_REQUIRING_JUSTIFICATION.includes(v.purpose) && !v.justification)
+        ctx.addIssue({ code: "custom", path: ["justification"], message: "validation.required" });
+      else if (tooShort(v.justification, 20))
         ctx.addIssue({ code: "custom", path: ["justification"], message: "validation.tooShort" });
     }
   });

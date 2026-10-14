@@ -3,6 +3,7 @@ import { ROLES, type MyArea, type Role } from "@cdf/contracts";
 import {
   ROLE_PERMISSIONS,
   areaPermitted,
+  canAdministerExportPolicy,
   navigationFor,
   permissionsForRoles,
   shellAreas,
@@ -127,5 +128,17 @@ describe("shell areas (UX redesign S1, audit §20.4)", () => {
     expect(areaPermitted({ permissions: [] }, "MY_WORK")).toBe(true);
     expect(areaPermitted({ permissions: [] }, "CASES")).toBe(true);
     expect(areaPermitted({ permissions: [] }, "RECORDS")).toBe(false);
+  });
+});
+
+describe("export policy administration (DEC-F24, migration 2040)", () => {
+  it("is separate from export approval: an approver never administers export policy, whatever the grant", () => {
+    const actorOf = (...roles: Role[]) => ({ permissions: permissionsForRoles(roles) });
+    expect(canAdministerExportPolicy(actorOf("PLATFORM_ADMIN"))).toBe(true);
+    expect(ROLE_PERMISSIONS.GRC_DIRECTOR).toContain("EXPORT_POLICY_ADMIN"); // the 1930 grant, kept and inert
+    expect(canAdministerExportPolicy(actorOf("GRC_DIRECTOR"))).toBe(false);
+    expect(canAdministerExportPolicy(actorOf("PLATFORM_ADMIN", "CASE_MANAGER"))).toBe(false);
+    expect(canAdministerExportPolicy(actorOf("CASE_MANAGER"))).toBe(false);
+    expect(canAdministerExportPolicy(null)).toBe(false);
   });
 });

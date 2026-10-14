@@ -51,7 +51,7 @@ async function draft(s: Scenario, actor: UserKey, caseIdValue: string, d: Draft 
   const justification =
     d.justification !== undefined ? d.justification : audience === "EXTERNAL" ? JUSTIFICATION : null;
   const [r] = await s.tx<{ id: string }[]>`
-    select api.create_export_request(${caseIdValue}, ${d.format ?? "PDF"}, ${audience}, 'REGULATOR_REQUEST',
+    select api.create_export_request(${caseIdValue}, ${d.format ?? "PDF"}, ${audience}, 'REGULATORY_OR_EXTERNAL_AUTHORITY',
       ${party}, ${justification}) as id`;
   return r!.id;
 }
@@ -123,6 +123,19 @@ async function rule(s: Scenario, actor: UserKey, code: string, args: string) {
   await s.tx`select api.set_export_rule(${code}, ${audience!}, ${min === "-" ? null : min!}::core.classification_level,
     ${objectType === "-" ? null : objectType!}, ${restricted === "restricted"}, ${action!}, now(), 'SOURCE_REQUIRED',
     ${REASON})`;
+}
+
+/** A rule version authored before migration 2040, when a GRC director could both set rules and approve (1930): the
+ *  owner connection plants it as api.set_export_rule wrote it. AGENT-09 X1 still excludes its author. */
+async function legacyRule(s: OwnerScenario, author: UserKey, code: string, args: string) {
+  await s.asOwner();
+  const [audience, min, objectType, restricted, action] = args.split(" ");
+  await s.tx`update exchange.approval_rule set effective_to = now() where code = ${code} and effective_to is null`;
+  await s.tx`insert into exchange.approval_rule (code, audience, min_classification, object_type, restricted_only,
+                                               action, source_status, reason, effective_from, created_by)
+             values (${code}, ${audience!}, ${min === "-" ? null : min!}::core.classification_level,
+                     ${objectType === "-" ? null : objectType!}, ${restricted === "restricted"}, ${action!},
+                     'SOURCE_REQUIRED', ${REASON}, now(), ${USERS[author]})`;
 }
 
 async function storedApprovals(s: OwnerScenario, request: string): Promise<number> {
@@ -218,12 +231,14 @@ describe("export builder (Q99, ADR-026)", () => {
       await s.as("investigatorA");
       await s.expectError(
         "CDF_FORBIDDEN",
-        (tx) => tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'AUDIT', null, null)`,
+        (tx) =>
+          tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null)`,
       );
       await s.as("lead");
       await s.expectError(
         "CDF_NOT_FOUND",
-        (tx) => tx`select api.create_export_request(${caseB}, 'PDF', 'INTERNAL', 'AUDIT', null, null)`,
+        (tx) =>
+          tx`select api.create_export_request(${caseB}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null)`,
       );
       // A draft is its requester's alone: approvers cannot see or act on it.
       await s.as("caseManager");
@@ -276,13 +291,13 @@ describe("export builder (Q99, ADR-026)", () => {
         await s.expectError(
           `CDF_INVALID:${field}`,
           (tx) =>
-            tx`select api.create_export_request(${caseA}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST', ${party}, ${justification})`,
+            tx`select api.create_export_request(${caseA}, 'EMAIL', 'EXTERNAL', 'REGULATORY_OR_EXTERNAL_AUTHORITY', ${party}, ${justification})`,
         );
       }
       await s.expectError(
         "CDF_INVALID:external_party",
         (tx) =>
-          tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'AUDIT', 'Regulator Alpha (synthetic)', null)`,
+          tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', 'Regulator Alpha (synthetic)', null)`,
       );
       const req = await draft(s, "lead", caseA, { format: "EMAIL", audience: "EXTERNAL" });
       await addItem(s, req, "CASE_SUMMARY", caseA);
@@ -512,16 +527,23 @@ describe("export builder (Q99, ADR-026)", () => {
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.preview_export(${internal})`);
       await s.as("grcDirector");
       await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
-      // The approval stage is given; the case's Restricted Case Authority (its owner, here also the requester:
-      // consent, not an approval stage) still decides.
+      // The approval stage is given; the case's Restricted Case Authority is its owner, here also the requester, who
+      // never consents to their own export (CDF-208): it waits for a teammate's request.
       expect(await decide(s, "grcDeputy", internal)).toBe("SUBMITTED");
-      expect(await authority(s, "grcDirector", internal)).toBe("APPROVED");
+      await s.as("grcDirector");
+      const own = await preview(s, internal);
+      await s.expectError(
+        "CDF_CONFLICT:REQUESTER_CANNOT_CONSENT",
+        (tx) => tx`select api.decide_restricted_export(${internal}, 'APPROVE', ${REASON}, ${own.hash})`,
+      );
 
-      // Only EXPORT_POLICY_ADMIN sets rules; a rule in force from now binds an approved, ungenerated export.
+      // Only EXPORT_POLICY_ADMIN sets rules, and never someone who approves exports (DEC-F24, migration 2040: the
+      // director keeps the 1930 grant, which no longer lets them act; the platform administrator holds it now). A rule
+      // in force from now binds an approved, ungenerated export.
       const pending = await draft(s, "lead", caseA);
       await addItem(s, pending, "CASE_SUMMARY", caseA);
       expect(await submit(s, pending, "CONFIDENTIAL")).toBe("APPROVED");
-      for (const actor of ["caseManager", "platformAdmin"] as const) {
+      for (const actor of ["caseManager", "grcDirector", "grcDeputy"] as const) {
         await s.as(actor);
         await s.expectError(
           "CDF_FORBIDDEN",
@@ -529,7 +551,7 @@ describe("export builder (Q99, ADR-026)", () => {
             tx`select api.set_export_rule('INTERNAL_ALL', 'INTERNAL', null, null, false, 'REQUIRE_SECOND_APPROVAL', now(), 'SOURCE_REQUIRED', ${REASON})`,
         );
       }
-      await s.as("grcDirector");
+      await s.as("platformAdmin");
       await s.tx`select api.set_export_rule('INTERNAL_ALL', 'INTERNAL', null, null, false, 'REQUIRE_SECOND_APPROVAL', now(), 'SOURCE_REQUIRED', ${REASON})`;
       await s.expectError(
         "CDF_CONFLICT:LATER_RULE_EXISTS",
@@ -582,10 +604,18 @@ describe("export builder (Q99, ADR-026)", () => {
   });
   it("X1: a policy administrator who changed a rule that applies to an export can never decide it", async () => {
     await ownerScenario(async (s) => {
-      // AGENT-09's probe: the director switches the confidential rule off, narrowed so its own version matches nothing.
+      // DEC-F24 (2040): an approver can no longer set a rule at all...
       await s.as("grcDirector");
-      await s.tx`select api.set_export_rule('EXTERNAL_CONFIDENTIAL', 'EXTERNAL', 'SECRET', null, false, 'NONE', now(),
-        'APPROVED', ${REASON})`;
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (
+          tx,
+        ) => tx`select api.set_export_rule('EXTERNAL_CONFIDENTIAL', 'EXTERNAL', 'SECRET', null, false, 'NONE', now(),
+          'APPROVED', ${REASON})`,
+      );
+      // ...but a version authored before (1930 let the director do both) still excludes its author. AGENT-09's probe:
+      // the director switched the confidential rule off, narrowed so its own version matches nothing.
+      await legacyRule(s, "grcDirector", "EXTERNAL_CONFIDENTIAL", "EXTERNAL SECRET - unrestricted NONE");
       const req = await draft(s, "lead", caseA, { audience: "EXTERNAL" });
       await addItem(s, req, "CASE_SUMMARY", caseA);
       const p = await preview(s, req);
@@ -601,7 +631,7 @@ describe("export builder (Q99, ADR-026)", () => {
         );
       }
       // Authoring a rule that never applied to the export does not exclude anyone.
-      await rule(s, "grcDeputy", "EXTERNAL_MINUTES", "EXTERNAL - MINUTES unrestricted NONE");
+      await legacyRule(s, "grcDeputy", "EXTERNAL_MINUTES", "EXTERNAL - MINUTES unrestricted NONE");
       expect(await decide(s, "grcDeputy", req)).toBe("APPROVED");
       await s.as("lead");
       expect((await generate(s, req)).hash).toBe(p.hash);
@@ -610,12 +640,13 @@ describe("export builder (Q99, ADR-026)", () => {
 
   it("a rule that begins after submission raises the approvals needed, and a refusal stops generation", async () => {
     await ownerScenario(async (s) => {
-      await rule(s, "grcDeputy", "EXTERNAL_CONFIDENTIAL", "EXTERNAL CONFIDENTIAL - unrestricted NONE");
+      // Versions authored by the deputy before migration 2040 (DEC-F24), so X1 keeps them out of this export.
+      await legacyRule(s, "grcDeputy", "EXTERNAL_CONFIDENTIAL", "EXTERNAL CONFIDENTIAL - unrestricted NONE");
       const req = await draft(s, "lead", caseA, { audience: "EXTERNAL" });
       await addItem(s, req, "CASE_SUMMARY", caseA);
       expect(await submit(s, req, "CONFIDENTIAL")).toBe("SUBMITTED");
       expect(await storedApprovals(s, req)).toBe(1);
-      await rule(
+      await legacyRule(
         s,
         "grcDeputy",
         "EXTERNAL_SUMMARY",
@@ -627,9 +658,57 @@ describe("export builder (Q99, ADR-026)", () => {
       expect(await notified(s, "EXPORT_APPROVAL_REQUESTED", req)).toEqual(["caseManager", "grcDirector"]);
       expect(await decide(s, "grcDirector", req)).toBe("APPROVED");
       // A refusing rule in force after approval stops generation.
-      await rule(s, "grcDirector", "EXTERNAL_SUMMARY_REFUSED", "EXTERNAL - CASE_SUMMARY unrestricted REFUSE");
+      await rule(
+        s,
+        "platformAdmin",
+        "EXTERNAL_SUMMARY_REFUSED",
+        "EXTERNAL - CASE_SUMMARY unrestricted REFUSE",
+      );
       await s.as("lead");
       await s.expectError("CDF_CONFLICT:REFUSED_BY_RULE", (tx) => tx`select api.generate_export(${req})`);
+    });
+  });
+
+  it("CDF-208 (AGENT-09 pack 4, R5): the authority never consents to an export they requested, on any path; a teammate's request is decided as usual", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseExec}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
+      // The case's owner, its only Restricted Case Authority, requests an export of it.
+      const own = await draft(s, "grcDirector", caseExec);
+      await addItem(s, own, "CASE_SUMMARY", caseExec);
+      expect(await submit(s, own, "SECRET")).toBe("SUBMITTED");
+      expect(await decide(s, "grcDeputy", own)).toBe("SUBMITTED");
+      await s.as("grcDirector");
+      const p = await preview(s, own);
+      for (const decision of ["APPROVE", "REJECT"]) {
+        await s.expectError(
+          "CDF_CONFLICT:REQUESTER_CANNOT_CONSENT",
+          (tx) => tx`select api.decide_restricted_export(${own}, ${decision}, ${REASON}, ${p.hash})`,
+        );
+      }
+      // Nor on any other path: the table refuses the requester's decision, even written by the owner connection.
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:REQUESTER_CANNOT_CONSENT",
+        (
+          tx,
+        ) => tx`insert into exchange.restricted_export_approval (request_id, case_id, decided_by, decision, reason,
+                                                                   preview_hash)
+                   values (${own}, ${caseExec}, ${USERS.grcDirector}, 'APPROVED', ${REASON}, ${p.hash})`,
+      );
+      // The export waits (the accepted deadlock): it is never approved and cannot be generated.
+      const [row] = await s.tx<
+        { status: string }[]
+      >`select status from exchange.export_request where id = ${own}`;
+      expect(row!.status).toBe("SUBMITTED");
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:NOT_APPROVED", (tx) => tx`select api.generate_export(${own})`);
+      // A teammate's request of the same case is decided by the authority, as before.
+      const team = await draft(s, "grcDeputy", caseExec);
+      await addItem(s, team, "CASE_SUMMARY", caseExec);
+      expect(await submit(s, team, "SECRET")).toBe("SUBMITTED");
+      expect(await authority(s, "grcDirector", team)).toBe("SUBMITTED");
+      expect(await decide(s, "grcDirector", team)).toBe("APPROVED");
     });
   });
 
@@ -679,11 +758,31 @@ describe("export builder (Q99, ADR-026)", () => {
     });
 
     await ownerScenario(async (s) => {
-      // The stage is given first; switching the rule off after submission does not remove the authority's say; the
-      // authority rejects, so the export is rejected.
+      // DEC-F23 (2040): the authority's say cannot be switched off or narrowed after submission (or ever), on any path;
+      // restating it is allowed. The stage is given first; the authority rejects, so the export is rejected.
       const { req, hash } = await deputyRequests(s);
       expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
-      await rule(s, "grcDeputy", "RESTRICTED_CASE_AUTHORITY", "ANY - - restricted NONE");
+      for (const args of [
+        "ANY - - restricted NONE",
+        "EXTERNAL - - restricted REQUIRE_AUTHORITY_APPROVAL",
+        "ANY SECRET - restricted REQUIRE_AUTHORITY_APPROVAL",
+        "ANY - MINUTES restricted REQUIRE_AUTHORITY_APPROVAL",
+        "ANY - - unrestricted REQUIRE_AUTHORITY_APPROVAL",
+        "ANY - - restricted REQUIRE_SECOND_APPROVAL",
+      ]) {
+        await s.expectError("CDF_CONFLICT:RESTRICTED_CASE_AUTHORITY_PROTECTED", () =>
+          rule(s, "platformAdmin", "RESTRICTED_CASE_AUTHORITY", args),
+        );
+      }
+      await s.expectError("CDF_CONFLICT:RESTRICTED_CASE_AUTHORITY_PROTECTED", () =>
+        legacyRule(s, "grcDeputy", "RESTRICTED_CASE_AUTHORITY", "ANY - - restricted NONE"),
+      );
+      await rule(
+        s,
+        "platformAdmin",
+        "RESTRICTED_CASE_AUTHORITY",
+        "ANY - - restricted REQUIRE_AUTHORITY_APPROVAL",
+      );
       expect(await decide(s, "grcDirector", req)).toBe("SUBMITTED");
       await s.expectError(
         "CDF_FORBIDDEN",
@@ -698,7 +797,7 @@ describe("export builder (Q99, ADR-026)", () => {
     await ownerScenario(async (s) => {
       // With no approval stage needed, the authority's approval alone approves it, and no approver can add a stage
       // meanwhile. The case owner needs no approver permission to see and decide it (AGENT-09 re-look on 1930).
-      await rule(s, "grcDeputy", "RESTRICTED_CASE", "ANY - - restricted NONE");
+      await rule(s, "platformAdmin", "RESTRICTED_CASE", "ANY - - restricted NONE");
       const { req, hash } = await deputyRequests(s);
       expect(await preview(s, req)).toMatchObject({
         approvals_required: 0,
@@ -723,7 +822,7 @@ describe("export builder (Q99, ADR-026)", () => {
       // The authority approves nothing a rule refuses or an approver could not see; a rejection is always possible.
       const { req, hash } = await deputyRequests(s);
       expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
-      await rule(s, "grcDeputy", "RESTRICTED_REFUSED", "ANY - - restricted REFUSE");
+      await rule(s, "platformAdmin", "RESTRICTED_REFUSED", "ANY - - restricted REFUSE");
       await s.as("grcDirector");
       await s.expectError("CDF_CONFLICT:REFUSED_BY_RULE", (tx) => decideAuthority(tx, req, hash));
       await s.asOwner();
@@ -735,28 +834,24 @@ describe("export builder (Q99, ADR-026)", () => {
     });
 
     await ownerScenario(async (s) => {
-      // Configurable: switched off, no authority decision is asked for; switched on later, generation stops.
-      await rule(s, "grcDeputy", "RESTRICTED_CASE_AUTHORITY", "ANY - - restricted NONE");
+      // DEC-F23 (2040), fail closed: even with no version of the rule in force (an end given on the owner connection,
+      // all the 1930 protection allows), an export of a restricted case still needs its authority. (Until 2040 this
+      // scenario showed the rule switched off and no authority decision asked for.)
+      await s.asOwner();
+      await s.tx`update exchange.approval_rule set effective_to = now()
+                 where code = 'RESTRICTED_CASE_AUTHORITY' and effective_to is null`;
       const { req, hash } = await deputyRequests(s);
-      expect(await preview(s, req)).toMatchObject({ authority_approval_required: false });
+      const p = await preview(s, req);
+      expect(p.authority_approval_required).toBe(true);
+      expect(p.matched_rules.map((r) => r.code)).toEqual(["RESTRICTED_CASE"]);
       expect(await submit(s, req, "SECRET")).toBe("SUBMITTED");
-      expect(await notified(s, "EXPORT_AUTHORITY_APPROVAL_REQUESTED", req)).toEqual([]);
-      await s.as("grcDirector");
-      await s.expectError("CDF_CONFLICT:AUTHORITY_APPROVAL_NOT_REQUIRED", (tx) =>
-        decideAuthority(tx, req, hash),
-      );
-      expect(await decide(s, "grcDirector", req)).toBe("APPROVED");
-      await rule(
-        s,
-        "grcDeputy",
-        "RESTRICTED_AUTHORITY_LATE",
-        "ANY - - restricted REQUIRE_AUTHORITY_APPROVAL",
-      );
+      expect(await notified(s, "EXPORT_AUTHORITY_APPROVAL_REQUESTED", req)).toEqual(["grcDirector"]);
+      expect(await decide(s, "grcDirector", req)).toBe("SUBMITTED");
       await s.as("grcDeputy");
-      await s.expectError(
-        "CDF_CONFLICT:AUTHORITY_APPROVAL_REQUIRED",
-        (tx) => tx`select api.generate_export(${req})`,
-      );
+      await s.expectError("CDF_CONFLICT:NOT_APPROVED", (tx) => tx`select api.generate_export(${req})`);
+      expect(await authority(s, "grcDirector", req)).toBe("APPROVED");
+      await s.as("grcDeputy");
+      expect((await generate(s, req)).hash).toBe(hash);
     });
 
     await scenario(async (s) => {
@@ -767,6 +862,219 @@ describe("export builder (Q99, ADR-026)", () => {
       await s.expectError("CDF_CONFLICT:CASE_NOT_RESTRICTED", (tx) =>
         decideAuthority(tx, req, "0".repeat(64)),
       );
+    });
+  });
+});
+
+describe("owner decisions DEC-F21, DEC-F22 and DEC-F24 (migration 2040)", () => {
+  it("DEC-F21: a purpose comes from the governed catalogue; OTHER needs a justification; legacy codes stay as history", async () => {
+    await ownerScenario(async (s) => {
+      const create = (purpose: string | null, justification: string | null) =>
+        s.tx`select api.create_export_request(${caseA}, 'PDF', 'INTERNAL', ${purpose}, null, ${justification}) as id`;
+      await s.as("lead");
+      for (const purpose of [
+        "AUTHORITY_SUBMISSION",
+        "REGULATOR_REQUEST",
+        "LEGAL_COUNSEL",
+        "INTERNAL_REPORTING",
+        "AUDIT",
+        "NOT_A_PURPOSE",
+        null,
+      ])
+        await s.expectError("CDF_INVALID:purpose", () => create(purpose, null));
+      await s.expectError("CDF_INVALID:justification", () => create("OTHER", null));
+      await s.expectError("CDF_INVALID:justification", () => create("OTHER", "Too short."));
+      await create("OTHER", JUSTIFICATION);
+      await create("LEGAL_REVIEW", null);
+      // The database refuses an inactive purpose, and OTHER without a justification, on any path.
+      await s.asOwner();
+      for (const [purpose, field] of [
+        ["AUDIT", "purpose"],
+        ["OTHER", "justification"],
+      ] as const) {
+        await s.expectError(
+          `CDF_INVALID:${field}`,
+          (tx) => tx`insert into exchange.export_request (case_id, format, audience, purpose, requested_by)
+                     values (${caseA}, 'PDF', 'INTERNAL', ${purpose}, ${USERS.lead})`,
+        );
+      }
+      // Administrable by the export policy administrator only, never by an approver (DEC-F24).
+      const setPurpose = (code: string, active: boolean, requiresJustification = false) =>
+        s.tx`select api.set_export_purpose(${code}, 'Synthetic purpose', 'غرض تجريبي', ${requiresJustification},
+          ${active}, 75, ${REASON})`;
+      for (const actor of ["caseManager", "grcDirector", "lead"] as const) {
+        await s.as(actor);
+        await s.expectError("CDF_FORBIDDEN", () => setPurpose("LEGAL_REVIEW", false));
+      }
+      await s.as("platformAdmin");
+      await s.expectError("CDF_INVALID:code", () => setPurpose("not a code", true));
+      await s.expectError(
+        "CDF_INVALID:sort_order",
+        (
+          tx,
+        ) => tx`select api.set_export_purpose('LEGAL_REVIEW', 'Legal review', 'مراجعة قانونية', false, true, 950,
+          ${REASON})`,
+      );
+      await s.expectError("CDF_CONFLICT:LEGACY_PURPOSE", () => setPurpose("AUDIT", true));
+      await s.expectError("CDF_CONFLICT:OTHER_REQUIRES_JUSTIFICATION", () =>
+        setPurpose("OTHER", true, false),
+      );
+      await setPurpose("LEGAL_REVIEW", false); // deactivated, never deleted
+      await setPurpose("SYNTHETIC_DEMO_PURPOSE", true, true);
+      await s.as("lead");
+      await s.expectError("CDF_INVALID:purpose", () => create("LEGAL_REVIEW", null));
+      await s.expectError("CDF_INVALID:justification", () => create("SYNTHETIC_DEMO_PURPOSE", null));
+      await create("SYNTHETIC_DEMO_PURPOSE", JUSTIFICATION);
+      expect(
+        await s.tx`select code, is_active from exchange.export_purpose
+                   where code in ('LEGAL_REVIEW', 'AUDIT', 'SYNTHETIC_DEMO_PURPOSE') order by code collate "C"`,
+      ).toEqual([
+        { code: "AUDIT", is_active: false },
+        { code: "LEGAL_REVIEW", is_active: false },
+        { code: "SYNTHETIC_DEMO_PURPOSE", is_active: true },
+      ]);
+      // Audited with codes and flags only.
+      await s.asOwner();
+      const events = await s.tx<{ object_id: string; metadata: Record<string, unknown> }[]>`
+        select object_id, metadata from audit.audit_event where action = 'EXPORT_PURPOSE_SET' order by seq`;
+      expect(events.map((e) => [e.object_id, e.metadata.is_active, e.metadata.created])).toEqual([
+        ["LEGAL_REVIEW", false, false],
+        ["SYNTHETIC_DEMO_PURPOSE", true, true],
+      ]);
+      expect(JSON.stringify(events)).not.toContain("Synthetic purpose");
+    });
+  });
+
+  it("DEC-F22: no external domain is invented; the empty list is SOURCE_REQUIRED and only the policy administrator reads it", async () => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      expect(
+        await s.tx`select value, status from config.setting where key = 'APPROVED_EXTERNAL_DOMAINS'`,
+      ).toEqual([{ value: null, status: "SOURCE_REQUIRED" }]);
+      await s.expectError(
+        "permission denied",
+        (tx) => tx`insert into exchange.approved_external_domain (domain, source_status, added_by)
+                   values ('regulator.example.test', 'APPROVED', ${USERS.caseManager})`,
+      );
+      await s.as("platformAdmin");
+      expect(await s.tx`select domain from exchange.approved_external_domain`).toEqual([]);
+    });
+  });
+
+  it("T-AMB-112 (DEC-F24): with no independent approver the export fails closed and a configuration warning is raised", async () => {
+    await ownerScenario(async (s) => {
+      const add = (user: UserKey, stage: number) =>
+        s.tx<
+          { id: string }[]
+        >`select api.add_export_approver(${USERS[user]}, ${stage}::int, ${REASON}) as id`;
+      const warnings = async () => {
+        await s.as("platformAdmin");
+        const [r] = await s.tx<
+          {
+            v: {
+              pools: { stage: number; in_use: boolean; active_members: number }[];
+              warnings: { request_id: string; stage: number; still_blocked: boolean }[];
+            };
+          }[]
+        >`select api.export_approval_config_warnings() as v`;
+        return {
+          pools: r!.v.pools,
+          warnings: r!.v.warnings.map((w) => ({
+            request_id: w.request_id,
+            stage: w.stage,
+            still_blocked: w.still_blocked,
+          })),
+        };
+      };
+      // Pools and warnings are the policy administrator's; an approver holding the 1930 grant is refused too.
+      for (const actor of ["caseManager", "grcDirector", "lead"] as const) {
+        await s.as(actor);
+        await s.expectError("CDF_FORBIDDEN", () => add("grcDeputy", 2));
+        await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.export_approval_config_warnings()`);
+      }
+      await s.as("platformAdmin");
+      await s.expectError("CDF_INVALID:stage", () => add("grcDirector", 3));
+      await s.expectError(
+        "CDF_INVALID:user_id",
+        (tx) => tx`select api.add_export_approver(${randomUUID()}, 2, ${REASON})`,
+      );
+      await s.expectError("CDF_FORBIDDEN", () => add("platformAdmin", 2));
+      await s.expectError("CDF_CONFLICT:APPROVER_LACKS_PERMISSION", () => add("caseManager", 2));
+      const [membership] = await add("grcDirector", 2);
+      await s.expectError("CDF_CONFLICT:ALREADY_MEMBER", () => add("grcDirector", 2));
+      expect(await warnings()).toEqual({
+        pools: [
+          { stage: 1, in_use: false, active_members: 0 },
+          { stage: 2, in_use: true, active_members: 1 },
+        ],
+        warnings: [],
+      });
+
+      // The stage-2 pool holds only the director, who requests: nobody independent may give the second approval.
+      const req = await draft(s, "grcDirector", caseA, { audience: "EXTERNAL" });
+      await addItem(s, req, "CASE_SUMMARY", caseA);
+      expect(await submit(s, req, "CONFIDENTIAL")).toBe("SUBMITTED");
+      expect(await decide(s, "caseManager", req)).toBe("SUBMITTED");
+      const hash = (await preview(s, req)).hash;
+      for (const actor of ["grcDeputy", "grcDirector"] as const) {
+        await s.as(actor);
+        await s.expectError(
+          "CDF_FORBIDDEN",
+          (tx) => tx`select api.decide_export(${req}, 'APPROVE', ${REASON}, ${hash})`,
+        );
+      }
+      // Only the first stage's approvers were ever asked.
+      expect(await notified(s, "EXPORT_APPROVAL_REQUESTED", req)).toEqual(["caseManager", "grcDeputy"]);
+      expect((await warnings()).warnings).toEqual([{ request_id: req, stage: 2, still_blocked: true }]);
+      await s.asOwner();
+      const events = await s.tx<{ actor_type: string; keys: string[] }[]>`
+        select actor_type, array(select jsonb_object_keys(metadata) order by 1) as keys
+        from audit.audit_event where action = 'EXPORT_APPROVAL_CONFIGURATION_WARNING' and object_id = ${req}`;
+      expect(events).toEqual([
+        {
+          actor_type: "SYSTEM",
+          keys: ["approvals_required", "eligible_approvers", "pool_in_use", "stage", "warning_id"],
+        },
+      ]);
+      // Table-level backup, whatever path writes an approval: never the requester, never outside the pool.
+      for (const approver of [USERS.grcDirector, USERS.grcDeputy]) {
+        await s.expectError(
+          "CDF_FORBIDDEN",
+          (
+            tx,
+          ) => tx`insert into exchange.export_approval (request_id, stage, approver_id, decision, reason, preview_hash)
+                     values (${req}, 2, ${approver}, 'APPROVED', ${REASON}, ${hash})`,
+        );
+      }
+
+      // The administrator resolves the configuration; the deputy joins the pool and gives the second approval.
+      await s.as("platformAdmin");
+      await add("grcDeputy", 2);
+      expect(await decide(s, "grcDeputy", req)).toBe("APPROVED");
+      expect((await warnings()).warnings).toEqual([{ request_id: req, stage: 2, still_blocked: false }]);
+
+      // A membership is revoked once, by the administrator; an emptied pool stays in use (closed, not open).
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.revoke_export_approver(${membership!.id}, ${REASON})`,
+      );
+      await s.as("platformAdmin");
+      await s.tx`select api.revoke_export_approver(${membership!.id}, ${REASON})`;
+      await s.expectError(
+        "CDF_CONFLICT:ALREADY_REVOKED",
+        (tx) => tx`select api.revoke_export_approver(${membership!.id}, ${REASON})`,
+      );
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (tx) => tx`select api.revoke_export_approver(${randomUUID()}, ${REASON})`,
+      );
+      // Members see their own memberships; nobody else but the administrator sees the pool.
+      await s.as("grcDeputy");
+      expect(await s.tx`select stage from exchange.export_approver_pool`).toEqual([{ stage: 2 }]);
+      await s.as("caseManager");
+      expect(await s.tx`select stage from exchange.export_approver_pool`).toEqual([]);
+      expect(await s.tx`select id from exchange.export_approval_warning`).toEqual([]);
     });
   });
 });

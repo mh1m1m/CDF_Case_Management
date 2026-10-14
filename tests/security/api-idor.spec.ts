@@ -24,7 +24,7 @@ import {
   placeHold,
   requestDisposition,
 } from "../support/records";
-import { committeeIds } from "../support/committee";
+import { committeeIds, preliminaryReferral, unseatDemoSeats } from "../support/committee";
 import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
 
 interface Targets {
@@ -76,6 +76,12 @@ const PROBES: Probe[] = [
     fn: "approve_form",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.approve_form(${t.formInstance}, 'APPROVED', null)`,
+  },
+  // Migration 2040 (DEC-AMB-009): what the case team is shown about executing each decided sanction.
+  {
+    fn: "sanction_executability",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.sanction_executability(${t.case})`,
   },
   {
     fn: "assign_case",
@@ -527,6 +533,19 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.withdraw_referral(${t.referral}, ${REASON})`,
   },
+  // Escalation after a repeated rejection (migration 2040, DEC-F09).
+  {
+    fn: "escalate_referral_rejection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.escalate_referral_rejection(${t.referral}, 'Synthetic: probe escalation text.')`,
+  },
+  {
+    fn: "decide_referral_escalation",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.decide_referral_escalation(${t.referral}, 'ACCEPT', null, null, ${self})`,
+  },
   {
     fn: "comment_on_referral",
     outcome: "NOT_FOUND",
@@ -536,6 +555,12 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
     fn: "referral_available_actions",
     outcome: "EMPTY",
     call: (tx, t) => tx`select * from api.referral_available_actions(${t.referral})`,
+  },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_referral.
+  {
+    fn: "referral_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.referral_view(${t.referral})`,
   },
   {
     fn: "revoke_referral_delegation",
@@ -646,6 +671,17 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.vote_item_status(${t.voteItem})`,
   },
+  // Purpose read models (migration 2030 section 4).
+  {
+    fn: "meeting_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.meeting_view(${t.meeting})`,
+  },
+  {
+    fn: "minutes_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.minutes_view(${t.minutes})`,
+  },
   {
     fn: "generate_minutes",
     outcome: "NOT_FOUND",
@@ -665,6 +701,73 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     fn: "apply_minutes_deemed_approval",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.apply_minutes_deemed_approval(${t.minutes})`,
+  },
+  // The owner's Finalization Set (migration 2030, ADR-040): acting roles, alternates, the snapshot amendment,
+  // emergency meetings, invitee acknowledgements and accommodations, vote revisions, recusals, notes and the
+  // minutes objection ruling.
+  {
+    fn: "activate_acting_chair",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_acting_chair(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "activate_acting_secretary",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_acting_secretary(${t.meeting}, ${REASON})`,
+  },
+  {
+    fn: "activate_alternate_member",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.activate_alternate_member(${t.participant}, ${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "amend_proceeding_snapshot",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.amend_proceeding_snapshot(${t.committeeProceeding}, ${t.participant}, ${REASON})`,
+  },
+  {
+    fn: "schedule_emergency_meeting",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.schedule_emergency_meeting(${t.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)',
+        null, now() + interval '2 hours', now() + interval '3 hours', ${REASON}, 'Synthetic: probe emergency.')`,
+  },
+  {
+    fn: "acknowledge_meeting_confidentiality",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.acknowledge_meeting_confidentiality(${t.witness})`,
+  },
+  {
+    fn: "record_meeting_accommodation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_meeting_accommodation(${t.participant}, 'Synthetic: probe accommodation.')`,
+  },
+  {
+    fn: "revise_vote",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revise_vote(${t.voteItem}, 'REJECT', ${REASON})`,
+  },
+  {
+    fn: "recuse_for_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.recuse_for_conflict(${t.voteItem}, ${REASON})`,
+  },
+  {
+    fn: "record_vote_note",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_vote_note(${t.voteItem}, 'Synthetic: probe note.', false)`,
+  },
+  {
+    fn: "reverse_meeting_conflict_determination",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.reverse_meeting_conflict_determination(${t.concern}, ${REASON})`,
+  },
+  {
+    fn: "overrule_minutes_objection",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.overrule_minutes_objection(${t.minutes}, ${REASON})`,
   },
 ];
 
@@ -802,6 +905,40 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
       tx`select api.record_authority_decision(${t.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(), 'Probe authority',
         'MEMO-PROBE-0001', null, null)`,
   },
+  // Migration 2030: return before submission, item flags, cancelling a request, a superseding opinion.
+  {
+    fn: "return_package_to_committee",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.return_package_to_committee(${t.pkg}, ${REASON})`,
+  },
+  {
+    fn: "recommendation_item_flags",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select * from api.recommendation_item_flags(${t.pkg})`,
+  },
+  {
+    fn: "cancel_legal_review_request",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.cancel_legal_review_request(${t.request}, ${REASON})`,
+  },
+  {
+    fn: "give_superseding_legal_opinion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.give_superseding_legal_opinion(${t.request}, 'CONCURS', null)`,
+  },
+  // DEC-AMB-003 (owner, 2026-10-13): the committee's resolution of a tainted item.
+  {
+    fn: "resolve_conflict_taint",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.resolve_conflict_taint(${t.item}, 'CONFIRM', 'Probe resolution reason.')`,
+  },
+  // Migration 2040: executing a decided sanction (AMB-109; DEC-AMB-004, DEC-AMB-009, DEC-AMB-011).
+  {
+    fn: "record_sanction_execution",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_sanction_execution(${t.item}, ${randomUUID()}, now(), 'HR-PROBE-0001')`,
+  },
 ];
 
 // Employee defence and grievance commands (migration 1910) take a subject, a portal link, a defence notice or a
@@ -814,6 +951,12 @@ interface GrievanceTargets {
 }
 
 const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_grievance or the decider it awaits.
+  {
+    fn: "grievance_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.grievance_view(${t.grievance})`,
+  },
   {
     fn: "link_subject_portal_account",
     outcome: "NOT_FOUND",
@@ -897,6 +1040,61 @@ const GRIEVANCE_PROBES: Probe<GrievanceTargets>[] = [
     call: (tx, t) =>
       tx`select api.record_grievance_outcome(${t.grievance}, ${["UPHOLD"]}::text[], null, ${randomUUID()}, 'Probe summary.')`,
   },
+  // Migration 2040: notice delivery and deadline changes (DEC-F15, DEC-F18), the grievant's withdrawal and completion
+  // (AMB-140, AMB-141), the one reconsideration on new evidence by either path (DEC-AMB-001), and a subject who left
+  // employment (DEC-AMB-009).
+  {
+    fn: "record_notice_delivery",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_notice_delivery(${t.notice}, 'HAND_DELIVERY', now(), 'HAND-PROBE-0001')`,
+  },
+  {
+    fn: "change_defence_deadline",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.change_defence_deadline(${t.notice}, 'EXTENSION', now() + interval '20 days', ${REASON})`,
+  },
+  {
+    fn: "withdraw_grievance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_grievance(${t.grievance}, ${REASON})`,
+  },
+  {
+    fn: "request_grievance_completion",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.request_grievance_completion(${t.grievance}, ${REASON})`,
+  },
+  {
+    fn: "complete_grievance",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.complete_grievance(${t.grievance}, 'Probe supplement text.')`,
+  },
+  {
+    fn: "file_grievance_reconsideration",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.file_grievance_reconsideration(${t.grievance}, 'Probe grievance grounds.',
+        'Probe new evidence description.', 'EVIDENCE-PROBE-0001')`,
+  },
+  {
+    fn: "record_grievance_reconsideration",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_grievance_reconsideration(${t.grievance}, 'EMAIL', now(), 'Probe grievance grounds.',
+        'LETTER-PROBE-0001', 'Probe new evidence description.', 'EVIDENCE-PROBE-0001')`,
+  },
+  {
+    fn: "flag_subject_left_employment",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.flag_subject_left_employment(${t.subject}, current_date, 'HR-PROBE-0001')`,
+  },
+  {
+    fn: "record_employment_execution_statement",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_employment_execution_statement(${t.subject}, 'WARNING', 'HR-PROBE-0001', ${REASON})`,
+  },
 ];
 
 // Notification commands (migration 1920) take the caller's own notification; nobody else's is reachable.
@@ -922,7 +1120,8 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
   {
     fn: "create_export_request",
     outcome: "NOT_FOUND",
-    call: (tx, t) => tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'AUDIT', null, null)`,
+    call: (tx, t) =>
+      tx`select api.create_export_request(${t.case}, 'PDF', 'INTERNAL', 'INTERNAL_MANAGEMENT_REVIEW', null, null)`,
   },
   {
     fn: "add_export_item",
@@ -969,6 +1168,12 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
     fn: "cancel_export",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.cancel_export(${t.request}, ${REASON})`,
+  },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_export.
+  {
+    fn: "export_request_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.export_request_view(${t.request})`,
   },
 ];
 
@@ -1022,6 +1227,27 @@ const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.waive_corrective_action(${t.action}, 'MEMO-PROBE-0001', ${REASON})`,
   },
+  // Migration 2030 (DEC-AMB-014): the replacement decision's disposition of a frozen action.
+  {
+    fn: "dispose_superseded_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.dispose_superseded_corrective_action(${t.action}, 'WAIVE', 'MEMO-PROBE-0001', ${REASON}, null, null,
+        null, null)`,
+  },
+  // Migration 2040 (DEC-F28): a unit, pool or external party owns the action.
+  {
+    fn: "set_corrective_action_owner_kind",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.set_corrective_action_owner_kind(${t.action}, 'EXTERNAL_PARTY', null, null, 'Probe party', ${REASON})`,
+  },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_corrective_action.
+  {
+    fn: "corrective_action_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.corrective_action_view(${t.action})`,
+  },
 ];
 
 // Continuity workbook import (migration 1960): staging names a case in the workbook's control sheet; every other
@@ -1074,6 +1300,12 @@ const BCP_PROBES: Probe<BcpTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.cancel_bcp_import(${t.batch}, ${REASON})`,
   },
+  // Migration 2040 item 13: the purpose read model, NOT_FOUND unless authz.can_view_bcp_import.
+  {
+    fn: "bcp_import_batch_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.bcp_import_batch_view(${t.batch})`,
+  },
 ];
 
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
@@ -1085,18 +1317,49 @@ const ADMIN_COMMANDS = [
   "appoint_committee_member",
   "end_committee_membership",
   "set_committee_rule_set",
+  // Rule-set options of the owner's Finalization Set (migration 2030): COMMITTEE_ADMIN only, no case.
+  "revise_committee_rule_set",
   // Recommendation authority rules (migration 1900): COMMITTEE_ADMIN only, no case.
   "set_action_authority_rule",
+  // Sanction catalogue versions, legal-review rules and authority-rule coverage (migration 2030): COMMITTEE_ADMIN
+  // only, no case (recommendations-authority.spec.ts).
+  "set_sanction_catalogue_entry",
+  "set_legal_review_rule",
+  "authority_rule_coverage",
   // Notification rules (migration 1920): NOTIFICATION_ADMIN only, no recipient or case.
   "set_notification_rule",
-  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case.
+  // Export approval rules (migration 1930): EXPORT_POLICY_ADMIN only, no export or case. Migration 2040 (DEC-F21,
+  // DEC-F24): the purpose catalogue, the approver pools and the configuration warnings (ids and counts), for a policy
+  // administrator who approves no export.
   "set_export_rule",
-  // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case.
+  "set_export_purpose",
+  "add_export_approver",
+  "revoke_export_approver",
+  "export_approval_config_warnings",
+  // Continuity-workbook operator registry (migration 2040, DEC-F30): BCP_CONTINUITY_ADMIN only, no batch or case.
+  "authorize_continuity_operator",
+  "revoke_continuity_operator",
+  // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case; its shared
+  // owner pools (migration 2040, DEC-F28) likewise.
   "set_corrective_action_policy",
+  "create_corrective_action_pool",
+  "set_corrective_action_pool_member",
+  // Sanction catalogue rules (migration 2040; DEC-AMB-004, DEC-AMB-011): COMMITTEE_ADMIN only, no case.
+  "set_sanction_rule",
+  // Referral escalation target (migration 2040, DEC-F09): COMMITTEE_ADMIN only, no referral or case.
+  "set_referral_escalation_target",
   // Sector registry (migration 1880): SECTOR_ADMIN only, no referral or case.
   "create_sector",
   "appoint_sector_member",
   "end_sector_membership",
+  // Migration 2030 (ADR-040): the business calendar (BUSINESS_CALENDAR_ADMIN), invitee-type rules and the
+  // independent conflict authority (COMMITTEE_ADMIN); none takes a case or a meeting.
+  "set_business_calendar_day",
+  "withdraw_business_calendar_day",
+  "set_business_week_pattern",
+  "set_invitee_type_rule",
+  "appoint_conflict_authority",
+  "end_conflict_authority",
 ];
 // Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
 // Covered in referral-preliminary.spec.ts.
@@ -1127,6 +1390,10 @@ const GLOBAL_COMMANDS = [
   "record_grievance",
   // Migration 1920: the caller's own notification preferences.
   "set_notification_preference",
+  // Migration 2040 item 13: the referrals and grievances awaiting the caller, each row under its object's read rule
+  // (purpose-read-models-2040.spec.ts).
+  "referral_queue",
+  "grievance_queue",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -1600,6 +1867,7 @@ describe("IDOR: referral commands give outsiders the same answer for real object
     "grcDirector",
     "committee",
     "committeeSecretary",
+    "committeeChair", // the owner-default escalation target (DEC-F09), with nothing escalated
     "internalAudit",
     "dpo",
     "complianceManager",
@@ -1651,6 +1919,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
 
   it.each(OUTSIDERS)("%s", async (actor) => {
     await scenario(async (s) => {
+      await unseatDemoSeats(s);
       await s.as("platformAdmin");
       const [ic] = await s.tx<{ id: string }[]>`select id from committee.committee where code = 'IC'`;
       for (const [user, seatCode] of [
@@ -1660,6 +1929,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
       ] as const) {
         await s.tx`select api.appoint_committee_member(${ic!.id}, ${USERS[user]}, ${seatCode}, now() - interval '1 day', null, 'DEMO-APPT')`;
       }
+      await preliminaryReferral(s, caseB); // AMB-018 (migration 2030)
       await s.as("caseManager");
       const [cp] = await s.tx<{ id: string }[]>`
         select api.refer_case_to_committee(${caseB}, ${ic!.id}, null, ${REASON}) as id`;
@@ -1734,6 +2004,12 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         "attendance_excuse",
         "meeting_conflict_concern",
         "witness_exclusion",
+        "meeting_acting_role",
+        "proceeding_snapshot_amendment",
+        "minutes_objection_ruling",
+        "confidentiality_ack",
+        "meeting_accommodation",
+        "meeting_conflict_reversal",
       ]) {
         expect(await s.tx`select id from ${s.tx("committee." + table)}`, table).toEqual([]);
       }
@@ -1919,7 +2195,7 @@ describe("IDOR: export requests (migration 1930)", () => {
     await scenario(async (s) => {
       await s.as("caseManager");
       const [r] = await s.tx<{ id: string }[]>`
-        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATOR_REQUEST', 'Regulator Alpha (synthetic)',
+        select api.create_export_request(${caseB}, 'EMAIL', 'EXTERNAL', 'REGULATORY_OR_EXTERNAL_AUTHORITY', 'Regulator Alpha (synthetic)',
           'Synthetic: the regulator asked for the case summary.') as id`;
       await s.tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${caseB})`;
       await s.tx`select api.add_export_recipient(${r!.id}, 'EXTERNAL', null, 'officer.alpha@example.test')`;
@@ -2221,6 +2497,7 @@ describe("CDF-205 T-AMB-142 (AMB-231): no api.* function accepts an acting-as us
   const TARGET_USER_ARGS = [
     "p_assigned_to",
     "p_assigned_user_id",
+    "p_authority_id", // api.end_conflict_authority (2030): the appointment row ended, not a user; the actor is derived
     "p_case_owner_id",
     "p_delegate_id",
     "p_new_user_id",

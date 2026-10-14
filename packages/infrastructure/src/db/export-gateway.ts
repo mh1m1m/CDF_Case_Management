@@ -10,6 +10,7 @@ import type {
   ExportObjectType,
   ExportPreview,
   ExportPurpose,
+  ExportPurposeLegacy,
   ExportStatus,
   GeneratedExport,
 } from "@cdf/contracts";
@@ -22,7 +23,7 @@ interface DocumentRow {
   classification: Classification;
   format: ExportFormat;
   audience: ExportAudience;
-  purpose: ExportPurpose;
+  purpose: ExportPurpose | ExportPurposeLegacy;
   external_party: string | null;
   items: {
     position: number;

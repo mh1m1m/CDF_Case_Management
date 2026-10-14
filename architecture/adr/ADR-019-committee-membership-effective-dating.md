@@ -8,7 +8,7 @@
 1. Seats: CHAIR, DEPUTY_CHAIR, SECRETARY, ALTERNATE_SECRETARY, MEMBER, ALTERNATE_MEMBER. `committee.membership` rows carry `effective_from` / `effective_to` (half-open, `tstzrange`).
 2. Constraints: a user has at most one seat per committee at any instant (exclusion constraint); CHAIR, DEPUTY_CHAIR, SECRETARY and ALTERNATE_SECRETARY are single-holder per instant (exclusion constraint per seat). The same person may sit on both committees only through explicit rows (Q23).
 3. **Rule sets** are effective-dated per committee (`committee.rule_set`, non-overlapping): quorum type (MAJORITY_ELIGIBLE / FIXED_NUMBER / PERCENTAGE / CUSTOM) and value, casting vote enabled, minutes review business days (3), deemed approval enabled, grievance window days (30), admissibility decider (SECRETARY / CHAIR / COMMITTEE). Each row has `source_status` OWNER_DEFAULT / SOURCE_REQUIRED / APPROVED.
-4. **Delegation** (`committee.delegation`): bounded window, reason, appointing reference; an alternate secretary acts automatically only while recorded as acting.
+4. **Acting roles** (amended by ADR-040, CON-007; no `committee.delegation` table was built). `committee.meeting_acting_role` (migration 2030) records, for one meeting, who acts as chair or secretary in another's place and on which basis (ABSENT, CONFLICTED, INELIGIBLE, VACANT, HANDOVER). An alternate secretary runs a meeting only while recorded as acting for it (`authz.can_manage_meeting`). Committee-level alternate-secretary work (scheduling, grievances, packages) stays as built.
 5. Membership changes never rewrite history; they end a row and start another. Notifications go to affected members (ADR-025).
 
 ## Consequences

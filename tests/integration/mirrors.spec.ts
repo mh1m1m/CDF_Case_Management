@@ -7,10 +7,16 @@ import {
   CASE_TASK_TYPES,
   CONFLICT_DECIDERS,
   EMPLOYEE_NOTICE_KINDS,
+  EXPORT_PURPOSES,
+  EXPORT_PURPOSES_LEGACY,
+  EXPORT_PURPOSES_REQUIRING_JUSTIFICATION,
   MEETING_CONFLICT_CONCERN_STATUSES,
   NOTIFICATION_TEMPLATES,
   PERMISSIONS,
   PRELIMINARY_OUTCOMES,
+  PRELIMINARY_OUTCOMES_NOT_ENABLED,
+  REFERRAL_EVENT_TYPES,
+  REFERRAL_STATUSES,
   STATUS_CODES,
 } from "@cdf/contracts";
 import { ALLOWED_CONTENT_TYPES, FORM_DEFINITIONS, FORM_ENTITLEMENTS } from "@cdf/domain";
@@ -97,6 +103,25 @@ describe("mirrors", () => {
     for (const code of PRELIMINARY_OUTCOMES) expect(STATUS_CODES.OUTCOME_CODE, code).toContain(code);
   });
 
+  it("preliminary outcomes not enabled are exactly the INACTIVE catalogue values (DEC-F10, 2040)", async () => {
+    const rows = await admin<{ value: string }[]>`
+      select value from config.status_dimension_value
+      where dimension = 'PRELIMINARY_OUTCOME' and state = 'INACTIVE' order by value collate "C"`;
+    expect(rows.map((r) => r.value)).toEqual([...PRELIMINARY_OUTCOMES_NOT_ENABLED].sort());
+  });
+
+  it("referral statuses and event types match the referral's checks (1880, DEC-F09 2040)", async () => {
+    const defs = await admin<{ conname: string; def: string }[]>`
+      select conname, pg_get_constraintdef(oid) as def from pg_constraint
+      where (conrelid, conname) in (('intake.referral'::regclass, 'referral_status_check'),
+                                    ('intake.referral_event'::regclass, 'referral_event_event_type_check'))
+      order by conname collate "C"`;
+    const codes = (name: string) =>
+      [...defs.find((d) => d.conname === name)!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+    expect(codes("referral_status_check")).toEqual([...REFERRAL_STATUSES].sort());
+    expect(codes("referral_event_event_type_check")).toEqual([...REFERRAL_EVENT_TYPES].sort());
+  });
+
   it("employee notice kinds match the notice's kind check (1990)", async () => {
     const [row] = await admin<{ def: string }[]>`
       select pg_get_constraintdef(oid) as def from pg_constraint
@@ -131,6 +156,19 @@ describe("mirrors", () => {
       const wording = messagesFor(locale).notificationTemplate as Record<string, string>;
       for (const code of NOTIFICATION_TEMPLATES) expect(wording[code], `${locale} ${code}`).toBeTruthy();
     }
+  });
+
+  it("export purposes match the governed catalogue exchange.export_purpose (DEC-F21, 2040)", async () => {
+    const rows = await admin<
+      { code: string; isActive: boolean; isLegacy: boolean; requiresJustification: boolean }[]
+    >`
+      select code, is_active as "isActive", is_legacy as "isLegacy", requires_justification as "requiresJustification"
+      from exchange.export_purpose order by sort_order`;
+    expect(rows.filter((r) => r.isActive).map((r) => r.code)).toEqual([...EXPORT_PURPOSES]);
+    expect(rows.filter((r) => r.isLegacy).map((r) => r.code)).toEqual([...EXPORT_PURPOSES_LEGACY]);
+    expect(rows.filter((r) => r.requiresJustification).map((r) => r.code)).toEqual([
+      ...EXPORT_PURPOSES_REQUIRING_JUSTIFICATION,
+    ]);
   });
 
   it("permission codes match iam.permission", async () => {

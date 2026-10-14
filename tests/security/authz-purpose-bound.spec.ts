@@ -819,3 +819,49 @@ describe("§15, §28.7, §28.9: RLS and audit coverage of the new tables", () =>
     });
   });
 });
+
+// =====================================================================================================
+describe("AMB-229: purpose access ends with its purpose, plus the configured grace (migration 2030)", () => {
+  it("T-AMB-140: a legal-hold task left open grants nothing once its request is decided and the grace has passed", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.request_legal_hold(${caseA}, 'LITIGATION', ${JUSTIFICATION}) as id`;
+      const [t] = await s.tx<
+        { id: string }[]
+      >`select api.assign_legal_hold_request(${r!.id}, ${USERS.legal}) as id`;
+      await s.as("legal");
+      expect((await footprint(s.tx)).catalogue).toEqual([caseA]);
+      expect(await opened(s.tx, "open_case_metadata", caseA)).toBe(true);
+
+      // The request was decided two days ago on a path that left the task open (the review command closes it; this
+      // covers any path that does not).
+      await s.asOwner();
+      await s.tx`update records.legal_hold_request
+                 set status = 'REJECTED', reviewed_by = ${USERS.legal}, reviewed_at = now() - interval '2 days',
+                     review_reason = 'Synthetic: decided on another path.'
+                 where id = ${r!.id}`;
+      expect(await s.tx`select status from case_mgmt.case_task where id = ${t!.id}`).toEqual([
+        { status: "OPEN" },
+      ]);
+
+      // Grace 0 (the default): the purpose has concluded, the holder learns nothing, as for a missing case.
+      await s.as("legal");
+      const ended = await footprint(s.tx);
+      expect(ended.catalogue).toEqual([]);
+      expect(ended.searchTotal).toBe(0);
+      expect(await opened(s.tx, "open_case_metadata", caseA)).toBe(false);
+      expect(await opened(s.tx, "open_case_metadata", randomUUID())).toBe(false);
+
+      // A one-day grace has passed too; a three-day grace keeps the access until it ends.
+      const grace = async (days: string) => {
+        await s.asOwner();
+        await s.tx`update config.setting set value = ${days} where key = 'PURPOSE_ACCESS_GRACE_DAYS'`;
+        await s.as("legal");
+        return (await footprint(s.tx)).catalogue;
+      };
+      expect(await grace("1")).toEqual([]);
+      expect(await grace("3")).toEqual([caseA]);
+    });
+  });
+});

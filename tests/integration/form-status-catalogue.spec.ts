@@ -146,11 +146,20 @@ describe("status vocabulary is grounded in the schema", () => {
   });
 
   it("marks stored values ACTIVE and derived or planned values PLANNED; every derived value says how", async () => {
+    // Migration 2040 (DEC-F10): a stored value may also be INACTIVE, kept for existing records but refused for new
+    // ones. Pinned below: only the owner's decision has withdrawn values so far.
     const wrong = await admin<{ dimension: string; value: string }[]>`
       select v.dimension, v.value from config.status_dimension_value v join config.status_dimension d on d.code = v.dimension
-      where (d.kind in ('STORED', 'STATUS_CODE')) <> (v.state = 'ACTIVE')
+      where (d.kind in ('STORED', 'STATUS_CODE')) <> (v.state in ('ACTIVE', 'INACTIVE'))
          or (d.kind = 'DERIVED' and v.derivation is null)`;
     expect(wrong).toEqual([]);
+    const inactive = await admin<{ dimension: string; value: string }[]>`
+      select dimension, value from config.status_dimension_value where state = 'INACTIVE'
+      order by dimension collate "C", value collate "C"`;
+    expect(inactive).toEqual([
+      { dimension: "PRELIMINARY_OUTCOME", value: "NOT_FEASIBLE" },
+      { dimension: "PRELIMINARY_OUTCOME", value: "NO_PERSONAL_JURISDICTION" },
+    ]);
   });
 
   it("adds the six reason codes the owner's 140-status list names, and nothing else", async () => {

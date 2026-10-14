@@ -1587,6 +1587,16 @@ export const en = {
     BCP_IMPORT_DECIDED: "A decision was recorded on your continuity workbook import.",
     RIGHTS_NOTICE_ISSUED: "A notice of your rights awaits you.",
     DECISION_NOTICE_ISSUED: "A decision notice awaits you. The period to file a grievance has started.",
+    MEETING_CONFLICT_DECISION_REQUESTED: "A conflict of interest raised in a meeting awaits your decision.",
+    MEETING_VOTE_OPENED: "A vote is open in a meeting you attend.",
+    GRIEVANCE_ADMISSIBILITY_DECISION_REQUESTED: "A grievance awaits your admissibility decision.",
+    REFERRAL_SUBMITTED_TO_HEAD: "A referral from your sector awaits your approval.",
+    REFERRAL_RETURNED: "A referral you prepared was returned to you.",
+    REFERRAL_SUBMITTED_TO_SECRETARY: "A referral awaits the committee secretary's decision.",
+    REFERRAL_ESCALATED: "A rejected referral was escalated to you for a decision.",
+    PRELIMINARY_REVIEW_REQUESTED: "A preliminary review recommendation awaits your review.",
+    PRELIMINARY_APPROVAL_REQUESTED: "A preliminary review recommendation awaits your approval.",
+    PRELIMINARY_RETURNED: "A preliminary review recommendation you prepared was returned.",
   },
   bcpTemplate: {
     readme: {

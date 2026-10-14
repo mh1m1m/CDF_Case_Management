@@ -12,7 +12,16 @@ import {
   type Scenario,
   type UserKey,
 } from "../support/db";
-import { IC_SEATS, REASON, committeeIds, openWithPresent, scheduleMeeting, seat } from "../support/committee";
+import {
+  DEMO_SEAT_REFERENCE,
+  IC_SEATS,
+  REASON,
+  committeeIds,
+  openWithPresent,
+  preliminaryReferral,
+  scheduleMeeting,
+  seat,
+} from "../support/committee";
 
 let caseB: string, caseR: string, ic: string, gc: string;
 
@@ -265,8 +274,11 @@ describe("server-only email delivery and reminders", () => {
         "recipient_id",
         "template_code",
       ]);
-      // Only mandatory templates email by default.
-      expect(new Set(batch.map((b) => b.template_code))).toEqual(new Set(["MEETING_INVITATION"]));
+      // Only mandatory templates email by default. The meeting fixture's preliminary review also asks
+      // its approver to approve (migration 2040 item 13), and that request is mandatory too.
+      expect(new Set(batch.map((b) => b.template_code))).toEqual(
+        new Set(["MEETING_INVITATION", "PRELIMINARY_APPROVAL_REQUESTED"]),
+      );
       const [first, second] = batch;
       expect(
         (await s.tx<{ s: string }[]>`select notify.record_email_delivery(${first!.id}, true) as s`)[0]!.s,
@@ -319,12 +331,21 @@ const VISIBLE: Record<string, string> = {
   EXPORT: "select count(*)::int as n from exchange.export_request where id = $1",
   CORRECTIVE_ACTION: "select count(*)::int as n from decision.corrective_action where id = $1",
   BCP_IMPORT: "select count(*)::int as n from exchange.bcp_import_batch where id = $1",
+  // Migration 2040 item 13: referral and preliminary-review notices.
+  REFERRAL: "select count(*)::int as n from intake.referral where id = $1",
+  PRELIMINARY_REVIEW: "select count(*)::int as n from case_mgmt.preliminary_recommendation where id = $1",
 };
 
 async function outbox(s: OwnerScenario) {
   await s.asOwner();
+  // Every row, except the seat notices about the demo seats of seed 30 (their appointment by the seed, their end by
+  // unseatDemoSeats): those seats are never part of a scenario.
   return s.tx<{ recipient_id: string; template_code: string; object_type: string; object_id: string }[]>`
-    select recipient_id, template_code, object_type, object_id from notify.outbox order by created_at`;
+    select o.recipient_id, o.template_code, o.object_type, o.object_id from notify.outbox o
+    where not exists (select 1 from committee.membership m
+                      where m.appointment_reference like ${DEMO_SEAT_REFERENCE + "%"}
+                        and o.dedupe_key like 'seat-%:' || m.id || ':%')
+    order by o.created_at`;
 }
 
 async function expectRecipientsSeeObjects(s: OwnerScenario) {
@@ -359,6 +380,7 @@ describe("AGENT-09 review of 1920", () => {
         ["legal", "MEMBER"],
         ["committeeSecretary", "ALTERNATE_SECRETARY"],
       ]);
+      await preliminaryReferral(s, caseR); // AMB-018 (migration 2030)
       await s.as("grcDirector");
       await s.tx`select api.approve_restricted_committee_referral(${caseR}, ${ic}, ${REASON})`;
       const [cp] = await s.tx<{ id: string }[]>`

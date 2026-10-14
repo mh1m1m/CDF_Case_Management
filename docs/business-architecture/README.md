@@ -20,4 +20,16 @@
 | [AMBIGUITY_TEST_MATRIX.md](AMBIGUITY_TEST_MATRIX.md)                       | Every CRITICAL and HIGH ambiguity mapped to an existing or required test (T-AMB-nnn).                                                                             |
 | [CONTRADICTION_REGISTER.md](CONTRADICTION_REGISTER.md)                     | Conflicts between sources, the authoritative resolution and the action each needs.                                                                                |
 
-Decisions: [ADR-017 … ADR-039](../../architecture/adr/README.md).
+Decisions: [ADR-017 … ADR-040](../../architecture/adr/README.md). Owner decisions: [OWNER_DECISIONS_FINALIZATION.md](OWNER_DECISIONS_FINALIZATION.md) (DEC-F01–F41, DEC-AMB-001–012).
+
+## Glossary: approver roles (CON-021)
+
+The Q&A, the ADRs and the code use different names for the same three roles. They are one role each, never different approvers.
+
+| Role code                    | Q&A name (Q13–Q15)                                    | Also written as                   |
+| ---------------------------- | ----------------------------------------------------- | --------------------------------- |
+| `COMPLIANCE_SECTION_MANAGER` | Compliance Section Manager                            | Compliance Manager                |
+| `GRC_DIRECTOR`               | Governance & Corporate Compliance Department Director | Department Director, GRC Director |
+| `GRC_SECTOR_HEAD`            | Sector Head of Governance and Compliance              | Sector Head, GRC Sector Head      |
+
+English and Arabic labels come from `packages/i18n` (DEC-54).
