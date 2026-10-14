@@ -114,15 +114,36 @@ async function reconcile(s: OwnerScenario): Promise<number> {
   return r!.n;
 }
 
+/** Forms a user keeps from a COMMITTEE or REVIEW grant reconciled before this test (path (a)), read as the owner. */
+async function keptForms(s: OwnerScenario, target: string, user: UserKey): Promise<string[]> {
+  await s.asOwner();
+  const rows = await s.tx<{ id: string }[]>`
+    select instance_id as id from case_mgmt.form_instance_access
+     where case_id = ${target} and user_id = ${USERS[user]}`;
+  return rows.map((r) => r.id).sort();
+}
+
 describe("a grant opens the case file only within its purpose (DEC-02, DEC-03)", () => {
   it("COMMITTEE, REVIEW and post-hand-over TRIAGE grants open nothing, even before reconciliation", async () => {
     await ownerScenario(async (s) => {
+      // None of them sees a form of case A on a database built from Git. A hosted database seeded before S3 may
+      // keep forms from the migration's own reconciliation (DEV: the committee chair, CDF-32 drift record 4.9);
+      // the grants made here add nothing to those.
+      const users = ["committeeChair", "legal", "triage"] as const;
+      const before: Partial<Record<UserKey, string[]>> = {};
+      for (const user of users) {
+        const kept = await keptForms(s, caseA, user);
+        await s.as(user);
+        before[user] = await formsSeen(s.tx, caseA);
+        // Only forms kept from a reconciled grant: none on a database built from Git.
+        expect(kept, user).toEqual(expect.arrayContaining(before[user]!));
+      }
       await legacyGrant(s, caseA, "committeeChair", "COMMITTEE");
       await legacyGrant(s, caseA, "legal", "REVIEW");
       await legacyGrant(s, caseA, "triage", "TRIAGE"); // case A is past hand-over (INVESTIGATION)
-      for (const user of ["committeeChair", "legal", "triage"] as const) {
+      for (const user of users) {
         await expectNoCaseFile(s, user, caseA);
-        expect(await formsSeen(s.tx, caseA), user).toEqual([]);
+        expect(await formsSeen(s.tx, caseA), user).toEqual(before[user]);
       }
       // A CASE grant opens the file; so does TRIAGE while the case is still in the triage stages.
       await s.as("caseManager");
