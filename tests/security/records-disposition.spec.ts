@@ -15,6 +15,7 @@ import {
   recordsState,
   requestDisposition,
 } from "../support/records";
+import { requestReopeningOnEvidence, setClosureAuthority } from "../support/closure";
 
 let caseB: string, caseExec: string;
 beforeAll(async () => {
@@ -82,11 +83,13 @@ describe("retention schedule", () => {
 
   it("REC-T27: reopening a closed case supersedes its schedule instead of editing it", async () => {
     await ownerScenario(async (s) => {
-      await s.asOwner();
-      await s.tx`update workflow.workflow_transition_definition set is_enabled = true where code = 'REOPEN_CASE'`;
       await s.as("caseManager");
       await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', 'Synthetic: screened out for the records suite.')`;
-      await s.tx`select api.transition_case(${caseB}, 'REOPEN_CASE', 'Synthetic: new information received.')`;
+      // Reopening is approved by the closure authority (DEC-AMB-002, migration 2060), configured here synthetically.
+      await setClosureAuthority(s, "GRC_DIRECTOR");
+      const request = await requestReopeningOnEvidence(s, caseB);
+      await s.as("grcDirector");
+      await s.tx`select api.decide_case_reopening(${request}, 'APPROVE', 'Synthetic: new information received.')`;
       await s.asOwner();
       const rows = await s.tx<{ superseded_reason: string | null }[]>`
         select superseded_reason from records.retention_schedule where case_id = ${caseB}`;

@@ -84,13 +84,19 @@ export async function preliminaryReferral(s: Scenario, caseId: string): Promise<
 }
 
 /** Refers the case; to the Investigation Committee after its preliminary review referred it (AMB-018). */
-export async function refer(s: Scenario, committeeId: string, caseId: string, by: UserKey = "caseManager") {
+export async function refer(
+  s: Scenario,
+  committeeId: string,
+  caseId: string,
+  by: UserKey = "caseManager",
+  parentProceeding: string | null = null,
+) {
   await unseatDemoSeats(s);
   const [k] = await admin<{ kind: string }[]>`select kind from committee.committee where id = ${committeeId}`;
   if (k?.kind === "INVESTIGATION") await preliminaryReferral(s, caseId);
   await s.as(by);
   const [cp] = await s.tx<{ id: string }[]>`
-    select api.refer_case_to_committee(${caseId}, ${committeeId}, null, ${REASON}) as id`;
+    select api.refer_case_to_committee(${caseId}, ${committeeId}, ${parentProceeding}, ${REASON}) as id`;
   return cp!.id;
 }
 
@@ -100,13 +106,15 @@ export interface MeetingFixture {
   participant: Record<string, string>;
 }
 
-/** Refers the case, schedules an in-person deliberation and returns its participants by user key. */
+/** Refers the case (from `parentProceeding`, if given), schedules an in-person deliberation and returns its
+ *  participants by user key. */
 export async function scheduleMeeting(
   s: Scenario,
   committeeId: string,
   caseId: string,
+  parentProceeding: string | null = null,
 ): Promise<MeetingFixture> {
-  const committeeProceeding = await refer(s, committeeId, caseId);
+  const committeeProceeding = await refer(s, committeeId, caseId, "caseManager", parentProceeding);
   await s.as("committeeSecretary");
   const [m] = await s.tx<{ id: string }[]>`
     select api.schedule_meeting(${committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Meeting room (synthetic)', null,

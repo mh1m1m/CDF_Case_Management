@@ -697,7 +697,9 @@ describe("a finding vote binds one finding version (AMB-030, migration 2030)", (
     await ownerScenario(async (s) => {
       await seat(s, ic, IC_SEATS);
       const facts = await caseFacts(s, caseB);
-      const f = await scheduleMeeting(s, ic, caseB);
+      // Referred from the investigation that recorded the finding: a FINDING vote is on the current version of a finding
+      // of the committee proceeding or the one it was referred from (CDF-214, migration 2060).
+      const f = await scheduleMeeting(s, ic, caseB, facts.proceeding);
       await openWithPresent(s, f, VOTERS);
       const [vi] = await s.tx<{ id: string }[]>`
         select api.open_vote_item(${f.meeting}, 'FINDING', ${facts.finding}, 'Finding on the allegation (synthetic)') as id`;
@@ -736,6 +738,35 @@ describe("a finding vote binds one finding version (AMB-030, migration 2030)", (
         `vote item ${vi!.id} is closed`,
         (tx) => tx`update committee.vote_item set finding_id = ${v2!.id} where id = ${vi!.id}`,
       );
+    });
+  });
+  it("CDF-214 (migration 2060): a FINDING vote takes only the current version of a finding of the committee proceeding or the one it was referred from", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const facts = await caseFacts(s, caseB);
+      // A legal review of the case records its own finding on the same allegation.
+      await s.as("caseManager");
+      const [other] = await s.tx<{ id: string }[]>`
+        select api.open_proceeding(${caseB}, 'LEGAL_REVIEW', null, ${REASON}) as id`;
+      await s.as("investigatorB");
+      const [sibling] = await s.tx<{ id: string }[]>`
+        select api.record_finding(${facts.allegation}, null, ${other!.id}, 'NOT_SUBSTANTIATED',
+          'Synthetic: a finding of another proceeding.') as id`;
+      const f = await scheduleMeeting(s, ic, caseB, facts.proceeding);
+      await openWithPresent(s, f, VOTERS);
+      const open = (tx: Scenario["tx"], finding: string) =>
+        tx`select api.open_vote_item(${f.meeting}, 'FINDING', ${finding}, 'Finding on the allegation (synthetic)')`;
+      // Another proceeding's finding is refused as an unknown finding is.
+      await s.as("committeeSecretary");
+      await s.expectError("CDF_INVALID:finding_id", (tx) => open(tx, sibling!.id));
+      // Once a later version exists, the earlier one is refused; the current version is accepted.
+      await s.as("investigatorB");
+      const [v2] = await s.tx<{ id: string }[]>`
+        select api.record_finding(${facts.allegation}, null, ${facts.proceeding}, 'PARTIALLY_SUBSTANTIATED',
+          'Synthetic: revised finding.') as id`;
+      await s.as("committeeSecretary");
+      await s.expectError("CDF_INVALID:finding_id", (tx) => open(tx, facts.finding));
+      await open(s.tx, v2!.id);
     });
   });
 });

@@ -5,7 +5,7 @@
 // rest of each rule, the three coordinator defaults (2026-10-14 11:26) and the guards on forged paths.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, caseId, ownerScenario, type OwnerScenario, type Scenario } from "../support/db";
+import { USERS, admin, caseId, ownerScenario, type OwnerScenario, type Scenario } from "../support/db";
 import { committeeIds } from "../support/committee";
 import {
   ALL_CHECKS,
@@ -228,7 +228,9 @@ describe("the Defence Packet (DEC-AMB-006 option C; AMB-159, AMB-118, AMB-171)",
         "CDF_CONFLICT:ITEM_NOT_REVIEWED",
         (tx) => tx`select api.submit_defence_packet(${packet})`,
       );
-      const redacted = await storeRendition(s, "caseManager", a.versionId);
+      // The lead (the chooser) makes the redacted rendition; the case manager, who made neither, clears it (CDF-217(1),
+      // migration 2060).
+      const redacted = await storeRendition(s, "lead", a.versionId);
       await s.as("caseManager");
       // A redacted clearance names a rendition of the chosen original; an as-is clearance the original itself.
       await s.expectError(
@@ -320,8 +322,8 @@ describe("the Defence Packet (DEC-AMB-006 option C; AMB-159, AMB-118, AMB-171)",
         await s.tx`select event_type, actor_id from evidence.custody_event
                    where version_id = ${redacted.versionId} order by seq`,
       ).toEqual([
-        { event_type: "RECEIVED", actor_id: USERS.caseManager },
-        { event_type: "STORED", actor_id: USERS.caseManager },
+        { event_type: "RECEIVED", actor_id: USERS.lead },
+        { event_type: "STORED", actor_id: USERS.lead },
         { event_type: "PACKET_VIEWED", actor_id: USERS.employee },
       ]);
       const viewed = await ledger(s, "DEFENCE_PACKET_ITEM_VIEWED");
@@ -632,7 +634,7 @@ describe("the Defence Packet (DEC-AMB-006 option C; AMB-159, AMB-118, AMB-171)",
       const a = await storeEvidence(s, "investigatorB", caseB);
       const other = await storeEvidence(s, "investigatorA", caseA);
       const { packet, items } = await packetWith(s, "lead", n.notice, [a.versionId]);
-      const redacted = await storeRendition(s, "caseManager", a.versionId);
+      const redacted = await storeRendition(s, "lead", a.versionId);
       await s.as("lead");
       await s.expectError(
         "CDF_CONFLICT:ALREADY_ADDED",
@@ -856,5 +858,222 @@ describe("the prior-sanctions extract (DEC-AMB-005 option B; AMB-034, AMB-106)",
           tx`select api.request_sanction_extract(${p.committeeProceeding}, ${p.requestingSubject}, ${REASON_2050})`,
       );
     });
+  });
+});
+
+describe("Defence Packet follow-ups (migration 2060, ADR-042)", () => {
+  it("CDF-217(1): whoever made a redacted rendition never clears it, by the command or on the table, under the chooser rule's switch", async () => {
+    await ownerScenario(async (s) => {
+      await setPacketPolicy(s);
+      await leadOnCaseB(s);
+      const n = await defenceNotice(s, caseB);
+      const a = await storeEvidence(s, "investigatorB", caseB);
+      const { packet, items } = await packetWith(s, "lead", n.notice, [a.versionId]);
+      // The case manager did not choose the item, but made the rendition: they may not clear it.
+      const redacted = await storeRendition(s, "caseManager", a.versionId);
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_CONFLICT:REVIEWER_IS_REDACTOR",
+        (
+          tx,
+        ) => tx`select api.review_defence_packet_item(${items[0]!}, 'CLEARED_REDACTED', ${redacted.versionId},
+                     'Item (redacted)', ${ALL_CHECKS}::text[], null)`,
+      );
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:REVIEWER_IS_REDACTOR",
+        (tx) =>
+          tx`insert into grievance.defence_packet_review (item_id, packet_id, outcome, disclosed_version_id,
+                                                           disclosed_title, checks, reviewed_by)
+             values (${items[0]!}, ${packet}, 'CLEARED_REDACTED', ${redacted.versionId}, 'Item (redacted)',
+                     ${ALL_CHECKS}::text[], ${USERS.caseManager})`,
+      );
+      // The same configurable switch as the chooser rule (coordinator default 1): a policy that lets the chooser
+      // review lets the redactor clear their rendition too.
+      await setPacketPolicy(s, { reviewerMustDiffer: false });
+      await s.as("caseManager");
+      await s.tx`select api.review_defence_packet_item(${items[0]!}, 'CLEARED_REDACTED', ${redacted.versionId},
+                   'Item (redacted)', ${ALL_CHECKS}::text[], null)`;
+    });
+  });
+
+  const WITHHOLD_NOTE = "Synthetic: unique-withhold-marker-2060, names a witness.";
+  const EVIDENCE_TITLE = "Synthetic: unique-evidence-title-marker-2060";
+  /** Case 0003 (restricted, SECRET): the lead investigator and the subject's portal account are cleared to SECRET. */
+  async function restrictedNotice(s: OwnerScenario) {
+    await setPacketPolicy(s);
+    await s.asOwner();
+    await s.tx`update iam.user_profile set clearance = 'SECRET' where id in (${USERS.lead}, ${USERS.employee})`;
+    await s.as("grcDirector");
+    await s.tx`select api.assign_case(${caseExec}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON_2050})`;
+    return defenceNotice(s, caseExec, "grcDirector");
+  }
+  const approvalView = (tx: Scenario["tx"], packet: string) =>
+    tx<{ v: ApprovalView }[]>`select api.defence_packet_approval_view(${packet}) as v`;
+  interface ApprovalView {
+    status: string;
+    release_block: string | null;
+    items: {
+      position: number;
+      outcome: string;
+      redaction: string;
+      disclosed_title: string | null;
+      content_type: string | null;
+      checks: string[];
+    }[];
+    counts: Record<string, number>;
+  }
+
+  it("CDF-218(1): the Restricted Case Authority reads what it approves, bound to the request, never evidence; audited with counts", async () => {
+    await ownerScenario(async (s) => {
+      const n = await restrictedNotice(s);
+      const a = await storeEvidence(s, "grcDirector", caseExec, {
+        classification: "SECRET",
+        title: EVIDENCE_TITLE,
+      });
+      const b = await storeEvidence(s, "grcDirector", caseExec, { classification: "SECRET" });
+      const c = await storeEvidence(s, "grcDirector", caseExec, { classification: "SECRET" });
+      const { packet, items } = await packetWith(s, "lead", n.notice, [
+        a.versionId,
+        b.versionId,
+        c.versionId,
+      ]);
+      // Nothing awaits the authority while the packet is a draft.
+      await s.as("grcDirector");
+      await s.expectError("CDF_NOT_FOUND", (tx) => approvalView(tx, packet));
+      // Item 1 as is; item 2 by a rendition the lead made; item 3 withheld. The lead submits.
+      await clearAsIs(s, "grcDirector", items[0]!, "First item");
+      const r = await storeRendition(s, "lead", b.versionId);
+      await s.as("grcDirector");
+      await s.tx`select api.review_defence_packet_item(${items[1]!}, 'CLEARED_REDACTED', ${r.versionId},
+                   'Second item (redacted)', ${ALL_CHECKS}::text[], null)`;
+      await s.tx`select api.review_defence_packet_item(${items[2]!}, 'WITHHELD', null, null, ${["WITNESS"]}::text[],
+                   ${WITHHOLD_NOTE})`;
+      await s.as("lead");
+      expect(await s.tx`select api.submit_defence_packet(${packet}) as st`).toEqual([
+        { st: "AWAITING_AUTHORITY" },
+      ]);
+
+      await s.as("grcDirector");
+      const [row] = await approvalView(s.tx, packet);
+      const v = row!.v;
+      expect(v.status).toBe("AWAITING_AUTHORITY");
+      expect(v.release_block).toBeNull();
+      expect(
+        v.items.map((i) => [i.position, i.outcome, i.redaction, i.disclosed_title, i.content_type]),
+      ).toEqual([
+        [1, "CLEARED_AS_IS", "NONE", "First item", "application/pdf"],
+        [2, "CLEARED_REDACTED", "REDACTED_RENDITION", "Second item (redacted)", "application/pdf"],
+        [3, "WITHHELD", "WITHHELD", null, null],
+      ]);
+      expect(v.items[2]!.checks).toEqual(["WITNESS"]);
+      expect(v.counts).toEqual({ items: 3, cleared: 2, redacted: 1, withheld: 1, not_disclosable: 0 });
+      // Never evidence: no evidence or version id, object key, hash, evidence title or reviewer note.
+      const text = JSON.stringify(v);
+      for (const hidden of [
+        a.evidenceId,
+        a.versionId,
+        b.versionId,
+        c.versionId,
+        r.versionId,
+        a.objectKey,
+        r.objectKey,
+        a.sha256,
+        r.sha256,
+        EVIDENCE_TITLE,
+        WITHHOLD_NOTE,
+      ]) {
+        expect(text).not.toContain(hidden);
+      }
+      const keys = new Set<string>();
+      const walk = (x: unknown): void => {
+        if (Array.isArray(x)) x.forEach(walk);
+        else if (x && typeof x === "object")
+          for (const [k, y] of Object.entries(x)) {
+            keys.add(k);
+            walk(y);
+          }
+      };
+      walk(v);
+      for (const k of [
+        "evidence_id",
+        "version_id",
+        "disclosed_version_id",
+        "object_key",
+        "sha256",
+        "note",
+        "title",
+      ]) {
+        expect(keys.has(k), k).toBe(false);
+      }
+      // Audited: one business event per read, ids and counts only.
+      const viewed = await ledger(s, "DEFENCE_PACKET_APPROVAL_VIEWED");
+      expect(viewed).toHaveLength(1);
+      expect(viewed[0]).toEqual({
+        actor_id: USERS.grcDirector,
+        category: "BUSINESS",
+        outcome: "SUCCESS",
+        reason: null,
+        metadata: { items: 3, cleared: 2, withheld: 1 },
+      });
+      // Bound to the approval request: the chooser and submitter, the case team of other cases, another GRC director
+      // without access, the subject and the platform administrator all get NOT_FOUND, as for a random id.
+      for (const u of [
+        "lead",
+        "caseManager",
+        "investigatorB",
+        "grcDeputy",
+        "employee",
+        "platformAdmin",
+      ] as const) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", (tx) => approvalView(tx, packet));
+      }
+      await s.as("grcDirector");
+      await s.expectError("CDF_NOT_FOUND", (tx) => approvalView(tx, randomUUID()));
+      // Refusals leave no business event.
+      expect(await ledger(s, "DEFENCE_PACKET_APPROVAL_VIEWED")).toHaveLength(1);
+      // Once decided, nothing awaits the authority.
+      await s.as("grcDirector");
+      await s.tx`select api.decide_restricted_defence_packet(${packet}, 'APPROVE', 'Synthetic: authority decision.')`;
+      await s.expectError("CDF_NOT_FOUND", (tx) => approvalView(tx, packet));
+    });
+  });
+
+  it("CDF-218(1): an authority who made or submitted the packet reads nothing of it; an unrestricted case's packet never awaits one", async () => {
+    await ownerScenario(async (s) => {
+      const n = await restrictedNotice(s);
+      const a = await storeEvidence(s, "grcDirector", caseExec, { classification: "SECRET" });
+      const { packet, items } = await packetWith(s, "grcDirector", n.notice, [a.versionId]);
+      await clearAsIs(s, "lead", items[0]!);
+      await s.as("grcDirector");
+      expect(await s.tx`select api.submit_defence_packet(${packet}) as st`).toEqual([
+        { st: "AWAITING_AUTHORITY" },
+      ]);
+      await s.expectError("CDF_NOT_FOUND", (tx) => approvalView(tx, packet));
+    });
+    await ownerScenario(async (s) => {
+      await setPacketPolicy(s);
+      const n = await defenceNotice(s, caseB);
+      const a = await storeEvidence(s, "investigatorB", caseB);
+      const { packet, items } = await packetWith(s, "caseManager", n.notice, [a.versionId]);
+      await leadOnCaseB(s);
+      await clearAsIs(s, "lead", items[0]!);
+      await s.as("caseManager");
+      expect(await s.tx`select api.submit_defence_packet(${packet}) as st`).toEqual([{ st: "RELEASED" }]);
+      for (const u of ["caseManager", "grcDirector", "lead"] as const) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", (tx) => approvalView(tx, packet));
+      }
+    });
+  });
+
+  it("AGENT-09 R1: the approval read is VOLATILE (it audits); only authenticated may call it", async () => {
+    const [fn] = await admin<{ volatility: string; anon: boolean; authenticated: boolean }[]>`
+      select p.provolatile as volatility,
+             has_function_privilege('anon', p.oid, 'EXECUTE') as anon,
+             has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated
+      from pg_proc p where p.oid = 'api.defence_packet_approval_view(uuid)'::regprocedure`;
+    expect(fn).toEqual({ volatility: "v", anon: false, authenticated: true });
   });
 });

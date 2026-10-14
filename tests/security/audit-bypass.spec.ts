@@ -17,6 +17,7 @@ import {
 } from "../support/db";
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 import { preliminaryReferral, unseatDemoSeats } from "../support/committee";
+import { setClosureAuthority } from "../support/closure";
 import {
   clearAsIs,
   defenceNotice,
@@ -124,6 +125,9 @@ const NOT_STATE_CHANGING = new Set([
   "open_defence_packet_item",
   "sanction_extract_view",
   "my_sanction_extract_approvals",
+  // Migration 2060 (ADR-042): what a case viewer reads of closure (closures, requests; blockers and reopening requests
+  // only for those who may act on them). Not audited: the closure and reopening commands are.
+  "case_closure_view",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -1726,10 +1730,42 @@ describe("every state-changing command writes its audit event in the same transa
       },
       // Records lifecycle on the walk case (ADR-013): close, archive, hold and release, class, eligibility,
       // request, approval by someone else, logical execution. The class fixture is added before the walk.
+      // Closure (migration 2060, DEC-F40) with a synthetic closure authority (GRC_DIRECTOR; the setting is
+      // SOURCE_REQUIRED and migration-managed, so the owner fixture sets it): the case manager's closure is a request
+      // the GRC director approves. A reopening request is then rejected, so the case stays closed for the records steps.
       {
-        fn: "transition_case",
+        fn: "close_case",
         actor: "caseManager",
-        run: (s) => s.tx`select api.transition_case(${ids.case!}, 'SCREEN_OUT', ${REASON})`,
+        run: async (s) => {
+          await apart(s, () => setClosureAuthority(s as OwnerScenario, "GRC_DIRECTOR"), "caseManager");
+          return s.tx`select api.close_case(${ids.case!}, 'NO_ACTION', ${REASON})`;
+        },
+      },
+      {
+        fn: "decide_case_closure",
+        actor: "grcDirector",
+        run: async (s) => {
+          const request = await one(
+            s,
+            s.tx`select id from case_mgmt.case_closure_request where case_id = ${ids.case!} and status = 'AWAITING_APPROVAL'`,
+          );
+          return s.tx`select api.decide_case_closure(${request}, 'APPROVE', ${REASON})`;
+        },
+      },
+      {
+        fn: "request_case_reopening",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.reopening = await one(
+            s,
+            s.tx`select api.request_case_reopening(${ids.case!}, 'NEW_EVIDENCE', ${REASON},
+              'Synthetic: a further extract received after closure.', 'DEMO-WALK-REF', null) as id`,
+          )),
+      },
+      {
+        fn: "decide_case_reopening",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.decide_case_reopening(${ids.reopening!}, 'REJECT', ${REASON})`,
       },
       {
         fn: "transition_case",
@@ -2444,9 +2480,11 @@ describe("every state-changing command writes its audit event in the same transa
           s.tx`select api.record_custody_exception(${stored.kept!.evidenceId}, ${stored.kept!.versionId},
             'EXTERNAL_TRANSFER', ${REASON}, 'EXT-DEMO-WALK')`,
       },
+      // The case manager makes the redacted rendition; the lead, who neither chose the item nor made the rendition,
+      // clears it (CDF-217(1), migration 2060).
       {
         fn: "register_evidence_rendition",
-        actor: "lead",
+        actor: "caseManager",
         run: async (s) => {
           const [r] = await s.tx<{ v: string }[]>`
             select o_version_id as v from api.register_evidence_rendition(${stored.kept!.versionId}, 'walk-redacted.pdf',
@@ -2455,7 +2493,7 @@ describe("every state-changing command writes its audit event in the same transa
           await apart(
             s,
             () => s.tx`select api.complete_evidence_version(${ids.rendition!}, 'CLEAN', 'walk-scanner')`,
-            "lead",
+            "caseManager",
           );
           return r;
         },
@@ -2514,12 +2552,13 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "caseManager",
         run: (s) => s.tx`select api.withdraw_defence_packet(${ids.defencePacket!}, ${REASON})`,
       },
-      // A restricted case's packet (case 0003): its Restricted Case Authority decides it.
+      // A restricted case's packet (case 0003): its Restricted Case Authority reads what it approves (CDF-218(1),
+      // migration 2060), then decides it.
       {
-        fn: "decide_restricted_defence_packet",
+        fn: "defence_packet_approval_view",
         actor: "grcDirector",
         run: async (s) => {
-          const packet = await apart(
+          ids.restrictedPacket = await apart(
             s,
             async () => {
               const exec = await caseId("0003");
@@ -2543,8 +2582,14 @@ describe("every state-changing command writes its audit event in the same transa
             },
             "grcDirector",
           );
-          return s.tx`select api.decide_restricted_defence_packet(${packet}, 'APPROVE', ${REASON})`;
+          return s.tx`select api.defence_packet_approval_view(${ids.restrictedPacket!})`;
         },
+      },
+      {
+        fn: "decide_restricted_defence_packet",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.decide_restricted_defence_packet(${ids.restrictedPacket!}, 'APPROVE', ${REASON})`,
       },
       // The prior-sanctions extract: the committee secretary asks for the walk subject's prior final sanctions.
       {
@@ -2555,6 +2600,18 @@ describe("every state-changing command writes its audit event in the same transa
             s,
             s.tx`select api.request_sanction_extract(${ids.committeeProceeding!}, ${ids.subject!}, ${REASON}) as id`,
           )),
+      },
+      // The package-building read models (DEC-02, migration 2060): the secretary's choices and the items in front of
+      // the committee, both audited with counts.
+      {
+        fn: "committee_scope_choices",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.committee_scope_choices(${ids.committeeProceeding!})`,
+      },
+      {
+        fn: "committee_items_view",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.committee_items_view(${ids.committeeProceeding!})`,
       },
       // A row from the restricted case 0003 awaiting its authority (owner fixture: the walk has no final sanction there).
       {

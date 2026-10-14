@@ -229,5 +229,7 @@ export const TRANSITIONS: readonly WorkflowTransition[] = [
     10,
   ),
   t("ARCHIVE_CASE", "CLOSURE", "ARCHIVE", "WORKFLOW_ADVANCE", false, false, [], false, true, 11),
-  t("REOPEN_CASE", "CLOSURE", "INVESTIGATION", "INVESTIGATION_APPROVE", true, true, [], false, false, 10),
+  // Migration 2060 (DEC-AMB-002, DEC-AMB-015): a system step, run only by api.decide_case_reopening after the closure
+  // authority's approval; api.transition_case refuses it.
+  t("REOPEN_CASE", "CLOSURE", "INVESTIGATION", "INVESTIGATION_APPROVE", true, true, [], true, true, 10),
 ];
