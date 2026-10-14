@@ -2,7 +2,9 @@
 // assignments, grants and conflict declarations allow, and nothing else.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { caseId, scenario, type UserKey } from "../support/db";
+import type { Tx } from "@cdf/infrastructure";
+import { USERS, caseId, ownerScenario, scenario, type UserKey } from "../support/db";
+import { IC_SEATS, committeeIds, openWithPresent, scheduleMeeting, seat } from "../support/committee";
 
 const SEED_CASES = ["0001", "0002", "0003", "0004"];
 let caseA: string, caseB: string, caseExec: string, caseConflict: string;
@@ -228,6 +230,106 @@ describe("assignment and separation of duties", () => {
         "CDF_FORBIDDEN",
         (tx) => tx`select api.transition_case(${caseB}, 'APPROVE_INVESTIGATION', 'Synthetic: self approval')`,
       );
+    });
+  });
+});
+
+describe("ambiguity register: cross-case discovery and search (CDF-205)", () => {
+  /** Every base table with a case_id column the caller may read; tables closed to the role count as empty. */
+  async function caseIdsReachable(s: { tx: Tx }): Promise<Set<string>> {
+    const tables = await s.tx<{ t: string }[]>`
+      select c.table_schema || '.' || c.table_name as t from information_schema.columns c
+      join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name
+      where c.column_name = 'case_id' and t.table_type = 'BASE TABLE'
+        and c.table_schema not in ('pg_catalog', 'information_schema')`;
+    const seen = new Set<string>();
+    for (const { t } of tables) {
+      try {
+        await s.tx.savepoint(async (sp) => {
+          for (const r of await sp.unsafe<{ case_id: string }[]>(`select distinct case_id from ${t}`))
+            seen.add(r.case_id);
+        });
+      } catch (error) {
+        expect((error as Error).message, t).toMatch(/^permission denied/);
+      }
+    }
+    return seen;
+  }
+
+  it("T-AMB-015: a seated, present committee member cannot discover the subject's other case", async () => {
+    const { ic } = await committeeIds();
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [p] = await s.tx<
+        { person_id: string }[]
+      >`select person_id from case_mgmt.case_subject where id = ${a!.id}`;
+      // The same person is also a subject of case 0004 (fixture: no command links a person across cases).
+      await s.asOwner();
+      await s.tx`
+        insert into case_mgmt.case_person (case_id, person_id, role, added_by)
+        values (${caseConflict}, ${p!.person_id}, 'SUBJECT', ${USERS.caseManager})`;
+      await s.tx`
+        insert into case_mgmt.case_subject (case_id, person_id, subject_category, added_by)
+        values (${caseConflict}, ${p!.person_id}, 'EMPLOYEE', ${USERS.caseManager})`;
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await openWithPresent(s, f, ["committeeChair", "legal", "legalB", "lead"]);
+
+      for (const member of ["legal", "legalB", "committeeChair", "committeeSecretary"] as const) {
+        await s.as(member);
+        const [v] = await s.tx<{ d: boolean; dm: boolean }[]>`
+          select authz.can_view_case(${caseConflict}) as d, authz.can_view_case_metadata(${caseConflict}) as dm`;
+        expect(v, member).toEqual({ d: false, dm: false });
+        expect(await s.tx`select id from case_mgmt.person where id = ${p!.person_id}`, member).toEqual([]);
+        expect(
+          await s.tx`select case_id from case_mgmt.case_subject where person_id = ${p!.person_id}`,
+          member,
+        ).toEqual([]);
+        expect((await caseIdsReachable(s)).has(caseConflict), member).toBe(false);
+      }
+    });
+  });
+
+  it("T-AMB-143: searching for a hidden case returns no row, no count and no snippet", async () => {
+    await scenario(async (s) => {
+      // The restricted SECRET case 0003 is invisible to these users (case visibility matrix above).
+      await s.as("grcDirector");
+      const [own] = await s.tx<{ n: string; t: string }[]>`
+        select case_number as n, title as t from case_mgmt.case_record where id = ${caseExec}`;
+      for (const user of ["caseManager", "grcDeputy", "records", "investigatorA", "triage"] as const) {
+        await s.as(user);
+        expect(
+          await s.tx`select * from api.search_records_catalogue(${own!.n}, null, null, 200, 0)`,
+          user,
+        ).toEqual([]);
+        const all = await s.tx<{ case_id: string; total_count: string }[]>`
+          select case_id, total_count from api.search_records_catalogue('CDF-DEMO', null, null, 200, 0)`;
+        expect(
+          all.map((r) => r.case_id),
+          user,
+        ).not.toContain(caseExec);
+        // The total counts only rows the caller sees.
+        for (const r of all) expect(Number(r.total_count), user).toBe(all.length);
+        expect(
+          await s.tx`select id from case_mgmt.case_overview where case_number = ${own!.n}`,
+          user,
+        ).toEqual([]);
+        expect(
+          await s.tx`select id from case_mgmt.case_record where title ilike ${"%" + own!.t.slice(0, 12) + "%"} and id = ${caseExec}`,
+          user,
+        ).toEqual([]);
+        const [c] = await s.tx<{ n: number }[]>`
+          select count(*)::int as n from case_mgmt.case_record where case_number = ${own!.n}`;
+        expect(c!.n, user).toBe(0);
+        expect(
+          (await s.tx<{ case_id: string | null }[]>`select case_id from api.my_work_items()`).map(
+            (i) => i.case_id,
+          ),
+          user,
+        ).not.toContain(caseExec);
+      }
     });
   });
 });

@@ -485,3 +485,48 @@ describe("AGENT-09 review of 1920", () => {
     });
   });
 });
+
+describe("ambiguity register: a misdelivered link opens nothing (CDF-205, ADR-025)", () => {
+  it("T-AMB-104: the object behind another user's notification answers NOT_FOUND or nothing to a non-recipient", async () => {
+    await scenario(async (s) => {
+      await seat(s, ic, SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await s.as("legal");
+      const [invite] = await mine(s, "MEETING_INVITATION");
+      expect(invite!.deep_link).toBe(`/meetings/${f.meeting}`);
+      // Anyone holding the link but not the access learns nothing from it.
+      for (const user of ["investigatorA", "committee", "platformAdmin", "employeeB", "dpo"] as const) {
+        await s.as(user);
+        expect(await s.tx`select id from committee.meeting where id = ${invite!.object_id}`, user).toEqual(
+          [],
+        );
+        expect(
+          await s.tx`select id from committee.meeting_participant where meeting_id = ${invite!.object_id}`,
+          user,
+        ).toEqual([]);
+        const [v] = await s.tx<{ ok: boolean }[]>`select authz.can_view_meeting(${invite!.object_id}) as ok`;
+        expect(v!.ok, user).toBe(false);
+        await s.expectError(
+          "CDF_NOT_FOUND",
+          (tx) => tx`select api.open_meeting(${invite!.object_id}, 'Synthetic: opening a forwarded link.')`,
+        );
+      }
+
+      // A defence notice link: the other subject's account gets nothing.
+      await s.as("caseManager");
+      const [subj] = await s.tx<{ id: string }[]>`
+        select api.add_case_subject(${caseB}, 'Employee Sigma (synthetic)', 'EMPLOYEE', null) as id`;
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.add_allegation(${caseB}, 'FRAUD', 'Synthetic: allegation against Employee Sigma.', ${subj!.id}, null, null) as id`;
+      await s.tx`select api.link_subject_portal_account(${subj!.id}, ${USERS.employee}, ${REASON})`;
+      const [n] = await s.tx<{ id: string }[]>`
+        select api.issue_defence_notice(${subj!.id}, 'Synthetic: you are invited to respond.',
+          ${[a!.id]}::uuid[], now() + interval '1 day') as id`;
+      await s.as("employeeB");
+      expect(await s.tx`select id from grievance.defence_notice where id = ${n!.id}`).toEqual([]);
+      const [list] = await s.tx<{ n: unknown[] }[]>`select api.my_defence_notices() as n`;
+      expect(list!.n).toEqual([]);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.acknowledge_defence_notice(${n!.id})`);
+    });
+  });
+});

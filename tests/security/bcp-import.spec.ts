@@ -1331,3 +1331,121 @@ describe("BCP import: integrity", () => {
     expect(codes).toEqual({ raw: "CDF_ERROR", found: "CDF_NOT_FOUND", conflict: "CDF_CONFLICT:BATCH_OPEN" });
   });
 });
+
+describe("ambiguity register: what never happens offline (CDF-205, ADR-034)", () => {
+  it("T-AMB-118: a 12_VOTES row stages UNSUPPORTED, can only be skipped, and the import creates no vote", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      await s.asOwner();
+      const [before] = await s.tx<{ v: number; i: number }[]>`
+        select (select count(*) from committee.vote)::int as v, (select count(*) from committee.vote_item)::int as i`;
+      const batch = await stage(s, "caseManager", control(t, caseB), [
+        subjectRow(3, "BCP-S1", t.now),
+        row("12_VOTES", 3, "BCP-V1", t.now, {
+          DETAILS: "Synthetic: Member Alpha voted APPROVE on the package during the outage.",
+        }),
+      ]);
+      const staged = await rows(s, batch);
+      expect([staged["BCP-V1"]!.state, staged["BCP-V1"]!.resolution]).toEqual(["UNSUPPORTED", null]);
+      await s.expectError("CDF_CONFLICT:RESOLUTION_NOT_ALLOWED", () =>
+        resolve(s, staged["BCP-V1"]!.id, "IMPORT"),
+      );
+      await s.expectError("CDF_CONFLICT:RESOLUTION_NOT_ALLOWED", () =>
+        resolve(s, staged["BCP-V1"]!.id, "USE_OFFLINE"),
+      );
+      await resolve(s, staged["BCP-V1"]!.id, "SKIP");
+      expect(await submit(s, batch)).toBe("SUBMITTED");
+      expect(await decide(s, "grcDirector", batch)).toBe("APPROVED");
+      await apply(s, "caseManager", batch);
+      await s.asOwner();
+      const [after] = await s.tx<{ v: number; i: number }[]>`
+        select (select count(*) from committee.vote)::int as v, (select count(*) from committee.vote_item)::int as i`;
+      expect(after).toEqual(before);
+      expect(await subjectCount(s, caseB)).toBeGreaterThan(0); // the importable row did go through
+    });
+  });
+
+  it("T-AMB-120: no template sheet maps to identity, legal hold, disposition, export or restricted-approval commands", async () => {
+    const sheets = await admin<{ sheet_code: string; command: string | null }[]>`
+      select sheet_code, command from exchange.bcp_template_sheet where command is not null order by position`;
+    expect(sheets.map((x) => [x.sheet_code, x.command])).toEqual([
+      ["05_SUBJECTS", "add_case_subject"],
+      ["06_ALLEGATIONS", "add_allegation"],
+      ["18_EMPLOYEE_NOTICE", "record_defence_response"],
+      ["21_CORRECTIVE_ACTIONS", "open_corrective_action"],
+    ]);
+    const FORBIDDEN =
+      /(identity|reveal|legal_hold|disposition|destroy|export|approve_restricted|restricted_.*approval|grant_case_access|break_glass)/i;
+    expect(sheets.filter((x) => FORBIDDEN.test(x.command!))).toEqual([]);
+    // The executor calls exactly those four commands and refuses every other sheet.
+    const [body] = await admin<{ src: string }[]>`
+      select pg_get_functiondef('exchange.bcp_execute_row'::regproc) as src`;
+    const called = [...body!.src.matchAll(/api\.([a-z_]+)\(/g)]
+      .map((m) => m[1])
+      .filter((f) => !f!.startsWith("_"));
+    expect([...new Set(called)].sort()).toEqual([
+      "add_allegation",
+      "add_case_subject",
+      "open_corrective_action",
+      "record_defence_response",
+    ]);
+    expect(body!.src).toContain("SHEET_NOT_IMPORTABLE");
+  });
+
+  it("T-AMB-121: the distributed template's README sheet carries the handling notice in both languages", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { readWorkbook } = await import("@cdf/infrastructure");
+    const { messagesFor } = await import("@cdf/i18n");
+    const read = readWorkbook(new Uint8Array(readFileSync("infrastructure/bcp/BCP-1_template.xlsx")));
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    const readme = read.workbook.sheets.find((x) => x.name === "00_README")!;
+    expect(read.workbook.sheets[0]!.name).toBe("00_README");
+    const lines = readme.rows.flatMap((r) => r.cells.map((c) => c.value));
+    for (const lang of ["en", "ar"] as const) {
+      const notice = messagesFor(lang).bcpTemplate.readme;
+      // Synthetic data only; outage use only, one case; second-person approval on return.
+      for (const line of [notice.line1, notice.line2, notice.line7]) expect(lines, lang).toContain(line);
+    }
+  });
+
+  it("T-AMB-124: on a restricted case an importer who is not cleared gets NOT_FOUND, staging or later", async () => {
+    await ownerScenario(async (s) => {
+      const caseExec = await caseId("0003"); // restricted, SECRET; the GRC Director owns it
+      const t = await clock(s, caseExec);
+      const ctl = control(t, caseExec, { PREPARED_BY: EMAIL.grcDirector });
+      const input = [
+        row(
+          "05_SUBJECTS",
+          3,
+          "BCP-S1",
+          t.now,
+          { DISPLAY_LABEL: "Employee Omega (synthetic)", SUBJECT_CATEGORY: "EMPLOYEE" },
+          "grcDirector",
+        ),
+      ];
+      const stageAs = (tx: Scenario["tx"]) =>
+        tx`select api.stage_bcp_import(${tx.json(ctl as never)}::jsonb, ${SHA}, ${tx.json(input as never)}::jsonb)`;
+      // A Case Manager granted the case while cleared, whose clearance is then lowered below SECRET.
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'SECRET' where id = ${USERS.caseManager}`;
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseExec}, ${USERS.caseManager}, 'CASE', ${REASON})`;
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'CONFIDENTIAL' where id = ${USERS.caseManager}`;
+      await s.as("caseManager");
+      await s.expectError("CDF_NOT_FOUND", stageAs);
+      // The owner stages, then loses clearance: the batch disappears and every command answers NOT_FOUND.
+      const batch = await stage(s, "grcDirector", ctl, input);
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'CONFIDENTIAL' where id = ${USERS.grcDirector}`;
+      await s.as("grcDirector");
+      expect(await s.tx`select id from exchange.bcp_import_batch where id = ${batch}`).toEqual([]);
+      expect(await s.tx`select id from exchange.bcp_import_row where batch_id = ${batch}`).toEqual([]);
+      await s.expectError("CDF_NOT_FOUND", stageAs);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.preview_bcp_import(${batch})`);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.apply_bcp_import(${batch}, ${SHA})`);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.cancel_bcp_import(${batch}, ${REASON})`);
+    });
+  });
+});
