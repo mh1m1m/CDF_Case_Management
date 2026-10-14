@@ -377,3 +377,52 @@ describe("evidence integrity", () => {
     });
   });
 });
+
+describe("ambiguity register: no API deletes an evidence object (CDF-205, ADR-013 D7)", () => {
+  it("T-AMB-101: neither storage adapter offers a delete, and the only removal is the transient quarantine copy", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { LocalFilesystemEvidenceStorage, SupabaseEvidenceStorage } = await import("@cdf/infrastructure");
+    for (const adapter of [LocalFilesystemEvidenceStorage, SupabaseEvidenceStorage]) {
+      const methods = Object.getOwnPropertyNames(adapter.prototype);
+      expect(
+        methods.filter((m) => /delete|remove|destroy|purge|unlink|erase|overwrite|replace/i.test(m)),
+        adapter.name,
+      ).toEqual([]);
+    }
+    // Source check: a removal or unlink only ever names the quarantine copy, after it reached the vault.
+    const supabase = readFileSync("packages/infrastructure/src/storage/supabase.ts", "utf8");
+    const removals = supabase.split("\n").filter((l) => /\.remove\(/.test(l));
+    expect(removals).toHaveLength(1);
+    expect(removals[0]).toMatch(/from\(QUARANTINE_BUCKET\)\.remove\(\[key\]\)/);
+    const local = readFileSync("packages/infrastructure/src/storage/local-fs.ts", "utf8");
+    const unlinks = local.split("\n").filter((l) => /\b(unlink|rm|rmdir)\(/.test(l));
+    expect(unlinks.map((l) => l.trim())).toEqual(["await unlink(source);"]);
+    expect(local).toMatch(/const source = this\.path\(QUARANTINE_BUCKET, objectKey\);/);
+  });
+
+  it("T-AMB-101: no application role may delete a stored object row, whatever the bucket", async () => {
+    await scenario(async (s) => {
+      for (const user of ["investigatorA", "lead", "caseManager", "grcDirector", "platformAdmin"] as const) {
+        await s.as(user);
+        await s.tx
+          .savepoint(async (sp) => {
+            const deleted = await sp`delete from storage.objects returning id`.catch((e: Error) => e.message);
+            // Either the role has no privilege, RLS (with no policy) hides every row, or (Supabase CLI stack) the
+            // storage schema's own delete guard refuses the statement: nothing is deleted.
+            expect(typeof deleted === "string" ? deleted : deleted.length, user).toSatisfy(
+              (v: unknown) =>
+                v === 0 ||
+                (typeof v === "string" &&
+                  (v.startsWith("permission denied") ||
+                    v ===
+                      "Direct deletion from storage tables is not allowed. Use the Storage API instead.")),
+            );
+            throw new Error("rollback");
+          })
+          .catch((e: Error) => {
+            if (e.message !== "rollback") throw e;
+          });
+      }
+    });
+  });
+});

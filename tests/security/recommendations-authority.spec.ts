@@ -4,7 +4,15 @@
 // flagged PROPOSED_UNVERIFIED; the legal reviewer reaches only the packet assigned to them; an authority decision
 // needs its source document and the authority the rules name; packets never carry the reporter's identity.
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, admin, caseId, ownerScenario, scenario, type Scenario } from "../support/db";
+import {
+  USERS,
+  admin,
+  caseId,
+  ownerScenario,
+  scenario,
+  type OwnerScenario,
+  type Scenario,
+} from "../support/db";
 import { REASON, committeeIds } from "../support/committee";
 import {
   draftPackage,
@@ -611,6 +619,211 @@ describe("AGENT-09 review of 1900 (W1, W2, reviewer eligibility)", () => {
         "CDF_FORBIDDEN",
         (tx) => tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`,
       );
+    });
+  });
+});
+
+describe("ambiguity register: rounds, frozen decisions and restricted approvals (CDF-205)", () => {
+  /** A package adopted, reviewed and returned by the authority (round 1), ready for a second round. */
+  async function returnedByAuthority(s: Scenario): Promise<PackageFixture> {
+    const f = await draftPackage(s, ic, caseB);
+    await voteOnPackage(s, f);
+    const { request } = await requestLegalReview(s, f);
+    await s.as("legalB");
+    await s.tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`;
+    await s.as("committeeSecretary");
+    await s.tx`select api.submit_to_authority(${f.pkg})`;
+    await decide(s, f, "CEO", "RETURN_TO_COMMITTEE", "MEMO-DEMO-0101");
+    return f;
+  }
+
+  const roundItems = async (s: Scenario, pkg: string) => {
+    await s.as("committeeSecretary");
+    return s.tx<{ id: string; package_round: number; status: string; result: string }[]>`
+      select id, package_round, status, result from committee.vote_item where package_id = ${pkg}
+      order by package_round, sequence_no`;
+  };
+
+  it("T-AMB-038: a vote item stays bound to the package round it was opened on after a revision", async () => {
+    await scenario(async (s) => {
+      const f = await returnedByAuthority(s);
+      const before = await roundItems(s, f.pkg);
+      expect(before.map((i) => [i.package_round, i.status, i.result])).toEqual([[1, "CLOSED", "APPROVED"]]);
+      await s.tx`select api.withdraw_recommendation_item(${f.sanction}, ${REASON})`;
+      expect(await voteOnPackage(s, f)).toBe("ADOPTED");
+      const after = await roundItems(s, f.pkg);
+      expect(after.map((i) => [i.package_round, i.status])).toEqual([
+        [1, "CLOSED"],
+        [2, "CLOSED"],
+      ]);
+      // The round-1 item is untouched by the revision and the new vote.
+      expect(after[0]).toEqual(before[0]);
+    });
+  });
+
+  it("T-AMB-049: adoption counts only the current round's votes", async () => {
+    await scenario(async (s) => {
+      const f = await returnedByAuthority(s);
+      // Round 1 approved everything; round 2 rejects everything, so nothing is adopted.
+      expect(await voteOnPackage(s, f, () => "REJECT")).toBe("DRAFT");
+      expect(await packageStatus(s, f.pkg)).toEqual({ status: "DRAFT", round_no: 2 });
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:PACKAGE_NOT_ADOPTED",
+        (tx) => tx`select api.submit_to_authority(${f.pkg})`,
+      );
+    });
+  });
+
+  it("T-AMB-059: a DECIDED package takes no new item and loses none", async () => {
+    await scenario(async (s) => {
+      const f = await draftPackage(s, ic, caseB);
+      await voteOnPackage(s, f);
+      const { request } = await requestLegalReview(s, f);
+      await s.as("legalB");
+      await s.tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${f.pkg})`;
+      await decide(s, f, "CEO", "APPROVE_AS_RECOMMENDED", "MEMO-DEMO-0102");
+      expect(await packageStatus(s, f.pkg)).toMatchObject({ status: "DECIDED" });
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:PACKAGE_NOT_EDITABLE",
+        (tx) =>
+          tx`select api.add_recommendation_item(${f.pkg}, 'OTHER', null, null, 'Synthetic: late addition.', null, null)`,
+      );
+      for (const item of [f.sanction, f.corrective]) {
+        await s.expectError(
+          "CDF_CONFLICT:PACKAGE_NOT_EDITABLE",
+          (tx) => tx`select api.withdraw_recommendation_item(${item}, ${REASON})`,
+        );
+      }
+      const items = await s.tx<{ id: string }[]>`
+        select id from decision.recommendation_item where package_id = ${f.pkg} and withdrawn_at is null`;
+      expect(items.map((i) => i.id).sort()).toEqual([f.sanction, f.corrective].sort());
+    });
+  });
+
+  it("T-AMB-064: no platform command or recommendation type imposes an interim measure", async () => {
+    const commands = await admin<{ fn: string }[]>`
+      select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname in ('api', 'public_api') and p.proname ~* '(interim|suspen|precaution)'`;
+    expect(commands).toEqual([]);
+    const [types] = await admin<{ def: string }[]>`
+      select string_agg(pg_get_constraintdef(oid), ' ') as def from pg_constraint
+      where conrelid = 'decision.recommendation_item'::regclass and contype = 'c'`;
+    expect(types!.def).not.toMatch(/INTERIM|SUSPEN|PRECAUTION/i);
+  });
+});
+
+describe("ambiguity register: restricted-case legal review and decisions (CDF-205)", () => {
+  interface Restricted {
+    caseExec: string;
+    meeting: string;
+    pkg: string;
+  }
+
+  /** The restricted SECRET seed case referred with its authority's approval, a corrective-action package adopted. */
+  async function restrictedAdopted(s: OwnerScenario): Promise<Restricted> {
+    const caseExec = await caseId("0003");
+    await s.asOwner();
+    await s.tx`update iam.user_profile set clearance = 'SECRET'
+               where id in (${USERS.committeeSecretary}, ${USERS.legalB})`;
+    const { seat } = await import("../support/committee");
+    await seat(s, ic, [
+      ["committeeChair", "CHAIR"],
+      ["committeeSecretary", "SECRETARY"],
+      ["grcDeputy", "MEMBER"],
+    ]);
+    await s.as("grcDirector");
+    await s.tx`select api.approve_restricted_committee_referral(${caseExec}, ${ic}, ${REASON})`;
+    const [cp] = await s.tx<{ id: string }[]>`
+      select api.refer_case_to_committee(${caseExec}, ${ic}, null, ${REASON}) as id`;
+    await s.as("committeeSecretary");
+    const [m] = await s.tx<{ id: string }[]>`
+      select api.schedule_meeting(${cp!.id}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+        now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON}) as id`;
+    const [p] = await s.tx<{ id: string }[]>`
+      select id from committee.meeting_participant where meeting_id = ${m!.id} and user_id = ${USERS.grcDeputy}`;
+    await s.as("grcDeputy");
+    await s.tx`select api.declare_meeting_conflict(${p!.id}, 'NO_CONFLICT', null)`;
+    await s.as("committeeSecretary");
+    await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+    await s.tx`select api.record_attendance(${p!.id}, 'PRESENT')`;
+    const [pkg] = await s.tx<{ id: string }[]>`
+      select api.create_recommendation_package(${cp!.id}, 'PACKAGE') as id`;
+    await s.tx`select api.add_recommendation_item(${pkg!.id}, 'CORRECTIVE_ACTION', null, null,
+                 'Synthetic: tighten the approval controls.', null, null)`;
+    await adopt(s, { caseExec, meeting: m!.id, pkg: pkg!.id });
+    return { caseExec, meeting: m!.id, pkg: pkg!.id };
+  }
+
+  /** Submits, opens the current round's vote, has the only voting member approve and records adoption. */
+  async function adopt(s: Scenario, r: Restricted) {
+    await s.as("committeeSecretary");
+    await s.tx`select api.submit_package_for_vote(${r.pkg})`;
+    await s.tx`select api.open_package_vote(${r.meeting}, ${r.pkg})`;
+    const [vi] = await s.tx<{ id: string }[]>`
+      select vi.id from committee.vote_item vi join decision.recommendation_package p
+        on p.id = vi.package_id and vi.package_round = p.round_no where p.id = ${r.pkg}`;
+    await s.as("grcDeputy");
+    await s.tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`;
+    await s.as("committeeSecretary");
+    await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+    const [st] = await s.tx<{ s: string }[]>`select api.record_package_adoption(${r.pkg}) as s`;
+    expect(st!.s).toBe("ADOPTED");
+  }
+
+  it("T-AMB-072: a later legal review on the same package cannot reuse a used approval", async () => {
+    await ownerScenario(async (s) => {
+      const r = await restrictedAdopted(s);
+      await s.as("grcDirector");
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.approve_restricted_legal_review(${r.pkg}, ${USERS.legalB}, ${REASON}) as id`;
+      await s.as("committeeSecretary");
+      const [req] = await s.tx<{ id: string }[]>`
+        select api.request_legal_review(${r.pkg}, ${USERS.legalB}, ${REASON}, null, null) as id`;
+      // The reviewer returns the package; it is revised and adopted again in round 2.
+      await s.as("legalB");
+      await s.tx`select api.give_legal_opinion(${req!.id}, 'CONFLICTS', 'Synthetic: the action lacks an owner.')`;
+      await adopt(s, r);
+      expect(await packageStatus(s, r.pkg)).toEqual({ status: "ADOPTED", round_no: 2 });
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:AUTHORITY_APPROVAL_REQUIRED",
+        (tx) => tx`select api.request_legal_review(${r.pkg}, ${USERS.legalB}, ${REASON}, null, null)`,
+      );
+      await s.asOwner();
+      const [used] = await s.tx<{ legal_review_request_id: string }[]>`
+        select legal_review_request_id from decision.restricted_legal_review_approval where id = ${a!.id}`;
+      expect(used!.legal_review_request_id).toBe(req!.id);
+      // A fresh, request-specific approval is what opens the second review.
+      await s.as("grcDirector");
+      await s.tx`select api.approve_restricted_legal_review(${r.pkg}, ${USERS.legalB}, ${REASON})`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.request_legal_review(${r.pkg}, ${USERS.legalB}, ${REASON}, null, null)`;
+    });
+  });
+
+  it("T-AMB-078: a seated secretary no longer cleared for the restricted case cannot record the decision", async () => {
+    await ownerScenario(async (s) => {
+      const r = await restrictedAdopted(s);
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${r.pkg})`;
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'CONFIDENTIAL' where id = ${USERS.committeeSecretary}`;
+      await s.as("committeeSecretary");
+      const record = (tx: Scenario["tx"]) =>
+        tx`select api.record_authority_decision(${r.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now() - interval '1 hour',
+          'Chief Executive (synthetic)', 'MEMO-DEMO-0103', null, ${REASON})`;
+      await s.expectError("CDF_NOT_FOUND", record);
+      await s.asOwner();
+      expect(await s.tx`select id from decision.authority_decision where package_id = ${r.pkg}`).toEqual([]);
+      // Cleared again, the same seat holder records it.
+      await s.tx`update iam.user_profile set clearance = 'SECRET' where id = ${USERS.committeeSecretary}`;
+      await s.as("committeeSecretary");
+      await record(s.tx);
+      expect(await packageStatus(s, r.pkg)).toMatchObject({ status: "DECIDED" });
     });
   });
 });
