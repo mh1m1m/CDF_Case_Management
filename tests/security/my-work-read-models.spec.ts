@@ -238,8 +238,8 @@ describe("work items exist only where the caller passes the command's own check"
         (await itemsOf(s, u)).filter((i) => i.case_id === caseSecret).map((i) => i.category);
       // The SECRET demo case is restricted: GRC Deputy Mu has the clearance and CASE_VIEW_ALL but no named access.
       expect(await of("grcDeputy")).toEqual([]);
-      // The restriction is lifted as a fixture (still SECRET): no command may lift one until DEC-AMB-012 is decided
-      // (CDF-206, migration 2015). Its authority, GRC Director Zeta, then declares a conflict.
+      // The restriction is lifted as a fixture (still SECRET): no command may lift one until the two-person lift that
+      // DEC-AMB-012 decided (migration 2130) is built and security-cleared (CDF-206, migration 2015). Its authority, GRC Director Zeta, then declares a conflict.
       await s.asOwner();
       await s.tx`update case_mgmt.case_record set is_restricted = false where id = ${caseSecret}`;
       await s.as("grcDirector");
