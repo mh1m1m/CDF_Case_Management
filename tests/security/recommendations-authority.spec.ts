@@ -3830,7 +3830,7 @@ describe("ambiguity register: restricted-case legal review and decisions (CDF-20
       await s.tx`update iam.user_profile set clearance = 'CONFIDENTIAL' where id = ${USERS.committeeSecretary}`;
       await s.as("committeeSecretary");
       const record = (tx: Scenario["tx"]) =>
-        tx`select api.record_authority_decision(${r.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now() - interval '1 hour',
+        tx`select api.record_authority_decision(${r.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(),
           'Chief Executive (synthetic)', 'MEMO-DEMO-0103', null, ${REASON})`;
       await s.expectError("CDF_NOT_FOUND", record);
       await s.asOwner();

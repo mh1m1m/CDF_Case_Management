@@ -1093,7 +1093,7 @@ describe("ambiguity register: legal opinions are never exported (CDF-205, ADR-03
       await s.as("committeeSecretary");
       await s.tx`select api.submit_to_authority(${f.pkg})`;
       const [d] = await s.tx<{ id: string }[]>`
-        select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now() - interval '1 hour',
+        select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(),
           'Chief Executive (synthetic)', 'MEMO-DEMO-0068', null, ${REASON}) as id`;
 
       const req = await draft(s, "caseManager", caseB);
