@@ -8,7 +8,17 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
-import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  admin,
+  caseId,
+  ledgerMark,
+  madeSince,
+  ownerScenario,
+  scenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
 
 const REASON = "Synthetic: case history and roster test.";
 let caseA: string, caseB: string, caseSecret: string, caseConflict: string;
@@ -239,15 +249,25 @@ describe("history shows business events from the catalogue only", () => {
 describe("each event keeps its own audience", () => {
   it("conflict declarations: the person concerned and conflict managers only", async () => {
     await scenario(async (s) => {
-      // Case A: three people declared. An investigator sees only their own declaration.
-      const own = (await historyOf(s, "investigatorA", caseA)).filter(
-        (r) => r.action === "CONFLICT_DECLARED",
-      );
-      expect(own.map((r) => r.subject_name)).toEqual(["Investigator Alpha"]);
-      const manager = (await historyOf(s, "caseManager", caseA)).filter(
-        (r) => r.action === "CONFLICT_DECLARED",
-      );
-      expect(manager.length).toBe(3);
+      // Case A: the three people who declared in the seed declare again here, so their declarations are the newest
+      // events whatever the case's history holds (ledgerMark). An investigator sees only their own declaration.
+      const mark = await ledgerMark();
+      for (const user of ["caseManager", "lead", "investigatorA"] as UserKey[]) {
+        await s.as(user);
+        await s.tx`select api.declare_conflict(${caseA}, false, ${REASON})`;
+      }
+      const declared = async (user: UserKey) =>
+        (await historyOf(s, user, caseA)).filter((r) => r.action === "CONFLICT_DECLARED");
+      const own = await declared("investigatorA");
+      expect(madeSince(own, mark).map((r) => r.subject_name)).toEqual(["Investigator Alpha"]);
+      // Nor anyone else's, in all the history the investigator gets.
+      expect(own.filter((r) => r.subject_name !== "Investigator Alpha")).toEqual([]);
+      const manager = await declared("caseManager");
+      expect(
+        madeSince(manager, mark)
+          .map((r) => r.subject_name)
+          .sort(),
+      ).toEqual(["Case Manager Gamma", "Investigator Alpha", "Lead Investigator Delta"]);
       // Case C: investigator A declared a conflict and was removed. The remaining investigator sees the team change
       // but neither the declaration, nor the decision, nor the reason the assignment ended.
       const other = await historyOf(s, "investigatorB", caseConflict);
@@ -261,46 +281,69 @@ describe("each event keeps its own audience", () => {
 
   it("team-change reasons: the full-roster audience, the person concerned and the actor", async () => {
     await scenario(async (s) => {
+      // The case manager ends and renews the seed's two assignments on case A, so the assignment events are this
+      // test's own and the newest (ledgerMark).
+      const team = await admin<{ id: string; user_id: string; role: string }[]>`
+        select id, user_id, assignment_role as role from case_mgmt.case_assignment
+         where case_id = ${caseA} and status = 'ACTIVE' and user_id in (${USERS.lead}, ${USERS.investigatorA})`;
+      expect(team.map((a) => a.role).sort()).toEqual(["INVESTIGATOR", "LEAD_INVESTIGATOR"]);
+      const mark = await ledgerMark();
+      await s.as("caseManager");
+      for (const a of team) {
+        await s.tx`select api.end_assignment(${a.id}, ${REASON})`;
+        await s.tx`select api.assign_case(${caseA}, ${a.user_id}, ${a.role}, ${REASON})`;
+      }
       const assigned = (rows: HistoryRow[]) =>
         Object.fromEntries(
-          rows.filter((r) => r.action === "CASE_ASSIGNED").map((r) => [r.subject_name, r.reason]),
+          madeSince(rows, mark)
+            .filter((r) => r.action === "CASE_ASSIGNED")
+            .map((r) => [r.subject_name, r.reason]),
         );
-      const investigator = assigned(await historyOf(s, "investigatorA", caseA));
-      expect(investigator["Investigator Alpha"]).not.toBeNull(); // about them
-      expect(investigator["Lead Investigator Delta"]).toBeNull(); // about someone else
-      const lead = assigned(await historyOf(s, "lead", caseA)); // the case's lead manages the team
-      expect(Object.values(lead).every((r) => r !== null)).toBe(true);
+      expect(assigned(await historyOf(s, "investigatorA", caseA))).toEqual({
+        "Investigator Alpha": REASON, // about them
+        "Lead Investigator Delta": null, // about someone else
+      });
+      // The case's lead manages the team.
+      expect(assigned(await historyOf(s, "lead", caseA))).toEqual({
+        "Investigator Alpha": REASON,
+        "Lead Investigator Delta": REASON,
+      });
     });
   });
 
   it("access grants: the full-roster audience and the grantee, never an AUDIT-scope grant", async () => {
     await scenario(async (s) => {
+      // The grants are this test's own, so they are the newest events (ledgerMark): an AUDIT grant to the DPO, and a
+      // CASE grant to investigator B that then ends.
+      const mark = await ledgerMark();
       await s.as("caseManager");
       await s.tx`select api.grant_case_access(${caseA}, ${USERS.dpo}, 'AUDIT', ${REASON}, null)`;
-      const grants = async (user: UserKey) =>
-        (await historyOf(s, user, caseA))
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.grant_case_access(${caseA}, ${USERS.investigatorB}, 'CASE', ${REASON}, null) as id`;
+      const grants = async (user: UserKey, since = 0n) =>
+        madeSince(await historyOf(s, user, caseA), since)
           .filter((r) => r.action === "CASE_ACCESS_GRANTED")
           .map((r) => `${r.subject_name}:${(r.detail as { scope: string }).scope}`)
           .sort();
-      const earlier = (await endedBeforeS3(caseA)).grants;
-      const full = [
-        "Triage Officer Beta:TRIAGE",
-        ...earlier.map((g) => `${g.display_name}:${g.scope}`),
-      ].sort();
-      expect(await grants("lead")).toEqual(full);
-      expect(await grants("caseManager")).toEqual(full);
-      // Hand-over ended the triage grant (S3, DEC-03): the triage officer no longer opens case A at all.
+      // The grantee sees its own grant while it holds it.
+      expect(await grants("investigatorB", mark)).toEqual(["Investigator Beta:CASE"]);
+      await s.as("caseManager");
+      await s.tx`select api.revoke_case_access(${g!.id}, ${REASON})`;
+      expect(await grants("lead", mark)).toEqual(["Investigator Beta:CASE"]);
+      expect(await grants("caseManager", mark)).toEqual(["Investigator Beta:CASE"]);
+      // An ended grant opens nothing, and hand-over ended the triage grant (S3, DEC-03): neither grantee opens case A
+      // any more. The investigator outside the full roster sees no grant at all.
+      expect(await grants("investigatorB")).toEqual([]);
       expect(await grants("triage")).toEqual([]);
       expect(await grants("investigatorA")).toEqual([]);
-      // The end of that grant is an access event with the same audience.
-      const revoked = async (user: UserKey) =>
-        (await historyOf(s, user, caseA))
+      // The end of a grant is an access event with the same audience.
+      const revoked = async (user: UserKey, since = 0n) =>
+        madeSince(await historyOf(s, user, caseA), since)
           .filter((r) => r.action === "CASE_ACCESS_REVOKED")
           .map((r) => r.subject_name)
           .sort();
-      expect(await revoked("lead")).toEqual(
-        ["Triage Officer Beta", ...earlier.map((g) => g.display_name)].sort(),
-      );
+      expect(await revoked("lead", mark)).toEqual(["Investigator Beta"]);
+      expect(await revoked("caseManager", mark)).toEqual(["Investigator Beta"]);
       expect(await revoked("investigatorA")).toEqual([]);
       // The AUDIT grantee passes the case gate, and still never sees its own oversight grant.
       expect(await grants("dpo")).toEqual([]);

@@ -86,6 +86,24 @@ export async function reportId(ref: string): Promise<string> {
   return row.id;
 }
 
+/**
+ * The newest audit ledger entry so far, read on the owner connection (committed rows only). `api.case_history`
+ * returns at most 500 events, newest first, so on a database that keeps the suites' records from run to run (hosted
+ * DEV, CDF-32 §4.10) a seed case's oldest events leave that window. A history test therefore asserts on events it
+ * makes itself, which are always the newest, and finds them above this mark with `madeSince`.
+ */
+export async function ledgerMark(): Promise<bigint> {
+  const [row] = await admin<
+    { seq: string }[]
+  >`select coalesce(max(seq), 0)::text as seq from audit.audit_event`;
+  return BigInt(row!.seq);
+}
+
+/** The history rows a test made after `ledgerMark()`. */
+export function madeSince<R extends { seq: string }>(rows: R[], mark: bigint): R[] {
+  return rows.filter((r) => BigInt(r.seq) > mark);
+}
+
 class Rollback extends Error {}
 
 function expectErrorIn(tx: Tx): Scenario["expectError"] {
