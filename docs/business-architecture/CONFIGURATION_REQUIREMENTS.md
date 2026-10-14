@@ -1,8 +1,8 @@
 # Configuration Requirements
 
-> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204). Generated from one data set with its companion files, so counts agree across them.
+> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)). Generated from one data set with its companion files, so counts agree across them.
 
-All R3 rows (44), plus 56 settings that owner decisions or derivations name. Every setting below follows the same rules:
+All R3 rows (44), plus 57 settings that owner decisions or derivations name. Every setting below follows the same rules:
 
 - **Effective-dated (§12):** `effective_from`, `effective_to`, `rule_version`; rows are never edited, a new version closes the old one (the `committee.rule_set`, `exchange.approval_rule` and `decision.action_authority_rule` pattern).
 - **No retroactive silent change (§13):** the version in force when an action starts is snapshotted on it (proceeding rule snapshot, notice window, export rules, authority rule at submission). Completed votes, historic quorum, started grievance windows, past membership, approved minutes, completed decisions and historic sanction authority never change.
@@ -118,3 +118,4 @@ All R3 rows (44), plus 56 settings that owner decisions or derivations name. Eve
 | AMB-236 | R4    | `SOD_MATRIX = SOURCE_REQUIRED`                                                                                   | —                                                              |
 | AMB-237 | R4    | `CLEARANCE_ADMIN = SOURCE_REQUIRED`                                                                              | —                                                              |
 | AMB-238 | R4    | `CLASSIFICATION_LABELS = SOURCE_REQUIRED`                                                                        | —                                                              |
+| AMB-251 | R4    | `RESTRICTED_GRIEVANCE_DECIDER_NOMINATION = SOURCE_REQUIRED`                                                      | Rebase PR-A, migrations 2030/2040 (DEC-F01–F41 application)    |

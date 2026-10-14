@@ -2214,3 +2214,82 @@ describe("non-object commands", () => {
     });
   });
 });
+
+describe("CDF-205 T-AMB-142 (AMB-231): no api.* function accepts an acting-as user id", () => {
+  // The only user ids a command takes are the people it acts on (grantee, appointee, assignee, owner,
+  // delegate, reviewer). Who is acting always comes from the session (api._actor() / authz.current_user_id()).
+  const TARGET_USER_ARGS = [
+    "p_assigned_to",
+    "p_assigned_user_id",
+    "p_case_owner_id",
+    "p_delegate_id",
+    "p_new_user_id",
+    "p_owner_id",
+    "p_recorder_id",
+    "p_restricted_authority_id",
+    "p_reviewer_id",
+    "p_secretary_id",
+    "p_user_id",
+  ];
+
+  async function inputArgs() {
+    return admin<{ fn: string; arg: string; type: string; src: string }[]>`
+      select n.nspname || '.' || p.proname as fn, a.name as arg, format_type(a.type, null) as type, p.prosrc as src
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+           unnest(p.proargnames, coalesce(p.proallargtypes, p.proargtypes::oid[]),
+                  coalesce(p.proargmodes, array_fill('i'::"char", array[cardinality(p.proargnames)])))
+             as a(name, type, mode)
+      where n.nspname in ('api', 'public_api') and p.proargnames is not null and a.mode in ('i', 'b')
+      order by 1, 2`;
+  }
+
+  it("no argument names an actor, caller, impersonated or on-behalf-of user", async () => {
+    const args = await inputArgs();
+    expect(args.length).toBeGreaterThan(100);
+    const unnamed = await admin`
+      select p.oid::regprocedure::text from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname in ('api', 'public_api') and p.pronargs > 0 and p.proargnames is null`;
+    expect(unnamed).toEqual([]); // every argument is named, so the name check below sees all of them
+    const actingAs =
+      /^p_(actor|acting|act_as|as_user|as_|on_behalf|behalf|caller|impersonat|current_user|me$|self|session_user)|_by(_id)?$/;
+    expect(args.filter((a) => actingAs.test(a.arg)).map((a) => `${a.fn}(${a.arg})`)).toEqual([]);
+  });
+
+  it("the user ids commands accept are the pinned target arguments, and each such command derives its actor itself", async () => {
+    const args = await inputArgs();
+    const userLike =
+      /(user|owner|delegate|recorder|reviewer|secretary|authority_id|assigned_to|actor|caller)/;
+    const uuidUserArgs = [
+      ...new Set(args.filter((a) => a.type === "uuid" && userLike.test(a.arg)).map((a) => a.arg)),
+    ].sort();
+    // A new user-id argument fails here until someone confirms it names a target, not the actor.
+    expect(uuidUserArgs).toEqual(TARGET_USER_ARGS);
+    const withTarget = [...new Set(args.filter((a) => TARGET_USER_ARGS.includes(a.arg)).map((a) => a.fn))];
+    expect(withTarget.length).toBeGreaterThan(20);
+    const deriving = /api\._actor\(\)|authz\.current_user_id\(\)/;
+    const blind = withTarget.filter((fn) => !args.some((a) => a.fn === fn && deriving.test(a.src)));
+    expect(blind).toEqual([]);
+  });
+
+  it("passing someone else's id as the target never makes them the actor", async () => {
+    const target = await caseId("0001");
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.grant_case_access(${target}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null) as id`;
+      await s.asOwner();
+      const [grant] = await s.tx<{ user_id: string; granted_by: string }[]>`
+        select user_id, granted_by from case_mgmt.case_access_grant where id = ${g!.id}`;
+      expect(grant).toEqual({ user_id: USERS.grcDeputy, granted_by: USERS.caseManager });
+      const events = await s.tx<{ actor_id: string }[]>`
+        select actor_id from audit.audit_event where action = 'CASE_ACCESS_GRANTED' and object_id = ${g!.id}`;
+      expect(events).toEqual([{ actor_id: USERS.caseManager }]);
+      // Naming the case manager as the target does not lend their authority to an investigator.
+      await s.as("investigatorA");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.grant_case_access(${target}, ${USERS.caseManager}, 'CASE', ${REASON}, null)`,
+      );
+    });
+  });
+});

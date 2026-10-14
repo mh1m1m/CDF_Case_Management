@@ -664,3 +664,64 @@ describe("AGENT-09 re-check of 1910 (G2b, G3b, approval checks)", () => {
     });
   });
 });
+
+describe("ambiguity register: defence notices and late paper grievances (CDF-205)", () => {
+  it("T-AMB-092: a defence notice carries no evidence and no reporter field, in its tables or the portal read", async () => {
+    await scenario(async (s) => {
+      const ids = await twoSubjects(s); // case B has an identified reporter (Reporter Gamma, synthetic)
+      await s.as("caseManager");
+      await notice(s, ids.sigma!, [ids.sigmaAllegation!]);
+      await s.as("employee");
+      const [mine] = await s.tx<{ n: unknown }[]>`select api.my_defence_notices() as n`;
+      const text = JSON.stringify(mine!.n);
+      expect(text).not.toMatch(/Reporter Gamma|reporter\.gamma|WBID-|WB-SEED/i);
+      const keys = new Set<string>();
+      const walk = (v: unknown) => {
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === "object")
+          for (const [k, x] of Object.entries(v)) {
+            keys.add(k);
+            walk(x);
+          }
+      };
+      walk(mine!.n);
+      expect(
+        [...keys].filter((k) => /evidence|reporter|wb_id|identity|attachment|storage|object_key/i.test(k)),
+      ).toEqual([]);
+    });
+    const columns = await admin<{ c: string }[]>`
+      select table_name || '.' || column_name as c from information_schema.columns
+      where table_schema = 'grievance' and table_name like 'defence_notice%'
+        and column_name ~* '(evidence|reporter|wb_id|identity|attachment|storage|object_key)'`;
+    expect(columns).toEqual([]);
+  });
+
+  it("T-AMB-089: a grievance recorded later from paper keeps its original received date, which decides lateness", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, gc, GC_SEATS);
+      const [num] = await admin<
+        { n: string }[]
+      >`select case_number as n from case_mgmt.case_record where id = ${caseB}`;
+      await s.as("committeeSecretary");
+      const decided = new Date(Date.now() - 45 * 86400_000);
+      const received = new Date(Date.now() - 43 * 86400_000); // two days after the decision, recorded only now
+      const [g] = await s.tx<{ id: string }[]>`
+        select api.record_grievance('LINKED', ${num!.n}, 'Employee Sigma (synthetic)', null, null, null,
+          'PHYSICAL_SUBMISSION', ${received}, ${decided}, 'Synthetic: the sanction ignored my response.',
+          'PAPER-DEMO-0089') as id`;
+      await s.asOwner();
+      const [row] = await s.tx<
+        { original_submission_date: Date; recorded_at: Date; is_late: boolean; window_days: number }[]
+      >`
+        select original_submission_date, recorded_at, is_late, window_days from grievance.grievance where id = ${g!.id}`;
+      expect(row!.original_submission_date.toISOString()).toBe(received.toISOString());
+      expect(row!.recorded_at.getTime()).toBeGreaterThan(received.getTime() + 40 * 86400_000);
+      expect(row!.window_days).toBeLessThan(43); // recorded today it would be late; received in time it is not
+      expect(row!.is_late).toBe(false);
+      await s.expectError(
+        "grievance ", // "grievance <id> is closed or its record is immutable", even for the owner
+        (tx) => tx`update grievance.grievance set original_submission_date = now() where id = ${g!.id}`,
+      );
+    });
+  });
+});
