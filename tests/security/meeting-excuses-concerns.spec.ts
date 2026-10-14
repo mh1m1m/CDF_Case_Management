@@ -26,6 +26,7 @@ import {
   seat,
   type MeetingFixture,
 } from "../support/committee";
+import { concludeProceedings } from "../support/closure";
 
 const EXCUSE = "Synthetic: unique-excuse-marker-2000, medical appointment.";
 const CONCERN = "Synthetic: unique-concern-marker-2000, works for the subject's unit.";
@@ -599,8 +600,8 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
       await s.as("legal");
       await s.expectError("CDF_CONFLICT:MEETING_NOT_ACTIVE", () => raise(s, f.participant.committeeChair!));
 
-      // Nor does a case that is no longer active.
-      await s.as("caseManager");
+      // Nor does a case that is no longer active (it closes with no proceeding open: CON-022, migration 2060).
+      await concludeProceedings(s, caseB);
       await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', ${REASON})`;
       await s.as("legal");
       await s.expectError("CDF_CONFLICT:CASE_NOT_ACTIVE", () => raise(s, f.participant.committeeChair!));

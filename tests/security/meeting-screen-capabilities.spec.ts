@@ -28,6 +28,7 @@ import {
   vote,
   type MeetingFixture,
 } from "../support/committee";
+import { concludeProceedings } from "../support/closure";
 
 const CONCERN = "Synthetic: a concern raised by the capability test.";
 const NOTE = "Synthetic: a note on the vote, for the capability test.";
@@ -456,8 +457,9 @@ describe("api.meeting_view roster capabilities (migration 2055, ADR-054)", () =>
       for (const u of CALLERS) await view(s, u, f.meeting);
       expect(await ledger(s)).toBe(written);
 
-      // The case leaves ACTIVE: committee.lock_managed_meeting refuses everything (CASE_NOT_ACTIVE).
-      await s.as("caseManager");
+      // The case leaves ACTIVE: committee.lock_managed_meeting refuses everything (CASE_NOT_ACTIVE). It closes with no
+      // proceeding open (CON-022, migration 2060).
+      await concludeProceedings(s, caseB);
       await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', ${REASON})`;
       await sweep(s, f.meeting);
       v = await view(s, "committeeSecretary", f.meeting);

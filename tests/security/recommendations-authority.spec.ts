@@ -16,6 +16,7 @@ import {
   type UserKey,
 } from "../support/db";
 import { REASON, committeeIds, preliminaryReferral, seat } from "../support/committee";
+import { concludeProceedings, setClosureAuthority } from "../support/closure";
 import {
   DECISION_VOTERS,
   authorityRuleFor,
@@ -3631,6 +3632,8 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           await s.tx`select api.submit_corrective_action_completion(${a1!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
           await s.as("caseManager");
           await s.tx`select api.verify_corrective_action(${a1!}, 'VERIFIED', null)`;
+          // No proceeding is left open (CON-022, migration 2060): the committee's work is concluded first.
+          await concludeProceedings(s, caseB);
           await closeCase(s);
           await s.asOwner();
           const [before] =
@@ -3643,8 +3646,8 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             (tx) =>
               tx`select api.raise_meeting_conflict(${f.meeting.participant.lead!}, 'Synthetic: the lead is related.')`,
           );
-          // The validated conflict itself is written on the owner connection (validating it on a closed case belongs to
-          // migration 2060): a confirmed case conflict of the lead, whose vote decided round one.
+          // The validated conflict itself: a confirmed case conflict of the lead, whose vote decided round one, written as
+          // the case conflict process records it (fixture on the owner connection).
           await s.asOwner();
           await s.tx`update case_mgmt.conflict_check set is_current = false
                      where case_id = ${caseB} and user_id = ${USERS.lead} and is_current`;
@@ -3678,7 +3681,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
                  from decision.recommendation_package p where p.id = ${f.pkg}`,
           );
           // Nothing moved: the package is DECIDED in round one, its decision is not superseded and is unchanged, and
-          // the case stays CLOSED until the 2060 reopening.
+          // the case stays CLOSED until it is reopened.
           expect(await packageStatus(s, f.pkg)).toEqual({ status: "DECIDED", round_no: 1 });
           expect(await superseded(s, f.pkg)).toEqual([]);
           expect(await s.tx`select id from decision.conflict_remediation`).toEqual([]);
@@ -3687,6 +3690,116 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           ).toEqual([before]);
           expect(await s.tx`select records_state from case_mgmt.case_record where id = ${caseB}`).toEqual([
             { records_state: "CLOSED" },
+          ]);
+        });
+      });
+
+      it("T-AMB-131 (DEC-AMB-015 option A, migration 2060): a validated decisive conflict found after closure reopens the case only by the closure authority's approval; the authority decision is never edited", async () => {
+        await ownerScenario(async (s) => {
+          const {
+            f,
+            d1,
+            a: [a1],
+          } = await decidedWithActions(s, 1);
+          await s.as("financeEmployee");
+          await s.tx`select api.submit_corrective_action_completion(${a1!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
+          await s.as("caseManager");
+          await s.tx`select api.verify_corrective_action(${a1!}, 'VERIFIED', null)`;
+          await concludeProceedings(s, caseB);
+          await closeCase(s);
+          await s.asOwner();
+          const [before] =
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`;
+          /** A decided case conflict of `user`, as the case conflict process records it (owner fixture). */
+          const decided = async (user: UserKey, status = "CONFLICT_CONFIRMED") => {
+            await s.asOwner();
+            await s.tx`update case_mgmt.conflict_check set is_current = false
+                       where case_id = ${caseB} and user_id = ${USERS[user]} and is_current`;
+            await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration, decided_by, decided_at,
+                                                             decision_reason)
+              values (${caseB}, ${USERS[user]}, ${status}, 'Synthetic: related to the subject.',
+                      ${USERS.caseManager}, now(), 'Synthetic: the relationship is decided.')`;
+          };
+          const reopen = (tx: Scenario["tx"]) =>
+            tx<{ id: string }[]>`
+              select api.request_case_reopening(${caseB}, 'DECISIVE_POST_DECISION_CONFLICT', ${FIRM}, null, null,
+                ${f.pkg}) as id`;
+
+          // Fails closed while the closure authority is SOURCE_REQUIRED, before anything else is looked at.
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:CASE_CLOSURE_APPROVAL_RULE_REQUIRED", reopen);
+          await setClosureAuthority(s, "GRC_DIRECTOR");
+          // No validated conflict yet; then a conflict that could not have changed the result (legal rejected; without
+          // that vote the package is still approved): neither is a decisive conflict.
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:NO_VALIDATED_DECISIVE_CONFLICT", reopen);
+          await decided("legal");
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:NO_VALIDATED_DECISIVE_CONFLICT", reopen);
+          // Legal's conflict is cleared; the lead's vote decided round one (two to one; one to one without it).
+          await decided("legal", "CONFLICT_CLEARED");
+          await decided("lead");
+          await s.as("caseManager");
+          // The conflict is not new evidence: evidence fields are refused for this reason, and so is a package that is
+          // not the case's.
+          await s.expectError(
+            "CDF_INVALID:new_evidence_description",
+            (tx) =>
+              tx`select api.request_case_reopening(${caseB}, 'DECISIVE_POST_DECISION_CONFLICT', ${FIRM},
+                   'Synthetic: the conflict is not evidence.', null, ${f.pkg})`,
+          );
+          await s.expectError(
+            "CDF_INVALID:package_id",
+            (tx) =>
+              tx`select api.request_case_reopening(${caseB}, 'DECISIVE_POST_DECISION_CONFLICT', ${FIRM}, null, null,
+                   ${randomUUID()})`,
+          );
+          const [r] = await reopen(s.tx);
+          await s.expectError("CDF_CONFLICT:REOPENING_REQUEST_PENDING", reopen);
+          // Only the closure authority decides, never the maker.
+          await s.expectError(
+            "CDF_FORBIDDEN",
+            (tx) => tx`select api.decide_case_reopening(${r!.id}, 'APPROVE', ${FIRM})`,
+          );
+          await s.as("grcDirector");
+          expect(await s.tx`select api.decide_case_reopening(${r!.id}, 'APPROVE', ${FIRM}) as r`).toEqual([
+            { r: "REOPENED" },
+          ]);
+          await s.asOwner();
+          expect(
+            await s.tx`select c.records_state, i.current_state from case_mgmt.case_record c
+                       join workflow.workflow_instance i on i.case_id = c.id where c.id = ${caseB}`,
+          ).toEqual([{ records_state: "ACTIVE", current_state: "INVESTIGATION" }]);
+          // The authority decision is untouched; the package is still DECIDED and tainted, so the case cannot close.
+          expect(
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`,
+          ).toEqual([before]);
+          expect(await packageStatus(s, f.pkg)).toEqual({ status: "DECIDED", round_no: 1 });
+          await s.as("caseManager");
+          await s.expectError(
+            "CDF_CONFLICT:TAINTED_BY_CONFLICT",
+            (tx) => tx`select api.close_case(${caseB}, 'NO_ACTION', ${FIRM})`,
+          );
+          // Audited with codes and ids only; the justification stays in the request.
+          await s.asOwner();
+          expect(
+            await s.tx`select action, reason, metadata from audit.audit_event
+                       where case_id = ${caseB} and action like 'CASE_REOPENING_%' order by seq`,
+          ).toEqual([
+            {
+              action: "CASE_REOPENING_REQUESTED",
+              reason: null,
+              metadata: { reason_type: "DECISIVE_POST_DECISION_CONFLICT", package_id: f.pkg },
+            },
+            {
+              action: "CASE_REOPENING_DECIDED",
+              reason: null,
+              metadata: {
+                decision: "APPROVE",
+                reason_type: "DECISIVE_POST_DECISION_CONFLICT",
+                package_id: f.pkg,
+              },
+            },
           ]);
         });
       });

@@ -8,6 +8,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, caseId, ownerScenario, type OwnerScenario, type Scenario, type UserKey } from "../support/db";
 import { REASON, committeeIds, preliminaryReferral, seat } from "../support/committee";
+import { concludeProceedings } from "../support/closure";
 import { authorityRuleFor, draftPackage, voteOnPackage, type PackageFixture } from "../support/decision";
 
 const TITLE = "Synthetic: strengthen approval controls";
@@ -726,7 +727,8 @@ describe("case closure (EPIC 12)", () => {
       await s.expectError("CDF_CONFLICT:CORRECTIVE_ACTIONS_OUTSTANDING", close);
       await s.as("grcDirector");
       await verify(s, id, "VERIFIED");
-      await s.as("caseManager");
+      // No proceeding may be left open either (CON-022, migration 2060).
+      await concludeProceedings(s, caseB);
       await close();
       await s.asOwner();
       const [c] = await s.tx<{ records_state: string }[]>`

@@ -1,8 +1,15 @@
 // CDF-62 · §31–§33, ADR-007: the case workflow can only move through api.transition_case, one defined step
 // at a time, with the permission, reason, separation-of-duties and condition guards of that step. Nothing
 // else (direct writes, internal helpers, unknown or out-of-state codes, disabled steps) moves a case.
+import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { admin, caseId, scenario, type Scenario, type UserKey } from "../support/db";
+import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  DECIDE_REASON,
+  JUSTIFICATION_2060,
+  requestReopeningOnEvidence,
+  setClosureAuthority,
+} from "../support/closure";
 
 let caseA: string, caseB: string, caseConflict: string;
 beforeAll(async () => {
@@ -233,34 +240,183 @@ describe("the UI's list of steps never promises more than the database allows", 
   });
 });
 
-describe("ambiguity register: reopening stays disabled until the DEC-AMB-002 (B) approval path is built (CDF-205)", () => {
-  it("T-AMB-131: nobody can run REOPEN_CASE on a closed case, whatever their permissions", async () => {
-    await scenario(async (s) => {
+describe("ambiguity register: reopening a closed case (DEC-AMB-002 option B; migration 2060, ADR-042)", () => {
+  const reopenStep = (tx: Scenario["tx"]) =>
+    tx`select api.transition_case(${caseB}, 'REOPEN_CASE', 'Synthetic: new evidence arrived after closure.')`;
+
+  it("T-AMB-131: REOPEN_CASE is a system step nobody runs through transition_case; requests fail closed while the closure authority is SOURCE_REQUIRED", async () => {
+    await ownerScenario(async (s) => {
       await s.as("caseManager");
       await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', 'Synthetic: screened out before a reopen attempt.')`;
       expect(await state(s, caseB)).toBe("CLOSURE");
       for (const user of ["caseManager", "grcDirector", "grcDeputy", "lead", "investigatorB"] as UserKey[]) {
         await s.as(user);
+        await s.expectError("CDF_", reopenStep);
         await s.expectError(
-          "CDF_",
-          (tx) =>
-            tx`select api.transition_case(${caseB}, 'REOPEN_CASE', 'Synthetic: new evidence arrived after closure.')`,
+          "permission denied",
+          (tx) => tx`select workflow.apply_transition(${caseB}, 'REOPEN_CASE', ${null}, ${REASON})`,
         );
       }
-      // Those who could otherwise take the step are told it is not available, never that it succeeded.
+      // Those who could otherwise take the step are told it is not available from the state, never that it succeeded.
       for (const user of ["caseManager", "grcDirector"] as UserKey[]) {
         await s.as(user);
+        await s.expectError("CDF_CONFLICT:TRANSITION_NOT_AVAILABLE_FROM_STATE", reopenStep);
+        expect(
+          (await s.tx<{ code: string }[]>`select code from api.available_transitions(${caseB})`).map(
+            (t) => t.code,
+          ),
+        ).not.toContain("REOPEN_CASE");
+        // DEC-AMB-015: "Fail closed if the required closure authority is not configured."
         await s.expectError(
-          "CDF_CONFLICT:TRANSITION_NOT_YET_AVAILABLE",
+          "CDF_CONFLICT:CASE_CLOSURE_APPROVAL_RULE_REQUIRED",
           (tx) =>
-            tx`select api.transition_case(${caseB}, 'REOPEN_CASE', 'Synthetic: new evidence arrived after closure.')`,
+            tx`select api.request_case_reopening(${caseB}, 'NEW_EVIDENCE', ${JUSTIFICATION_2060},
+               'Synthetic: a further ledger extract.', 'DEMO-EVIDENCE-REF-2060', null)`,
         );
       }
       await s.as("caseManager");
       expect(await state(s, caseB)).toBe("CLOSURE");
     });
-    const [def] = await admin<{ is_enabled: boolean }[]>`
-      select is_enabled from workflow.workflow_transition_definition where code = 'REOPEN_CASE'`;
-    expect(def!.is_enabled).toBe(false);
+    const [def] = await admin<{ is_enabled: boolean; is_system: boolean }[]>`
+      select is_enabled, is_system from workflow.workflow_transition_definition where code = 'REOPEN_CASE'`;
+    expect(def).toEqual({ is_enabled: true, is_system: true });
+  });
+
+  it("T-AMB-131: only the closure authority reopens, on new evidence with a documented reason, never the maker; audited, retention recalculated", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("caseManager");
+      await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', 'Synthetic: screened out before a reopening.')`;
+      await setClosureAuthority(s, "GRC_DIRECTOR");
+      const request = (
+        tx: Scenario["tx"],
+        description: string | null,
+        reference: string | null,
+        pkg: string | null = null,
+      ) =>
+        tx`select api.request_case_reopening(${caseB}, 'NEW_EVIDENCE', ${JUSTIFICATION_2060}, ${description},
+             ${reference}, ${pkg}::uuid)`;
+      // The maker holds the REOPEN_CASE permission (INVESTIGATION_APPROVE): the investigator who still sees the closed
+      // case does not; those who cannot see it get NOT_FOUND.
+      await s.as("investigatorB");
+      await s.expectError("CDF_FORBIDDEN", (tx) => request(tx, "Synthetic: a further extract.", "DEMO-REF"));
+      for (const user of ["triage", "investigatorA", "platformAdmin"] as UserKey[]) {
+        await s.as(user);
+        await s.expectError("CDF_NOT_FOUND", (tx) =>
+          request(tx, "Synthetic: a further extract.", "DEMO-REF"),
+        );
+      }
+      // A documented reason: the evidence and where it is recorded, and a justification.
+      await s.as("caseManager");
+      await s.expectError("CDF_INVALID:new_evidence_description", (tx) => request(tx, null, "DEMO-REF"));
+      await s.expectError("CDF_INVALID:new_evidence_reference", (tx) =>
+        request(tx, "Synthetic: a further extract.", null),
+      );
+      await s.expectError("CDF_INVALID:package_id", (tx) =>
+        request(tx, "Synthetic: a further extract.", "DEMO-REF", randomUUID()),
+      );
+      await s.expectError(
+        "CDF_INVALID:justification",
+        (tx) =>
+          tx`select api.request_case_reopening(${caseB}, 'NEW_EVIDENCE', 'short', 'Synthetic: a further extract.',
+             'DEMO-REF', null)`,
+      );
+      await s.expectError(
+        "CDF_INVALID:reason_type",
+        (tx) =>
+          tx`select api.request_case_reopening(${caseB}, 'EXTERNAL_ORDER', ${JUSTIFICATION_2060}, null, null, null)`,
+      );
+      // Rejected with a reason: the case stays closed.
+      const first = await requestReopeningOnEvidence(s, caseB);
+      await s.expectError("CDF_CONFLICT:REOPENING_REQUEST_PENDING", (tx) =>
+        request(tx, "Synthetic: a further extract.", "DEMO-REF"),
+      );
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_INVALID:decision",
+        (tx) => tx`select api.decide_case_reopening(${first}, 'MAYBE', ${DECIDE_REASON})`,
+      );
+      await s.expectError(
+        "CDF_INVALID:reason",
+        (tx) => tx`select api.decide_case_reopening(${first}, 'REJECT', 'no')`,
+      );
+      expect(await s.tx`select api.decide_case_reopening(${first}, 'REJECT', ${DECIDE_REASON}) as r`).toEqual(
+        [{ r: "REJECTED" }],
+      );
+      await s.expectError(
+        "CDF_CONFLICT:REQUEST_NOT_PENDING",
+        (tx) => tx`select api.decide_case_reopening(${first}, 'APPROVE', ${DECIDE_REASON})`,
+      );
+      expect(await state(s, caseB)).toBe("CLOSURE");
+      // The authority asks: it may not decide its own request (AGENT-09 R3, any decision); another holder does.
+      const second = await requestReopeningOnEvidence(s, caseB, "grcDirector");
+      for (const d of ["APPROVE", "REJECT"]) {
+        await s.expectError(
+          "CDF_CONFLICT:REQUESTER_CANNOT_APPROVE",
+          (tx) => tx`select api.decide_case_reopening(${second}, ${d}, ${DECIDE_REASON})`,
+        );
+      }
+      // The case manager is no closure authority.
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.decide_case_reopening(${second}, 'APPROVE', ${DECIDE_REASON})`,
+      );
+      await s.as("grcDeputy");
+      expect(
+        await s.tx`select api.decide_case_reopening(${second}, 'APPROVE', ${DECIDE_REASON}) as r`,
+      ).toEqual([{ r: "REOPENED" }]);
+      expect(await state(s, caseB)).toBe("INVESTIGATION");
+      await s.asOwner();
+      expect(await s.tx`select records_state from case_mgmt.case_record where id = ${caseB}`).toEqual([
+        { records_state: "ACTIVE" },
+      ]);
+      // A request is decided once, never by its maker, even on the table.
+      await s.expectError(
+        `case reopening request ${second} is decided once`,
+        (tx) =>
+          tx`update case_mgmt.case_reopening_request set status = 'AWAITING_APPROVAL', decided_by = null, decided_at = null,
+             decision_reason = null where id = ${second}`,
+      );
+      await s.expectError(
+        'new row for relation "case_reopening_request" violates check constraint',
+        (tx) =>
+          tx`insert into case_mgmt.case_reopening_request (case_id, reason_type, justification, new_evidence_description,
+             new_evidence_reference, status, requested_by, decided_by, decided_at, decision_reason)
+           values (${caseB}, 'NEW_EVIDENCE', ${JUSTIFICATION_2060}, 'Synthetic: a further extract.', 'DEMO-REF',
+             'APPROVED', ${USERS.grcDirector}, ${USERS.grcDirector}, now(), ${DECIDE_REASON})`,
+      );
+      // Audited with codes and ids; justifications, evidence descriptions and reasons stay in the request.
+      const events = await s.tx<
+        { action: string; reason: string | null; metadata: Record<string, unknown> }[]
+      >`
+        select action, reason, metadata from audit.audit_event
+        where case_id = ${caseB} and (action like 'CASE_REOPENING_%' or action = 'CASE_REOPENED') order by seq`;
+      expect(events.map((e) => e.action)).toEqual([
+        "CASE_REOPENING_REQUESTED",
+        "CASE_REOPENING_DECIDED",
+        "CASE_REOPENING_REQUESTED",
+        "CASE_REOPENING_DECIDED",
+        "CASE_REOPENED",
+      ]);
+      const text = JSON.stringify(events.filter((e) => e.action !== "CASE_REOPENED"));
+      for (const hidden of [
+        JUSTIFICATION_2060,
+        DECIDE_REASON,
+        "a further ledger extract",
+        "DEMO-EVIDENCE-REF-2060",
+      ]) {
+        expect(text).not.toContain(hidden);
+      }
+      // ADR-013 D3: the closure's retention schedule is superseded, never edited; recalculated at the next closure.
+      expect(
+        await s.tx`select superseded_reason from records.retention_schedule where case_id = ${caseB}`,
+      ).toEqual([{ superseded_reason: "REOPENED" }]);
+      // Not built here (ADR-042): a reopened case has no step into CLOSURE until the phase 9/10 steps are enabled.
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_CONFLICT:CLOSURE_STEP_NOT_AVAILABLE",
+        (tx) => tx`select api.close_case(${caseB}, 'NO_ACTION', 'Synthetic: closing the reopened case.')`,
+      );
+    });
   });
 });
