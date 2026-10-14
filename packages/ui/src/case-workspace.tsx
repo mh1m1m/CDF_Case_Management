@@ -46,7 +46,12 @@ export function CDFCaseHeader({
             {title}
           </bdi>
         </h1>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        {/* At the end edge, even on a line of their own, and so is each line they wrap onto: the open "More
+            actions" list hangs from there toward the start, so it always has room. Top edges line up, so the open
+            list never pulls the next step down. */}
+        {actions ? (
+          <div className="ms-auto flex flex-wrap items-start justify-end gap-2">{actions}</div>
+        ) : null}
       </div>
       <div
         className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm"
@@ -64,7 +69,13 @@ export function CDFCaseHeader({
   );
 }
 
-/** "More actions" «إجراءات أخرى»: a disclosure of links, so it works without JavaScript (audit §22.5.3). */
+/**
+ * "More actions" «إجراءات أخرى»: a disclosure of links, so it works without JavaScript (audit §22.5.3). The open
+ * list is in the page flow, so it moves what follows down instead of covering it: a list laid over the page hid
+ * part of the case tabs, which left them too small to hit (WCAG 2.5.8). It hangs from the button's end edge toward
+ * the start and never counts toward the menu's width, so opening it moves neither the button nor the next step
+ * beside it. The header keeps its actions at the end edge, so the list always has room on the screen.
+ */
 export function CDFOverflowMenu({
   label,
   items,
@@ -76,7 +87,7 @@ export function CDFOverflowMenu({
 }) {
   if (items.length === 0) return null;
   return (
-    <details className="relative" data-testid={testId}>
+    <details data-testid={testId}>
       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-cdf-md border border-cdf-border bg-cdf-surface px-4 text-sm font-semibold hover:bg-cdf-hover [&::-webkit-details-marker]:hidden">
         {label}
         <svg
@@ -90,19 +101,21 @@ export function CDFOverflowMenu({
           <path d="m4 6 4 4 4-4" />
         </svg>
       </summary>
-      <ul className="absolute end-0 z-30 mt-2 grid w-64 max-w-[calc(100vw-2rem)] gap-1 rounded-cdf-md border border-cdf-border bg-cdf-surface-elevated p-2 shadow-lg">
-        {items.map((i) => (
-          <li key={i.key}>
-            <a
-              href={i.href}
-              data-testid={`${testId}-${i.key}`}
-              className="flex min-h-11 items-center rounded-cdf-sm px-3 hover:bg-cdf-hover"
-            >
-              {i.label}
-            </a>
-          </li>
-        ))}
-      </ul>
+      <div className="flex justify-end [contain:inline-size]">
+        <ul className="mt-2 grid w-64 max-w-[calc(100vw-2rem)] shrink-0 gap-1 rounded-cdf-md border border-cdf-border bg-cdf-surface-elevated p-2">
+          {items.map((i) => (
+            <li key={i.key}>
+              <a
+                href={i.href}
+                data-testid={`${testId}-${i.key}`}
+                className="flex min-h-11 items-center rounded-cdf-sm px-3 hover:bg-cdf-hover"
+              >
+                {i.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
     </details>
   );
 }
