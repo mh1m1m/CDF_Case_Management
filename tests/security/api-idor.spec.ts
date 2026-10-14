@@ -1421,6 +1421,60 @@ const EVIDENCE_HALF_PROBES: Probe<EvidenceHalfTargets>[] = [
   },
 ];
 
+interface ClosureTargets {
+  case: string;
+  closureRequest: string;
+  closedCase: string;
+  reopeningRequest: string;
+  committeeProceeding: string;
+  packet: string;
+}
+
+// Migration 2060 (ADR-042): closure and reopening, the package-building read models and the packet approval read.
+const CLOSURE_2060_PROBES: Probe<ClosureTargets>[] = [
+  {
+    fn: "close_case",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_case(${t.case}, 'NO_ACTION', ${REASON})`,
+  },
+  {
+    fn: "decide_case_closure",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_case_closure(${t.closureRequest}, 'APPROVE', ${REASON})`,
+  },
+  {
+    fn: "case_closure_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.case_closure_view(${t.case})`,
+  },
+  {
+    fn: "request_case_reopening",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.request_case_reopening(${t.closedCase}, 'NEW_EVIDENCE', ${REASON}, ${REASON}, 'DEMO-REF', null)`,
+  },
+  {
+    fn: "decide_case_reopening",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_case_reopening(${t.reopeningRequest}, 'APPROVE', ${REASON})`,
+  },
+  {
+    fn: "committee_scope_choices",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.committee_scope_choices(${t.committeeProceeding})`,
+  },
+  {
+    fn: "committee_items_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.committee_items_view(${t.committeeProceeding})`,
+  },
+  {
+    fn: "defence_packet_approval_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.defence_packet_approval_view(${t.packet})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1726,6 +1780,7 @@ describe("catalog guard", () => {
       ...CORRECTIVE_ACTION_PROBES.map((p) => p.fn),
       ...BCP_PROBES.map((p) => p.fn),
       ...EVIDENCE_HALF_PROBES.map((p) => p.fn),
+      ...CLOSURE_2060_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -2535,6 +2590,91 @@ describe("IDOR: exclusion records, Defence Packets and sanction extracts (migrat
       ]) {
         expect(await s.tx`select id from ${s.tx(table)}`, table).toEqual([]);
       }
+    });
+  });
+});
+
+describe("IDOR: closure, reopening and the package-building read models (migration 2060)", () => {
+  // With a synthetic closure authority (GRC_DIRECTOR): a closure request pending on case B, which is also referred to
+  // the Investigation Committee; case 0004 closed by the authority's approval, with a reopening request pending; a
+  // draft Defence Packet on case B. None of these sees case B or 0004, holds a seat or is the subject.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    const ev = await import("../support/evidence");
+    const cl = await import("../support/closure");
+    const cm = await import("../support/committee");
+    const case4 = await caseId("0004");
+    const { ic } = await committeeIds();
+    await ownerScenario(async (s) => {
+      await cl.setClosureAuthority(s, "GRC_DIRECTOR");
+      expect(await cl.closeWith(s, caseB)).toBe("AWAITING_APPROVAL");
+      await s.as("caseManager");
+      await s.tx`select api.transition_case(${case4}, 'START_SCREENING', null)`;
+      expect(await cl.closeWith(s, case4)).toBe("AWAITING_APPROVAL");
+      await s.asOwner();
+      const requests = await s.tx<{ id: string; case_id: string }[]>`
+        select id, case_id from case_mgmt.case_closure_request where status = 'AWAITING_APPROVAL'`;
+      const closureRequest = requests.find((r) => r.case_id === caseB)!.id;
+      await s.as("grcDirector");
+      await s.tx`select api.decide_case_closure(${requests.find((r) => r.case_id === case4)!.id}, 'APPROVE', ${REASON})`;
+      const reopeningRequest = await cl.requestReopeningOnEvidence(s, case4);
+      await cm.seat(s, ic, cm.IC_SEATS);
+      const cp = await cm.refer(s, ic, caseB);
+      await ev.setPacketPolicy(s);
+      const n = await ev.defenceNotice(s, caseB);
+      const v = await ev.storeEvidence(s, "investigatorB", caseB);
+      const { packet } = await ev.packetWith(s, "caseManager", n.notice, [v.versionId]);
+
+      await s.as(actor);
+      const real: ClosureTargets = {
+        case: caseB,
+        closureRequest,
+        closedCase: case4,
+        reopeningRequest,
+        committeeProceeding: cp,
+        packet,
+      };
+      const random: ClosureTargets = {
+        case: randomUUID(),
+        closureRequest: randomUUID(),
+        closedCase: randomUUID(),
+        reopeningRequest: randomUUID(),
+        committeeProceeding: randomUUID(),
+        packet: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of CLOSURE_2060_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of ["case_mgmt.case_closure_request", "case_mgmt.case_closure"]) {
+        expect(await s.tx`select id from ${s.tx(table)}`, table).toEqual([]);
+      }
+      // Reopening requests have no reader at all: they are read through api.case_closure_view only.
+      await s.expectError("permission denied", (tx) => tx`select id from case_mgmt.case_reopening_request`);
+      // Nothing moved: both requests are still pending, case B is active and 0004 closed.
+      await s.asOwner();
+      expect(
+        await s.tx`select status from case_mgmt.case_closure_request where id = ${closureRequest}
+                   union all select status from case_mgmt.case_reopening_request where id = ${reopeningRequest}`,
+      ).toEqual([{ status: "AWAITING_APPROVAL" }, { status: "AWAITING_APPROVAL" }]);
+      expect(
+        await s.tx`select records_state from case_mgmt.case_record where id in (${caseB}, ${case4})
+                   order by records_state`,
+      ).toEqual([{ records_state: "ACTIVE" }, { records_state: "CLOSED" }]);
     });
   });
 });
