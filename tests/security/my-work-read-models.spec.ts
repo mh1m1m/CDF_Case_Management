@@ -57,9 +57,9 @@ describe("sidebar areas: permission AND live relationship, never a role name (G7
       investigatorA: ["MY_WORK", "CASES"],
       lead: ["MY_WORK", "CASES"], // LEGAL_HOLD_REQUEST alone never gives Records
       committee: ["MY_WORK"], // CONFLICT_DECLARE alone never gives Cases
-      // A COMMITTEE grant shows Cases until the Committee area exists (S5): the case is reachable today.
-      committeeSecretary: ["MY_WORK", "CASES"],
-      committeeChair: ["MY_WORK", "CASES"],
+      // No committee grants (S3, ADR-016 D2): committee seats alone open no case, so no Cases area.
+      committeeSecretary: ["MY_WORK"],
+      committeeChair: ["MY_WORK"],
       legal: ["MY_WORK", "RECORDS"], // no Cases from CONFLICT_DECLARE or CASE_DISCOVER
       grcDirector: ["MY_WORK", "CASES", "RECORDS"],
       records: ["MY_WORK", "RECORDS"],
@@ -233,14 +233,16 @@ describe("work items exist only where the caller passes the command's own check"
   });
 
   it("keeps restricted and over-clearance cases out of a conflict manager's list", async () => {
-    await scenario(async (s) => {
+    await ownerScenario(async (s) => {
       const of = async (u: UserKey) =>
         (await itemsOf(s, u)).filter((i) => i.case_id === caseSecret).map((i) => i.category);
       // The SECRET demo case is restricted: GRC Deputy Mu has the clearance and CASE_VIEW_ALL but no named access.
       expect(await of("grcDeputy")).toEqual([]);
-      // Its authority, GRC Director Zeta, lifts the restriction (still SECRET) and then declares a conflict.
+      // The restriction is lifted as a fixture (still SECRET): no command may lift one until DEC-AMB-012 is decided
+      // (CDF-206, migration 2015). Its authority, GRC Director Zeta, then declares a conflict.
+      await s.asOwner();
+      await s.tx`update case_mgmt.case_record set is_restricted = false where id = ${caseSecret}`;
       await s.as("grcDirector");
-      await s.tx`select api.change_case_classification(${caseSecret}, 'SECRET', false, ${REASON})`;
       await s.tx`select api.declare_conflict(${caseSecret}, true, ${REASON})`;
       expect(await of("grcDeputy")).toContain("CONFLICT_TO_DECIDE"); // SECRET clearance, CONFLICT_MANAGE
       expect(await of("caseManager")).toEqual([]); // CONFLICT_MANAGE and CASE_VIEW_ALL, but CONFIDENTIAL clearance

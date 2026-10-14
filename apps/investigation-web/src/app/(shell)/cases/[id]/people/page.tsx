@@ -22,6 +22,7 @@ import {
 import { investigationService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { confirmation } from "../../../confirmations";
+import { formAccessLabel } from "../../../access-labels";
 import { assignAction, decideConflictAction, declareConflictAction } from "../actions";
 import { CaseWorkspace, contentOpen, loadCase, personName } from "../workspace";
 
@@ -150,7 +151,9 @@ export default async function CasePeoplePage({
                       {r.isSelf ? <> ({t("caseWorkspace.roster.you")})</> : null} ·{" "}
                       {r.relationship === "ASSIGNMENT"
                         ? t.code("assignmentRole", r.code)
-                        : `${t("myAccess.basis.GRANT")}: ${t.code("myAccess.grantScope", r.code)}`}
+                        : r.relationship === "FORM_ACCESS"
+                          ? `${t("myAccess.basis.FORM_ACCESS")}: ${formAccessLabel(t, r.code)}`
+                          : `${t("myAccess.basis.GRANT")}: ${t.code("myAccess.grantScope", r.code)}`}
                       {r.status !== "ACTIVE" ? (
                         <>
                           {" "}

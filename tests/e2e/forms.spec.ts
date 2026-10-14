@@ -2,7 +2,7 @@
 // investigator starts an Evidence Register from "Start another form" (it asks first), saves and prepares it; the
 // lead finds it waiting for review and returns it with a reason; the investigator sees it returned to them,
 // with the reason, and prepares it again; the lead reviews it. A viewer without a working relationship sees it
-// read-only and an unassigned investigator gets nothing.
+// read-only; an unassigned investigator, and the triage officer once the case left triage (S3, DEC-03), get nothing.
 import { expect, test } from "@playwright/test";
 import { signIn } from "./support";
 
@@ -128,19 +128,28 @@ test("a form is started, saved, prepared, reviewed and kept from outsiders", asy
   await expect(lead2.getByTestId("audit-timeline")).toContainText("Form reviewed");
   await lead2.context().close();
 
-  // 7. The triage officer sees the final form read-only, with no decision or withdrawal controls.
+  // 7. The GRC Director oversees the case but has no part in this form: they see it final and read-only, with no
+  // decision or withdrawal controls.
+  const grc = await signIn(browser, "grc.director@example.test");
+  await grc.goto(instanceUrl);
+  await expect(grc.getByTestId("form-status")).toHaveText("Reviewed");
+  await expect(grc.getByTestId("form-read-only")).toBeVisible();
+  await expect(grc.getByTestId("draft-form")).toHaveCount(0);
+  await expect(grc.getByTestId("decision-card")).toHaveCount(0);
+  await expect(grc.getByTestId("withdraw-card")).toHaveCount(0);
+  await grc.context().close();
+
+  // 8. The triage officer's access ended when the case was handed over from triage (S3, DEC-03): the case and its
+  // forms are not found for them, as for any outsider.
   const triage = await signIn(browser, "triage@example.test");
-  await triage.goto(instanceUrl);
-  await expect(triage.getByTestId("form-status")).toHaveText("Reviewed");
-  await expect(triage.getByTestId("form-read-only")).toBeVisible();
-  await expect(triage.getByTestId("draft-form")).toHaveCount(0);
-  await expect(triage.getByTestId("decision-card")).toHaveCount(0);
-  await expect(triage.getByTestId("withdraw-card")).toHaveCount(0);
+  expect((await triage.goto(instanceUrl))?.status()).toBe(404);
+  expect((await triage.goto(caseUrl))?.status()).toBe(404);
   await triage.context().close();
 });
 
 test("the Arabic forms page renders right-to-left with Arabic labels", async ({ browser }) => {
-  const page = await signIn(browser, "committee.secretary@example.test", "ar");
+  // The case manager (a committee seat opens no case since S3, so the committee secretary no longer sees it).
+  const page = await signIn(browser, "casemanager@example.test", "ar");
   await page.goto("/cases");
   await page.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
   await page.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
@@ -152,6 +161,7 @@ test("the Arabic forms page renders right-to-left with Arabic labels", async ({ 
   await page.getByTestId("start-another-form").locator("summary").click();
   await expect(page.getByTestId("start-WB-FRM-13")).toBeVisible();
   await expect(page.getByRole("button", { name: "بدء: قرار تشكيل لجنة تحقيق" })).toBeVisible();
-  await expect(page.getByTestId("start-WB-FRM-11")).toHaveCount(0);
+  // Only forms this role prepares are offered: the case manager views the formation resolution but does not draft it.
+  await expect(page.getByTestId("start-WB-FRM-14")).toHaveCount(0);
   await page.context().close();
 });

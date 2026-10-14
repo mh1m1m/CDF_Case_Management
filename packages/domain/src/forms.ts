@@ -49,6 +49,15 @@ export function formDisplayNumber(formCode: string, instanceNo: number): string 
   return `${formCode} #${instanceNo}`;
 }
 
+/**
+ * Reads the code of a form-scoped access row (S3, ADR-016 D2: `api.my_access()` and `api.case_access_roster()` code
+ * it `<form code>:<instance no>`). Null for anything else, so a caller falls back to a generic label.
+ */
+export function parseFormAccessCode(code: string): { formCode: string; instanceNo: number } | null {
+  const m = /^([A-Z][A-Z0-9-]{1,31}):([1-9][0-9]{0,8})$/.exec(code);
+  return m ? { formCode: m[1]!, instanceNo: Number(m[2]) } : null;
+}
+
 // ---- The case's Forms tab (UX redesign S2g; audit §23.13, UX-068, UX-086) -----------------------------------
 /** The step a started form waits for; none once it is complete or withdrawn (mirror of the list's nextRoles). */
 export type FormNextStep = "PREPARE" | "REVIEW" | "APPROVE";

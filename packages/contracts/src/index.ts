@@ -708,8 +708,12 @@ export interface CaseAccessRosterEntry {
   userId: string;
   displayName: string;
   displayNameAr: string | null;
-  relationship: "ASSIGNMENT" | "GRANT";
-  /** The assignment role, or the grant's purpose (TRIAGE, CASE, COMMITTEE, REVIEW). */
+  /** FORM_ACCESS: one form kept from a reconciled COMMITTEE or REVIEW grant (S3, ADR-016 D2), never the case. */
+  relationship: "ASSIGNMENT" | "GRANT" | "FORM_ACCESS";
+  /**
+   * The assignment role, the grant's purpose (TRIAGE, CASE, COMMITTEE, REVIEW), or for FORM_ACCESS
+   * `<form code>:<instance no>` (read with `parseFormAccessCode` from `@cdf/domain`).
+   */
   code: string;
   sinceAt: string;
   untilAt: string | null;
@@ -803,6 +807,8 @@ export const WORK_CATEGORIES = [
   "FORM_TO_REVIEW",
   "FORM_TO_APPROVE",
   "FORM_RETURNED",
+  /** S3 (ADR-016 D2, path (a)): a draft kept for the caller by form-scoped access, to complete without the case. */
+  "FORM_TO_COMPLETE",
   "INTERVIEW_TO_REVIEW",
   "INTERVIEW_TO_APPROVE",
   "INTERVIEW_SOON",
@@ -866,17 +872,28 @@ export interface RetentionReviewer {
   displayNameAr: string;
 }
 
-export const ACCESS_BASES = ["CLEARANCE", "ROLE", "ASSIGNMENT", "GRANT", "TASK", "BREAK_GLASS"] as const;
+export const ACCESS_BASES = [
+  "CLEARANCE",
+  "ROLE",
+  "ASSIGNMENT",
+  "GRANT",
+  "FORM_ACCESS",
+  "TASK",
+  "BREAK_GLASS",
+] as const;
 export type AccessBasis = (typeof ACCESS_BASES)[number];
 
 /** One line of the caller's own access basis (`api.my_access()`); nobody else's. */
 export interface MyAccessEntry {
   basis: AccessBasis;
+  /** For FORM_ACCESS (S3, ADR-016 D2): `<form code>:<instance no>` (read with `parseFormAccessCode` from `@cdf/domain`). */
   code: string;
   caseId: string | null;
   caseNumber: string | null;
   sinceAt: string | null;
   untilAt: string | null;
+  /** For FORM_ACCESS: the kept form's id, so the row leads to that form; null on every other row. */
+  targetId: string | null;
 }
 
 /** One audit-ledger row for Oversight: metadata only. Reasons and details wait for DEC-11 (audit G13). */

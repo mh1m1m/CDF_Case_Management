@@ -103,6 +103,7 @@ export {
   formWaitingAction,
   getFormDefinition,
   isFormEntitled,
+  parseFormAccessCode,
   sha256Hex,
   validateFormData,
 } from "./forms";

@@ -44,8 +44,6 @@ declare
   u_lead  uuid := 'a0000000-0000-4000-8000-000000000006';
   u_cm    uuid := 'a0000000-0000-4000-8000-000000000003';
   u_grc   uuid := 'a0000000-0000-4000-8000-000000000008';
-  u_sec   uuid := 'a0000000-0000-4000-8000-000000000015';
-  u_chair uuid := 'a0000000-0000-4000-8000-000000000016';
 begin
   -- Reports -------------------------------------------------------------------
   r1 := pg_temp.seed_report('WB-SEED00000001', 'FINANCIAL_CORRUPTION',
@@ -100,10 +98,8 @@ begin
     'SYNTHETIC: As far as I recall, the duplicate invoices were approved in the same week.');
   perform pg_temp.act_as('lead@example.test');
   perform api.reply_to_reporter(r1, 'Thank you. Please share the approximate dates of the approvals if you can (synthetic).');
-  -- Committee access to case A so committee forms (WB-FRM-13/14) can be prepared, reviewed and approved (Phase 8).
-  perform pg_temp.act_as('casemanager@example.test');
-  perform api.grant_case_access(c_a, u_sec, 'COMMITTEE', 'Synthetic: committee secretary for case A', null);
-  perform api.grant_case_access(c_a, u_chair, 'COMMITTEE', 'Synthetic: committee chair for case A', null);
+  -- No committee grants (S3, ADR-016 D2): a COMMITTEE grant opens no case, and new ones are refused. Committee
+  -- work runs through the committee registry, referral and meeting commands (1870-1920).
 
   -- Case B (0002): identified reporter, investigator B assigned, in SCREENING --------------
   perform pg_temp.act_as('triage@example.test');

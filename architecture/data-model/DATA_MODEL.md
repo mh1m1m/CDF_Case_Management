@@ -45,6 +45,8 @@ case_mgmt.case_record 1──* case_mgmt.allegation
 case_mgmt.case_record 1──* case_mgmt.case_person *──1 case_mgmt.person
 case_mgmt.case_record 1──* case_mgmt.case_assignment          (ACTIVE / ENDED)
 case_mgmt.case_record 1──* case_mgmt.case_access_grant        (ACTIVE / REVOKED, scoped)
+case_mgmt.case_access_grant 1──* case_mgmt.form_instance_access *──1 forms.form_instance   (S3 path (a), legacy only)
+case_mgmt.case_access_grant 1──0..1 case_mgmt.grant_scope_reconciliation                 (S3 report, append-only)
 case_mgmt.case_record 1──* case_mgmt.conflict_check           (is_current flag)
 case_mgmt.case_record 1──* protected_identity.reveal_request
 case_mgmt.case_record 1──1 workflow.workflow_instance 1──* workflow.workflow_transition_event
@@ -116,6 +118,11 @@ Only `public_api.submit_report()` writes the vault; only `api.resolve_reporter_i
 | `case_mgmt.case_access_grant`    | `scope` (`TRIAGE`, `CASE`, `COMMITTEE`, `REVIEW`, `AUDIT`); `status` (`ACTIVE`, `REVOKED`); `reason`; `effective_from/to`; `granted_by/at`, `revoked_by/at`, `revocation_reason`.                                 |
 | `case_mgmt.conflict_check`       | `status` (`NO_CONFLICT`, `CONFLICT_DECLARED`, `CONFLICT_CONFIRMED`, `CONFLICT_CLEARED`); `declaration` (5–2000); `decided_by/at`, `decision_reason`; `is_current` marks the latest check per user and case.       |
 | `case_mgmt.case_overview` (view) | Case row joined with the current workflow state (code, bilingual name, sequence, entered/due timestamps) and the primary assigned investigator (lead first); `security_invoker`, so it inherits the caller's RLS. |
+
+**Grant scope (S3, `20261007002020`; ADR-016 D2, D3; SECURITY_RULES A-23).** Only CASE and AUDIT grants open a case. A TRIAGE grant opens it only before hand-over (a state before `JURISDICTION`), and the hand-over transitions end it. COMMITTEE and REVIEW stay valid scope codes so ended grants keep their history, but an insert trigger refuses new ones. Two tables record the S3 reconciliation; both have RLS enabled, no policy for an application role, and triggers that reject update, delete and truncate:
+
+- `case_mgmt.form_instance_access`: `(instance_id, user_id)` unique; `case_id`; `source_grant_id` (the ended grant); `source_scope` (`COMMITTEE`, `REVIEW`); `created_at`. A legacy holder's kept form instance (path (a)). It opens that instance only, while the instance is not final or withdrawn, the case is `ACTIVE` and the case gate admits the holder.
+- `case_mgmt.grant_scope_reconciliation`: one row per grant the migration ended. `grant_id` unique; `case_id`; `user_id`; `scope`; `before_status`, `before_effective_to`, `after_status`, `revoked_at`; `outcome` (`ENDED`, `NARROWED_TO_FORM_INSTANCES`, consistent with `form_instances_kept`); `audit_event_id` (no FK, so the ledger keeps its own truncate guard); `reconciled_at`.
 
 ### 4.6 `workflow`
 

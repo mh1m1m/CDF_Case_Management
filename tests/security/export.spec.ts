@@ -1078,3 +1078,46 @@ describe("owner decisions DEC-F21, DEC-F22 and DEC-F24 (migration 2040)", () => 
     });
   });
 });
+
+describe("ambiguity register: legal opinions are never exported (CDF-205, ADR-032 §10)", () => {
+  it("T-AMB-068: no export item type takes a legal opinion, and package or decision items never carry its text", async () => {
+    const { draftPackage, voteOnPackage, requestLegalReview } = await import("../support/decision");
+    const { ic } = await committeeIds();
+    const MARKER = "unique-opinion-marker-068";
+    await scenario(async (s) => {
+      const f = await draftPackage(s, ic, caseB);
+      await voteOnPackage(s, f);
+      const { request, packet } = await requestLegalReview(s, f);
+      await s.as("legalB");
+      await s.tx`select api.give_legal_opinion(${request}, 'CONCURS_WITH_COMMENTS', ${"Synthetic: " + MARKER + " concur."})`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${f.pkg})`;
+      const [d] = await s.tx<{ id: string }[]>`
+        select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now() - interval '1 hour',
+          'Chief Executive (synthetic)', 'MEMO-DEMO-0068', null, ${REASON}) as id`;
+
+      const req = await draft(s, "caseManager", caseB);
+      for (const [type, id] of [
+        ["LEGAL_OPINION", request],
+        ["LEGAL_REVIEW", request],
+        ["LEGAL_REVIEW_REQUEST", request],
+        ["PACKET", packet],
+      ] as const) {
+        await s.expectError(
+          "CDF_INVALID:object_type",
+          (tx) => tx`select api.add_export_item(${req}, ${type}, ${id})`,
+        );
+      }
+      await addItem(s, req, "RECOMMENDATION_PACKAGE", f.pkg);
+      await addItem(s, req, "AUTHORITY_DECISION", d!.id);
+      const p = await preview(s, req);
+      expect(p.document.items.map((i) => [i.object_type, i.included])).toEqual([
+        ["RECOMMENDATION_PACKAGE", true],
+        ["AUTHORITY_DECISION", true],
+      ]);
+      const text = JSON.stringify(p.document);
+      expect(text).not.toContain(MARKER);
+      expect(text).not.toMatch(/opinion/i);
+    });
+  });
+});

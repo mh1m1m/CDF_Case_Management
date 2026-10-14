@@ -55,8 +55,12 @@ describe("after case creation the conversation belongs to the case (DEC-06)", ()
   const SEND: UserKey[] = ["caseManager", "lead"];
   const READ: UserKey[] = ["grcDirector", "grcDeputy"];
   // On the case team or with case access, but not correspondents: the thread stays closed to them.
-  const ON_CASE: UserKey[] = ["investigatorA", "triage", "committeeSecretary", "committeeChair"];
+  const ON_CASE: UserKey[] = ["investigatorA"];
   const OUTSIDE: UserKey[] = [
+    // S3 (ADR-016 D2, D3): triage's grant ended at hand-over, and the committee roles open no case.
+    "triage",
+    "committeeSecretary",
+    "committeeChair",
     "intake",
     "investigatorB",
     "committee",
@@ -90,7 +94,7 @@ describe("after case creation the conversation belongs to the case (DEC-06)", ()
     });
   });
 
-  it("seeing the case is not enough: an investigator, triage and the committee get no thread", async () => {
+  it("seeing the case is not enough: an investigator on the case gets no thread", async () => {
     await scenario(async (s) => {
       for (const user of ON_CASE) {
         await s.as(user);
@@ -186,13 +190,24 @@ describe("REPORTER_COMMUNICATE delegations", () => {
 
   it("refuses everyone who does not manage the team, and anything but an investigator on the case", async () => {
     await scenario(async (s) => {
-      // Not on the case: the case does not exist.
-      for (const user of ["investigatorB", "intake", "platformAdmin", "records"] as const) {
+      // Not on the case: the case does not exist. Since S3 that includes triage after hand-over and the committee.
+      for (const user of [
+        "investigatorB",
+        "intake",
+        "platformAdmin",
+        "records",
+        "triage",
+        "committeeChair",
+        "committeeSecretary",
+      ] as const) {
         await s.as(user);
         await s.expectError("CDF_NOT_FOUND", (tx) => delegate(tx, caseA, "investigatorA"));
       }
-      // On the case without managing its team (an investigator cannot delegate to itself).
-      for (const user of ["investigatorA", "triage", "committeeChair", "committeeSecretary"] as const) {
+      // On the case without managing its team (an investigator cannot delegate to itself). Since S3 a CASE grant
+      // stands in for the committee's former case reach.
+      await s.as("caseManager");
+      await s.tx`select api.grant_case_access(${caseA}, ${USERS.committee}, 'CASE', 'Synthetic: case access', null)`;
+      for (const user of ["investigatorA", "committee"] as const) {
         await s.as(user);
         await s.expectError("CDF_FORBIDDEN", (tx) => delegate(tx, caseA, "investigatorA"));
       }
@@ -208,7 +223,7 @@ describe("REPORTER_COMMUNICATE delegations", () => {
       const id = await delegate(s.tx, caseA, "investigatorA");
       await s.expectError("CDF_CONFLICT:ALREADY_DELEGATED", (tx) => delegate(tx, caseA, "investigatorA"));
       // Ending: the same rule, then once only.
-      for (const user of ["investigatorA", "committeeChair"] as const) {
+      for (const user of ["investigatorA", "committee"] as const) {
         await s.as(user);
         await s.expectError("CDF_FORBIDDEN", (tx) => endDelegation(tx, id));
       }

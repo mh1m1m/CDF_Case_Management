@@ -255,7 +255,7 @@ describe("every state-changing command writes its audit event in the same transa
         run: async (s) =>
           (ids.grant = await one(
             s,
-            s.tx`select api.grant_case_access(${caseB}, ${USERS.committee}, 'COMMITTEE', ${REASON}, null) as id`,
+            s.tx`select api.grant_case_access(${caseB}, ${USERS.committee}, 'CASE', ${REASON}, null) as id`,
           )),
       },
       {
@@ -1617,6 +1617,19 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "lead",
         run: (s) => s.tx`select api.open_form_instance(${ids.form!})`,
       },
+      // Since S3 (ADR-016 D2) a committee seat opens no case: the committee form runs on a CASE grant.
+      {
+        fn: "grant_case_access",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.grant_case_access(${caseA}, ${USERS.committeeSecretary}, 'CASE', ${REASON}, null)`,
+      },
+      {
+        fn: "grant_case_access",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.grant_case_access(${caseA}, ${USERS.committeeChair}, 'CASE', ${REASON}, null)`,
+      },
       {
         fn: "start_form",
         actor: "committeeSecretary",
@@ -2535,6 +2548,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_manage_retention",
       "authz.can_message_reporter",
       "authz.can_prepare_form",
+      "authz.can_prepare_form_instance",
       "authz.can_read_reporter_conversation",
       "authz.can_record_findings",
       "authz.can_release_legal_hold",
@@ -2579,6 +2593,7 @@ describe("audit internals are not reachable", () => {
       "authz.current_subject",
       "authz.current_user_id",
       "authz.form_entitled",
+      "authz.has_case_file_basis",
       "authz.has_permission",
       "authz.in_records_catalogue_scope",
       "authz.is_committee_secretary",

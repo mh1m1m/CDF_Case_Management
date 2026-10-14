@@ -704,6 +704,51 @@ describe("§20: break-glass is exceptional, approved by someone else, time-bound
     });
   });
 
+  it("CDF-205 T-AMB-139 (AMB-228): a break-glass grant left alone lapses at its duration and still needs review", async () => {
+    await ownerScenario(async (s) => {
+      await giveTask(s, caseA, "legal", "LEGAL_REVIEW");
+      await s.as("legal");
+      const [bg] = await s.tx<
+        { id: string }[]
+      >`select api.request_break_glass(${caseA}, ${JUSTIFICATION}, 60) as id`;
+      await s.as("grcDirector");
+      await s.tx`select api.decide_break_glass(${bg!.id}, true, 'Synthetic: urgent preservation check.')`;
+      await s.asOwner();
+      const [row] = await s.tx<{ minutes: number; status: string }[]>`
+        select extract(epoch from access_expires_at - decided_at)::int / 60 as minutes, status
+        from case_mgmt.break_glass_access where id = ${bg!.id}`;
+      expect(row).toEqual({ minutes: 60, status: "ACTIVE" }); // the expiry is the requested duration
+      await s.as("legal");
+      expect(await opened(s.tx, "open_case", caseA)).toBe(true);
+      // Fixture as the owner: the duration has run out. Nobody ends the grant.
+      await s.asOwner();
+      await s.tx`update case_mgmt.break_glass_access
+        set decided_at = decided_at - interval '61 minutes', access_expires_at = access_expires_at - interval '61 minutes'
+        where id = ${bg!.id}`;
+      await s.as("legal");
+      expect(await opened(s.tx, "open_case", caseA)).toBe(false);
+      await s.asOwner();
+      const [lapsed] = await s.tx<{ ok: boolean }[]>`
+        select authz.has_active_break_glass(${caseA}, ${USERS.legal}) as ok`;
+      expect(lapsed!.ok).toBe(false);
+      // The lapsed grant cannot be re-approved; a new request is the only way back in.
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:BREAK_GLASS_NOT_REQUESTED",
+        (tx) => tx`select api.decide_break_glass(${bg!.id}, true, 'Synthetic: approve again.')`,
+      );
+      // Lapsing is not a way round the post-event review: it is still due, and an independent reviewer closes it.
+      await s.asOwner();
+      const [due] = await s.tx<{ review_status: string }[]>`
+        select review_status from case_mgmt.break_glass_access where id = ${bg!.id}`;
+      expect(due!.review_status).toBe("PENDING");
+      await s.as("grcDeputy");
+      await s.tx`select api.review_break_glass(${bg!.id}, 'APPROPRIATE', 'Synthetic: access lapsed as requested.')`;
+      const audit = await actions(s, caseA, "BREAK_GLASS_%");
+      expect(audit).toEqual(["BREAK_GLASS_REQUESTED", "BREAK_GLASS_APPROVED", "BREAK_GLASS_REVIEWED"]);
+    });
+  });
+
   it("PBA-T22: break-glass never reaches restricted, unknown or archived cases and is not routine", async () => {
     await ownerScenario(async (s) => {
       await setRecordsState(s, caseExec, "CLOSED", { lowerTo: "CONFIDENTIAL" });

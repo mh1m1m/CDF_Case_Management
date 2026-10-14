@@ -2,11 +2,11 @@ name: Hosted DEV (Supabase)
 
 # CDF-32 / CEOM §11: the hosted DEV database (Supabase project blycdqjphsxvyiuoommv, "cdf-case-dev")
 # changes only from Git. This workflow applies infrastructure/supabase/migrations with the Supabase
-# CLI, seeds the synthetic demo data once (later only users added to the seed), and runs the database,
-# RLS and security suites against DEV. It runs on pushes to the branch named below that touch the
-# database or the tests, and manually (workflow_dispatch) once the file exists on the default branch,
-# because GitHub resolves manual dispatch against main. It never resets, drops or truncates anything
-# on the hosted project.
+# CLI, seeds the synthetic demo data once (later only the users, sectors and reporter messages added to
+# the seed), and runs the database, RLS and security suites against DEV. It runs on pushes to the branch
+# named below that touch the database or the tests, and manually (workflow_dispatch) once the file
+# exists on the default branch, because GitHub resolves manual dispatch against main. It never resets,
+# drops or truncates anything on the hosted project.
 #
 # The CLI connects with --db-url through the Supavisor session pooler (IPv4; the direct database host
 # is IPv6-only, which GitHub-hosted runners cannot reach), so no Supabase access token is needed.
@@ -33,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       seed:
-        description: Seed synthetic data (all of it into an empty DEV, afterwards only users added to the seed)
+        description: Seed synthetic data (all of it into an empty DEV, afterwards only the users, sectors and reporter messages added to the seed)
         type: boolean
         default: true
       test:
@@ -56,7 +56,9 @@ jobs:
   hosted-dev:
     name: Migrate, seed and test DEV
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The suites cross regions statement by statement: run 38334615873 took 8.7 s per test over the pooler
+    # (485 tests in 71 minutes), so the 770 tests at migration 2010 need about 112 minutes. 240 leaves room.
+    timeout-minutes: 240
     environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -223,6 +225,94 @@ jobs:
             echo "::notice::Seed users: DEV already has every synthetic user of the seed in Git"
           else
             echo "::notice::Seed users: ${added%% *} synthetic users of the seed in Git added to DEV (${added#* })"
+          fi
+
+      - name: Synthetic sectors added to the seed since DEV was seeded (insert only)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
+        env:
+          REFERENCE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: |
+          # PR #56 (migration 1880) added two synthetic sectors and four sector positions to the seed
+          # (20_synthetic_rebase_users.sql). Its users reach DEV in the step above, but DEV was seeded before the
+          # sectors existed, so the direct-referral tests acting as the Operations preparer and head would fail
+          # (drift record 4.8). So the sectors of the database the drift check has just built from Git that DEV
+          # lacks are inserted here, with their positions. Nothing on DEV is updated or deleted; a sector whose code
+          # DEV already uses under another id stops the step, so a difference is never skipped silently.
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select * from iam.sector) to 'seed-sectors.csv' csv"
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select sector_id, user_id, position, effective_from, effective_to, appointment_reference, appointed_by, appointed_at, ended_by, ended_at, end_reason from iam.sector_membership) to 'seed-positions.csv' csv"
+          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 <<'SQL'
+          begin;
+          create temp table seed_sector (like iam.sector) on commit drop;
+          \copy seed_sector from 'seed-sectors.csv' csv
+          create temp table seed_position (like iam.sector_membership) on commit drop;
+          alter table seed_position drop column id;
+          \copy seed_position from 'seed-positions.csv' csv
+          create temp table added (id uuid primary key) on commit drop;
+          with ins as (
+            insert into iam.sector
+            select s.* from seed_sector s where not exists (select 1 from iam.sector x where x.id = s.id)
+            returning id
+          )
+          insert into added select id from ins;
+          insert into iam.sector_membership (sector_id, user_id, position, effective_from, effective_to, appointment_reference,
+            appointed_by, appointed_at, ended_by, ended_at, end_reason)
+          select * from seed_position where sector_id in (select id from added);
+          select (select count(*) from added) || ' ' || (select count(*) from seed_position where sector_id in (select id from added))
+            || ' ' || coalesce((select string_agg(x.code, ', ' order by x.code) from iam.sector x join added a using (id)), '');
+          commit;
+          SQL
+          )
+          rm -f seed-sectors.csv seed-positions.csv
+          read -r sectors positions codes <<< "$added"
+          if [ "$sectors" = 0 ]; then
+            echo "::notice::Seed sectors: DEV already has every synthetic sector of the seed in Git"
+          else
+            echo "::notice::Seed sectors: $sectors synthetic sectors of the seed in Git added to DEV ($codes) with $positions positions"
+          fi
+
+      - name: Reporter messages added to the seed since DEV was seeded (insert only)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }}
+        run: |
+          # PR #55 (DEC-06, migration 1840) added the reporter conversation on case A to 02_synthetic_cases.sql: a
+          # portal follow-up on WB-SEED00000001 and the lead investigator's reply. DEV was seeded before that, and
+          # the seed files never run again, so DEV had no message on that report and four tests of
+          # tests/security/reporter-conversation.spec.ts failed in run 38334615873 (drift record 4.7). While that
+          # report has no message, the same two messages are posted here through the same commands and as the same
+          # users as in the seed, which also writes the same audit events. Nothing on DEV is updated or deleted.
+          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 <<'SQL'
+          begin;
+          create function pg_temp.act_as(p_email text)
+          returns void
+          language sql
+          as $$
+            select set_config('request.jwt.claims',
+              json_build_object('sub', (select id from iam.user_profile where email = p_email), 'role', 'authenticated')::text, true);
+          $$;
+          create temp table topped_up (n int) on commit drop;
+          do $$
+          declare r1 uuid;
+          begin
+            select id into r1 from intake.report where report_ref = 'WB-SEED00000001';
+            if r1 is null or exists (select 1 from intake.report_message where report_id = r1) then
+              insert into topped_up values (0);
+              return;
+            end if;
+            perform set_config('request.jwt.claims', '', true);
+            perform public_api.post_reporter_message('WB-SEED00000001',
+              encode(sha256(convert_to('unusable-seed-secret:WB-SEED00000001', 'UTF8')), 'hex'),
+              'SYNTHETIC: As far as I recall, the duplicate invoices were approved in the same week.');
+            perform pg_temp.act_as('lead@example.test');
+            perform api.reply_to_reporter(r1, 'Thank you. Please share the approximate dates of the approvals if you can (synthetic).');
+            insert into topped_up values (2);
+          end $$;
+          select n from topped_up;
+          commit;
+          SQL
+          )
+          if [ "$added" = 0 ]; then
+            echo "::notice::Seed reporter messages: DEV already has the seed's conversation on WB-SEED00000001"
+          else
+            echo "::notice::Seed reporter messages: $added messages of the seed in Git posted on WB-SEED00000001"
           fi
 
       - name: Synthetic committee seats added to the seed since DEV was seeded (insert only)

@@ -65,6 +65,16 @@ const countRows = async (tx: Tx, table: "form_instance_version" | "form_event", 
   return r!.n;
 };
 
+/**
+ * Explicit CASE grants on case A for the committee secretary and chair. Since S3 (ADR-016 D2) a COMMITTEE grant
+ * opens no case and cannot be created, so a test that needs these roles on the case file grants it this way.
+ */
+async function committeeOnCaseA(s: Scenario): Promise<void> {
+  await s.as("caseManager");
+  for (const user of ["committeeSecretary", "committeeChair"] as const)
+    await s.tx`select api.grant_case_access(${caseA}, ${USERS[user]}, 'CASE', 'Synthetic: committee role on the case file', null)`;
+}
+
 /** An Evidence Register (WB-FRM-11) saved on case A by investigator A, inside the caller's scenario. */
 async function evidenceRegisterOnCaseA(s: Scenario): Promise<string> {
   await s.as("investigatorA");
@@ -84,10 +94,10 @@ describe("form visibility", () => {
         ["caseManager", 1],
         ["grcDirector", 1],
         ["grcDeputy", 1],
-        ["triage", 1], // TRIAGE grant on case A and TRIAGE_OFFICER is entitled to view
+        ["triage", 0], // entitled to view, but its TRIAGE grant ended when case A was handed over (S3, DEC-03)
         ["investigatorB", 0], // not assigned to case A
         ["committee", 0],
-        ["committeeSecretary", 0], // COMMITTEE grant on case A, but no entitlement on WB-FRM-11
+        ["committeeSecretary", 0], // no access to case A (S3: a committee role opens no case), and not entitled
         ["committeeChair", 0],
         ["intake", 0], // RESTRICTED clearance, CONFIDENTIAL case
         ["platformAdmin", 0],
@@ -107,6 +117,7 @@ describe("form visibility", () => {
 
   it("is per form: a committee form is visible to committee roles and hidden from investigators", async () => {
     await scenario(async (s) => {
+      await committeeOnCaseA(s);
       await s.as("committeeSecretary");
       const id = await start(s.tx, caseA, "WB-FRM-13");
       await save(s.tx, id, COMMITTEE_FORMATION);
@@ -115,7 +126,7 @@ describe("form visibility", () => {
         ["committeeChair", 1],
         ["caseManager", 1],
         ["grcDirector", 1],
-        ["triage", 1],
+        ["triage", 0], // handed over (S3, DEC-03)
         ["committee", 0], // entitled to view WB-FRM-13 but has no access to case A
         ["investigatorA", 0], // assigned to case A, not entitled to committee forms
         ["lead", 0],
@@ -170,8 +181,9 @@ describe("form visibility", () => {
 describe("form start gate", () => {
   it("needs the permission, the entitlement and a working relationship with a visible active case", async () => {
     await scenario(async (s) => {
-      await s.as("triage"); // TRIAGE grant on case A; TRIAGE_OFFICER prepares intake forms
-      expect(await start(s.tx, caseA, "WB-FRM-01")).toMatch(/^[0-9a-f-]{36}$/);
+      await s.as("triage"); // TRIAGE grant on case B, still in screening; TRIAGE_OFFICER prepares intake forms
+      expect(await start(s.tx, caseB, "WB-FRM-01", "RESTRICTED")).toMatch(/^[0-9a-f-]{36}$/);
+      await s.expectError("CDF_NOT_FOUND", (tx) => start(tx, caseA, "WB-FRM-01")); // case A was handed over
       await s.as("investigatorA"); // assigned investigator; the baseline gives investigators no committee forms
       await s.expectError("CDF_FORBIDDEN", (tx) => start(tx, caseA, "WB-FRM-13")); // committee form
       await s.as("lead");
@@ -198,7 +210,16 @@ describe("form start gate", () => {
       const [caseVisible] = await s.tx<{ ok: boolean }[]>`select authz.can_view_case(${caseB}) as ok`;
       expect(caseVisible!.ok).toBe(true);
       await s.expectError("CDF_FORBIDDEN", (tx) => start(tx, caseB, "WB-FRM-01", "RESTRICTED"));
-      await s.as("committeeSecretary"); // COMMITTEE grant: may prepare committee forms, not investigation ones
+      // A COMMITTEE grant can no longer be made (S3, DEC-02); with a CASE grant the secretary prepares committee
+      // forms, never investigation ones.
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_INVALID:scope",
+        (tx) =>
+          tx`select api.grant_case_access(${caseA}, ${USERS.committeeSecretary}, 'COMMITTEE', 'Synthetic: committee', null)`,
+      );
+      await committeeOnCaseA(s);
+      await s.as("committeeSecretary");
       expect(await start(s.tx, caseA, "WB-FRM-13")).toMatch(/^[0-9a-f-]{36}$/);
       await s.expectError("CDF_FORBIDDEN", (tx) => start(tx, caseA, "WB-FRM-11"));
     });
@@ -218,7 +239,7 @@ describe("form start gate", () => {
 describe("form data validation in the database", () => {
   it("rejects unknown keys, wrong shapes, bad options, bad dates and oversized or control-character text", async () => {
     await scenario(async (s) => {
-      await s.as("committeeSecretary");
+      await s.as("caseManager");
       const id = await start(s.tx, caseA, "WB-FRM-13");
       await s.expectError("CDF_INVALID:data", (tx) => save(tx, id, { not_a_field: "x" }));
       await s.expectError("CDF_INVALID:data", (tx) => save(tx, id, ["chair"]));
@@ -331,6 +352,7 @@ describe("form lifecycle", () => {
 
   it("separates preparer, reviewer and approver on an approval form and returns it to draft on demand", async () => {
     await scenario(async (s) => {
+      await committeeOnCaseA(s);
       await s.as("committeeSecretary");
       const id = await start(s.tx, caseA, "WB-FRM-13");
       await save(s.tx, id, COMMITTEE_FORMATION);
@@ -413,7 +435,8 @@ describe("form access audit", () => {
       const id = await evidenceRegisterOnCaseA(s);
       await s.as("lead");
       expect(await open(s.tx, id)).toBe(true);
-      await s.as("committeeChair"); // case visible through the COMMITTEE grant, form not entitled
+      await committeeOnCaseA(s);
+      await s.as("committeeChair"); // case visible through a CASE grant, form not entitled
       expect(await open(s.tx, id)).toBe(false);
       await s.as("investigatorB");
       expect(await open(s.tx, id)).toBe(false);

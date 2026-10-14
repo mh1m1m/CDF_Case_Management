@@ -73,7 +73,6 @@ describe("DEC-09: evidence follows the investigation team, not case visibility",
     await scenario(async (s) => {
       const item = await stored(s, "investigatorA", caseA);
       await s.as("caseManager");
-      await s.tx`select api.grant_case_access(${caseA}, ${USERS.committee}, 'REVIEW', ${REASON}, null)`;
       await s.tx`select api.grant_case_access(${caseA}, ${USERS.dpo}, 'AUDIT', ${REASON}, null)`;
       await s.tx`select api.grant_case_access(${caseA}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
       await s.tx`select api.assign_case(${caseA}, ${USERS.legal}, 'REVIEWER', ${REASON})`;
@@ -81,14 +80,21 @@ describe("DEC-09: evidence follows the investigation team, not case visibility",
       // Every one of these can see the case; none of them is the investigation team.
       const seeCaseOnly: UserKey[] = [
         "grcDirector", // CASE_VIEW_ALL oversight (packets at S5)
-        "triage", // TRIAGE grant: the reporter's files only
-        "committeeChair", // COMMITTEE grant
-        "committeeSecretary", // COMMITTEE grant
-        "committee", // REVIEW grant
         "legal", // REVIEWER assignment
         "dpo", // AUDIT grant
       ];
-      const outsiders: UserKey[] = ["investigatorB", "records", "platformAdmin", "internalAudit", "soc"];
+      const outsiders: UserKey[] = [
+        "investigatorB",
+        "records",
+        "platformAdmin",
+        "internalAudit",
+        "soc",
+        // S3 (ADR-016 D2, D3): triage's grant ended at hand-over, and committee roles open no case.
+        "triage",
+        "committeeChair",
+        "committeeSecretary",
+        "committee",
+      ];
       for (const user of team)
         expect(await reach(s, user, item, caseA), user).toEqual({ case: true, ...EVERYTHING });
       for (const user of seeCaseOnly)
@@ -172,7 +178,7 @@ describe("DEC-09: an item may be limited to the case leads", () => {
       await s.tx`select api.grant_case_access(${caseA}, ${USERS.grcDeputy}, 'CASE', ${REASON}, null)`;
       await s.as("lead");
       await restrict(s.tx, item.evidenceId, "LEADS", "Synthetic: medical record, leads only.");
-      for (const user of ["investigatorA", "grcDeputy", "triage"] as UserKey[])
+      for (const user of ["investigatorA", "grcDeputy", "grcDirector"] as UserKey[])
         expect(await reach(s, user, item, caseA), user).toEqual({ case: true, ...NOTHING });
       for (const user of ["lead", "caseManager"] as UserKey[])
         expect(await reach(s, user, item, caseA), user).toMatchObject({ item: 1, versions: 1, download: 1 });
@@ -300,13 +306,18 @@ describe("DEC-09: the reporter's files after a case exists", () => {
       for (const user of ["grcDirector", "grcDeputy", "committee", "intake", "records"] as UserKey[])
         expect(await files(s, user, id), user).toEqual({ listed: 0, download: 0 });
 
-      // Only a TRIAGE grant reaches them: COMMITTEE, REVIEW and AUDIT grants see the case, not its reporter's files.
-      const grants = [
+      // Only a TRIAGE grant reaches them: an AUDIT grant sees the case, not its reporter's files. COMMITTEE and
+      // REVIEW grants cannot be made any more (S3, DEC-02).
+      const grants = [["dpo", "AUDIT"]] as const;
+      await s.as("caseManager");
+      for (const [user, scope] of [
         ["committeeChair", "COMMITTEE"],
         ["committee", "REVIEW"],
-        ["dpo", "AUDIT"],
-      ] as const;
-      await s.as("caseManager");
+      ] as const)
+        await s.expectError(
+          "CDF_INVALID:scope",
+          (tx) => tx`select api.grant_case_access(${caseB}, ${USERS[user]}, ${scope}, ${REASON}, null)`,
+        );
       for (const [user, scope] of grants)
         await s.tx`select api.grant_case_access(${caseB}, ${USERS[user]}, ${scope}, ${REASON}, null)`;
       for (const [user] of grants) {
@@ -316,12 +327,10 @@ describe("DEC-09: the reporter's files after a case exists", () => {
         expect(await files(s, user, id), user).toEqual({ listed: 0, download: 0 });
       }
 
-      // Hand-over ends the TRIAGE grant (DEC-03, S3); its end ends the files too.
+      // Hand-over ends the TRIAGE grant in the same transaction (DEC-03, S3); its end ends the files too. Closing
+      // at screening leaves the triage stages, so it is a hand-over.
       await s.as("caseManager");
-      const [grant] = await s.tx<{ id: string }[]>`
-        select id from case_mgmt.case_access_grant
-         where case_id = ${caseB} and user_id = ${USERS.triage} and scope = 'TRIAGE' and status = 'ACTIVE'`;
-      await s.tx`select api.revoke_case_access(${grant!.id}, 'Synthetic: handed over to the investigation team.')`;
+      await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', 'Synthetic: screened out for the suite.')`;
       expect(await files(s, "triage", id)).toEqual({ listed: 0, download: 0 });
     });
   });

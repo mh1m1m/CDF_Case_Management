@@ -146,3 +146,53 @@ describe("identity vault", () => {
     expect(rows).toEqual([]);
   });
 });
+
+describe("ambiguity register: channel abuse and the vault (CDF-205)", () => {
+  it("T-AMB-006: an approved CHANNEL_ABUSE outcome makes protected identity readable to no one", async () => {
+    await scenario(async (s) => {
+      await s.as("grcDirector");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseB}, 'CHANNEL_ABUSE', 'Synthetic: the report appears malicious.') as id`;
+      await s.as("grcSectorHead");
+      await s.tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`;
+      await s.as("caseManager");
+      const [p] = await s.tx<{ outcome_code: string }[]>`
+        select p.outcome_code from case_mgmt.proceeding p
+        join case_mgmt.preliminary_recommendation r on r.proceeding_id = p.id where r.id = ${r!.id}`;
+      expect(p!.outcome_code).toBe("CHANNEL_ABUSE");
+
+      for (const user of [
+        "investigatorA",
+        "investigatorB",
+        "lead",
+        "caseManager",
+        "grcDirector",
+        "grcSectorHead",
+        "platformAdmin",
+        "internalAudit",
+        "dpo",
+        "soc",
+      ] as const) {
+        await s.as(user);
+        await s.expectError(
+          "permission denied",
+          (tx) => tx`select * from protected_identity.reporter_identity`,
+        );
+        // Resolution still needs a justified, separately approved request; the outcome is no shortcut.
+        await s.expectError(
+          "CDF_",
+          (tx) => tx`select * from api.resolve_reporter_identity(${caseB}, ${JUSTIFICATION})`,
+        );
+      }
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:APPROVED_REVEAL_REQUEST_REQUIRED",
+        (tx) => tx`select * from api.resolve_reporter_identity(${caseB}, ${JUSTIFICATION})`,
+      );
+      // Nothing about the outcome carries identity values.
+      await s.as("soc");
+      const events = await s.tx`select metadata, reason from audit.audit_event where case_id = ${caseB}`;
+      expect(JSON.stringify(events)).not.toMatch(/Reporter Gamma|reporter\.gamma/);
+    });
+  });
+});

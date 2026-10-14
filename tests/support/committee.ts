@@ -49,8 +49,9 @@ export const IC_SEATS: [UserKey, string][] = [
  * AMB-018 (migration 2030): a case that did not arrive as a direct referral reaches the Investigation Committee only
  * after its preliminary review concluded REFERRED_TO_COMMITTEE with the approver's approval. The GRC Director prepares
  * the recommendation (no review step, Q15) and the GRC Sector Head approves it. On a restricted case the approver sees
- * nothing without an explicit grant (fail safe), so the case owner grants a review and revokes it afterwards. Does
- * nothing when the case's latest approved recommendation already refers it, or when the case is a direct referral.
+ * nothing without an explicit grant (fail safe), so the case owner grants case access (a REVIEW grant is refused since
+ * migration 2020, DEC-02) and revokes it afterwards. Does nothing when the case's latest approved recommendation
+ * already refers it, or when the case is a direct referral.
  */
 export async function preliminaryReferral(s: Scenario, caseId: string): Promise<void> {
   await s.as("grcDirector");
@@ -71,7 +72,7 @@ export async function preliminaryReferral(s: Scenario, caseId: string): Promise<
   let grant: string | undefined;
   if (c.is_restricted) {
     const [g] = await s.tx<{ id: string }[]>`
-      select api.grant_case_access(${caseId}, ${USERS.grcSectorHead}, 'REVIEW', ${REASON}, null) as id`;
+      select api.grant_case_access(${caseId}, ${USERS.grcSectorHead}, 'CASE', ${REASON}, null) as id`;
     grant = g!.id;
   }
   await s.as("grcSectorHead");

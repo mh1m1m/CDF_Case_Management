@@ -54,6 +54,11 @@ describe("routes", () => {
     expect(itemHref(item({ targetType: "FORM_INSTANCE", targetId: "f", caseId: "c" }))).toBe(
       "/cases/c/forms/f",
     );
+    // S3 (ADR-016 D2): a form held by form-scoped access opens in the purpose view, even if the case is named.
+    for (const caseId of [null, "c"])
+      expect(itemHref(item({ area: "MY_WORK", targetType: "FORM_INSTANCE", targetId: "f", caseId }))).toBe(
+        "/my-work/forms/f",
+      );
     expect(itemHref(item({ targetType: "CASE_TASK", targetId: "t", caseId: "c" }))).toBe("/records/c");
     expect(itemHref(item({ targetType: "HOLD_REQUEST", targetId: "h", caseId: "c" }))).toBe(
       "/records/legal-holds",

@@ -5,7 +5,7 @@
 // rule lets the chair break. Minutes are reviewed by attending members and deemed approved only after the window and
 // a reminder.
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
+import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
 import {
   IC_SEATS,
   REASON,
@@ -736,6 +736,102 @@ describe("a finding vote binds one finding version (AMB-030, migration 2030)", (
         `vote item ${vi!.id} is closed`,
         (tx) => tx`update committee.vote_item set finding_id = ${v2!.id} where id = ${vi!.id}`,
       );
+    });
+  });
+});
+
+describe("ambiguity register: meetings (CDF-205)", () => {
+  it("T-AMB-029: a member who declares a conflict about one subject votes on no item of the meeting", async () => {
+    await scenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await s.as("legalB");
+      // The declaration names one subject, but the conflict is the meeting's: it covers every item.
+      await s.tx`select api.declare_meeting_conflict(${f.participant.legalB!}, 'CONFLICT_DECLARED', 'Synthetic: related to Subject Sigma only.')`;
+      await openWithPresent(s, f, ["committeeChair", "legal", "lead"]);
+      await s.expectError(
+        "CDF_CONFLICT:COI_NOT_CLEARED",
+        (tx) => tx`select api.record_attendance(${f.participant.legalB!}, 'PRESENT')`,
+      );
+      const first = await openItem(s, f.meeting, "Item about Subject Sigma (synthetic)");
+      await s.as("legalB");
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.cast_vote(${first}, 'APPROVE', null)`);
+      for (const u of ["committeeChair", "legal", "lead"] as const) await vote(s, u, first, "APPROVE");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${first}, null)`;
+      const second = await openItem(s, f.meeting, "Item about Subject Tau (synthetic)");
+      await s.as("legalB");
+      expect(await s.tx`select id from committee.vote_item`).toEqual([]);
+      await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.cast_vote(${second}, 'REJECT', null)`);
+      const r = await itemRow(s, second);
+      expect(r.eligible_count).toBeNull(); // counted at close; the conflicted member is never eligible
+      for (const u of ["committeeChair", "legal", "lead"] as const) await vote(s, u, second, "APPROVE");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${second}, null)`;
+      for (const item of [first, second]) expect((await itemRow(s, item)).eligible_count).toBe(3);
+    });
+  });
+
+  it("T-AMB-035: a continuation meeting starts every member PENDING; no one is present until they declare again", async () => {
+    await scenario(async (s) => {
+      const f = await ready(s);
+      await s.as("committeeSecretary");
+      const [m2] = await s.tx<{ id: string }[]>`
+        select api.schedule_meeting(${f.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
+          now() + interval '3 days', now() + interval '3 days 1 hour', ${REASON}) as id`;
+      const rows = await s.tx<{ id: string; user_id: string; coi_status: string; attendance: string }[]>`
+        select id, user_id, coi_status, attendance from committee.meeting_participant where meeting_id = ${m2!.id}`;
+      expect(new Set(rows.map((r) => r.coi_status))).toEqual(new Set(["PENDING"]));
+      await s.tx`select api.open_meeting(${m2!.id}, ${REASON})`;
+      const legal = rows.find((r) => r.user_id === USERS.legal)!;
+      // Cleared in the first meeting is not cleared in this one.
+      await s.expectError(
+        "CDF_CONFLICT:COI_NOT_CLEARED",
+        (tx) => tx`select api.record_attendance(${legal.id}, 'PRESENT')`,
+      );
+      await s.as("legal");
+      await s.tx`select api.declare_meeting_conflict(${legal.id}, 'NO_CONFLICT', null)`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.record_attendance(${legal.id}, 'PRESENT')`;
+    });
+  });
+
+  it("T-AMB-040: no command or column stores a meeting recording", async () => {
+    const args = await admin<{ fn: string }[]>`
+      select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname in ('api', 'public_api')
+        and (p.proname ~* '(recording|audio|video|transcript)'
+             or pg_get_function_arguments(p.oid) ~* '(recording|audio|video|transcript)')`;
+    // Only the governed interview recording (an evidence link) and the recording of a grievance on a restricted case
+    // (a filing, not media) match; nothing takes a meeting recording.
+    expect(args.map((a) => a.fn).sort()).toEqual([
+      "api.approve_restricted_grievance_recording",
+      "api.link_interview_recording",
+    ]);
+    const columns = await admin<{ c: string }[]>`
+      select table_schema || '.' || table_name || '.' || column_name as c from information_schema.columns
+      where table_schema in ('committee', 'decision', 'grievance')
+        and column_name ~* '(recording|audio|video|transcript|media)'`;
+    // The one match is a conflict re-media-tion (migration 2030, DEC-AMB-013), not media.
+    expect(columns.map((x) => x.c)).toEqual(["decision.authority_decision_supersession.remediation_id"]);
+  });
+
+  it("T-AMB-047: a present member who voted cannot vote again once the item is CLOSED", async () => {
+    await scenario(async (s) => {
+      const f = await ready(s);
+      const item = await openItem(s, f.meeting);
+      for (const u of VOTERS) await vote(s, u, item, "APPROVE");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${item}, null)`;
+      for (const u of VOTERS) {
+        await s.as(u);
+        await s.expectError(
+          "CDF_CONFLICT:VOTE_NOT_OPEN",
+          (tx) => tx`select api.cast_vote(${item}, 'REJECT', null)`,
+        );
+      }
+      const r = await itemRow(s, item);
+      expect(r).toMatchObject({ status: "CLOSED", result: "APPROVED" });
     });
   });
 });

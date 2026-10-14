@@ -35,6 +35,7 @@ interface RosterRow {
   relationship: string;
   code: string;
   status: string;
+  ended_at: Date | null;
   is_self: boolean;
 }
 
@@ -261,15 +262,20 @@ describe("each event keeps its own audience", () => {
           .filter((r) => r.action === "CASE_ACCESS_GRANTED")
           .map((r) => `${r.subject_name}:${(r.detail as { scope: string }).scope}`)
           .sort();
-      const full = [
-        "Committee Chair Xi:COMMITTEE",
-        "Committee Secretary Nu:COMMITTEE",
-        "Triage Officer Beta:TRIAGE",
-      ];
+      const full = ["Triage Officer Beta:TRIAGE"];
       expect(await grants("lead")).toEqual(full);
       expect(await grants("caseManager")).toEqual(full);
-      expect(await grants("triage")).toEqual(["Triage Officer Beta:TRIAGE"]);
+      // Hand-over ended the triage grant (S3, DEC-03): the triage officer no longer opens case A at all.
+      expect(await grants("triage")).toEqual([]);
       expect(await grants("investigatorA")).toEqual([]);
+      // The end of that grant is an access event with the same audience.
+      const revoked = async (user: UserKey) =>
+        (await historyOf(s, user, caseA))
+          .filter((r) => r.action === "CASE_ACCESS_REVOKED")
+          .map((r) => r.subject_name)
+          .sort();
+      expect(await revoked("lead")).toEqual(["Triage Officer Beta"]);
+      expect(await revoked("investigatorA")).toEqual([]);
       // The AUDIT grantee passes the case gate, and still never sees its own oversight grant.
       expect(await grants("dpo")).toEqual([]);
     });
@@ -286,7 +292,8 @@ describe("each event keeps its own audience", () => {
       await s.as("grcDirector");
       await s.tx`select api.place_legal_hold(${caseA}, 'CASE', null, 'LITIGATION', ${REASON + " Preserve."}, null)`;
 
-      for (const user of ["investigatorA", "lead", "committeeChair", "triage"] as UserKey[]) {
+      // The committee chair and triage no longer open case A (S3), so the team here is the investigators.
+      for (const user of ["investigatorA", "lead"] as UserKey[]) {
         const rows = await historyOf(s, user, caseA);
         const placed = rows.filter((r) => r.action === "LEGAL_HOLD_PLACED");
         expect(placed.length, user).toBe(1);
@@ -338,7 +345,8 @@ describe("each event keeps its own audience", () => {
       // The GRC Director joins case A and records a SECRET item; an investigator records a CONFIDENTIAL one.
       await s.as("caseManager");
       await s.tx`select api.assign_case(${caseA}, ${USERS.grcDirector}, 'CASE_OWNER', ${REASON})`;
-      await s.tx`select api.grant_case_access(${caseA}, ${USERS.committee}, 'REVIEW', ${REASON}, null)`;
+      // An AUDIT grant opens the case file; it is not the investigation team (a REVIEW grant is refused since S3).
+      await s.tx`select api.grant_case_access(${caseA}, ${USERS.committee}, 'AUDIT', ${REASON}, null)`;
       const register = async (user: UserKey, level: string, file: string) => {
         await s.as(user);
         const [v] = await s.tx<{ v: string }[]>`
@@ -364,7 +372,7 @@ describe("each event keeps its own audience", () => {
         expect(mine, user).toContain(confSeq!.seq);
         expect(mine, user).not.toContain(secretSeq!.seq);
       }
-      // The reviewer (REVIEW grant) is not the investigation team: neither item (DEC-09; packets at S5).
+      // The AUDIT grantee is not the investigation team: neither item (DEC-09; packets at S5).
       const reviewer = await seqs("committee");
       expect(reviewer).not.toContain(confSeq!.seq);
       expect(reviewer).not.toContain(secretSeq!.seq);
@@ -446,20 +454,18 @@ describe("the access roster (DEC-08)", () => {
   it("is full only for those who manage the team; others see the team and their own basis", async () => {
     await scenario(async (s) => {
       const team = ["investigatorA:ASSIGNMENT:INVESTIGATOR", "lead:ASSIGNMENT:LEAD_INVESTIGATOR"];
-      const grants = [
-        "committeeChair:GRANT:COMMITTEE",
-        "committeeSecretary:GRANT:COMMITTEE",
-        "triage:GRANT:TRIAGE",
-      ];
+      // The triage grant ended at hand-over (S3, DEC-03); the full audience still sees it, as REVOKED.
+      const grants = ["triage:GRANT:TRIAGE"];
       const expected: Partial<Record<UserKey, string[]>> = {
         caseManager: [...team, ...grants],
         grcDirector: [...team, ...grants],
         grcDeputy: [...team, ...grants],
         lead: [...team, ...grants], // the case's assigned lead
         investigatorA: team,
-        triage: [...team, "triage:GRANT:TRIAGE"],
-        committeeChair: [...team, "committeeChair:GRANT:COMMITTEE"],
-        committeeSecretary: [...team, "committeeSecretary:GRANT:COMMITTEE"],
+        // Neither opens case A since S3, so neither gets a roster.
+        triage: [],
+        committeeChair: [],
+        committeeSecretary: [],
       };
       for (const [user, want] of Object.entries(expected)) {
         const rows = await rosterOf(s, user as UserKey, caseA);
@@ -468,6 +474,9 @@ describe("the access roster (DEC-08)", () => {
         for (const r of rows)
           expect(r.is_self, `${user} ${rosterKey(r)}`).toBe(r.user_id === USERS[user as UserKey]);
       }
+      const triageRow = (await rosterOf(s, "caseManager", caseA)).find((r) => r.code === "TRIAGE");
+      expect(triageRow).toMatchObject({ status: "REVOKED" });
+      expect(triageRow!.ended_at).not.toBeNull();
     });
   });
 

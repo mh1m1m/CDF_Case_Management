@@ -22,6 +22,7 @@ const USERS = {
   caseManager: "a0000000-0000-4000-8000-000000000003",
   investigatorA: "a0000000-0000-4000-8000-000000000004",
   grcDirector: "a0000000-0000-4000-8000-000000000008",
+  committeeChair: "a0000000-0000-4000-8000-000000000016",
   records: "a0000000-0000-4000-8000-000000000019",
 } as const;
 
@@ -235,4 +236,50 @@ export async function eligibleCase(label: string): Promise<{ caseId: string; cas
     await tx`select api.refresh_disposition_eligibility()`;
   });
   return c;
+}
+
+/**
+ * One form kept open for the committee chair after their case grant was narrowed (S3, ADR-016 D2, path (a)): a
+ * new SCREENING case with a Committee Formation form the case manager prepared, a COMMITTEE grant for the chair
+ * as one made before S3, and the migration's own reconciliation, which ends the grant and keeps the chair on
+ * that form only. The owner-level steps stand in for the history: no application path can create a COMMITTEE
+ * grant any more. A TEST FIXTURE in the throwaway CI or local database.
+ */
+export async function formOnlyCase(
+  label: string,
+): Promise<{ caseId: string; caseNumber: string; instanceId: string }> {
+  const c = await screeningCase(label);
+  const instanceId = await as("caseManager", async (tx) => {
+    const [f] = await tx<{ id: string }[]>`
+      select api.start_form(${c.caseId}, 'WB-FRM-13', 'CONFIDENTIAL'::core.classification_level) as id`;
+    await tx`select * from api.save_form_draft(${f!.id}, ${tx.json({
+      formation_reference: `CDF-DEMO-COMMITTEE-${label}`.slice(0, 60),
+      formation_date: "2026-09-15",
+      chair: "Committee Chair Xi",
+      members: "Committee Member Epsilon",
+      secretary: "Committee Secretary Nu",
+      scope: "Synthetic committee scope for the purpose-bound access e2e.",
+      independence_confirmed: "true",
+    })})`;
+    await tx`select api.prepare_form(${f!.id})`;
+    return f!.id;
+  });
+  const admin = postgres(process.env.CDF_ADMIN_DATABASE_URL ?? url("postgres", "CDF_ADMIN_DB_PASSWORD"), {
+    max: 1,
+    onnotice: () => undefined,
+  });
+  try {
+    await admin.begin(async (tx) => {
+      const [g] = await tx<{ id: string }[]>`
+        insert into case_mgmt.case_access_grant (case_id, user_id, scope, reason, granted_by)
+        values (${c.caseId}, ${USERS.committeeChair}, 'CASE', 'Synthetic: committee grant made before S3',
+                ${USERS.grcDirector})
+        returning id`;
+      await tx`update case_mgmt.case_access_grant set scope = 'COMMITTEE' where id = ${g!.id}`;
+      await tx`select case_mgmt.reconcile_grant_scope()`;
+    });
+  } finally {
+    await admin.end();
+  }
+  return { ...c, instanceId };
 }
