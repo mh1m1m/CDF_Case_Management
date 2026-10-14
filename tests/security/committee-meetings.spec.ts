@@ -4,6 +4,7 @@
 // are not selectable and their choices stay hidden until the item closes; the casting vote exists only on a tie the
 // rule lets the chair break. Minutes are reviewed by attending members and deemed approved only after the window and
 // a reminder.
+import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
 import {
@@ -20,10 +21,10 @@ import {
 } from "../support/committee";
 import { caseFacts } from "../support/decision";
 
-let caseB: string, ic: string, gc: string;
+let caseA: string, caseB: string, ic: string, gc: string;
 
 beforeAll(async () => {
-  caseB = await caseId("0002");
+  [caseA, caseB] = await Promise.all([caseId("0001"), caseId("0002")]);
   ({ ic, gc } = await committeeIds());
 });
 
@@ -863,6 +864,41 @@ describe("ambiguity register: meetings (CDF-205)", () => {
       }
       const r = await itemRow(s, item);
       expect(r).toMatchObject({ status: "CLOSED", result: "APPROVED" });
+    });
+  });
+
+  it("T-AMB-037: a participant of a meeting gets NOT_FOUND on a meeting of another case, as for an id that names none (AMB-063)", async () => {
+    await scenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const a = await scheduleMeeting(s, ic, caseB);
+      const b = await scheduleMeeting(s, ic, caseA);
+      await s.as("committeeSecretary");
+      const [w] = await s.tx<{ id: string }[]>`
+        select api.invite_to_meeting(${a.meeting}, 'WITNESS', ${USERS.employeeB}, null, true, ${REASON}) as id`;
+      // The witness takes part in meeting A (2030 purpose read model, migration 2065's screen).
+      await s.as("employeeB");
+      const [mine] = await s.tx<{ v: { meeting_id: string; me: { participant_id: string } } }[]>`
+        select api.meeting_view(${a.meeting}) as v`;
+      expect(mine!.v).toMatchObject({ meeting_id: a.meeting, me: { participant_id: w!.id } });
+      // Meeting B, of another case, is as unknown to them as an id that names no meeting: the same refusal, no row.
+      for (const id of [b.meeting, randomUUID()]) {
+        await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.meeting_view(${id})`);
+      }
+      expect(await s.tx`select id from committee.meeting where id = ${b.meeting}`).toEqual([]);
+      expect(
+        await s.tx`select id from committee.meeting_participant where meeting_id = ${b.meeting}`,
+      ).toEqual([]);
+      // Nor can they act on it through a participant of B, as for a participant id that names none.
+      for (const p of [b.participant.legal!, randomUUID()]) {
+        await s.expectError(
+          "CDF_NOT_FOUND",
+          (tx) => tx`select api.acknowledge_meeting_confidentiality(${p})`,
+        );
+        await s.expectError(
+          "CDF_NOT_FOUND",
+          (tx) => tx`select api.declare_meeting_conflict(${p}, 'NO_CONFLICT', null)`,
+        );
+      }
     });
   });
 });

@@ -2642,21 +2642,26 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             await s.tx`select eligible, present from committee.quorum_state(${m!.id}, ${f.pkg}, 2)`,
           ).toEqual([{ eligible: 2, present: 2 }]);
           // The lead is offered no vote and casts none: not their own, not a recusal, not one written for them.
-          const mayVote = async (u: UserKey) => {
+          const offered = async (u: UserKey) => {
             await s.as(u);
             const [r] = await s.tx<
               {
                 v: {
                   deliberation: {
-                    vote_items: { vote_item_id: string; capabilities: { may_vote: boolean } }[];
+                    vote_items: {
+                      vote_item_id: string;
+                      capabilities: { may_vote: boolean; may_recuse_for_conflict: boolean };
+                    }[];
                   };
                 };
               }[]
             >`select api.meeting_view(${m!.id}) as v`;
-            return r!.v.deliberation.vote_items.find((i) => i.vote_item_id === vi!.id)!.capabilities.may_vote;
+            const c = r!.v.deliberation.vote_items.find((i) => i.vote_item_id === vi!.id)!.capabilities;
+            // may_recuse_for_conflict since 2065 (ADR-054).
+            return { vote: c.may_vote, recuse: c.may_recuse_for_conflict };
           };
-          expect(await mayVote("lead")).toBe(false);
-          expect(await mayVote("legal")).toBe(true);
+          expect(await offered("lead")).toEqual({ vote: false, recuse: false });
+          expect(await offered("legal")).toEqual({ vote: true, recuse: true });
           await s.as("lead");
           await s.expectError(
             "CDF_CONFLICT:EXCLUDED_BY_CONFLICT",
@@ -2693,6 +2698,60 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             select api.open_vote_item(${m!.id}, 'OTHER', null, 'Other business (synthetic)') as id`;
           await s.as("lead");
           await s.tx`select api.cast_vote(${other!.id}, 'APPROVE', null)`;
+        });
+      });
+
+      it("T-AMB-028: the secretary is offered no vote to record for an absent conflicted member on the re-vote, only on other business (migration 2065)", async () => {
+        await ownerScenario(async (s) => {
+          const { f } = await decidedByLead(s);
+          await upheldOnLead(s, f);
+          await s.as("committeeSecretary");
+          await resolve(s, f.sanction, "RE_VOTE");
+          await s.tx`select api.close_meeting(${f.meeting.meeting}, ${REASON})`;
+          const [m] = await s.tx<{ id: string }[]>`
+            select api.schedule_meeting(${f.meeting.committeeProceeding}, 'DELIBERATION', 'IN_PERSON',
+              'Meeting room (synthetic)', null, now() + interval '2 days', now() + interval '2 days 2 hours', ${REASON}) as id`;
+          const parts = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${m!.id}`;
+          const p = (u: UserKey) => parts.find((r) => r.user_id === USERS[u])!.id;
+          // The lead stays away; the chair and legal are present.
+          for (const u of ["committeeChair", "legal"] as const) {
+            await s.as(u);
+            await s.tx`select api.declare_meeting_conflict(${p(u)}, 'NO_CONFLICT', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+          for (const u of ["committeeChair", "legal"] as const)
+            await s.tx`select api.record_attendance(${p(u)}, 'PRESENT')`;
+          await s.tx`select api.open_package_vote(${m!.id}, ${f.pkg})`;
+          const [vi] = await s.tx<{ id: string }[]>`
+            select id from committee.vote_item where package_id = ${f.pkg} and package_round = 2`;
+          const recordable = async (item: string) => {
+            await s.as("committeeSecretary");
+            const [r] = await s.tx<
+              { v: { deliberation: { vote_items: { vote_item_id: string; record_vote_for: string[] }[] } } }[]
+            >`select api.meeting_view(${m!.id}) as v`;
+            return r!.v.deliberation.vote_items.find((i) => i.vote_item_id === item)!.record_vote_for;
+          };
+          // DEC-AMB-013 on the secretary's path: the re-vote offers no vote to write for the lead, and the command
+          // refuses one.
+          expect(await recordable(vi!.id)).toEqual([]);
+          await s.expectError(
+            "CDF_CONFLICT:EXCLUDED_BY_CONFLICT",
+            (tx) => tx`select api.record_vote_for_member(${vi!.id}, ${p("lead")}, 'ABSENT', ${REASON}, null)`,
+          );
+          for (const u of ["committeeChair", "legal"] as const) {
+            await s.as(u);
+            await s.tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+          // Other business of the same meeting is not the package's: the lead's absence is recorded there.
+          const [other] = await s.tx<{ id: string }[]>`
+            select api.open_vote_item(${m!.id}, 'OTHER', null, 'Other business (synthetic)') as id`;
+          expect(await recordable(other!.id)).toEqual([p("lead")]);
+          await s.tx`select api.record_vote_for_member(${other!.id}, ${p("lead")}, 'ABSENT', ${REASON}, null)`;
+          expect(await recordable(other!.id)).toEqual([]);
         });
       });
 
