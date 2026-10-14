@@ -112,6 +112,26 @@ async function rosterOf(s: Scenario, user: UserKey, id: string) {
 const nameOf = (id: string) => Object.entries(USERS).find(([, v]) => v === id)?.[0];
 const rosterKey = (r: RosterRow) => `${nameOf(r.user_id)}:${r.relationship}:${r.code}`;
 
+/**
+ * COMMITTEE and REVIEW grants made before S3, which migration 2020 ended, and the forms they kept (ADR-016 D2,
+ * path (a)). A database built from Git has none: its seed makes no such grant. A hosted database seeded before S3
+ * keeps them (DEV: the committee chair and secretary on case A, CDF-32 drift record 4.9), and history and the full
+ * roster show them like any other grant. Read on the owner connection, so a scenario's own rows never count.
+ */
+async function endedBeforeS3(target: string) {
+  const grants = await admin<{ user_id: string; display_name: string; scope: string }[]>`
+    select r.user_id, u.display_name, r.scope
+      from case_mgmt.grant_scope_reconciliation r
+      join iam.user_profile u on u.id = r.user_id
+     where r.case_id = ${target} and r.scope in ('COMMITTEE', 'REVIEW')`;
+  const forms = await admin<{ user_id: string; code: string }[]>`
+    select a.user_id, i.form_code || ':' || i.instance_no as code
+      from case_mgmt.form_instance_access a
+      join forms.form_instance i on i.id = a.instance_id
+     where a.case_id = ${target}`;
+  return { grants, forms };
+}
+
 const OUTSIDERS: UserKey[] = [
   "investigatorB", // no relationship with case A
   "committee", // CONFLICT_DECLARE and FORM_VIEW alone
@@ -262,7 +282,11 @@ describe("each event keeps its own audience", () => {
           .filter((r) => r.action === "CASE_ACCESS_GRANTED")
           .map((r) => `${r.subject_name}:${(r.detail as { scope: string }).scope}`)
           .sort();
-      const full = ["Triage Officer Beta:TRIAGE"];
+      const earlier = (await endedBeforeS3(caseA)).grants;
+      const full = [
+        "Triage Officer Beta:TRIAGE",
+        ...earlier.map((g) => `${g.display_name}:${g.scope}`),
+      ].sort();
       expect(await grants("lead")).toEqual(full);
       expect(await grants("caseManager")).toEqual(full);
       // Hand-over ended the triage grant (S3, DEC-03): the triage officer no longer opens case A at all.
@@ -274,7 +298,9 @@ describe("each event keeps its own audience", () => {
           .filter((r) => r.action === "CASE_ACCESS_REVOKED")
           .map((r) => r.subject_name)
           .sort();
-      expect(await revoked("lead")).toEqual(["Triage Officer Beta"]);
+      expect(await revoked("lead")).toEqual(
+        ["Triage Officer Beta", ...earlier.map((g) => g.display_name)].sort(),
+      );
       expect(await revoked("investigatorA")).toEqual([]);
       // The AUDIT grantee passes the case gate, and still never sees its own oversight grant.
       expect(await grants("dpo")).toEqual([]);
@@ -455,7 +481,12 @@ describe("the access roster (DEC-08)", () => {
     await scenario(async (s) => {
       const team = ["investigatorA:ASSIGNMENT:INVESTIGATOR", "lead:ASSIGNMENT:LEAD_INVESTIGATOR"];
       // The triage grant ended at hand-over (S3, DEC-03); the full audience still sees it, as REVOKED.
-      const grants = ["triage:GRANT:TRIAGE"];
+      const earlier = await endedBeforeS3(caseA);
+      const grants = [
+        "triage:GRANT:TRIAGE",
+        ...earlier.grants.map((g) => `${nameOf(g.user_id)}:GRANT:${g.scope}`),
+        ...earlier.forms.map((f) => `${nameOf(f.user_id)}:FORM_ACCESS:${f.code}`),
+      ];
       const expected: Partial<Record<UserKey, string[]>> = {
         caseManager: [...team, ...grants],
         grcDirector: [...team, ...grants],
