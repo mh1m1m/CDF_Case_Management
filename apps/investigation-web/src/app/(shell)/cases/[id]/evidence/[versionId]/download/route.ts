@@ -1,6 +1,7 @@
 // Evidence download (§24, §27; threat T05). The browser never addresses storage: this handler asks the
-// database for permission (api.open_evidence_version records custody and audit, or a SECURITY denial) and
-// streams the vault object with download-only, non-cacheable, nosniff headers.
+// database for permission (api.open_evidence_version records custody and audit, or a SECURITY denial), checks
+// the vault object's SHA-256 (AMB-165, migration 2050) and serves it with download-only, non-cacheable, nosniff
+// headers.
 import { notFound } from "next/navigation";
 import { evidenceService, requireActor } from "@/server/container";
 

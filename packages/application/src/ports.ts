@@ -178,6 +178,11 @@ export interface EvidenceGateway {
   ): Promise<void>;
   /** Records the download (custody + audit) and returns the storage facts, or null when denied/missing. */
   openVersion(ctx: UserRequestContext, versionId: string): Promise<EvidenceDownloadRecord | null>;
+  /**
+   * AMB-165: the content read back did not match the recorded SHA-256. The database blocks the version for every
+   * reader, records custody and a SECURITY event, and tells the case owner (migration 2050).
+   */
+  reportIntegrityFailure(ctx: UserRequestContext, versionId: string, observedSha256: string): Promise<void>;
   /** DEC-09: limit an item to the case leads, or open it to the team again (audited in the database). */
   setRestriction(
     ctx: UserRequestContext,

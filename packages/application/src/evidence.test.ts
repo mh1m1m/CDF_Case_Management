@@ -21,6 +21,7 @@ const investigator: Actor = {
 const ITEM = "33333333-3333-4333-8333-333333333333";
 const HIDDEN = "44444444-4444-4444-8444-444444444444";
 const pdf = new TextEncoder().encode("%PDF-1.7\n%synthetic invoice");
+const PDF_SHA256 = "2c0653da9b15dd3314d98dfe0bece38bfc41cfb50c8074af99835686ab9ffe59";
 const meta = {
   caseId: CASE,
   title: "Invoice batch",
@@ -28,7 +29,9 @@ const meta = {
   classification: "CONFIDENTIAL",
 };
 
-function harness(opts: { scan?: ScanResult["status"]; putFails?: boolean; promoteFails?: boolean } = {}) {
+function harness(
+  opts: { scan?: ScanResult["status"]; putFails?: boolean; promoteFails?: boolean; stored?: Uint8Array } = {},
+) {
   const calls: string[] = [];
   const events: SecurityEvent[] = [];
   const gateway: EvidenceGateway = {
@@ -49,8 +52,8 @@ function harness(opts: { scan?: ScanResult["status"]; putFails?: boolean; promot
             objectKey: "cases/x/evidence/e1/v1",
             fileName: "a.pdf",
             contentType: "application/pdf",
-            sizeBytes: 3,
-            sha256: "ab",
+            sizeBytes: pdf.length,
+            sha256: PDF_SHA256,
             evidenceId: "e1",
             caseId: CASE,
           }
@@ -62,6 +65,9 @@ function harness(opts: { scan?: ScanResult["status"]; putFails?: boolean; promot
     listReportAttachments: async () => [],
     listCaseReportAttachments: async () => [],
     openReportAttachment: async () => null,
+    reportIntegrityFailure: async (_c, v, observed) => {
+      calls.push(`integrity:${v}:${observed.slice(0, 8)}`);
+    },
   };
   const storage: EvidenceStorage = {
     kind: "local-fs",
@@ -73,7 +79,7 @@ function harness(opts: { scan?: ScanResult["status"]; putFails?: boolean; promot
       if (opts.promoteFails) throw new Error("link failed");
       calls.push(`promote:${k}`);
     },
-    openReadStream: async () => new Blob([pdf]).stream() as ReadableStream<Uint8Array>,
+    openReadStream: async () => new Blob([opts.stored ?? pdf]).stream() as ReadableStream<Uint8Array>,
     exists: async () => true,
   };
   const scanner: MalwareScanner = {
@@ -172,10 +178,27 @@ describe("evidence upload pipeline", () => {
   });
 
   it("streams a download only when the database opened the version", async () => {
-    const { service } = harness();
+    const { service, calls } = harness();
     const d = await service.openDownload(ctx, "v1");
     expect(d?.fileName).toBe("a.pdf");
+    expect(new Uint8Array(await new Response(d!.stream).arrayBuffer())).toEqual(pdf);
     expect(await service.openDownload(ctx, "v2")).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it("AMB-165: never serves content whose SHA-256 no longer matches, and reports the mismatch", async () => {
+    const tampered = new TextEncoder().encode("%PDF-1.7\n%synthetic invoice, altered");
+    const { service, calls } = harness({ stored: tampered });
+    await expect(service.openDownload(ctx, "v1")).rejects.toMatchObject({
+      kind: "UNAVAILABLE",
+      detail: "EVIDENCE_INTEGRITY_FAILED",
+      correlationId: ctx.requestId,
+    });
+    const observed = Array.from(
+      new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", tampered)),
+      (b) => b.toString(16).padStart(2, "0"),
+    ).join("");
+    expect(calls).toEqual([`integrity:v1:${observed.slice(0, 8)}`]);
   });
 });
 

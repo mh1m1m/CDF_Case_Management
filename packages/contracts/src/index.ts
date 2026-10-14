@@ -418,7 +418,18 @@ export type ScanStatus = (typeof SCAN_STATUSES)[number];
 export const EVIDENCE_REJECTION_CODES = ["MALWARE_DETECTED", "SCAN_UNAVAILABLE", "STORAGE_FAILURE"] as const;
 export type EvidenceRejectionCode = (typeof EVIDENCE_REJECTION_CODES)[number];
 
-export const CUSTODY_EVENT_TYPES = ["RECEIVED", "STORED", "REJECTED", "DOWNLOADED"] as const;
+export const CUSTODY_EVENT_TYPES = [
+  "RECEIVED",
+  "STORED",
+  "REJECTED",
+  "DOWNLOADED",
+  // Exclusion, custody exceptions, the integrity check and the Defence Packet viewer (migration 2050, ADR-041)
+  "EXCLUDED",
+  "CUSTODY_EXCEPTION",
+  "EXTERNAL_TRANSFER",
+  "INTEGRITY_FAILED",
+  "PACKET_VIEWED",
+] as const;
 export type CustodyEventType = (typeof CUSTODY_EVENT_TYPES)[number];
 
 /** Upper bound for one evidence file (25 MiB), enforced by the browser hint, the server and the database. */
@@ -1618,13 +1629,18 @@ export const NOTIFICATION_TEMPLATES = [
   "PRELIMINARY_REVIEW_REQUESTED",
   "PRELIMINARY_APPROVAL_REQUESTED",
   "PRELIMINARY_RETURNED",
+  // The evidence half, the Defence Packet and the prior-sanctions extract (migration 2050, ADR-041)
+  "EVIDENCE_INTEGRITY_FAILED",
+  "DEFENCE_PACKET_APPROVAL_REQUESTED",
+  "DEFENCE_PACKET_RELEASED",
+  "SANCTION_EXTRACT_APPROVAL_REQUESTED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
 export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
-/** What a notification points at (notify.outbox.object_type after migration 2040). */
+/** What a notification points at (notify.outbox.object_type after migration 2050). */
 export const NOTIFICATION_OBJECT_TYPES = [
   "COMMITTEE",
   "MEETING",
@@ -1637,6 +1653,9 @@ export const NOTIFICATION_OBJECT_TYPES = [
   "BCP_IMPORT",
   "REFERRAL",
   "PRELIMINARY_REVIEW",
+  "CASE",
+  "DEFENCE_PACKET",
+  "SANCTION_EXTRACT_APPROVAL",
 ] as const;
 export type NotificationObjectType = (typeof NOTIFICATION_OBJECT_TYPES)[number];
 

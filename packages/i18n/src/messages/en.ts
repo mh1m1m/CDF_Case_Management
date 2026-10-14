@@ -839,6 +839,11 @@ export const en = {
     STORED: "Stored in the vault",
     REJECTED: "Rejected",
     DOWNLOADED: "Downloaded",
+    EXCLUDED: "Excluded from consideration",
+    CUSTODY_EXCEPTION: "Custody exception recorded",
+    EXTERNAL_TRANSFER: "Sent for external examination",
+    INTEGRITY_FAILED: "Integrity check failed",
+    PACKET_VIEWED: "Viewed in a defence packet",
   },
   forms: {
     title: "Forms",
@@ -1719,6 +1724,10 @@ export const en = {
     PRELIMINARY_REVIEW_REQUESTED: "Preliminary recommendation to review",
     PRELIMINARY_APPROVAL_REQUESTED: "Preliminary recommendation to approve",
     PRELIMINARY_RETURNED: "Preliminary recommendation returned",
+    EVIDENCE_INTEGRITY_FAILED: "Evidence integrity check failed",
+    DEFENCE_PACKET_APPROVAL_REQUESTED: "Defence packet to approve",
+    DEFENCE_PACKET_RELEASED: "Evidence for your defence",
+    SANCTION_EXTRACT_APPROVAL_REQUESTED: "Prior sanction to approve",
   },
   oversight: {
     title: "Oversight",
@@ -1795,6 +1804,12 @@ export const en = {
     PRELIMINARY_REVIEW_REQUESTED: "A preliminary review recommendation awaits your review.",
     PRELIMINARY_APPROVAL_REQUESTED: "A preliminary review recommendation awaits your approval.",
     PRELIMINARY_RETURNED: "A preliminary review recommendation you prepared was returned.",
+    EVIDENCE_INTEGRITY_FAILED:
+      "A stored evidence file on your case failed its integrity check and is blocked.",
+    DEFENCE_PACKET_APPROVAL_REQUESTED: "A defence packet on your restricted case awaits your approval.",
+    DEFENCE_PACKET_RELEASED: "Selected evidence for your defence is ready to view.",
+    SANCTION_EXTRACT_APPROVAL_REQUESTED:
+      "A committee asked to include a prior sanction from your restricted case. It awaits your decision.",
   },
   bcpTemplate: {
     readme: {

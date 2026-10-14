@@ -9,6 +9,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
 import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
 import { closeAndArchive, giveTask, recordsState } from "../support/records";
+import {
+  defenceNotice,
+  packetWith,
+  setPacketPolicy,
+  storeEvidence,
+  storeRendition,
+} from "../support/evidence";
 
 const REASON = "Synthetic: need-to-know test reason.";
 const CASE_B_REF = "WB-SEED00000002"; // case CDF-DEMO-2026-0002 (investigator B; triage holds a TRIAGE grant)
@@ -366,5 +373,93 @@ describe("DEC-09 functions", () => {
       expect(r.anon, r.fn).toBe(false);
       expect(r.src, r.fn).not.toContain("protected_identity");
     }
+  });
+});
+
+describe("ambiguity register: the Defence Packet gives no general evidence access (migration 2050, ADR-041)", () => {
+  it("T-AMB-094: excluded evidence cannot be added to a packet, by the command or on the table", async () => {
+    await ownerScenario(async (s) => {
+      await setPacketPolicy(s);
+      const n = await defenceNotice(s, caseA);
+      const kept = await storeEvidence(s, "investigatorA", caseA);
+      const excluded = await storeEvidence(s, "investigatorA", caseA);
+      await s.as("lead");
+      await s.tx`select api.exclude_evidence(${excluded.evidenceId}, 'Synthetic: obtained outside the mandate.')`;
+      const { packet } = await packetWith(s, "lead", n.notice, [kept.versionId]);
+      await s.expectError(
+        "CDF_CONFLICT:EVIDENCE_EXCLUDED",
+        (tx) => tx`select api.add_defence_packet_item(${packet}, ${excluded.versionId})`,
+      );
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_CONFLICT:EVIDENCE_EXCLUDED",
+        (tx) => tx`select api.add_defence_packet_item(${packet}, ${excluded.versionId})`,
+      );
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:EVIDENCE_EXCLUDED",
+        (
+          tx,
+        ) => tx`insert into grievance.defence_packet_item (packet_id, position, evidence_id, source_version_id, added_by)
+                   values (${packet}, 9, ${excluded.evidenceId}, ${excluded.versionId}, ${USERS.lead})`,
+      );
+      expect(
+        await s.tx`select evidence_id from grievance.defence_packet_item where packet_id = ${packet}`,
+      ).toEqual([{ evidence_id: kept.evidenceId }]);
+    });
+  });
+
+  it("T-AMB-102: a packet holder views a cleared item inline and can never download evidence", async () => {
+    await ownerScenario(async (s) => {
+      await setPacketPolicy(s);
+      const n = await defenceNotice(s, caseA);
+      const a = await storeEvidence(s, "investigatorA", caseA);
+      const redacted = await storeRendition(s, "lead", a.versionId);
+      const { packet, items } = await packetWith(s, "lead", n.notice, [a.versionId]);
+      await s.as("caseManager");
+      await s.tx`select api.review_defence_packet_item(${items[0]!}, 'CLEARED_REDACTED', ${redacted.versionId},
+                   'Ledger extract (redacted)', ${[
+                     "REPORTER",
+                     "WITNESS",
+                     "CONFIDENTIALITY",
+                     "PRIVILEGE",
+                     "RESTRICTED_INFORMATION",
+                     "OTHER_PROTECTED",
+                   ]}::text[], null)`;
+      await s.as("lead");
+      await s.tx`select api.submit_defence_packet(${packet})`;
+      // The subject: the viewer serves the cleared rendition inline; the download gate returns nothing for any version.
+      await s.as("employee");
+      const [o] = await s.tx<{ o_disposition: string; o_version_id: string }[]>`
+        select o_disposition, o_version_id from api.open_defence_packet_item(${items[0]!})`;
+      expect(o).toEqual({ o_disposition: "INLINE", o_version_id: redacted.versionId });
+      for (const version of [a.versionId, redacted.versionId])
+        expect(await s.tx`select 1 from api.open_evidence_version(${version})`, version).toEqual([]);
+      expect(await s.tx`select 1 from evidence.evidence_version`).toEqual([]);
+      // Seeing the item in a packet gives nothing on the case: no other item, no custody, no new version.
+      await s.expectError(
+        "CDF_NOT_FOUND",
+        (
+          tx,
+        ) => tx`select * from api.register_evidence_version(${caseA}, ${a.evidenceId}, null, null, null, null, null,
+                     null, 'x.pdf', 'application/pdf', 10, ${sha()})`,
+      );
+      // PACKET_EVIDENCE_DOWNLOAD is false until DEC-67 is answered; only a recorded policy version changes the
+      // disposition, and even then the evidence download gate stays closed to the subject.
+      await setPacketPolicy(s, { download: true });
+      await s.as("employee");
+      const [o2] = await s.tx<{ o_disposition: string }[]>`
+        select o_disposition from api.open_defence_packet_item(${items[0]!})`;
+      expect(o2!.o_disposition).toBe("ATTACHMENT");
+      expect(await s.tx`select 1 from api.open_evidence_version(${redacted.versionId})`).toEqual([]);
+      // No application role can change the policy.
+      for (const u of ["employee", "caseManager", "platformAdmin"] as const) {
+        await s.as(u);
+        await s.expectError(
+          "permission denied",
+          (tx) => tx`update grievance.defence_packet_policy set packet_evidence_download = true`,
+        );
+      }
+    });
   });
 });

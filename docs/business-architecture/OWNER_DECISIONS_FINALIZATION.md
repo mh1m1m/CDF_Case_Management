@@ -113,6 +113,8 @@ Given on 2026-10-13 (10:01 UTC, project timeline) on `OWNER_PACK.md` of the ambi
 - **DEC-AMB-011 → A.** A grievance outcome never makes the challenged disciplinary sanction more severe. It may uphold, reduce, modify in a non-more-severe manner, or cancel it. If genuinely new facts justify a potentially more severe sanction, that proceeds through the appropriate reinvestigation or new decision process with full due-process protections, not through the grievance.
 - **DEC-AMB-012 → C.** Restricted status may be lifted only through two-person control: the case's Restricted Case Authority plus an independent second authorized approver. Require reason, audit, and a preview of the access population and permissions that would become available after declassification. No user may approve their own second approval.
 
+Placement of DEC-AMB-005 and DEC-AMB-006, with DEC-F37: ADR-041, migration 2050 (the prior-sanctions extract and the Defence Packet; the coordinator's three narrow defaults of 2026-10-14 are recorded there).
+
 DEC-AMB-013 was given on 2026-10-13 (14:40 UTC, project timeline) and confirmed as final at 14:43 ("remove it from future owner packs"). Placement: ADR-040 section 3 item 10, migration 2030 §3.10, with the downstream guards in 2040.
 
 - **DEC-AMB-013 → A.** If a conflict of interest is discovered after the competent authority has already decided, and the conflicted member's participation could have changed the substantive voting result:

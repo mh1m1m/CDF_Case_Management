@@ -524,6 +524,43 @@ describe("the proceeding snapshot and seats (AMB-038, AMB-039, migration 2030)",
   });
 });
 
+describe("CDF-212: a member whose seat has ended declares nothing (migration 2050)", () => {
+  it("a declaration needs a current seat, as a vote and attendance do; the participant row and the ledger stay as they were", async () => {
+    await ownerScenario(async (s) => {
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      // A member whose seat is current declares (control).
+      await s.as("legal");
+      await s.tx`select api.declare_meeting_conflict(${f.participant.legal!}, 'NO_CONFLICT', null)`;
+      await s.asOwner();
+      const [ms] = await s.tx<{ id: string }[]>`
+        select id from committee.membership where committee_id = ${ic} and user_id = ${USERS.legalB} and effective_to is null`;
+      await s.as("platformAdmin");
+      await s.tx`select api.end_committee_membership(${ms!.id}, now(), ${REASON})`;
+      await s.as("legalB");
+      await s.expectError(
+        "CDF_CONFLICT:SEAT_ENDED",
+        (tx) => tx`select api.declare_meeting_conflict(${f.participant.legalB!}, 'NO_CONFLICT', null)`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:SEAT_ENDED",
+        (tx) =>
+          tx`select api.declare_meeting_conflict(${f.participant.legalB!}, 'CONFLICT_DECLARED', 'Synthetic: related to a party.')`,
+      );
+      await s.asOwner();
+      expect(
+        await s.tx`select coi_status from committee.meeting_participant where id = ${f.participant.legalB!}`,
+      ).toEqual([{ coi_status: "PENDING" }]);
+      expect(
+        await s.tx`select id from committee.meeting_conflict where participant_id = ${f.participant.legalB!}`,
+      ).toEqual([]);
+      expect(
+        await s.tx`select seq from audit.audit_event where action = 'COI_DECLARED' and object_id = ${f.participant.legalB!}`,
+      ).toEqual([]);
+    });
+  });
+});
+
 describe("raised conflicts: the decider cascade (DEC-F04, CON-006, migration 2030)", () => {
   const raise = (s: Scenario, participant: string) =>
     s.tx<

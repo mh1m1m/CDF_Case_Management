@@ -96,9 +96,14 @@ describe("storage policy", () => {
       where n.nspname in ('api', 'authz') and p.proname like '%evidence%' order by 1`;
     expect(fns.map((f) => f.fn)).toEqual([
       "api.complete_evidence_version(uuid,text,text)",
+      // Migration 2050 (ADR-041): exclusion, its record, renditions and the integrity report.
+      "api.evidence_exclusion_record(uuid)",
+      "api.exclude_evidence(uuid,text)",
       "api.open_evidence_version(uuid)",
+      "api.register_evidence_rendition(uuid,text,text,bigint,text)",
       "api.register_evidence_version(uuid,uuid,text,text,text,text,date,core.classification_level,text,text,bigint,text)",
       "api.reject_evidence_version(uuid,text,text,text)",
+      "api.report_evidence_integrity_failure(uuid,text)",
       "api.set_evidence_restriction(uuid,text,text)",
       "authz.can_download_evidence(uuid)",
       "authz.can_upload_evidence(uuid)",
@@ -107,5 +112,26 @@ describe("storage policy", () => {
       "authz.is_evidence_team(uuid)",
     ]);
     expect(fns.every((f) => f.auth && !f.anon)).toBe(true);
+  });
+
+  it("an object key leaves the database only through the register and open commands (2050 adds two)", async () => {
+    const fns = await admin<{ fn: string }[]>`
+      select p.oid::regprocedure::text as fn
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname not in ('pg_catalog', 'information_schema')
+        and (array_to_string(p.proargnames, ',') ilike '%object_key%'
+             or pg_get_function_result(p.oid) ilike '%object_key%')
+        and (has_function_privilege('authenticated', p.oid, 'EXECUTE') or has_function_privilege('anon', p.oid, 'EXECUTE'))
+      order by 1`;
+    expect(fns.map((f) => f.fn)).toEqual([
+      // The subject's Defence Packet viewer: a cleared item of a released packet, for server code only (DEC-AMB-006).
+      "api.open_defence_packet_item(uuid)",
+      "api.open_evidence_version(uuid)",
+      "api.open_report_attachment(uuid)",
+      // Upload destinations: the key of the version the caller is registering.
+      "api.register_evidence_rendition(uuid,text,text,bigint,text)",
+      "api.register_evidence_version(uuid,uuid,text,text,text,text,date,core.classification_level,text,text,bigint,text)",
+      "public_api.register_report_attachment(text,text,text,text,text,bigint,text)",
+    ]);
   });
 });

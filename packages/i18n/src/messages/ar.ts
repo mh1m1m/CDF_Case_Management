@@ -819,6 +819,11 @@ export const ar: Messages = {
     STORED: "خُزّن في الخزنة",
     REJECTED: "رُفض",
     DOWNLOADED: "نُزّل",
+    EXCLUDED: "استُبعد من الاعتبار",
+    CUSTODY_EXCEPTION: "سُجّل استثناء في سلسلة الحيازة",
+    EXTERNAL_TRANSFER: "أُرسل لفحص خارجي",
+    INTEGRITY_FAILED: "فشل التحقق من السلامة",
+    PACKET_VIEWED: "عُرض ضمن ملف دفاع",
   },
   forms: {
     title: "النماذج",
@@ -1682,6 +1687,10 @@ export const ar: Messages = {
     PRELIMINARY_REVIEW_REQUESTED: "توصية أولية للمراجعة",
     PRELIMINARY_APPROVAL_REQUESTED: "توصية أولية بانتظار الاعتماد",
     PRELIMINARY_RETURNED: "إعادة توصية أولية",
+    EVIDENCE_INTEGRITY_FAILED: "فشل التحقق من سلامة دليل",
+    DEFENCE_PACKET_APPROVAL_REQUESTED: "ملف دفاع للموافقة",
+    DEFENCE_PACKET_RELEASED: "أدلة لدفاعك",
+    SANCTION_EXTRACT_APPROVAL_REQUESTED: "جزاء سابق للموافقة",
   },
   oversight: {
     title: "الرقابة",
@@ -1762,6 +1771,10 @@ export const ar: Messages = {
     PRELIMINARY_REVIEW_REQUESTED: "توصية مراجعة أولية بانتظار مراجعتك.",
     PRELIMINARY_APPROVAL_REQUESTED: "توصية مراجعة أولية بانتظار اعتمادك.",
     PRELIMINARY_RETURNED: "أُعيدت توصية مراجعة أولية أعددتها.",
+    EVIDENCE_INTEGRITY_FAILED: "فشل ملف دليل محفوظ في قضيتك في التحقق من السلامة، وقد حُجب.",
+    DEFENCE_PACKET_APPROVAL_REQUESTED: "ملف دفاع في قضيتك المقيدة بانتظار موافقتك.",
+    DEFENCE_PACKET_RELEASED: "أدلة مختارة لدفاعك جاهزة للاطلاع.",
+    SANCTION_EXTRACT_APPROVAL_REQUESTED: "طلبت لجنة إدراج جزاء سابق من قضيتك المقيدة، وهو بانتظار قرارك.",
   },
   bcpTemplate: {
     readme: {
