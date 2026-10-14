@@ -538,7 +538,38 @@ requirements:
         tests/security/recommendations-authority.spec.ts,
         tests/security/purpose-read-models.spec.ts,
       ]
-    notes: "Database half (P12-2a). The meeting and minutes pages that use these answers follow in the next change, with no migration. A roster row's answers are computed only for the meeting's runner and on the caller's own row; elsewhere they are false. The meeting-level declaration and acknowledgement flags equal their commands: never for a member whose seat has ended (CDF-212) or an excluded witness."
+    notes: "Database half (P12-2a). The meeting and minutes pages that use these answers are CDF-UX-014, with no migration. A roster row's answers are computed only for the meeting's runner and on the caller's own row; elsewhere they are false. The meeting-level declaration and acknowledgement flags equal their commands: never for a member whose seat has ended (CDF-212) or an excluded witness."
+
+  - id: CDF-UX-014
+    title: "The committee's meeting and minutes pages: purpose routes on the meeting and minutes read models, forms only where the command would accept them, one 404 for outsiders, in Arabic and English"
+    source: [Phase 12 plan P12-2, UX-116, ADR-016 D0 and D2, DEC-51, AMB-083, ADR-054 P12-2a amendment]
+    external_ids: []
+    linear_issues: [CDF-158]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.meeting_view,
+        api.minutes_view,
+        api.vote_item_status,
+        packages/application/src/meetings.ts,
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/actions.ts",
+        "apps/investigation-web/src/app/(shell)/minutes/[minutesId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/minutes/[minutesId]/actions.ts",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/integration/meetings.spec.ts,
+        tests/e2e/meetings.spec.ts,
+        tests/accessibility/meetings.spec.ts,
+        packages/application/src/meetings.test.ts,
+        packages/validation/src/meetings.test.ts,
+        packages/infrastructure/src/db/meetings-gateway.test.ts,
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+      ]
+    notes: "No migration. The pages read only the purpose read models, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. Naming who has not voted yet only to the meeting's runner is presentation: the database shows any deliberation reader who has voted (Q61, Q62), never a choice before the vote closes. Not in this change: scheduling and invitations (P12-2b), finding and package votes (P12-2c, after 2060). The concern-only view names no participant (UX backlog)."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"

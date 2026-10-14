@@ -92,8 +92,61 @@ They only ever turn `true` into `false`, and now equal their commands' answers.
 ### 5. The screens follow in their own change
 
 The meeting and minutes pages, their actions and their Arabic and English text come in the next change, with no
-migration, once this one has merged. Recording a declaration, an acknowledgement or an accommodation for an invitee
-without an account (the secretary's path in those commands) comes with the invitations of P12-2b.
+migration, once this one has merged (the P12-2a amendment below). Recording a declaration, an acknowledgement or an
+accommodation for an invitee without an account (the secretary's path in those commands) comes with the invitations
+of P12-2b.
+
+## P12-2a amendment: the meeting and minutes pages (2026-10-14)
+
+The committee gains its meeting and minutes pages on these read models, with no migration. They are purpose routes
+(ADR-016 D2): `/meetings/{id}` reads `api.meeting_view` and, for each open vote, `api.vote_item_status`;
+`/minutes/{id}` reads `api.minutes_view`, and `api.meeting_view` for names only when the caller may see the meeting.
+Neither page reads a case table. Each action is a server action that runs the `api.*` command in the caller's
+security context, so the database checks again on submit.
+
+- **Where they open from.** My Work rows (2045) and notifications whose link the database writes under `/meetings`
+  or `/minutes` now open these pages (`LIVE_PURPOSE_ROOTS`), and the shell marks them as Committee work. The
+  Committee area's own lists come with S5.
+- **One not-found.** A malformed id is a 404 before any read. A missing meeting or version and one the caller may
+  not see are the same 404, and that refusal is recorded as `ACCESS_DENIED` with the read's name only. A platform or
+  database administrator gets the same 404 (§21).
+- **Who sees what.** The page follows the view the database returns. Whoever may see the meeting gets it, each part
+  under its own read rule; the case team's capabilities are all false, so it reads the meeting and gets no form. A
+  caller who may see a concern but not the meeting (the committee's conflict authority) gets those concerns and
+  nothing else. The case number shows only where the view names the case, which it does only with case-metadata
+  visibility; otherwise the page says the case is not shown.
+- **Forms only where the command would accept them.** Each form shows only when its capability is true: the
+  runner's meeting, attendance, excuse, vote and minutes forms; a member's own declaration, acknowledgement, vote,
+  revision, recusal and note; a concern raised from the meeting-level flag and decided by whoever the concern's own
+  flag names. Actions on a participant's row show only where §1's flags are true, which is for the runner.
+- **Votes.** A member sees how many of the members present who count have voted, and whether they have; the runner
+  also sees who has not voted yet, to chase them before closing. The database lets any deliberation reader see who
+  has voted while a vote is open (Q61 and Q62, migration 1890), and never a choice before it closes. Naming who has
+  not voted only to the runner is presentation, not a control. Counts and the result show once the vote closes, and
+  individual choices only where the rule snapshot is not a secret ballot (AMB-083).
+- **Minutes.** The case team reads a version only once it is approved or deemed approved; before that it gets the
+  same 404 (`api.minutes_view`, 2030). Dates on the minutes show Gregorian and Hijri (DEC-51), and the review period
+  shows as a configured value whose source is the committee's rule for the proceeding. The review, reminder,
+  deemed-approval and overrule forms come from the version's own capabilities.
+- **Confirmation and refusals.** There are 23 server actions. Nineteen acts ask for confirmation first, saying what
+  happens, whether it can be undone, who is affected and who is told; recording attendance or an excused absence,
+  acknowledging confidentiality, revising a vote and declaring no conflict do not. Five acts tell someone, never
+  with content: cancelling a meeting, raising a concern, opening a vote, generating minutes and reminding reviewers.
+  A refused command is recorded as `COMMAND_DENIED` with the command and the outcome only, never the reason, note,
+  narrative or comment typed.
+- **Not in this change.** Scheduling, invitations and the secretary's path for an invitee without an account
+  (P12-2b); votes on findings and packages (P12-2c, after migration 2060). Excluding a witness and activating an
+  acting chair, secretary or alternate are shown on the page and not offered.
+- **Known limitation.** The concern-only view names no participant, because its read model gives ids only; it says
+  "a participant". It is in the UX backlog.
+- **Layout.** A description list in a narrow side column stacks each value under its term, so a formal date never
+  pushes the page sideways (`CDFDescriptionList` with `stacked`).
+- **Tests.** Unit: 30 new (schemas, service, gateway, confirmations, routes, layout).
+  `tests/integration/meetings.spec.ts` (3): the whole flow through the service, a concern and its decider, and the
+  refusals with their security events. `tests/e2e/meetings.spec.ts` (7, Arabic and English, a member on a 390 px
+  phone): declaring, opening, attendance, a vote cast and closed, minutes written and reviewed, and the 404s for
+  outsiders. `tests/accessibility/meetings.spec.ts` (4): axe at 1280 and 390 px and no sideways scroll at 1280, 390
+  and 320 px, with every disclosure open, in both languages.
 
 ## Consequences
 

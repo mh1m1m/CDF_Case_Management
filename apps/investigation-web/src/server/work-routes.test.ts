@@ -43,6 +43,8 @@ describe("routes", () => {
     expect(areaHref(area("CASES", "my-cases"))).toBe("/cases");
     expect(areaOfPath("/cases/abc/forms")).toBe("CASES");
     expect(areaOfPath("/admin/users")).toBe("ADMINISTRATION");
+    expect(areaOfPath("/meetings/abc")).toBe("COMMITTEE");
+    expect(areaOfPath("/minutes/abc")).toBe("COMMITTEE");
     expect(areaOfPath("/settings/access")).toBeUndefined();
   });
   it("leads each item to the page where its work is done", () => {
@@ -88,9 +90,11 @@ describe("routes", () => {
       BCP_IMPORT: "/continuity/imports",
     } as const;
     const all = Object.values(roots);
+    // P12-2a (ADR-054): the meeting and minutes pages have shipped; the rest have not.
+    const shipped: readonly string[] = ["/meetings", "/minutes"];
     for (const [targetType, root] of Object.entries(roots) as [keyof typeof roots, string][]) {
       const i = item({ area: "MY_WORK", targetType, targetId: "x", caseId: "c" });
-      expect(itemHref(i), targetType).toBeNull();
+      expect(itemHref(i), targetType).toBe(shipped.includes(root) ? `${root}/x` : null);
       expect(itemHref(i, [root]), targetType).toBe(`${root}/x`);
       expect(
         itemHref(
@@ -163,6 +167,11 @@ describe("notification links (UX redesign S4)", () => {
   const id = "0b1f6f2e-6c7a-4d39-9d5e-1f6c2f0d9a11";
   it("links nowhere while the page has not shipped", () => {
     expect(notificationHref({ deepLink: `/committees/${id}` })).toBeNull();
+  });
+  it("links a meeting's and minutes' notices to their pages (P12-2a)", () => {
+    expect(notificationHref({ deepLink: `/meetings/${id}` })).toBe(`/meetings/${id}`);
+    expect(notificationHref({ deepLink: `/minutes/${id}` })).toBe(`/minutes/${id}`);
+    expect(notificationHref({ deepLink: `/meetings/${id}/x?y=1` })).toBeNull();
   });
   it("links to a live root only, and only to an id-only path", () => {
     expect(notificationHref({ deepLink: `/committees/${id}` }, ["/committees"])).toBe(`/committees/${id}`);

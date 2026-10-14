@@ -40,3 +40,5 @@ export { INBOX_PAGE, createInboxService } from "./inbox";
 export type { InboxDeps, InboxGateway, InboxService } from "./inbox";
 export { createCaseStructureService } from "./case-structure";
 export type { CaseStructureDeps, CaseStructureGateway, CaseStructureService } from "./case-structure";
+export { createMeetingsService } from "./meetings";
+export type { MeetingsDeps, MeetingsGateway, MeetingsService } from "./meetings";
