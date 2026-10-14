@@ -41,16 +41,18 @@ GRIEVANCE (LINKED to a decision, or STANDALONE / DIRECT_GRIEVANCE) ─▶ admiss
 
 ### 3.1 Referral (`intake.referral.status`)
 
-| From                            | Command                                                      | To                                            | Actor                          | Guard                                                      |
-| ------------------------------- | ------------------------------------------------------------ | --------------------------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| —                               | `api.create_referral`                                        | DRAFT                                         | sector member                  | active sector membership                                   |
-| DRAFT / RETURNED_FOR_COMPLETION | `api.submit_referral_to_head`                                | SUBMITTED_TO_HEAD                             | preparer                       | required fields                                            |
-| SUBMITTED_TO_HEAD               | `api.sector_approve_referral`                                | SUBMITTED_TO_SECRETARY                        | sector head or active delegate | delegate window covers now; approver ≠ preparer            |
-| SUBMITTED_TO_HEAD               | `api.sector_return_referral`                                 | DRAFT                                         | head / delegate                | reason                                                     |
-| SUBMITTED_TO_SECRETARY          | `api.secretary_decide_referral`                              | ACCEPTED / RETURNED_FOR_COMPLETION / REJECTED | IC secretary (effective seat)  | structured reasons for return / reject                     |
-| REJECTED                        | `api.resubmit_referral` / `api.object_to_referral_rejection` | SUBMITTED_TO_HEAD / OBJECTED                  | preparer / head                | rejection is not final                                     |
-| OBJECTED                        | `api.secretary_decide_referral`                              | ACCEPTED / REJECTED                           | IC secretary                   | objection recorded                                         |
-| ACCEPTED                        | (same transaction)                                           | case created                                  | system                         | `source_type = DIRECT_REFERRAL`, committee proceeding open |
+| From                            | Command                                                      | To                                            | Actor                          | Guard                                                                       |
+| ------------------------------- | ------------------------------------------------------------ | --------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------- |
+| —                               | `api.create_referral`                                        | DRAFT                                         | sector member                  | active sector membership                                                    |
+| DRAFT / RETURNED_FOR_COMPLETION | `api.submit_referral_to_head`                                | SUBMITTED_TO_HEAD                             | preparer                       | required fields                                                             |
+| SUBMITTED_TO_HEAD               | `api.sector_approve_referral`                                | SUBMITTED_TO_SECRETARY                        | sector head or active delegate | delegate window covers now; approver ≠ preparer                             |
+| SUBMITTED_TO_HEAD               | `api.sector_return_referral`                                 | DRAFT                                         | head / delegate                | reason                                                                      |
+| SUBMITTED_TO_SECRETARY          | `api.secretary_decide_referral`                              | ACCEPTED / RETURNED_FOR_COMPLETION / REJECTED | IC secretary (effective seat)  | structured reasons for return / reject                                      |
+| REJECTED                        | `api.resubmit_referral` / `api.object_to_referral_rejection` | SUBMITTED_TO_HEAD / OBJECTED                  | preparer / head                | rejection is not final                                                      |
+| OBJECTED                        | `api.secretary_decide_referral`                              | ACCEPTED / REJECTED                           | IC secretary                   | objection recorded                                                          |
+| REJECTED (second or later)      | `api.escalate_referral_rejection`                            | ESCALATED                                     | head / delegate (not preparer) | DEC-F09 (2040): text unchanged; once per rejection                          |
+| ESCALATED                       | `api.decide_referral_escalation`                             | ACCEPTED / REJECTED                           | escalation target seat holder  | DEC-F09: default IC Chair; excludes preparer, approver, rejecting secretary |
+| ACCEPTED                        | (same transaction)                                           | case created                                  | system                         | `source_type = DIRECT_REFERRAL`, committee proceeding open                  |
 
 ### 3.2 Preliminary review (`proceeding` type PRELIMINARY_REVIEW)
 
@@ -61,7 +63,7 @@ GRIEVANCE (LINKED to a decision, or STANDALONE / DIRECT_GRIEVANCE) ─▶ admiss
 | AWAITING_APPROVAL | `api.approve_preliminary_recommendation` | CONCLUDED / RETURNED         | GRC_SECTOR_HEAD                                          | approver ≠ preparer                               |
 | RETURNED          | `api.prepare_preliminary_recommendation` | AWAITING_REVIEW              | preparer                                                 | return reasons from a structured list             |
 
-Approval concludes the proceeding with the recommended outcome: INVESTIGATION_WARRANTED or REFERRED_TO_COMMITTEE to go on, or a closure (NO_ACTION, OUT_OF_SCOPE, DUPLICATE, TRANSFERRED, NON_PROCESSABLE, and since migration 1980 NOT_SERIOUS, NOT_SUBSTANTIATED, CHANNEL_ABUSE, NOT_FEASIBLE, NO_PERSONAL_JURISDICTION; ADR-036).
+Approval concludes the proceeding with the recommended outcome: INVESTIGATION_WARRANTED or REFERRED_TO_COMMITTEE to go on, or a closure (NO_ACTION, OUT_OF_SCOPE, DUPLICATE, TRANSFERRED, NON_PROCESSABLE, and since migration 1980 NOT_SERIOUS, NOT_SUBSTANTIATED, CHANNEL_ABUSE, NOT_FEASIBLE, NO_PERSONAL_JURISDICTION; ADR-036). Since migration 2040 (DEC-F10) NOT_FEASIBLE and NO_PERSONAL_JURISDICTION are INACTIVE in the catalogue: refused for a new recommendation and for endorsement or approval, kept on existing records, until their authority and definitions are confirmed (SOURCE_REQUIRED).
 
 ### 3.3 Committee proceeding
 
@@ -73,7 +75,7 @@ SCHEDULED → OPEN (secretary opens; COI declarations required from all eligible
 
 ### 3.5 Vote item
 
-OPEN → CLOSED (result APPROVED / REJECTED / TIED / NO_QUORUM). Quorum = count of PRESENT, NO_CONFLICT eligible voting members ≥ rule threshold. Tie with casting vote enabled → chair's casting vote decides, stored separately.
+OPEN → CLOSED (result APPROVED / REJECTED / TIED / NO_QUORUM / NO_DECISION; NO_DECISION when every vote abstains, ADR-020, CON-016). Quorum = count of PRESENT, NO_CONFLICT eligible voting members ≥ rule threshold; no item opens without it (ADR-040). Simple majority of substantive votes; abstentions count neither way (DEC-F01). Tie with casting vote enabled → the chair's casting vote decides, or the activated acting chair's where the rule grants it, stored separately; otherwise the tie stands (DEC-F03, ADR-040).
 
 ### 3.6 Legal review
 
@@ -85,7 +87,7 @@ AWAITING → RECORDED (secretary, source document) → EFFECTIVE (requires sourc
 
 ### 3.8 Grievance
 
-RECEIVED (channel, original date) → ADMISSIBILITY_PENDING → ADMISSIBLE / INADMISSIBLE (decider per rule set: SECRETARY / CHAIR / COMMITTEE) → IN_DELIBERATION → CONCLUDED (outcomes[]: UPHOLD, AMEND_SANCTION, CANCEL_SANCTION, REINVESTIGATE, REFER_TO_AUTHORITY, OTHER) → REINVESTIGATION proceeding if routed.
+RECEIVED (channel, original date) → ADMISSIBILITY_PENDING → ADMISSIBLE / INADMISSIBLE (decider per rule set: SECRETARY / CHAIR / COMMITTEE) → IN_DELIBERATION → CONCLUDED (outcomes[], the Q95 list, CON-014: UPHOLD, MODIFY, CANCEL, RETURN_FOR_REINVESTIGATION, REQUEST_COMPLETION, INADMISSIBLE, REJECT_ON_MERITS, PARTIALLY_ACCEPT, CORRECTIVE_ACTION, DISCIPLINARY_ACTION, OTHER_AUTHORIZED_OUTCOME; never more severe than the challenged sanction, DEC-AMB-011) → REINVESTIGATION proceeding if routed.
 
 ## 4. Mapping from CDF_CASE_V1
 
@@ -105,12 +107,12 @@ Existing cases are not re-pathed. V1 keeps running for them; new proceedings att
 
 ## 5. Time rules
 
-| Rule                        | Default              | Status          | Where                     |
-| --------------------------- | -------------------- | --------------- | ------------------------- |
-| Minutes review window       | 3 business days      | OWNER_DEFAULT   | `committee.rule_set`      |
-| Deemed approval             | enabled              | OWNER_DEFAULT   | `committee.rule_set`      |
-| Grievance window            | 30 days              | OWNER_DEFAULT   | `committee.rule_set` (GC) |
-| Business-day calendar       | Sun–Thu, no holidays | SOURCE_REQUIRED | `config.setting`          |
-| Defence submission deadline | configurable         | SOURCE_REQUIRED | `config.setting`          |
+| Rule                        | Default                                                              | Status                                                               | Where                                                                                    |
+| --------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Minutes review window       | 3 business days                                                      | OWNER_DEFAULT                                                        | `committee.rule_set`                                                                     |
+| Deemed approval             | enabled                                                              | OWNER_DEFAULT                                                        | `committee.rule_set`                                                                     |
+| Grievance window            | 30 days                                                              | OWNER_DEFAULT                                                        | `committee.rule_set` (GC)                                                                |
+| Business-day calendar       | Sun–Thu working week; holidays entered by the calendar administrator | OWNER_DECIDED (DEC-F02); the holidays themselves are SOURCE_REQUIRED | `config.business_week_pattern`, `config.business_calendar_day` (migration 2030, CON-005) |
+| Defence submission deadline | per notice, set by the issuer                                        | SOURCE_REQUIRED (default period)                                     | `grievance.defence_notice.due_at`                                                        |
 
 Deemed approval is applied by an idempotent command (`api.apply_minutes_deemed_approval`) invoked by a scheduler port; prototype runs it on read and from a cron route (PRODUCTION_SUBSTITUTION_REQUIRED: CDF scheduler).

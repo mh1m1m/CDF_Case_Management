@@ -41,5 +41,8 @@
 | [ADR-037](ADR-037-employee-notice-kinds.md)                     | Kinds of employee notice; the decision notice starts the grievance window       | Proposed |
 | [ADR-038](ADR-038-meeting-excuses-raised-conflicts.md)          | Excused attendance; conflicts raised by another meeting participant             | Proposed |
 | [ADR-039](ADR-039-meeting-witness-exclusion.md)                 | Excluding a witness from a committee meeting                                    | Proposed |
+| [ADR-040](ADR-040-owner-finalization-decisions.md)              | Applying the owner's Finalization Set and ambiguity decisions                   | Proposed |
+
+**Decision IDs DEC-61 and DEC-62 (CON-011).** Each ID names two different things. In ADR-018 §7 and ADR-022 they are owner card decisions: DEC-61 (owner card, restricted referral) and DEC-62 (owner card, restricted legal review). In the UX audit register O17 §17.7, the source of ADR-016, they are audit items, cited here as UX DEC-61 (the Stitch project) and UX DEC-62 (new case entities).
 
 Template: Context · Decision · Consequences · Production mapping · Requirements.

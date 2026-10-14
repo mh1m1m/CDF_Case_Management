@@ -61,24 +61,28 @@ With plain PostgreSQL it first applies `infrastructure/supabase/tests/bootstrap/
 
 Synthetic users (password = your `CDF_DEV_PASSWORD`, local-dev identity only):
 
-| Email                                                         | Role                       | Demonstrates                                             |
-| ------------------------------------------------------------- | -------------------------- | -------------------------------------------------------- |
-| `intake@example.test`                                         | Intake officer             | Sees reports, not cases                                  |
-| `triage@example.test`                                         | Triage officer             | Triage, create case, screening                           |
-| `casemanager@example.test`                                    | Case manager               | All non-restricted cases, assignment, workflow           |
-| `investigator.a@example.test` / `investigator.b@example.test` | Investigator               | Only assigned cases; conflict removes access             |
-| `lead@example.test`                                           | Lead investigator          | Assigns within own cases                                 |
-| `grc.director@example.test`, `grc.deputy@example.test`        | GRC director               | Approval, restricted cases, dual-control identity reveal |
-| `admin@example.test`                                          | Platform admin             | Users and roles, no case content                         |
-| `audit@example.test`, `soc@example.test`, `dpo@example.test`  | Oversight                  | Audit or security events only                            |
-| `revoked@example.test`                                        | Revoked                    | Cannot sign in or act                                    |
-| `records@example.test`, `records.b@example.test`              | Records officer            | Retention class, legal hold, disposition request         |
-| `legal@example.test`, `legal.b@example.test`                  | Legal reviewer             | Legal hold placement and dual-control release            |
-| `employee.rho@example.test`, `employee.phi@example.test`      | Referrer (Operations)      | Prepares direct referrals; Phi can be named delegate     |
-| `sector.head@example.test`                                    | Sector head (Operations)   | Approves or returns referrals, delegates, objects        |
-| `employee.chi@example.test`                                   | Referrer (Finance)         | Cannot see Operations referrals                          |
-| `compliance.mgr@example.test`                                 | Compliance section manager | Prepares preliminary reviews; committee composition      |
-| `grc.sector.head@example.test`                                | GRC sector head            | Final approval of preliminary reviews, no case access    |
+| Email                                                         | Role                        | Demonstrates                                             |
+| ------------------------------------------------------------- | --------------------------- | -------------------------------------------------------- |
+| `intake@example.test`                                         | Intake officer              | Sees reports, not cases                                  |
+| `triage@example.test`                                         | Triage officer              | Triage, create case, screening                           |
+| `casemanager@example.test`                                    | Case manager                | All non-restricted cases, assignment, workflow           |
+| `investigator.a@example.test` / `investigator.b@example.test` | Investigator                | Only assigned cases; conflict removes access             |
+| `lead@example.test`                                           | Lead investigator           | Assigns within own cases                                 |
+| `grc.director@example.test`, `grc.deputy@example.test`        | GRC director                | Approval, restricted cases, dual-control identity reveal |
+| `admin@example.test`                                          | Platform admin              | Users and roles, no case content                         |
+| `audit@example.test`, `soc@example.test`, `dpo@example.test`  | Oversight                   | Audit or security events only                            |
+| `revoked@example.test`                                        | Revoked                     | Cannot sign in or act                                    |
+| `records@example.test`, `records.b@example.test`              | Records officer             | Retention class, legal hold, disposition request         |
+| `legal@example.test`, `legal.b@example.test`                  | Legal reviewer              | Legal hold placement and dual-control release            |
+| `employee.rho@example.test`, `employee.phi@example.test`      | Referrer (Operations)       | Prepares direct referrals; Phi can be named delegate     |
+| `sector.head@example.test`                                    | Sector head (Operations)    | Approves or returns referrals, delegates, objects        |
+| `employee.chi@example.test`                                   | Referrer (Finance)          | Cannot see Operations referrals                          |
+| `compliance.mgr@example.test`                                 | Compliance section manager  | Prepares preliminary reviews; committee composition      |
+| `grc.sector.head@example.test`                                | GRC sector head             | Final approval of preliminary reviews, no case access    |
+| `ic.chair@example.test`, `ic.deputy@example.test`             | IC chair / deputy (demo)    | Seated on the Investigation Committee by the demo seed   |
+| `ic.secretary@example.test`                                   | IC secretary (demo)         | Runs IC meetings; accepts referrals                      |
+| `ic.member.a@example.test`, `ic.member.b@example.test`        | IC members (demo)           | Vote in IC meetings, review minutes                      |
+| `gc.chair@example.test`, `gc.secretary@example.test`          | GC chair / secretary (demo) | Seated on the Grievance Committee by the demo seed       |
 
 ## Tests
 

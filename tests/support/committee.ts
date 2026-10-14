@@ -1,4 +1,4 @@
-// Committee fixtures for the rebase security tests (migrations 1870 and 1890). Every call runs through the api.*
+// Committee fixtures for the rebase security tests (migrations 1870, 1890 and 2030). Every call runs through the api.*
 // commands as the acting user; nothing is inserted directly.
 import { USERS, admin, type Scenario, type UserKey } from "./db";
 
@@ -9,9 +9,28 @@ export async function committeeIds(): Promise<{ ic: string; gc: string }> {
   return { ic: rows.find((r) => r.code === "IC")!.id, gc: rows.find((r) => r.code === "GC")!.id };
 }
 
-/** Seats the given users on a committee from yesterday, as the platform admin. */
-export async function seat(s: Scenario, committeeId: string, seats: [UserKey, string][]): Promise<void> {
+/** Appointment-reference prefix of the demo seats in infrastructure/supabase/seed/30_synthetic_committee_seats.sql. */
+export const DEMO_SEAT_REFERENCE = "SEED-DEMO-COMMITTEE-";
+
+/**
+ * Ends the seeded demo seats on IC and GC inside the test's own transaction, which rolls back with it, so every test
+ * starts with both committees unseated as before the demo seed. Each seat ends one second after it began, through
+ * api.end_committee_membership as the platform admin, so it overlaps no seat a test appoints. Leaves the platform
+ * admin acting; a no-op once the seats are ended.
+ */
+export async function unseatDemoSeats(s: Scenario): Promise<void> {
   await s.as("platformAdmin");
+  await s.tx`
+    select api.end_committee_membership(m.id, m.effective_from + interval '1 second',
+      'Synthetic: the test starts with the committee unseated.')
+    from committee.membership m
+    where m.appointment_reference like ${DEMO_SEAT_REFERENCE + "%"} and m.ended_at is null
+    order by m.id`;
+}
+
+/** Seats the given users on a committee from yesterday, as the platform admin, after ending the demo seats. */
+export async function seat(s: Scenario, committeeId: string, seats: [UserKey, string][]): Promise<void> {
+  await unseatDemoSeats(s);
   for (const [user, seatCode] of seats) {
     await s.tx`select api.appoint_committee_member(${committeeId}, ${USERS[user]}, ${seatCode}, now() - interval '1 day', null, 'DEMO-APPT')`;
   }
@@ -26,7 +45,49 @@ export const IC_SEATS: [UserKey, string][] = [
   ["lead", "MEMBER"],
 ];
 
+/**
+ * AMB-018 (migration 2030): a case that did not arrive as a direct referral reaches the Investigation Committee only
+ * after its preliminary review concluded REFERRED_TO_COMMITTEE with the approver's approval. The GRC Director prepares
+ * the recommendation (no review step, Q15) and the GRC Sector Head approves it. On a restricted case the approver sees
+ * nothing without an explicit grant (fail safe), so the case owner grants case access (a REVIEW grant is refused since
+ * migration 2020, DEC-02) and revokes it afterwards. Does nothing when the case's latest approved recommendation
+ * already refers it, or when the case is a direct referral.
+ */
+export async function preliminaryReferral(s: Scenario, caseId: string): Promise<void> {
+  await s.as("grcDirector");
+  const [c] = await s.tx<{ is_restricted: boolean; needed: boolean }[]>`
+    select c.is_restricted,
+           c.source_type not in ('DIRECT_REFERRAL', 'DIRECT_GRIEVANCE')
+           and coalesce((select r.recommended_outcome from case_mgmt.preliminary_recommendation r
+                         join case_mgmt.proceeding p on p.id = r.proceeding_id
+                         where r.case_id = c.id and r.status = 'APPROVED'
+                         order by r.approved_at desc, p.sequence_no desc, r.version_no desc limit 1), '')
+               <> 'REFERRED_TO_COMMITTEE' as needed
+    from case_mgmt.case_record c where c.id = ${caseId}`;
+  if (!c) throw new Error("preliminaryReferral: the GRC Director cannot see the case");
+  if (!c.needed) return;
+  const [r] = await s.tx<{ id: string }[]>`
+    select api.prepare_preliminary_recommendation(${caseId}, 'REFERRED_TO_COMMITTEE',
+      'Synthetic: serious enough for the Investigation Committee.') as id`;
+  let grant: string | undefined;
+  if (c.is_restricted) {
+    const [g] = await s.tx<{ id: string }[]>`
+      select api.grant_case_access(${caseId}, ${USERS.grcSectorHead}, 'CASE', ${REASON}, null) as id`;
+    grant = g!.id;
+  }
+  await s.as("grcSectorHead");
+  await s.tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`;
+  if (grant) {
+    await s.as("grcDirector");
+    await s.tx`select api.revoke_case_access(${grant}, ${REASON})`;
+  }
+}
+
+/** Refers the case; to the Investigation Committee after its preliminary review referred it (AMB-018). */
 export async function refer(s: Scenario, committeeId: string, caseId: string, by: UserKey = "caseManager") {
+  await unseatDemoSeats(s);
+  const [k] = await admin<{ kind: string }[]>`select kind from committee.committee where id = ${committeeId}`;
+  if (k?.kind === "INVESTIGATION") await preliminaryReferral(s, caseId);
   await s.as(by);
   const [cp] = await s.tx<{ id: string }[]>`
     select api.refer_case_to_committee(${caseId}, ${committeeId}, null, ${REASON}) as id`;

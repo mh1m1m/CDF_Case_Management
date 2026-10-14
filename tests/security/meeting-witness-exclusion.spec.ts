@@ -144,9 +144,16 @@ describe("excluding a witness from a meeting (migration 2010, P11-G4, ADR-039)",
         "CDF_CONFLICT:WITNESS_EXCLUDED",
         (tx) => tx`select api.raise_meeting_conflict(${w}, 'Synthetic: a concern about the witness.')`,
       );
-      // The other witness declares and attends as usual.
+      // Nor is an accommodation recorded for them (migration 2030, AMB-157).
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:WITNESS_EXCLUDED",
+        (tx) => tx`select api.record_meeting_accommodation(${w}, 'Synthetic: step-free access.')`,
+      );
+      // The other witness declares, acknowledges confidentiality (2030, AMB-158) and attends as usual.
       await s.as("financeEmployee");
       await s.tx`select api.declare_meeting_conflict(${other}, 'NO_CONFLICT', null)`;
+      await s.tx`select api.acknowledge_meeting_confidentiality(${other})`;
       await s.as("committeeSecretary");
       await s.tx`select api.record_attendance(${other}, 'PRESENT')`;
 

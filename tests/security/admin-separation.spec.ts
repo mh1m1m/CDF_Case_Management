@@ -70,7 +70,8 @@ describe("administrative separation", () => {
       const categories = await s.tx<
         { category: string }[]
       >`select distinct category from audit.audit_event order by 1`;
-      expect(categories.map((c) => c.category)).toEqual(["BUSINESS"]);
+      // ADMIN: the demo committee seats of seed 30 are appointed through the audited registry command.
+      expect(categories.map((c) => c.category)).toEqual(["ADMIN", "BUSINESS"]);
     });
   });
 
