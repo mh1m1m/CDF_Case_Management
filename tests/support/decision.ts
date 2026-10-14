@@ -190,8 +190,10 @@ export async function decidedForSubjects(
   await s.tx`select api.give_legal_opinion(${request}, 'CONCURS', null)`;
   await s.as("committeeSecretary");
   await s.tx`select api.submit_to_authority(${f.pkg})`;
+  // Decided at now(), the adoption's own time: a decision may not fall on a Riyadh day before the adoption's (AMB-131),
+  // and an hour earlier is the day before between 00:00 and 01:00 Riyadh time.
   const [d] = await s.tx<{ id: string }[]>`
-    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now() - interval '1 hour',
+    select api.record_authority_decision(${f.pkg}, 'CEO', ${outcome}, now(),
       'Chief Executive (synthetic)', 'MEMO-DEMO-2040', null, ${REASON}) as id`;
   return { ...f, decision: d!.id, sigma: f.subject, tau: tau!.id };
 }
