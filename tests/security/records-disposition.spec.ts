@@ -157,8 +157,7 @@ describe("retention schedule", () => {
       );
       await s.expectError(
         "CDF_CONFLICT:RECORDS_READ_ONLY",
-        (tx) =>
-          tx`select api.grant_case_access(${caseB}, ${USERS.legal}, 'REVIEW', 'Synthetic: late review')`,
+        (tx) => tx`select api.grant_case_access(${caseB}, ${USERS.legal}, 'CASE', 'Synthetic: late access')`,
       );
       await s.as("grcDirector");
       await s.expectError(

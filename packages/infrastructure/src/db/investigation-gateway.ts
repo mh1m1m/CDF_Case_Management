@@ -526,7 +526,7 @@ export class PostgresInvestigationGateway implements InvestigationGateway {
         (Omit<MyAccessEntry, "sinceAt" | "untilAt"> & { sinceAt: Date | null; untilAt: Date | null })[]
       >`
         select basis, code, case_id as "caseId", case_number as "caseNumber", since_at as "sinceAt",
-               until_at as "untilAt"
+               until_at as "untilAt", target_id as "targetId"
         from api.my_access()`;
       return rows.map((r) => ({ ...r, sinceAt: iso(r.sinceAt), untilAt: iso(r.untilAt) }));
     });

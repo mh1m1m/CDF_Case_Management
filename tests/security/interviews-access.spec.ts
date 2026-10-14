@@ -44,7 +44,7 @@ describe("interview visibility", () => {
         ["lead", 1],
         ["caseManager", 1],
         ["grcDirector", 1],
-        ["triage", 0], // a TRIAGE-scope grant sees the case, not its interviews
+        ["triage", 0], // its TRIAGE grant ended at hand-over (S3); before it, the case but not its interviews
         ["intake", 0],
         ["investigatorB", 0],
         ["committee", 0],
@@ -135,7 +135,8 @@ describe("interview visibility", () => {
 describe("interview commands", () => {
   it("refuse outsiders, viewers without a working role, and anonymous callers", async () => {
     await scenario(async (s) => {
-      for (const user of ["investigatorB", "committee", "platformAdmin"] as const) {
+      // Triage's grant on case A ended at hand-over (S3, DEC-03): it is an outsider now, with the same answer.
+      for (const user of ["investigatorB", "committee", "platformAdmin", "triage"] as const) {
         await s.as(user);
         await s.expectError("CDF_NOT_FOUND", (tx) => plan(tx, caseA));
         await s.expectError(
@@ -149,8 +150,8 @@ describe("interview commands", () => {
       }
       await s.as("revoked");
       await s.expectError("CDF_UNAUTHENTICATED", (tx) => plan(tx, caseA));
-      // Triage sees the case but has no working role on it.
-      await s.as("triage");
+      // The GRC director sees the case but has no working role on it.
+      await s.as("grcDirector");
       await s.expectError("CDF_FORBIDDEN", (tx) => plan(tx, caseA));
       await s.as(null);
       await s.expectError("permission denied", (tx) => plan(tx, caseA));

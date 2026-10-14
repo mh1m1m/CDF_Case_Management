@@ -2,11 +2,13 @@
 // can see what they see, and until when. Only the caller's own rows; case numbers only where the caller may
 // see the case's metadata; nothing from the identity vault.
 import type { Metadata } from "next";
+import Link from "next/link";
 import type { MyAccessEntry } from "@cdf/contracts";
 import type { MessageKey, Translator } from "@cdf/i18n";
 import { CDFDateTime, CDFIdentifier, CDFPageHeader, CDFTable } from "@cdf/ui";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
+import { formAccessLabel } from "../../access-labels";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -23,6 +25,8 @@ function what(t: Translator, r: MyAccessEntry): string {
       return t.code("assignmentRole", r.code);
     case "GRANT":
       return t.code("myAccess.grantScope", r.code);
+    case "FORM_ACCESS":
+      return formAccessLabel(t, r.code);
     case "TASK":
       return t.code("records.taskTypeName", r.code, "records.taskType");
     case "BREAK_GLASS":
@@ -41,11 +45,26 @@ export default async function MyAccessPage() {
         caption={t("myAccess.tableLabel")}
         testId="my-access-table"
         rows={rows}
-        rowKey={(r) => `${r.basis}:${r.code}:${r.caseId ?? ""}:${r.sinceAt ?? ""}`}
+        rowKey={(r) => `${r.basis}:${r.code}:${r.caseId ?? ""}:${r.targetId ?? ""}:${r.sinceAt ?? ""}`}
         empty={t("myAccess.intro")}
         columns={[
           { header: t("myAccess.columns.basis"), cell: (r) => t(`myAccess.basis.${r.basis}` as MessageKey) },
-          { header: t("myAccess.columns.what"), cell: (r) => what(t, r) },
+          {
+            header: t("myAccess.columns.what"),
+            // A kept form leads to its own page (S3, ADR-016 D2): the case is not named, so the form tells it apart.
+            cell: (r) =>
+              r.basis === "FORM_ACCESS" && r.targetId ? (
+                <Link
+                  href={`/my-work/forms/${r.targetId}`}
+                  className="underline underline-offset-4"
+                  data-testid={`my-access-form-${r.targetId}`}
+                >
+                  {what(t, r)}
+                </Link>
+              ) : (
+                what(t, r)
+              ),
+          },
           {
             header: t("myAccess.columns.case"),
             cell: (r) => (r.caseNumber ? <CDFIdentifier>{r.caseNumber}</CDFIdentifier> : null),

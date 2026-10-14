@@ -57,7 +57,9 @@ export function itemHref(i: WorkItem): string {
     case "CONFLICT":
       return onCase ? `${onCase}/people#conflict-decisions` : "/my-work";
     case "FORM_INSTANCE":
-      return onCase ? `${onCase}/forms/${i.targetId}` : "/my-work";
+      // A form on a case the caller works in opens there; one held by form-scoped access alone (S3, ADR-016 D2)
+      // opens in the purpose view, which never shows the case.
+      return i.area === "CASES" && onCase ? `${onCase}/forms/${i.targetId}` : `/my-work/forms/${i.targetId}`;
     case "INTERVIEW":
       return onCase ? `${onCase}/interviews/${i.targetId}` : "/my-work";
     case "CASE_TASK":

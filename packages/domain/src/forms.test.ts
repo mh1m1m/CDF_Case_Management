@@ -16,6 +16,7 @@ import {
   formWaitingAction,
   getFormDefinition,
   isFormEntitled,
+  parseFormAccessCode,
   validateFormData,
 } from "./forms";
 
@@ -111,6 +112,20 @@ describe("form lifecycle helpers", () => {
   });
   it("formats display numbers", () => {
     expect(formDisplayNumber("WB-FRM-11", 2)).toBe("WB-FRM-11 #2");
+  });
+
+  it("reads a form-scoped access code and refuses anything else (S3)", () => {
+    expect(parseFormAccessCode("WB-FRM-13:2")).toEqual({ formCode: "WB-FRM-13", instanceNo: 2 });
+    for (const bad of [
+      "WB-FRM-13",
+      "WB-FRM-13:0",
+      "WB-FRM-13:-1",
+      "wb-frm-13:2",
+      "COMMITTEE",
+      "WB-FRM-13:2:3",
+      "",
+    ])
+      expect(parseFormAccessCode(bad), bad).toBeNull();
   });
 });
 

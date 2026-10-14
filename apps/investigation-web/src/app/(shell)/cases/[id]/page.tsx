@@ -20,7 +20,7 @@ import {
   inputClass,
   textareaClass,
 } from "@cdf/ui";
-import { lastReturn, progressSteps, stateByCode } from "@cdf/workflow";
+import { isHandOver, lastReturn, progressSteps, stateByCode } from "@cdf/workflow";
 import { investigationService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { overdueKeys } from "@/server/work-routes";
@@ -156,6 +156,15 @@ export default async function CaseOverviewPage({
                         className="mb-4 border-b border-cdf-border pb-4 last:border-0"
                         data-testid={`transition-${tr.code}`}
                       >
+                        {/* A hand-over (ADR-016 D3) ends triage access in the same step: say so before it. */}
+                        {c.currentState && isHandOver(c.currentState, tr.toState) ? (
+                          <p
+                            className="mb-2 text-sm text-cdf-text-secondary"
+                            data-testid={`handover-note-${tr.code}`}
+                          >
+                            {t("caseWorkspace.handOverNote")}
+                          </p>
+                        ) : null}
                         <CDFCommandForm
                           action={transitionAction.bind(null, c.id, tr.code)}
                           locale={t.locale}

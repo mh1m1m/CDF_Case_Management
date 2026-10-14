@@ -33,12 +33,15 @@ const visible = async (user: UserKey) => {
 describe("case visibility matrix", () => {
   it.each<[UserKey, string[]]>([
     ["intake", []], // intake sees reports, not cases
-    ["triage", ["0001", "0002", "0004"]], // own TRIAGE grants; 0003 is above clearance
+    // Own TRIAGE grants, only before hand-over (S3, DEC-03): 0001 was handed over; 0003 is above clearance.
+    ["triage", ["0002", "0004"]],
     ["caseManager", ["0001", "0002", "0004"]], // CASE_VIEW_ALL but not restricted cases
     ["investigatorA", ["0001"]], // assigned to A; removed from 0004 by conflict
     ["investigatorB", ["0002", "0004"]], // assigned only
     ["lead", ["0001"]],
     ["committee", []],
+    ["committeeChair", []], // a committee role opens no case (S3, DEC-02)
+    ["committeeSecretary", []],
     ["grcDirector", ["0001", "0002", "0003", "0004"]], // explicit grant on the restricted case
     ["grcDeputy", ["0001", "0002", "0004"]], // CASE_VIEW_ALL does not reach restricted cases
     ["platformAdmin", []], // administration never implies case content (§21)
