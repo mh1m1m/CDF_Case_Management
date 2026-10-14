@@ -1,7 +1,17 @@
 // §23, threats T01–T05, T21: the anonymous portal can submit and follow up on its own report only,
 // never learns whether another Report ID exists, and is rate-limited per Report ID.
 import { describe, expect, it } from "vitest";
-import { admin, newReportRef, newSecret, portal, portalScenario, secretHmac } from "../support/db";
+import {
+  admin,
+  caseId,
+  newReportRef,
+  newSecret,
+  ownerScenario,
+  portal,
+  portalScenario,
+  secretHmac,
+  USERS,
+} from "../support/db";
 import type { Tx } from "@cdf/infrastructure";
 
 const DESCRIPTION = "SYNTHETIC: Employee Alpha allegedly shared tender prices with Vendor Omega.";
@@ -323,6 +333,40 @@ describe("public portal", () => {
         "status_changed_at",
       ]);
       expect(["RECEIVED", "IN_PROGRESS", "INFORMATION_REQUESTED", "CLOSED"]).toContain(row!.s.status);
+    });
+  });
+
+  it("CDF-205 T-AMB-135 (AMB-224): a closed case shows the reporter CLOSED and no outcome category", async () => {
+    const caseA = await caseId("0001");
+    await ownerScenario(async (s) => {
+      await s.as(null);
+      const { ref, secret } = await submit(s.tx);
+      // Fixture as the owner: the report became case 0001, which concluded with an outcome and closed.
+      await s.asOwner();
+      await s.tx`update intake.report set status = 'CASE_OPENED', case_id = ${caseA} where report_ref = ${ref}`;
+      await s.tx`
+        insert into case_mgmt.proceeding (case_id, sequence_no, proceeding_type, status, outcome_code, opened_by,
+          closed_by, closed_at)
+        values (${caseA}, 999, 'INVESTIGATION', 'CONCLUDED', 'SUBSTANTIATED', ${USERS.caseManager},
+          ${USERS.caseManager}, now())`;
+      await s.tx`update case_mgmt.case_record set records_state = 'CLOSED', closed_at = coalesce(closed_at, now())
+        where id = ${caseA}`;
+      await s.as(null);
+      const [row] = await s.tx<
+        { s: Record<string, unknown> }[]
+      >`select public_api.get_report_status(${ref}, ${secretHmac(secret)}) as s`;
+      expect(row!.s.status).toBe("CLOSED");
+      expect(row!.s.can_reply).toBe(false);
+      expect(Object.keys(row!.s).sort()).toEqual([
+        "can_reply",
+        "messages",
+        "received_at",
+        "report_ref",
+        "status",
+        "status_changed_at",
+      ]);
+      const text = JSON.stringify(row!.s);
+      expect(text).not.toMatch(/SUBSTANTIATED|outcome|finding|sanction|decision/i);
     });
   });
 });

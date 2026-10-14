@@ -843,3 +843,34 @@ describe("preliminary closure outcomes (migration 1980, P11-G1, ADR-036)", () =>
     });
   });
 });
+
+describe("ambiguity register: preliminary review separation (CDF-205)", () => {
+  it("T-AMB-147: a preparer who also holds PRELIMINARY_REVIEW cannot review their own recommendation (N10)", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("investigatorA");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseA}, 'NO_ACTION', 'Synthetic: own review probe.') as id`;
+      // Review authority granted after preparation, so the recommendation still awaits review (Q15 applies at preparation).
+      await s.asOwner();
+      await s.tx`
+        insert into iam.user_role_assignment (user_id, role_code, justification, source_reference)
+        values (${USERS.investigatorA}, 'GRC_DIRECTOR', 'Synthetic: dual role for the test', 'TEST')`;
+      await s.as("investigatorA");
+      expect(
+        (await s.tx<{ ok: boolean }[]>`select authz.has_permission('PRELIMINARY_REVIEW') as ok`)[0]!.ok,
+      ).toBe(true);
+      await s.expectError(
+        "CDF_CONFLICT:SEPARATION_OF_DUTIES",
+        (tx) => tx`select api.review_preliminary_recommendation(${r!.id}, 'ENDORSE', null, null)`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:SEPARATION_OF_DUTIES",
+        (tx) =>
+          tx`select api.review_preliminary_recommendation(${r!.id}, 'RETURN', array['RECOMMENDATION_INCOMPLETE'], null)`,
+      );
+      const [row] = await s.tx<{ status: string; reviewed_by: string | null }[]>`
+        select status, reviewed_by from case_mgmt.preliminary_recommendation where id = ${r!.id}`;
+      expect(row).toEqual({ status: "AWAITING_REVIEW", reviewed_by: null });
+    });
+  });
+});

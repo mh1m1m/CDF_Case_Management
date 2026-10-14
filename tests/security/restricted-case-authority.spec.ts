@@ -267,6 +267,33 @@ describe("ordinary cases are unchanged until grant scope lands (S3)", () => {
   });
 });
 
+describe("ambiguity register: clearance changes (CDF-205)", () => {
+  it("T-AMB-148: lowering a staffed user's clearance removes their restricted access at once", async () => {
+    await ownerScenario(async (s) => {
+      await accepted(s);
+      const caseId = await createRestricted(s, USERS.grcDirector);
+      await s.as("grcDirector");
+      await s.tx`select api.assign_case(${caseId}, ${USERS.investigatorA}, 'INVESTIGATOR', ${REASON})`;
+      expect(await canView(s, "investigatorA", caseId)).toBe(true);
+      expect((await s.tx`select id from case_mgmt.case_record where id = ${caseId}`).length).toBe(1);
+
+      // The directory lowers the investigator's clearance below the case's classification (no session, no cache).
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'RESTRICTED' where id = ${USERS.investigatorA}`;
+      expect(await canView(s, "investigatorA", caseId)).toBe(false);
+      expect(await s.tx`select id from case_mgmt.case_record where id = ${caseId}`).toEqual([]);
+      expect(await s.tx`select id from case_mgmt.allegation where case_id = ${caseId}`).toEqual([]);
+      const [opened] = await s.tx<{ v: boolean }[]>`select api.open_case(${caseId}) as v`;
+      expect(opened!.v).toBe(false); // an audited denial, as for any case the user cannot see
+
+      // The same holds for the authority who owns the case.
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'RESTRICTED' where id = ${USERS.grcDirector}`;
+      expect(await canView(s, "grcDirector", caseId)).toBe(false);
+    });
+  });
+});
+
 describe("lifting a restriction is not decided, so nobody can (CDF-206, AMB-234, DEC-AMB-012)", () => {
   const LEVEL = "Synthetic: reclassification within the restricted case.";
 

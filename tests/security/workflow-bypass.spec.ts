@@ -232,3 +232,35 @@ describe("the UI's list of steps never promises more than the database allows", 
     });
   });
 });
+
+describe("ambiguity register: reopening stays disabled until the DEC-AMB-002 (B) approval path is built (CDF-205)", () => {
+  it("T-AMB-131: nobody can run REOPEN_CASE on a closed case, whatever their permissions", async () => {
+    await scenario(async (s) => {
+      await s.as("caseManager");
+      await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', 'Synthetic: screened out before a reopen attempt.')`;
+      expect(await state(s, caseB)).toBe("CLOSURE");
+      for (const user of ["caseManager", "grcDirector", "grcDeputy", "lead", "investigatorB"] as UserKey[]) {
+        await s.as(user);
+        await s.expectError(
+          "CDF_",
+          (tx) =>
+            tx`select api.transition_case(${caseB}, 'REOPEN_CASE', 'Synthetic: new evidence arrived after closure.')`,
+        );
+      }
+      // Those who could otherwise take the step are told it is not available, never that it succeeded.
+      for (const user of ["caseManager", "grcDirector"] as UserKey[]) {
+        await s.as(user);
+        await s.expectError(
+          "CDF_CONFLICT:TRANSITION_NOT_YET_AVAILABLE",
+          (tx) =>
+            tx`select api.transition_case(${caseB}, 'REOPEN_CASE', 'Synthetic: new evidence arrived after closure.')`,
+        );
+      }
+      await s.as("caseManager");
+      expect(await state(s, caseB)).toBe("CLOSURE");
+    });
+    const [def] = await admin<{ is_enabled: boolean }[]>`
+      select is_enabled from workflow.workflow_transition_definition where code = 'REOPEN_CASE'`;
+    expect(def!.is_enabled).toBe(false);
+  });
+});
