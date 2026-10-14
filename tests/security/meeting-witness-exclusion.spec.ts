@@ -228,7 +228,7 @@ describe("excluding a witness from a meeting (migration 2010, P11-G4, ADR-039)",
     });
   });
 
-  it("the catalogue follows: S112 and T3-B2.4-241 are delivered; the evidence half of P11-G4 stays open", async () => {
+  it("the catalogue follows: S112 and T3-B2.4-241 are delivered; since 2050 the evidence half is too, and P11-G4 is closed", async () => {
     await ownerScenario(async (s) => {
       await s.asOwner();
       const statuses = await s.tx<
@@ -247,7 +247,8 @@ describe("excluding a witness from a meeting (migration 2010, P11-G4, ADR-039)",
       const open = await s.tx<{ id: string }[]>`
         select legacy_id as id from config.legacy_form_map where gap_ref = 'P11-G4'
         union all select legacy_code from config.legacy_status_map where gap_ref = 'P11-G4'`;
-      expect(open.map((r) => r.id).sort()).toEqual(["S083", "S083", "T3-B2.3-112", "T3-B2.3-144"]);
+      // The evidence half (S083, T3-B2.3-112, T3-B2.3-144) closed with migration 2050 (ADR-041).
+      expect(open.map((r) => r.id).sort()).toEqual([]);
       const [mod] = await s.tx<{ commands: string[]; delivered_in: string[] }[]>`
         select commands, delivered_in from config.target_module where code = 'MEETING_WITNESSES'`;
       expect(mod!.commands).toContain("api.exclude_meeting_witness");

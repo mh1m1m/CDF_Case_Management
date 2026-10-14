@@ -1121,3 +1121,44 @@ describe("ambiguity register: legal opinions are never exported (CDF-205, ADR-03
     });
   });
 });
+
+describe("ambiguity register: evidence and Defence Packets are never exported (AMB-191, migration 2050)", () => {
+  it("T-AMB-111: adding evidence, a version, a Defence Packet or one of its items to an export is refused", async () => {
+    const { clearAsIs, defenceNotice, packetWith, setPacketPolicy, storeEvidence, storeRendition } =
+      await import("../support/evidence");
+    await ownerScenario(async (s) => {
+      await setPacketPolicy(s);
+      const n = await defenceNotice(s, caseA);
+      const v = await storeEvidence(s, "investigatorA", caseA);
+      const r = await storeRendition(s, "lead", v.versionId);
+      const { packet, items } = await packetWith(s, "lead", n.notice, [v.versionId]);
+      await clearAsIs(s, "caseManager", items[0]!);
+      await s.as("lead");
+      await s.tx`select api.submit_defence_packet(${packet})`;
+      const req = await draft(s, "caseManager", caseA);
+      for (const [type, id] of [
+        ["EVIDENCE", v.evidenceId],
+        ["EVIDENCE_VERSION", v.versionId],
+        ["EVIDENCE_VERSION", r.versionId],
+        ["DEFENCE_PACKET", packet],
+        ["DEFENCE_PACKET_ITEM", items[0]!],
+        ["PACKET", packet],
+      ] as const) {
+        await s.expectError(
+          "CDF_INVALID:object_type",
+          (tx) => tx`select api.add_export_item(${req}, ${type}, ${id})`,
+        );
+      }
+      // The table refuses the types too, on the owner connection.
+      await s.asOwner();
+      for (const type of ["EVIDENCE", "DEFENCE_PACKET"]) {
+        await s.expectError(
+          'new row for relation "export_item" violates check constraint',
+          (tx) => tx`insert into exchange.export_item (request_id, position, object_type, object_id, added_by)
+                     values (${req}, 1, ${type}, ${v.evidenceId}, ${USERS.caseManager})`,
+        );
+      }
+      expect(await s.tx`select id from exchange.export_item where request_id = ${req}`).toEqual([]);
+    });
+  });
+});

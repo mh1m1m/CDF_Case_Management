@@ -1191,6 +1191,55 @@ describe("ambiguity register: defence notices and late paper grievances (CDF-205
     expect(columns).toEqual([]);
   });
 
+  it("T-AMB-092: evidence reaches the subject only as reviewed Defence Packet items; a restricted case also needs its authority", async () => {
+    const { clearAsIs, defenceNotice, packetWith, setPacketPolicy, storeEvidence, subjectView } =
+      await import("../support/evidence");
+    await ownerScenario(async (s) => {
+      await setPacketPolicy(s);
+      await s.asOwner();
+      await s.tx`update iam.user_profile set clearance = 'SECRET' where id in (${USERS.lead}, ${USERS.employee})`;
+      await s.as("caseManager");
+      await s.tx`select api.assign_case(${caseB}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
+      // An unrestricted case: an unreviewed item blocks the release; the notice itself carries no evidence.
+      const n = await defenceNotice(s, caseB);
+      const a = await storeEvidence(s, "investigatorB", caseB);
+      const { packet, items } = await packetWith(s, "lead", n.notice, [a.versionId]);
+      await s.expectError(
+        "CDF_CONFLICT:ITEM_NOT_REVIEWED",
+        (tx) => tx`select api.submit_defence_packet(${packet})`,
+      );
+      await s.as("employee");
+      expect(await subjectView(s, n.notice)).toEqual([]);
+      expect(await s.tx`select * from api.open_defence_packet_item(${items[0]!})`).toEqual([]);
+      await clearAsIs(s, "caseManager", items[0]!, "Reviewed item");
+      await s.as("lead");
+      expect(await s.tx`select api.submit_defence_packet(${packet}) as st`).toEqual([{ st: "RELEASED" }]);
+      await s.as("employee");
+      expect(await subjectView(s, n.notice)).toEqual([["Reviewed item"]]);
+      // No general evidence access from the packet: no item row, no version, no download.
+      expect(await s.tx`select id from evidence.evidence`).toEqual([]);
+      expect(await s.tx`select 1 from api.open_evidence_version(${a.versionId})`).toEqual([]);
+
+      // A restricted case: the reviewed packet waits for the case's Restricted Case Authority.
+      await s.as("grcDirector");
+      await s.tx`select api.assign_case(${caseExec}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
+      const r = await defenceNotice(s, caseExec, "grcDirector", "employee", "Employee Tau (synthetic)");
+      const e = await storeEvidence(s, "grcDirector", caseExec, { classification: "SECRET" });
+      const restricted = await packetWith(s, "lead", r.notice, [e.versionId]);
+      await clearAsIs(s, "grcDirector", restricted.items[0]!, "Restricted item");
+      await s.as("lead");
+      expect(await s.tx`select api.submit_defence_packet(${restricted.packet}) as st`).toEqual([
+        { st: "AWAITING_AUTHORITY" },
+      ]);
+      await s.as("employee");
+      expect(await subjectView(s, r.notice)).toEqual([]);
+      await s.as("grcDirector");
+      await s.tx`select api.decide_restricted_defence_packet(${restricted.packet}, 'APPROVE', 'Synthetic: consent given.')`;
+      await s.as("employee");
+      expect(await subjectView(s, r.notice)).toEqual([["Restricted item"]]);
+    });
+  });
+
   it("T-AMB-089: a grievance recorded later from paper keeps its original received date, which decides lateness", async () => {
     await ownerScenario(async (s) => {
       await seat(s, gc, GC_SEATS);

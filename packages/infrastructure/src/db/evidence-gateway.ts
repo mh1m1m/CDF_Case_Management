@@ -188,6 +188,12 @@ export class PostgresEvidenceGateway implements EvidenceGateway {
     });
   }
 
+  reportIntegrityFailure(ctx: UserRequestContext, versionId: string, observedSha256: string): Promise<void> {
+    return this.run(ctx, async (tx) => {
+      await tx`select api.report_evidence_integrity_failure(${versionId}, ${observedSha256})`;
+    });
+  }
+
   setRestriction(
     ctx: UserRequestContext,
     i: Parameters<EvidenceGateway["setRestriction"]>[1],
