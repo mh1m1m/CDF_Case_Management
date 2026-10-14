@@ -87,6 +87,19 @@ const SCREEN_OUT_REASONS = async (s: Scenario, id: string) => {
   return t!;
 };
 
+/** AGENT-09 R2: case B's viewers without the closure entitlement learn only that they lack it, never that a grievance
+ *  window is running or a decision is not final. */
+async function expectNoBlockLeak(s: Scenario) {
+  for (const user of ["investigatorB", "triage", "grcDirector"] as UserKey[]) {
+    await s.as(user);
+    expect(await SCREEN_OUT_REASONS(s, caseB), user).toEqual({
+      allowed: false,
+      blocking_reasons: ["MISSING_PERMISSION"],
+    });
+    expect((await view(s, caseB)).closure_blocks, user).toBeNull();
+  }
+}
+
 describe("the case outcome catalogue and the settings (DEC-F39, AMB-212, AMB-214, AMB-216)", () => {
   it("outcomes are the CRM closure statuses' OUTCOME_CODE values, reference data nobody edits; the three settings are SOURCE_REQUIRED", async () => {
     const outcomes = await admin<{ code: string; is_active: boolean; in_catalogue: boolean }[]>`
@@ -439,6 +452,8 @@ describe("closure readiness on every path (CON-022, AMB-146, AMB-213, AMB-214)",
       await s.expectError("CDF_CONFLICT:GRIEVANCE_WINDOW_OPEN", (tx) => close(tx, caseB));
       await s.expectError("CDF_CONFLICT:GRIEVANCE_WINDOW_OPEN", (tx) => screenOut(tx, caseB));
       expect((await view(s, caseB)).closure_blocks).toEqual(["GRIEVANCE_WINDOW_OPEN"]);
+      expect((await SCREEN_OUT_REASONS(s, caseB)).blocking_reasons).toEqual(["GRIEVANCE_WINDOW_OPEN"]);
+      await expectNoBlockLeak(s);
     });
     await ownerScenario(async (s) => {
       const f = await decidedForSubjects(s, ic, caseB);
@@ -461,6 +476,8 @@ describe("closure readiness on every path (CON-022, AMB-146, AMB-213, AMB-214)",
       await s.expectError("CDF_CONFLICT:DECISION_NOT_FINAL", (tx) => close(tx, caseB));
       await s.expectError("CDF_CONFLICT:DECISION_NOT_FINAL", (tx) => screenOut(tx, caseB));
       expect((await view(s, caseB)).closure_blocks).toEqual(["DECISION_NOT_FINAL"]);
+      expect((await SCREEN_OUT_REASONS(s, caseB)).blocking_reasons).toEqual(["DECISION_NOT_FINAL"]);
+      await expectNoBlockLeak(s);
     });
   });
 });
