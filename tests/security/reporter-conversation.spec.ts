@@ -8,7 +8,17 @@ import { createHash } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Tx } from "@cdf/infrastructure";
 import { closeAndArchive } from "../support/records";
-import { USERS, caseId, ownerScenario, reportId, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  caseId,
+  ledgerMark,
+  madeSince,
+  ownerScenario,
+  reportId,
+  scenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
 
 const REASON = "Synthetic: reporter conversation test.";
 const REF_A = "WB-SEED00000001";
@@ -309,17 +319,27 @@ describe("REPORTER_COMMUNICATE delegations", () => {
 
 describe("history and My Work follow the conversation's rule", () => {
   const MESSAGE_EVENTS = ["REPORT_MESSAGE_SENT", "REPORTER_MESSAGE_RECEIVED"];
-  const actions = async (s: Scenario, user: UserKey) => {
+  const actions = async (s: Scenario, user: UserKey, since = 0n) => {
     await s.as(user);
-    return (await s.tx<{ action: string }[]>`select action from api.case_history(${caseA}, 500)`).map(
-      (r) => r.action,
-    );
+    return madeSince(
+      await s.tx<{ seq: string; action: string }[]>`select seq, action from api.case_history(${caseA}, 500)`,
+      since,
+    ).map((r) => r.action);
   };
 
   it("message events reach the conversation's readers only; delegations reach those who manage the team and the delegate", async () => {
     await scenario(async (s) => {
+      // The reporter writes and the lead answers here, so the message events are the newest whatever the case's
+      // history holds (ledgerMark).
+      const mark = await ledgerMark();
+      await s.as(null);
+      const [posted] = await s.tx<{ ok: boolean }[]>`
+        select public_api.post_reporter_message(${REF_A}, ${seedHmac(REF_A)}, 'SYNTHETIC: one more detail.') as ok`;
+      expect(posted!.ok).toBe(true);
+      await s.as("lead");
+      await reply(s.tx, reportA);
       for (const user of ["caseManager", "lead", "grcDirector"] as const)
-        expect(await actions(s, user), user).toEqual(expect.arrayContaining(MESSAGE_EVENTS));
+        expect(await actions(s, user, mark), user).toEqual(expect.arrayContaining(MESSAGE_EVENTS));
       for (const user of ["investigatorA", "triage", "committeeSecretary", "committeeChair"] as const) {
         const seen = await actions(s, user);
         for (const a of MESSAGE_EVENTS) expect(seen, user).not.toContain(a);
@@ -330,7 +350,7 @@ describe("history and My Work follow the conversation's rule", () => {
       for (const user of ["lead", "caseManager", "investigatorA"] as const)
         expect(await actions(s, user), user).toContain("REPORTER_COMMUNICATION_DELEGATED");
       // Now a correspondent, the delegate sees the message events too.
-      expect(await actions(s, "investigatorA")).toEqual(expect.arrayContaining(MESSAGE_EVENTS));
+      expect(await actions(s, "investigatorA", mark)).toEqual(expect.arrayContaining(MESSAGE_EVENTS));
       for (const user of ["triage", "committeeChair"] as const)
         expect(await actions(s, user), user).not.toContain("REPORTER_COMMUNICATION_DELEGATED");
 
