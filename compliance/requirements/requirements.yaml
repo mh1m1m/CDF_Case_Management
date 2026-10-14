@@ -511,6 +511,35 @@ requirements:
       ]
     notes: "The preview runs the referral command's own checks first and audits nothing. On a seat one person holds, a not-cleared total above zero may narrow down who; the committee snapshot after referral carries the same totals (DEC-F19)."
 
+  - id: CDF-UX-013
+    title: "The meeting screen offers an action only to whoever its command would accept now: attendance, excuses, a concern about a participant, recording a vote for an absent member, revising, recusing and noting a vote"
+    source:
+      [
+        Phase 12 plan P12-2,
+        UX-116,
+        ADR-016 D0,
+        AMB-077,
+        AMB-081,
+        AMB-082,
+        DEC-AMB-013,
+        CDF-212,
+        coordinator conditions 2026-10-14,
+        ADR-054,
+      ]
+    external_ids: []
+    linear_issues: [CDF-158]
+    status: IN_PROGRESS
+    enforcement:
+      [infrastructure/supabase/migrations/20261007002055_meeting_screen_capabilities.sql, api.meeting_view]
+    tests:
+      [
+        tests/security/meeting-screen-capabilities.spec.ts,
+        tests/security/committee-meetings.spec.ts,
+        tests/security/recommendations-authority.spec.ts,
+        tests/security/purpose-read-models.spec.ts,
+      ]
+    notes: "Database half (P12-2a). The meeting and minutes pages that use these answers follow in the next change, with no migration. A roster row's answers are computed only for the meeting's runner and on the caller's own row; elsewhere they are false. The meeting-level declaration and acknowledgement flags equal their commands: never for a member whose seat has ended (CDF-212) or an excluded witness."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

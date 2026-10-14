@@ -699,7 +699,15 @@ describe("api.meeting_view: votes without choices (DEC-F01, DEC-F03, AMB-083)", 
           status: "OPEN",
           tally: null,
           i_have_voted: false,
-          capabilities: { may_vote: true, may_close: false, may_cast_casting_vote: false },
+          // may_revise, may_recuse_for_conflict and may_record_note since 2055 (ADR-054).
+          capabilities: {
+            may_vote: true,
+            may_close: false,
+            may_cast_casting_vote: false,
+            may_revise: false,
+            may_recuse_for_conflict: true,
+            may_record_note: false,
+          },
         }),
       ]);
       await s.tx`select api.cast_vote(${item}, 'REJECT', null)`;
@@ -720,6 +728,9 @@ describe("api.meeting_view: votes without choices (DEC-F01, DEC-F03, AMB-083)", 
         may_vote: false,
         may_close: false,
         may_cast_casting_vote: false,
+        may_revise: false,
+        may_recuse_for_conflict: false,
+        may_record_note: false,
       });
       await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.cast_vote(${item}, 'APPROVE', null)`);
       await s.expectError(
