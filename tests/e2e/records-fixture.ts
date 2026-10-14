@@ -252,6 +252,31 @@ export async function eligibleCase(label: string): Promise<{ caseId: string; cas
   return c;
 }
 
+/**
+ * A disposed case and its certificate (DEC-51 dates, CDF-209): the records officer requests disposition, the GRC
+ * Director approves it and the officer executes it, each through the real command in their own context. Returns the
+ * certificate's stored issue time as ISO text, as read by the officer.
+ */
+export async function disposedCase(
+  label: string,
+): Promise<{ caseId: string; caseNumber: string; certificateId: string; issuedAt: string }> {
+  const c = await eligibleCase(label);
+  const requestId = await as("records", async (tx) => {
+    const [r] = await tx<{ id: string }[]>`select api.request_disposition(${c.caseId}) as id`;
+    return r!.id;
+  });
+  await as(
+    "grcDirector",
+    (tx) => tx`select api.decide_disposition(${requestId}, true, 'Synthetic decision reason.')`,
+  );
+  return as("records", async (tx) => {
+    const [r] = await tx<{ id: string }[]>`select api.execute_disposition(${requestId}) as id`;
+    const [cert] = await tx<{ issued_at: Date }[]>`
+      select issued_at from records.disposition_certificate where id = ${r!.id}`;
+    return { ...c, certificateId: r!.id, issuedAt: cert!.issued_at.toISOString() };
+  });
+}
+
 /** A new SCREENING case with a Committee Formation form the case manager started and left as an empty draft. */
 export async function draftFormCase(
   label: string,

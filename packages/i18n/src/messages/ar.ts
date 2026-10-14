@@ -35,6 +35,11 @@ export const ar: Messages = {
     working: "جارٍ التنفيذ…",
     mainNavigation: "التنقل الرئيسي",
   },
+  recordDate: {
+    hijri: "{day} {month} {year}هـ",
+    dual: "{gregorian} ({hijri})",
+    withTime: "{date}، {time}",
+  },
   nav: {
     intake: "الوارد والفرز",
     cases: "القضايا",

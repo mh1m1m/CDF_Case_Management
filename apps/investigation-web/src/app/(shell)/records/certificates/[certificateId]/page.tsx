@@ -1,12 +1,13 @@
 // Disposition certificate (CDF-71; ADR-013 D7). Readable by whoever may see the record's metadata (RLS on
 // records.disposition_certificate); the hash is recomputed by api.verify_disposition_certificate on every view.
 // PRODUCTION_SUBSTITUTION_REQUIRED: the hash is unsigned here; production signs it with an HSM key (CDF-38).
+// A formal record, so its dates show Gregorian first and Hijri second (DEC-51, CDF-209).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { navigationFor } from "@cdf/authorization";
-import { formatDateTime, type MessageKey } from "@cdf/i18n";
-import { CDFAlert, CDFBadge, CDFCard, CDFDescriptionList, CDFPageHeader } from "@cdf/ui";
+import type { MessageKey } from "@cdf/i18n";
+import { CDFAlert, CDFBadge, CDFCard, CDFDescriptionList, CDFPageHeader, CDFRecordDate } from "@cdf/ui";
 import { recordsService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 
@@ -26,7 +27,9 @@ export default async function CertificatePage({ params }: { params: Promise<{ ce
   const t = await getTranslator();
   const c = await recordsService().getCertificate(ctx, certificateId);
   if (!c) notFound();
-  const at = (v: string) => formatDateTime(t.locale, v);
+  const at = (v: string, testId: string) => (
+    <CDFRecordDate value={v} locale={t.locale} withTime testId={`certificate-${testId}`} />
+  );
 
   return (
     <>
@@ -56,11 +59,11 @@ export default async function CertificatePage({ params }: { params: Promise<{ ce
               term: t("records.certificate.triggerEvent"),
               value: t.code("records.triggerEvent", c.triggerEvent, "common.none"),
             },
-            { term: t("records.certificate.triggerAt"), value: at(c.triggerAt) },
-            { term: t("records.certificate.retainUntil"), value: at(c.retainUntil) },
-            { term: t("records.certificate.requestedAt"), value: at(c.requestedAt) },
-            { term: t("records.certificate.approvedAt"), value: at(c.approvedAt) },
-            { term: t("records.certificate.issuedAt"), value: at(c.issuedAt) },
+            { term: t("records.certificate.triggerAt"), value: at(c.triggerAt, "trigger-at") },
+            { term: t("records.certificate.retainUntil"), value: at(c.retainUntil, "retain-until") },
+            { term: t("records.certificate.requestedAt"), value: at(c.requestedAt, "requested-at") },
+            { term: t("records.certificate.approvedAt"), value: at(c.approvedAt, "approved-at") },
+            { term: t("records.certificate.issuedAt"), value: at(c.issuedAt, "issued-at") },
             {
               term: t("records.certificate.action"),
               value: t.code("records.dispositionAction", c.dispositionAction, "common.none"),
