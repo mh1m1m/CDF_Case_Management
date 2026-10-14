@@ -54,12 +54,23 @@ env:
 
 jobs:
   hosted-dev:
-    name: Migrate, seed and test DEV
+    name: Migrate, seed and test DEV (part ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    # The suites cross regions statement by statement, at 8.7 to 12.7 s per test over the pooler (run 38518115426:
-    # 821 tests in 161 minutes). The 997 tests at main 3a58adc need up to about 211 minutes, and every pack still to
-    # come adds more, so 330 leaves room. GitHub-hosted jobs stop at 360.
+    # Every statement of the suites is one round trip from the runner to the Tokyo pooler, and a round trip took
+    # 0.108 to 0.155 s in runs 38439738743 to 38535085113, depending on the run. Counted on a local database, the
+    # 1,053 tests with migration 2050 make 155,898 round trips: 282 to 402 minutes in one job at those rates, and
+    # GitHub-hosted jobs stop at 360. So the suites run as two Vitest shards, two jobs of the same run one after
+    # the other, each with its own report and its own limit. Never side by side: two sessions running the suites
+    # on DEV at once wait on each other at the audit ledger's chain lock and deadlock
+    # (compliance/evidence/HOSTED_DEV_VALIDATION.md §12). Each job repeats the migration, seed and drift steps,
+    # which find nothing more to do the second time.
     timeout-minutes: 330
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        # A dispatch without the suites migrates once.
+        shard: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.test) && '[1, 2]' || '[1]') }}
     environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -393,28 +404,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
 
-      - name: Database, RLS and security suites against DEV
+      - name: Database, RLS and security suites against DEV (shard ${{ matrix.shard }} of 2)
         id: suites
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
           CDF_ENVIRONMENT: test
           # Every statement crosses regions (runner to the Tokyo pooler); the CI default of 30 s per test is too short.
           CDF_DB_TEST_TIMEOUT_MS: "600000"
-        run: pnpm test:db --reporter=default --reporter=github-actions --reporter=json --outputFile.json=vitest-dev.json
+        # Vitest assigns each test file to one shard by a hash of its path, so a new file lands in one of the two
+        # without a list to maintain.
+        run: >-
+          pnpm test:db --shard=${{ matrix.shard }}/2 --reporter=default --reporter=github-actions --reporter=json
+          --outputFile.json=vitest-dev.json
 
       - name: Suite totals and failed tests as annotations (job logs are not readable from every client)
         if: ${{ always() && steps.suites.outcome != 'skipped' }}
-        run: node scripts/db/vitest-annotations.mjs vitest-dev.json "DB suites on DEV"
+        run: node scripts/db/vitest-annotations.mjs vitest-dev.json "DB suites on DEV, shard ${{ matrix.shard }} of 2"
 
       - name: Evidence summary
         if: always()
         run: |
           {
-            echo "## Hosted DEV run"
+            echo "## Hosted DEV run, part ${{ matrix.shard }}"
             echo "- Project: \`$SUPABASE_PROJECT_REF\` (cdf-case-dev)"
             echo "- Commit: \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`"
             echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo "- Trigger: ${{ github.event_name }} · Seed: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }} · Tests: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}"
+            echo "- Trigger: ${{ github.event_name }} · Seed: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }} · Tests: ${{ github.event_name != 'workflow_dispatch' || inputs.test }} (shard ${{ matrix.shard }} of 2)"
             echo
             echo '```'
             if [ -n "$CDF_ADMIN_DATABASE_URL" ]; then
