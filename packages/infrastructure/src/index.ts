@@ -20,6 +20,7 @@ export { PostgresInterviewGateway } from "./db/interviews-gateway";
 export { PostgresRecordsGateway } from "./db/records-gateway";
 export { PostgresInboxGateway } from "./db/inbox-gateway";
 export { PostgresCaseStructureGateway } from "./db/case-structure-gateway";
+export { PostgresMeetingsGateway } from "./db/meetings-gateway";
 export {
   REDACTED,
   isDeniedKey,

@@ -35,7 +35,8 @@ export const LOCAL_DEV_USERS: Readonly<Record<string, string>> = {
   "compliance.mgr@example.test": "a0000000-0000-4000-8000-000000000026",
   "grc.sector.head@example.test": "a0000000-0000-4000-8000-000000000027",
   "employee.chi@example.test": "a0000000-0000-4000-8000-000000000028",
-  // Demo committee seats (seed 30_synthetic_committee_seats.sql); never used by the tests.
+  // Demo committee seats (seed 30_synthetic_committee_seats.sql). The database tests never use them; the meeting
+  // screens' browser specs sign in as them, because a seeded Investigation Committee is theirs (P12-2a).
   "ic.chair@example.test": "a0000000-0000-4000-8000-000000000101",
   "ic.deputy@example.test": "a0000000-0000-4000-8000-000000000102",
   "ic.secretary@example.test": "a0000000-0000-4000-8000-000000000103",

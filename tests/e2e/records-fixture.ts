@@ -32,6 +32,12 @@ const USERS = {
   committeeSecretary: "a0000000-0000-4000-8000-000000000015",
   legal: "a0000000-0000-4000-8000-000000000021",
   grcSectorHead: "a0000000-0000-4000-8000-000000000027",
+  // The seed's demo Investigation Committee (Phase 12 P12-2a meeting screens; see IC_DEMO)
+  icChair: "a0000000-0000-4000-8000-000000000101",
+  icDeputy: "a0000000-0000-4000-8000-000000000102",
+  icSecretary: "a0000000-0000-4000-8000-000000000103",
+  icMemberA: "a0000000-0000-4000-8000-000000000104",
+  icMemberB: "a0000000-0000-4000-8000-000000000105",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -573,4 +579,236 @@ export async function restrictedStructureCase(
     await tx`select api.change_case_classification(${c.caseId}, 'CONFIDENTIAL', true, ${STRUCTURE_REASON})`;
   });
   return c;
+}
+
+// ---- Meeting and minutes screens (Phase 12 P12-2a; migration 2065, ADR-054) ---------------------------------
+
+/**
+ * The seed's demo Investigation Committee (30_synthetic_committee_seats.sql). On a seeded database a referral to the
+ * Investigation Committee goes to it, so the meeting screens' specs sign in as its members: the chair, the deputy
+ * chair and the two members vote, and the secretary runs the meeting. The database tests never use them; they seat
+ * the test users inside a transaction that rolls back.
+ */
+export const IC_DEMO = {
+  icChair: "ic.chair@example.test",
+  icDeputy: "ic.deputy@example.test",
+  icSecretary: "ic.secretary@example.test",
+  icMemberA: "ic.member.a@example.test",
+  icMemberB: "ic.member.b@example.test",
+} as const;
+export type IcDemoUser = keyof typeof IC_DEMO;
+export const IC_VOTERS: IcDemoUser[] = ["icChair", "icDeputy", "icMemberA", "icMemberB"];
+
+const MEETING_REASON = "Synthetic: meeting screens e2e fixture.";
+
+export interface MeetingFixture {
+  caseId: string;
+  caseNumber: string;
+  meetingId: string;
+  /** Each demo member's participant id in the meeting. */
+  participant: Record<IcDemoUser, string>;
+}
+
+interface RawMeeting {
+  logistics: { status: string };
+  roster: { participant_id: string; user_id: string | null; attendance: string; coi_status: string }[] | null;
+  deliberation: { vote_items: { vote_item_id: string; sequence_no: number; status: string }[] } | null;
+  minutes: { minutes_id: string; version_no: number; status: string }[];
+}
+
+const meetingAs = async (user: keyof typeof USERS, meetingId: string): Promise<RawMeeting> => {
+  const [row] = await as(user, (tx) => tx<{ v: RawMeeting }[]>`select api.meeting_view(${meetingId}) as v`);
+  return row!.v;
+};
+
+const demoUser = (userId: string | null) =>
+  (Object.keys(IC_DEMO) as IcDemoUser[]).find((u) => USERS[u] === userId);
+
+/**
+ * A new case referred to the demo Investigation Committee after its preliminary review referred it (AMB-018), with
+ * an in-person deliberation the secretary scheduled for tomorrow. Fails unless the demo committee holds its seats.
+ */
+export async function scheduledMeeting(label: string): Promise<MeetingFixture> {
+  const seated = await as(
+    "platformAdmin",
+    (tx) => tx<{ user_id: string }[]>`
+      select m.user_id from committee.membership m join committee.committee c on c.id = m.committee_id
+       where c.code = 'IC' and m.effective_from <= now() and (m.effective_to is null or m.effective_to > now())`,
+  );
+  const unseated = (Object.keys(IC_DEMO) as IcDemoUser[]).filter(
+    (u) => !seated.some((m) => m.user_id === USERS[u]),
+  );
+  if (unseated.length > 0)
+    throw new Error(
+      `the demo Investigation Committee is not seated (${unseated.join(", ")}); run pnpm db:reset`,
+    );
+  const c = await screeningCase(label);
+  await preliminaryReferral(c.caseId);
+  const [referral] = await as(
+    "caseManager",
+    (tx) => tx<{ id: string }[]>`
+      select api.refer_case_to_committee(${c.caseId}, (select id from committee.committee where code = 'IC'), null,
+                                         ${MEETING_REASON}) as id`,
+  );
+  const meetingId = await as("icSecretary", async (tx) => {
+    const [m] = await tx<{ id: string }[]>`
+      select api.schedule_meeting(${referral!.id}, 'DELIBERATION', 'IN_PERSON', 'Meeting room 2 (synthetic)', null,
+        now() + interval '1 day', now() + interval '1 day 2 hours', ${MEETING_REASON}) as id`;
+    return m!.id;
+  });
+  const roster = (await meetingAs("icSecretary", meetingId)).roster ?? [];
+  const participant = Object.fromEntries(
+    (Object.keys(IC_DEMO) as IcDemoUser[]).map((u) => {
+      const row = roster.find((r) => r.user_id === USERS[u]);
+      if (!row) throw new Error(`scheduledMeeting: ${u} is not in the meeting`);
+      return [u, row.participant_id];
+    }),
+  ) as Record<IcDemoUser, string>;
+  return { ...c, meetingId, participant };
+}
+
+/** The listed members declare no conflict, each as themself. */
+export async function declareNoConflict(m: MeetingFixture, users: IcDemoUser[]): Promise<void> {
+  for (const u of users)
+    await as(u, (tx) => tx`select api.declare_meeting_conflict(${m.participant[u]}, 'NO_CONFLICT', null)`);
+}
+
+/** The voters declare no conflict, then the secretary opens the meeting and records them present. */
+export async function openWithVoters(m: MeetingFixture, voters: IcDemoUser[] = IC_VOTERS): Promise<void> {
+  await declareNoConflict(m, voters);
+  await as("icSecretary", async (tx) => {
+    await tx`select api.open_meeting(${m.meetingId}, ${MEETING_REASON})`;
+    for (const u of voters) await tx`select api.record_attendance(${m.participant[u]}, 'PRESENT')`;
+  });
+}
+
+/** The secretary opens a vote on other business; returns its id. */
+export async function openVote(m: MeetingFixture, title = "Recommendation (synthetic)"): Promise<string> {
+  const [v] = await as(
+    "icSecretary",
+    (tx) => tx<{ id: string }[]>`select api.open_vote_item(${m.meetingId}, 'OTHER', null, ${title}) as id`,
+  );
+  return v!.id;
+}
+
+/** The id of the meeting's vote with this number, as the secretary reads it. */
+export async function voteItemId(m: MeetingFixture, sequenceNo: number): Promise<string> {
+  const item = (await meetingAs("icSecretary", m.meetingId)).deliberation?.vote_items.find(
+    (v) => v.sequence_no === sequenceNo,
+  );
+  if (!item) throw new Error(`voteItemId: no vote ${sequenceNo}`);
+  return item.vote_item_id;
+}
+
+/** Each listed member casts their own vote. */
+export async function castVotes(item: string, votes: [IcDemoUser, string][]): Promise<void> {
+  for (const [u, choice] of votes) await as(u, (tx) => tx`select api.cast_vote(${item}, ${choice}, null)`);
+}
+
+/** The secretary closes the vote; returns its result. */
+export async function closeVote(item: string): Promise<string> {
+  const [r] = await as(
+    "icSecretary",
+    (tx) => tx<{ v: string }[]>`select api.close_vote_item(${item}, null) as v`,
+  );
+  return r!.v;
+}
+
+/** A vote everyone present approves, closed: the meeting may then close. */
+export async function approvedVote(m: MeetingFixture, voters: IcDemoUser[] = IC_VOTERS): Promise<string> {
+  const item = await openVote(m);
+  await castVotes(
+    item,
+    voters.map((u) => [u, "APPROVE"]),
+  );
+  await closeVote(item);
+  return item;
+}
+
+/** The secretary closes the meeting and writes its minutes; returns their id. */
+export async function minutedMeeting(m: MeetingFixture): Promise<string> {
+  return as("icSecretary", async (tx) => {
+    await tx`select api.close_meeting(${m.meetingId}, ${MEETING_REASON})`;
+    const [mi] = await tx<{ id: string }[]>`
+      select api.generate_minutes(${m.meetingId}, 'Synthetic minutes for the meeting screens e2e.') as id`;
+    return mi!.id;
+  });
+}
+
+/** A member raises a conflict about another and the chair decides it; returns the concern's id. */
+export async function decidedConcern(
+  m: MeetingFixture,
+  raiser: IcDemoUser,
+  about: IcDemoUser,
+  decision: "UPHELD" | "DISMISSED",
+): Promise<string> {
+  const [k] = await as(
+    raiser,
+    (tx) => tx<{ id: string }[]>`
+      select api.raise_meeting_conflict(${m.participant[about]},
+        'Synthetic: the member reviewed this matter before, for the e2e check.') as id`,
+  );
+  await as(
+    "icChair",
+    (tx) =>
+      tx`select api.decide_meeting_conflict(${k!.id}, ${decision}, 'Synthetic: decided on the record.')`,
+  );
+  return k!.id;
+}
+
+/**
+ * Leaves nothing waiting on the demo committee, whatever state a test left the meeting in. A scheduled meeting is
+ * cancelled. On an open one, each counted member who has not voted approves, each open vote closes (the chair breaks
+ * a tie) and the meeting closes. A closed meeting without minutes gets them, and every member who may still review
+ * the latest minutes approves them.
+ */
+export async function settleMeeting(meetingId: string): Promise<void> {
+  let view = await meetingAs("icSecretary", meetingId);
+  if (view.logistics.status === "SCHEDULED") {
+    await as("icSecretary", (tx) => tx`select api.cancel_meeting(${meetingId}, ${MEETING_REASON})`);
+    return;
+  }
+  if (view.logistics.status === "OPEN") {
+    const counted = (view.roster ?? []).filter(
+      (r) => r.attendance === "PRESENT" && r.coi_status === "NO_CONFLICT",
+    );
+    for (const item of view.deliberation?.vote_items.filter((v) => v.status === "OPEN") ?? []) {
+      const [status] = await as(
+        "icSecretary",
+        (tx) =>
+          tx<
+            { v: { voters: { participant_id: string; has_voted: boolean; replaced: boolean | null }[] } }[]
+          >`select api.vote_item_status(${item.vote_item_id}) as v`,
+      );
+      for (const voter of status!.v.voters) {
+        const row = counted.find((r) => r.participant_id === voter.participant_id);
+        const user = demoUser(row?.user_id ?? null);
+        if (!voter.has_voted && !voter.replaced && user)
+          await castVotes(item.vote_item_id, [[user, "APPROVE"]]);
+      }
+      if ((await closeVote(item.vote_item_id)) === "AWAITING_CASTING_VOTE")
+        await as("icChair", (tx) => tx`select api.cast_casting_vote(${item.vote_item_id}, 'APPROVE', null)`);
+    }
+    await as("icSecretary", (tx) => tx`select api.close_meeting(${meetingId}, ${MEETING_REASON})`);
+    view = await meetingAs("icSecretary", meetingId);
+  }
+  if (view.logistics.status !== "CLOSED") return;
+  let latest = [...view.minutes].sort((a, b) => b.version_no - a.version_no)[0];
+  if (!latest) {
+    await as(
+      "icSecretary",
+      (tx) => tx`select api.generate_minutes(${meetingId}, 'Synthetic minutes for the meeting screens e2e.')`,
+    );
+    latest = (await meetingAs("icSecretary", meetingId)).minutes[0];
+  }
+  if (latest?.status !== "IN_REVIEW") return;
+  for (const u of IC_VOTERS) {
+    const [row] = await as(
+      u,
+      (tx) => tx<{ v: { capabilities: { may_review: boolean } | null } }[]>`
+        select api.minutes_view(${latest.minutes_id}) as v`,
+    );
+    if (row!.v.capabilities?.may_review)
+      await as(u, (tx) => tx`select api.review_minutes(${latest.minutes_id}, 'APPROVE', null)`);
+  }
 }

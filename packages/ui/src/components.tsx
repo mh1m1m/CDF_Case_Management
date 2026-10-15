@@ -275,9 +275,25 @@ export function CDFCard({
   );
 }
 
-export function CDFDescriptionList({ items }: { items: { term: string; value: ReactNode }[] }) {
+/**
+ * Terms and their values, side by side from the small breakpoint. `stacked` keeps each value under its term at every
+ * width, for a narrow side column where a term and a long value (a formal date, DEC-51) would not fit on one line.
+ */
+export function CDFDescriptionList({
+  items,
+  stacked = false,
+}: {
+  items: { term: string; value: ReactNode }[];
+  stacked?: boolean;
+}) {
   return (
-    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-[max-content_1fr]">
+    <dl
+      className={
+        stacked
+          ? "grid grid-cols-1 gap-y-2"
+          : "grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-[max-content_1fr]"
+      }
+    >
       {items.map((i) => (
         <div key={i.term} className="contents">
           <dt className="font-semibold text-cdf-text-secondary">{i.term}</dt>

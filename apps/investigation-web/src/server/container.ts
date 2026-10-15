@@ -12,6 +12,7 @@ import {
   createInboxService,
   createInterviewService,
   createInvestigationService,
+  createMeetingsService,
   createRecordsService,
   type CaseStructureService,
   type EvidenceService,
@@ -20,6 +21,7 @@ import {
   type InboxService,
   type InterviewService,
   type InvestigationService,
+  type MeetingsService,
   type RecordsService,
 } from "@cdf/application";
 import { shellAreas } from "@cdf/authorization";
@@ -33,6 +35,7 @@ import {
   PostgresInboxGateway,
   PostgresInterviewGateway,
   PostgresInvestigationGateway,
+  PostgresMeetingsGateway,
   PostgresRecordsGateway,
   PostgresSecurityEventSink,
   SupabaseEvidenceStorage,
@@ -52,6 +55,7 @@ const globalForApp = globalThis as unknown as {
   cdfRecords?: RecordsService;
   cdfInbox?: InboxService;
   cdfCaseStructure?: CaseStructureService;
+  cdfMeetings?: MeetingsService;
 };
 
 function pool(): Sql {
@@ -135,6 +139,15 @@ export function caseStructureService(): CaseStructureService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfCaseStructure;
+}
+
+/** The committee's meeting and minutes screens (ADR-054; Phase 12 P12-2a): purpose read models and commands only. */
+export function meetingsService(): MeetingsService {
+  globalForApp.cdfMeetings ??= createMeetingsService({
+    gateway: new PostgresMeetingsGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfMeetings;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */
