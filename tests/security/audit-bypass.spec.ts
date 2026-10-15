@@ -3072,6 +3072,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_report",
       "authz.can_view_report_files",
       "authz.can_view_sector_roster",
+      "authz.corrective_event_withheld",
       "authz.current_clearance",
       "authz.current_roles",
       "authz.current_subject",
