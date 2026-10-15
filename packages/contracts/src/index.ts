@@ -1828,7 +1828,8 @@ export type ExecutionState = (typeof EXECUTION_STATES)[number];
 export interface CorrectiveAction {
   id: string;
   caseId: string;
-  recommendationItemId: string;
+  /** Null for an action from an approved preliminary corrective proposal (migration 2070, DEC-F41). */
+  recommendationItemId: string | null;
   actionType: CorrectiveActionType;
   sequenceNo: number;
   title: string;

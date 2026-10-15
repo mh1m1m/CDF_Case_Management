@@ -18,6 +18,7 @@ import {
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 import { preliminaryReferral, unseatDemoSeats } from "../support/committee";
 import { setClosureAuthority } from "../support/closure";
+import { setPreliminaryCorrectiveTypes } from "../support/preliminary";
 import {
   clearAsIs,
   defenceNotice,
@@ -84,6 +85,8 @@ const NOT_STATE_CHANGING = new Set([
   // Direct referral and preliminary review (migration 1880): the caller's next actions and approval queue.
   "referral_available_actions",
   "preliminary_approval_queue",
+  // Corrective action from preliminary review (migration 2070): the recommendation's proposals and capability flags.
+  "preliminary_corrective_view",
   // Committee meetings (migration 1890): who has voted, and choices only after close.
   "vote_item_status",
   // Purpose read models of a meeting and its minutes (migration 2030 section 4): reads, like vote_item_status.
@@ -1617,6 +1620,65 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "grcSectorHead",
         run: (s) =>
           s.tx`select api.approve_preliminary_recommendation(${ids.recommendation!}, 'APPROVE', null, null)`,
+      },
+      // DEC-F41 (migration 2070): a corrective action from preliminary review. A second recommendation on case A keeps
+      // the matter with Compliance (NOT_SERIOUS); its preparer proposes a corrective action under a synthetic
+      // PRELIMINARY_CORRECTIVE_ACTION_TYPES; once endorsed and approved (fixtures), a corrective-action manager records
+      // the required authority's decision and opens the action.
+      {
+        fn: "propose_preliminary_corrective_action",
+        actor: "investigatorA",
+        run: async (s) => {
+          ids.correctiveRecommendation = await apart(
+            s,
+            async () => {
+              await setPreliminaryCorrectiveTypes(s as OwnerScenario, "CORRECTIVE_ACTION");
+              await s.as("investigatorA");
+              return one(
+                s,
+                s.tx`select api.prepare_preliminary_recommendation(${caseA}, 'NOT_SERIOUS',
+                  'Synthetic: the walk recommendation keeps the matter with Compliance.') as id`,
+              );
+            },
+            "investigatorA",
+          );
+          return (ids.preliminaryProposal = await one(
+            s,
+            s.tx`select api.propose_preliminary_corrective_action(${ids.correctiveRecommendation}, 'CORRECTIVE_ACTION',
+              'Synthetic: the walk corrective-action proposal.') as id`,
+          ));
+        },
+      },
+      {
+        fn: "record_preliminary_authority_decision",
+        actor: "caseManager",
+        run: async (s) => {
+          const authority = await apart(
+            s,
+            async () => {
+              await s.as("grcDirector");
+              await s.tx`select api.review_preliminary_recommendation(${ids.correctiveRecommendation!}, 'ENDORSE', null, null)`;
+              await s.as("grcSectorHead");
+              await s.tx`select api.approve_preliminary_recommendation(${ids.correctiveRecommendation!}, 'APPROVE', null, null)`;
+              await s.as("caseManager");
+              return one(
+                s,
+                s.tx`select authority_type from decision.preliminary_authority_requirement
+                     where proposal_id = ${ids.preliminaryProposal!}`,
+              );
+            },
+            "caseManager",
+          );
+          return s.tx`select api.record_preliminary_authority_decision(${ids.preliminaryProposal!}, ${authority},
+            'APPROVED', now(), 'Delegated executive (synthetic)', 'MEMO-WALK-2070', ${REASON})`;
+        },
+      },
+      {
+        fn: "open_preliminary_corrective_action",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.open_preliminary_corrective_action(${ids.preliminaryProposal!}, 'Synthetic: walk preliminary action',
+            'Synthetic: add a second approver for the walk.', ${USERS.financeEmployee}, current_date + 30)`,
       },
       // Forms engine (CDF-50): an investigation form through save, prepare and review (its final state), a
       // committee form through review and approval by three different people, a draft withdrawn, and the

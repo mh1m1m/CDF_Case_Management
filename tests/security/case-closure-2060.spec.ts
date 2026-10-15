@@ -370,6 +370,59 @@ describe("closing with a closure authority configured (DEC-F40 maker/approver an
     });
   });
 
+  it("CDF-221 (migration 2070): a configured closure authority with nobody in force closes nothing on any path, mirroring reopening", async () => {
+    await ownerScenario(async (s) => {
+      // No active holder, as in R3 above.
+      await s.asOwner();
+      await s.tx`update iam.user_role_assignment set status = 'REVOKED', revoked_at = now(),
+                   revocation_reason = 'Synthetic: no holder for the test.'
+                 where role_code = 'HR_REVIEWER' and status = 'ACTIVE'`;
+      await s.tx`update iam.user_profile set status = 'SUSPENDED' where id = ${USERS.lead}`;
+      for (const role of [
+        "PLATFORM_ADMIN",
+        "DB_ADMIN",
+        "SOC_ANALYST",
+        "NO_SUCH_ROLE",
+        "HR_REVIEWER",
+        "LEAD_INVESTIGATOR",
+      ]) {
+        await setClosureAuthority(s, role);
+        // Configured, but no authority in force: the case manager neither closes directly nor files a request.
+        await s.as("caseManager");
+        await s.expectError("CDF_CONFLICT:CASE_CLOSURE_APPROVAL_RULE_REQUIRED", (tx) => close(tx, caseB));
+        await s.expectError("CDF_CONFLICT:CASE_CLOSURE_APPROVAL_RULE_REQUIRED", (tx) => screenOut(tx, caseB));
+        expect(await SCREEN_OUT_REASONS(s, caseB), role).toEqual({
+          allowed: false,
+          blocking_reasons: ["CASE_CLOSURE_APPROVAL_RULE_REQUIRED"],
+        });
+        expect(await view(s, caseB), role).toMatchObject({
+          records_state: "ACTIVE",
+          closure_authority_configured: false,
+          closure_requests: [],
+          closures: [],
+        });
+        // AGENT-09 R2 still holds: who may not close learns only that, never the rule's state.
+        await expectNoBlockLeak(s);
+        // Who cannot see the case learns nothing either.
+        await s.as("investigatorA");
+        await s.expectError("CDF_NOT_FOUND", (tx) => close(tx, caseB));
+      }
+      expect(await state(s, caseB)).toEqual({ records_state: "ACTIVE", current_state: "SCREENING" });
+      expect(await events(s, caseB)).toEqual([]);
+      // The refusals are not vacuous: with a real authority the same closure is a request (and unset, the case manager
+      // closes directly, T-AMB-127). A request already filed is not decided once the rule names nobody in force.
+      await setClosureAuthority(s, "GRC_DIRECTOR");
+      expect(await closeWith(s, caseB, "NOT_SERIOUS")).toBe("AWAITING_APPROVAL");
+      const pending = await pendingRequest(s, caseB);
+      await setClosureAuthority(s, "NO_SUCH_ROLE");
+      await s.as("grcDirector");
+      await s.expectError("CDF_CONFLICT:CASE_CLOSURE_APPROVAL_RULE_REQUIRED", (tx) =>
+        decide(tx, pending, "APPROVE"),
+      );
+      expect(await state(s, caseB)).toEqual({ records_state: "ACTIVE", current_state: "SCREENING" });
+    });
+  });
+
   it("AGENT-09 R1: an earlier transaction's closure never opens the guard; no path but the commands closes", async () => {
     await ownerScenario(async (s) => {
       await setClosureAuthority(s, "GRC_DIRECTOR");
