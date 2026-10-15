@@ -54,6 +54,11 @@ for (const locale of ["ar", "en"] as const) {
   test(`${locale}: My Committees and the committee page pass axe and reflow, for the secretary and a member`, async ({
     browser,
   }) => {
+    // The committee's page lists each open proceeding with its forms, and each e2e fixture refers a case of its own to
+    // the demo committee. After the e2e suite (CI runs it first, on the same database) the page holds about fifty
+    // proceedings: about 1.9 MB and 8,100 elements, and one axe pass takes about 20 s (measured 2026-10-15 after the
+    // P12-3a suite). The four passes here need more than the default 60 s; every check stays.
+    test.setTimeout(240_000);
     const m = await meeting(`committee-a11y-${locale}`);
     const ic = await demoCommitteeId();
     // Appointed after the referral, so the secretary may add them to it: the amendment form shows.
