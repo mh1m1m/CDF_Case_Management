@@ -610,17 +610,19 @@ describe("excused attendance and raised conflicts (migration 2000, P11-G6, ADR-0
     });
   });
 
-  it("the catalogue follows: P11-G6 is closed, T3-B1.2-050's case half is P11-G7, and the modules record 2000", async () => {
+  it("the catalogue follows: P11-G6 is closed, T3-B1.2-050's case half was P11-G7 (closed in 2080), and the modules record 2000", async () => {
     await scenario(async (s) => {
       await s.as("committeeChair");
       const forms = await s.tx<{ legacy_id: string; merge_target: string; gap_ref: string | null }[]>`
         select legacy_id, merge_target, gap_ref from config.legacy_form_map
         where legacy_id in ('T7-B1.2-048', 'T3-B1.2-050') order by legacy_id`;
       expect(forms.map((r) => [r.legacy_id, r.gap_ref])).toEqual([
-        ["T3-B1.2-050", "P11-G7"],
+        ["T3-B1.2-050", null],
         ["T7-B1.2-048", null],
       ]);
       expect(forms[0]!.merge_target).toContain("api.raise_meeting_conflict + api.decide_meeting_conflict");
+      // Migration 2080 (ADR-044) built the case half.
+      expect(forms[0]!.merge_target).toContain("api.raise_case_conflict + api.decide_case_conflict");
       expect(forms[1]!.merge_target).toContain("api.record_excused_absence");
       const [refs] = await s.tx<{ n: number }[]>`
         select (select count(*) from config.legacy_form_map where gap_ref = 'P11-G6')

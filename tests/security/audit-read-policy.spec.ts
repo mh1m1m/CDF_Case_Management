@@ -2,7 +2,8 @@
 // OR of the three former policies (business/admin with AUDIT_VIEW, security with SECURITY_EVENT_VIEW, case
 // team on business events of a visible case). Each branch is tested on its own, with synthetic fixture
 // events of every category on a case one investigator can see and on no case, so a branch that widens
-// (a category, a missing permission, a null case) fails here even when the seed has no such row.
+// (a category, a missing permission, a null case) fails here even when the seed has no such row. Since 2080
+// (AGENT-09 R1, CDF-225) the case-team branch leaves out the events of a raised conflict.
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { admin, caseId, ownerScenario, type UserKey } from "../support/db";
@@ -69,6 +70,35 @@ describe("audit.audit_event read policy (CDF-67)", () => {
           ${marker}, 'Synthetic CDF-67 fixture', '{}'::jsonb, 'SYSTEM')`;
       await s.as("investigatorA");
       expect(await s.tx`select seq from audit.audit_event where object_id = ${marker}`).toEqual([]);
+    });
+  });
+
+  it("the case-team branch leaves out a raised conflict's events, whenever written; oversight reads them (2080)", async () => {
+    const teamCase = await caseId("0001");
+    const marker = randomUUID();
+    const raised = [
+      "CASE_CONFLICT_RAISED",
+      "CASE_CONFLICT_DECIDED",
+      "MEETING_CONFLICT_RAISED",
+      "MEETING_CONFLICT_DECIDED",
+      "MEETING_CONFLICT_REVERSED",
+    ];
+    await ownerScenario(async (s) => {
+      // Rows as any command since 2000 wrote them: BUSINESS, on the case.
+      for (const action of [...raised, "ADMIN_ACTION"])
+        await s.tx`select audit.record_event(${action}, 'BUSINESS', 'SUCCESS', ${teamCase}, 'synthetic',
+          ${marker}, null, '{}'::jsonb, 'SYSTEM')`;
+      const seenBy = async (actor: UserKey) => {
+        await s.as(actor);
+        const rows = await s.tx<{ action: string }[]>`
+          select action from audit.audit_event where object_id = ${marker} order by seq`;
+        return rows.map((r) => r.action);
+      };
+      expect(await seenBy("investigatorA")).toEqual(["ADMIN_ACTION"]);
+      expect(await seenBy("investigatorB")).toEqual([]);
+      for (const actor of ["internalAudit", "dpo"] as const) {
+        expect(await seenBy(actor), actor).toEqual([...raised, "ADMIN_ACTION"]);
+      }
     });
   });
 });
