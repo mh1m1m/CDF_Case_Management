@@ -2,9 +2,11 @@
 // date is in the past (in Riyadh); error messages are i18n keys, never prose.
 import { z } from "zod";
 import {
+  ACTION_DISPOSITIONS,
   COMPLETION_EVIDENCE_RULES,
   CORRECTIVE_ACTION_POLICY_SOURCES,
   CORRECTIVE_ACTION_TYPES,
+  REWORDING_DISPOSITIONS,
   VERIFICATION_DECISIONS,
 } from "@cdf/contracts";
 
@@ -101,3 +103,38 @@ export const setCorrectiveActionPolicySchema = z.object({
   sourceStatus: z.enum(CORRECTIVE_ACTION_POLICY_SOURCES, { message: "validation.required" }),
   reason: text(5, 2000),
 });
+
+/**
+ * The replacement decision's disposition of a frozen action (DEC-AMB-014; api.dispose_superseded_corrective_action,
+ * Phase 12 P12-3b). It cites one of the replacement decision's own source documents and always says why; the reason
+ * stays with the disposition and the ledger, never on the card. MODIFY and REPLACE_WITH_NEW_ACTION carry the new
+ * wording and may set a due date (never in the past, which the database checks in Riyadh); a replacement names its
+ * owner. RE_ADOPT and WAIVE carry none of these.
+ */
+export const disposeSupersededCorrectiveActionSchema = z
+  .object({
+    actionId: uuid,
+    disposition: z.enum(ACTION_DISPOSITIONS, { message: "validation.required" }),
+    sourceDocumentReference: text(3, 300),
+    reason: text(5, 2000),
+    title: optionalText(5, 200),
+    description: optionalText(10, 4000),
+    ownerId: uuid.optional(),
+    dueDate: calendarDate.optional(),
+  })
+  .superRefine((v, ctx) => {
+    const rewords = REWORDING_DISPOSITIONS.includes(v.disposition);
+    for (const field of ["title", "description"] as const) {
+      if (rewords && !v[field])
+        ctx.addIssue({ code: "custom", path: [field], message: "validation.required" });
+      if (!rewords && v[field])
+        ctx.addIssue({ code: "custom", path: [field], message: "validation.invalid" });
+    }
+    if (!rewords && v.dueDate)
+      ctx.addIssue({ code: "custom", path: ["dueDate"], message: "validation.invalid" });
+    const replaces = v.disposition === "REPLACE_WITH_NEW_ACTION";
+    if (replaces && !v.ownerId)
+      ctx.addIssue({ code: "custom", path: ["ownerId"], message: "validation.required" });
+    if (!replaces && v.ownerId)
+      ctx.addIssue({ code: "custom", path: ["ownerId"], message: "validation.invalid" });
+  });

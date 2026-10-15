@@ -3,6 +3,7 @@
 import type {
   AllegationStatus,
   CaseTaskStatus,
+  CorrectiveActionStatus,
   EvidenceStatus,
   EvidenceVersionStatus,
   FormStatus,
@@ -53,6 +54,8 @@ interface Registry {
   recommendationPackage: Record<RecommendationPackageStatus, StatusTone>;
   /** A request for legal review (P12-3a): amber while it waits for the opinion; an opinion is a decision, not a win. */
   legalReview: Record<LegalReviewStatus, StatusTone>;
+  /** A corrective action (P12-3b): amber while its completion waits for the verifier; a waiver ends it, neutrally. */
+  correctiveAction: Record<CorrectiveActionStatus, StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -148,6 +151,13 @@ export const STATUS_TONES: Registry = {
     DECIDED: "neutral",
   },
   legalReview: { ASSIGNED: "warning", OPINION_GIVEN: "neutral", CANCELLED: "neutral" },
+  correctiveAction: {
+    OPEN: "info",
+    IN_PROGRESS: "info",
+    PENDING_VERIFICATION: "warning",
+    COMPLETED: "success",
+    WAIVED: "neutral",
+  },
 };
 
 /** The tone for a status; an unknown code (a newer database value) falls back to neutral, never to red. */

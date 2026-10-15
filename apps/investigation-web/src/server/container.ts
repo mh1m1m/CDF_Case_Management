@@ -9,6 +9,7 @@ import {
   createCaseStructureService,
   createCommitteeProceedingsService,
   createCommitteesService,
+  createCorrectiveActionService,
   createEvidenceService,
   createFormsService,
   createInboxService,
@@ -20,6 +21,7 @@ import {
   type CaseStructureService,
   type CommitteeProceedingsService,
   type CommitteesService,
+  type CorrectiveActionService,
   type EvidenceService,
   type EvidenceStorage,
   type FormsService,
@@ -38,6 +40,7 @@ import {
   PostgresCaseStructureGateway,
   PostgresCommitteeProceedingsGateway,
   PostgresCommitteesGateway,
+  PostgresCorrectiveActionGateway,
   PostgresEvidenceGateway,
   PostgresFormsGateway,
   PostgresInboxGateway,
@@ -68,6 +71,7 @@ const globalForApp = globalThis as unknown as {
   cdfCommittees?: CommitteesService;
   cdfCommitteeProceedings?: CommitteeProceedingsService;
   cdfLegalReviews?: LegalReviewsService;
+  cdfCorrectiveActions?: CorrectiveActionService;
 };
 
 function pool(): Sql {
@@ -194,6 +198,18 @@ export function legalReviewsService(): LegalReviewsService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfLegalReviews;
+}
+
+/**
+ * Corrective actions (ADR-033; Phase 12 P12-3b, ADR-058): the case's actions (A1) and one action (A2) from their read
+ * models, and the commands, among them a frozen action's disposition (DEC-AMB-014).
+ */
+export function correctiveActionService(): CorrectiveActionService {
+  globalForApp.cdfCorrectiveActions ??= createCorrectiveActionService({
+    gateway: new PostgresCorrectiveActionGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfCorrectiveActions;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

@@ -1,7 +1,8 @@
 // Every confirmation has its whole copy in both languages (UX-031; Phase 12 consequence preview, ADR-030): a missing
 // message would show its key in the dialog. The meeting and minutes acts (P12-2a, ADR-054), the committee and
-// logistics acts (P12-2b, ADR-055), the package and invite acts (P12-2c, ADR-056) and the legal review and authority
-// acts (P12-3a, ADR-057) are listed so that a rename in the catalogue fails here, not on the screen.
+// logistics acts (P12-2b, ADR-055), the package and invite acts (P12-2c, ADR-056), the legal review and authority
+// acts (P12-3a, ADR-057) and the corrective action's dispositions (P12-3b, ADR-058) are listed so that a rename in the
+// catalogue fails here, not on the screen.
 import { describe, expect, it } from "vitest";
 import { createTranslator, messagesFor, type Locale } from "@cdf/i18n";
 import { confirmation, type ConfirmAct } from "./confirmations";
@@ -53,6 +54,11 @@ const MEETING_ACTS: ConfirmAct[] = [
   "submitToAuthority",
   "recordAuthorityDecision",
   "approveRestrictedLegalReview",
+  // A corrective action under a superseded decision (P12-3b, ADR-058).
+  "disposeReAdopt",
+  "disposeModify",
+  "disposeWaive",
+  "disposeReplace",
 ];
 
 describe("confirmations", () => {
@@ -91,6 +97,10 @@ describe("confirmations", () => {
       "inviteToMeeting",
       // P12-3a: the reviewer of a new request is told it is assigned to them (1920, legal_review_request_notify).
       "requestLegalReview",
+      // P12-3b: the owner hears their action changed, and a new action's owner that it is assigned (2090).
+      "disposeModify",
+      "disposeWaive",
+      "disposeReplace",
     ]) {
       expect(confirmation(t, act as ConfirmAct).notified, act).not.toMatch(/^No one/);
     }
@@ -109,6 +119,8 @@ describe("confirmations", () => {
       "submitToAuthority",
       "recordAuthorityDecision",
       "approveRestrictedLegalReview",
+      // Re-adopting an action changes nothing its owner sees, so no one is told (2090).
+      "disposeReAdopt",
     ] as ConfirmAct[]) {
       expect(confirmation(t, act).notified, act).toMatch(/^No one/);
     }
@@ -132,7 +144,12 @@ describe("confirmations", () => {
       "submitToAuthority",
       "recordAuthorityDecision",
       "approveRestrictedLegalReview",
+      "disposeReAdopt",
+      "disposeModify",
     ] as ConfirmAct[])
       expect(confirmation(t, act).tone, act).toBe("primary");
+    // Waiving an action, or replacing it with a new one, ends it: not shown as moving work forward.
+    expect(confirmation(t, "disposeWaive").tone).toBeUndefined();
+    expect(confirmation(t, "disposeReplace").tone).toBeUndefined();
   });
 });

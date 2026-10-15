@@ -914,7 +914,54 @@ requirements:
         tests/security/api-idor.spec.ts,
         tests/security/audit-bypass.spec.ts,
       ]
-    notes: "Database half (P12-3b); the pages follow with no migration. A1 lists a case's corrective actions to whoever may see the case, with why each may not move and may_dispose as the view answers it; not audited. The view keeps every answer 2090 gave, CDF-227's exclusion included, and while an action is frozen gives the case team the replacement decision and its source documents, whether the caller may name an owner, the owners a replacement may name (every active holder of CORRECTIVE_ACTION_OWN, on the seat basis; only to a manager who may dispose and name one) and the due date a replacement takes by default (none while the policy's default is SOURCE_REQUIRED). The case history gains the freezing and the disposition as codes and times only. Known limitations (ADR-058): two authorities in a replacement round (CDF-228, 2170); a listed owner may be refused at submit (ruling 1)."
+    notes: "Database half (P12-3b); the pages are CDF-UX-022. A1 lists a case's corrective actions to whoever may see the case, with why each may not move and may_dispose as the view answers it; not audited. The view keeps every answer 2090 gave, CDF-227's exclusion included, and while an action is frozen gives the case team the replacement decision and its source documents, whether the caller may name an owner, the owners a replacement may name (every active holder of CORRECTIVE_ACTION_OWN, on the seat basis; only to a manager who may dispose and name one) and the due date a replacement takes by default (none while the policy's default is SOURCE_REQUIRED). The case history gains the freezing and the disposition as codes and times only. Known limitations (ADR-058): two authorities in a replacement round (CDF-228, 2170); a listed owner may be refused at submit (ruling 1)."
+
+  - id: CDF-UX-022
+    title: "Corrective actions under a superseded decision, on screen: the case's actions with why each may not move, the action's page, each disposition form only where its command would accept the caller now, the frozen actions where closure is refused, one 404 for anyone else, in Arabic and English"
+    source:
+      [
+        Phase 12 plan P12-3,
+        UX-116,
+        ADR-016 D0 and D2,
+        CDF-73 option D,
+        ADR-033,
+        DEC-AMB-013,
+        DEC-AMB-014,
+        DEC-F19,
+        DEC-F28,
+        DEC-F41,
+        coordinator rulings 2026-10-15 06:50,
+        ADR-058 P12-3b amendment,
+      ]
+    external_ids: []
+    linear_issues: [CDF-230]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.case_corrective_actions,
+        api.corrective_action_view,
+        api.dispose_superseded_corrective_action,
+        packages/application/src/corrective-actions.ts,
+        packages/validation/src/corrective-actions.ts,
+        "apps/investigation-web/src/app/(shell)/actions/[actionId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/actions/[actionId]/actions.ts",
+        "apps/investigation-web/src/app/(shell)/actions/labels.ts",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/proceedings/corrective-actions.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/page.tsx",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/integration/corrective-actions.spec.ts,
+        tests/e2e/corrective-actions.spec.ts,
+        tests/accessibility/corrective-actions.spec.ts,
+        packages/application/src/corrective-actions.test.ts,
+        packages/infrastructure/src/db/corrective-action-gateway.test.ts,
+        "apps/investigation-web/src/app/(shell)/actions/labels.test.ts",
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+      ]
+    notes: "No migration. The pages read only A1 and A2, never a case table; the disposition runs api.dispose_superseded_corrective_action in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only, never the reason, wording or document typed. The action's page gives whoever may see the action its card and the case team its origin and dispositions, never a disposition's reason; anyone else, and an id that names nothing, get the same 404, with ACCESS_DENIED recorded. Forms show only per may_dispose, disposition_options, may_name_owner and the owner candidates; each cites one of the replacement decision's own documents. My Work's ACTION_TO_DISPOSE row opens the action's disposition; the owner's and verifier's rows wait for P12-6, when /actions joins the live purpose roots. Known limitation (ADR-058): a form whose action moved on shows the disposition recorded first, not the refusal's words."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"

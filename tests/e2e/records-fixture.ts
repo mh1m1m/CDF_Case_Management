@@ -40,6 +40,8 @@ const USERS = {
   icMemberB: "a0000000-0000-4000-8000-000000000105",
   // Appointed to the demo committee after a referral, then ended (Phase 12 P12-2b; no other browser spec uses it)
   dpo: "a0000000-0000-4000-8000-000000000012",
+  // Employee Chi, a corrective action's owner (Phase 12 P12-3b; no other browser spec uses it)
+  financeEmployee: "a0000000-0000-4000-8000-000000000028",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -1138,5 +1140,171 @@ export async function legalReviewApproved(packageId: string): Promise<void> {
     (tx) => tx`
       select api.approve_restricted_legal_review(${packageId}, ${USERS.legalB}, '{}'::uuid[], '{}'::uuid[],
         'Synthetic: a legal review is needed on this restricted case.')`,
+  );
+}
+
+// ---- Corrective actions under a superseded decision (Phase 12 P12-3b; migration 2096, ADR-058) ----------------------
+
+/** The action the case manager opens under the first decision: the wording its owner reads on its card. */
+export const FROZEN_ACTION = {
+  title: "Synthetic: strengthen the approval controls",
+  description: "Synthetic: add a second approver to payments above the threshold.",
+} as const;
+
+/** The action's owner: Employee Chi, an implementation owner (see correctiveActionPrerequisites). */
+export const ACTION_OWNER = { id: USERS.financeEmployee, email: "employee.chi@example.test" } as const;
+
+/** The replacement decision's source documents, its primary document first: a disposition cites one of them. */
+export const REPLACEMENT_SOURCES = ["MEMO-DEMO-2096-E2E-02", "MEMO-DEMO-2096-E2E-03"] as const;
+
+const DECISION_REASON = "Synthetic: the CEO's decision on the package, for the e2e check.";
+
+export interface FrozenActionFixture extends ProceedingFixture {
+  packageId: string;
+  /** The package's one item, a case-wide corrective action. */
+  itemId: string;
+  /** The action opened under the first decision, owned by Employee Chi: frozen once that decision is superseded. */
+  actionId: string;
+}
+
+/**
+ * A corrective action needs an authority to decide it and an implementation owner to answer for it, and the seed has
+ * neither: only the disciplinary rule is seeded (DEC-F13; a submission fails closed without a rule, AMB-135) and nobody
+ * holds IMPLEMENTATION_OWNER. The platform administrator sets a synthetic SOURCE_REQUIRED rule sending corrective actions
+ * to the authority the disciplinary rule names (as tests/support/decision.ts does for the security suite) and grants
+ * Employee Chi IMPLEMENTATION_OWNER, each once per database. TEST FIXTURE steps, not CDF values: they exist only in the
+ * throwaway CI or local database.
+ */
+async function correctiveActionPrerequisites(): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ sanction: string; present: boolean }[]>`
+      select (select authority_type from decision.action_authority_rule
+              where item_type = 'DISCIPLINARY_SANCTION' and effective_from <= now()
+                and (effective_to is null or effective_to > now())
+              order by effective_from desc limit 1) as sanction,
+             exists (select 1 from decision.action_authority_rule
+                     where item_type = 'CORRECTIVE_ACTION' and effective_from <= now()
+                       and (effective_to is null or effective_to > now())) as present`;
+    if (!r!.present)
+      await tx`select api.set_action_authority_rule('CORRECTIVE_ACTION', ${r!.sanction}::text, now(),
+        'SOURCE_REQUIRED', 'Synthetic: test fixture rule.')`;
+  });
+  await as(
+    "platformAdmin",
+    (tx) => tx`select api.grant_role(${USERS.financeEmployee}, 'IMPLEMENTATION_OWNER',
+      'Synthetic: implementation owner for the e2e check.')`,
+  ).catch((e: unknown) => {
+    if (!(e instanceof Error && e.message.includes("ROLE_ALREADY_ACTIVE"))) throw e;
+  });
+}
+
+/** The meeting's open vote, as the secretary reads it; returns its id. */
+async function openVoteId(m: MeetingFixture): Promise<string> {
+  const open = (await meetingAs("icSecretary", m.meetingId)).deliberation?.vote_items.filter(
+    (v) => v.status === "OPEN",
+  );
+  if (open?.length !== 1) throw new Error(`openVoteId: ${open?.length ?? 0} open votes`);
+  return open[0]!.vote_item_id;
+}
+
+/** Legal Reviewer Pi reviews the adopted package and the secretary submits it to the authority its rules name. */
+async function reviewedAndSubmitted(f: ProceedingFixture, packageId: string): Promise<void> {
+  await opinionGiven(await legalReviewAsked(f, packageId));
+  await submittedToAuthority(packageId);
+}
+
+/** The secretary records the CEO's approval of the package, from these source documents (the first is primary). */
+async function ceoApproves(packageId: string, sources: readonly string[]): Promise<void> {
+  await as(
+    "icSecretary",
+    (tx) => tx`
+      select api.record_authority_decision(${packageId}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(), 'Authority (synthetic)',
+        ${sources[0]!}, null::jsonb, ${DECISION_REASON}, null::text, null::text, null::text,
+        ${sources.length > 1 ? [...sources.slice(1)] : null}::text[], null::jsonb)`,
+  );
+}
+
+/**
+ * A corrective action frozen by a superseded decision (DEC-AMB-014), and the replacement decision that must say what
+ * becomes of it. The demo committee adopts a package of one case-wide corrective action, Member B's vote deciding it
+ * (without that vote it ties); after a legal review the CEO approves it and the case manager opens the action for
+ * Employee Chi. Member A's concern about Member B is then upheld, the committee votes again without Member B and adopts
+ * the package again, and after a second review the CEO approves it again from REPLACEMENT_SOURCES: the first decision is
+ * superseded and the action frozen until a corrective-action manager of the case records its disposition. Fails unless
+ * the demo committee holds its seats.
+ */
+export async function frozenAction(label: string): Promise<FrozenActionFixture> {
+  await correctiveActionPrerequisites();
+  const f = await proceedingMeeting(label);
+  const { packageId, itemId } = await as("icSecretary", async (tx) => {
+    const [p] = await tx<{ id: string }[]>`
+      select api.create_recommendation_package(${f.committeeProceedingId}, 'PACKAGE') as id`;
+    const [i] = await tx<{ id: string }[]>`
+      select api.add_recommendation_item(${p!.id}, 'CORRECTIVE_ACTION', null, null,
+        'Synthetic: strengthen the approval controls.', null, null, false, '{}'::uuid[], null) as id`;
+    return { packageId: p!.id, itemId: i!.id };
+  });
+  await packageVoteOpened(f, packageId);
+  const first = await openVoteId(f);
+  await castVotes(first, [
+    ["icChair", "APPROVE"],
+    ["icDeputy", "ABSTAIN"],
+    ["icMemberA", "REJECT"],
+    ["icMemberB", "APPROVE"],
+  ]);
+  await closeVote(first);
+  await adoptionRecorded(packageId);
+  await reviewedAndSubmitted(f, packageId);
+  await ceoApproves(packageId, ["MEMO-DEMO-2096-E2E-01"]);
+  const [action] = await as(
+    "caseManager",
+    (tx) => tx<{ id: string }[]>`
+      select api.open_corrective_action(${itemId}, ${FROZEN_ACTION.title}, ${FROZEN_ACTION.description},
+        ${USERS.financeEmployee}, (now() at time zone 'Asia/Riyadh')::date + 30) as id`,
+  );
+  // Member B's vote decided the package: their upheld conflict sends it back to the committee without them.
+  await decidedConcern(f, "icMemberA", "icMemberB", "UPHELD");
+  await as("icSecretary", async (tx) => {
+    await tx`select api.resolve_conflict_taint(${itemId}, 'RE_VOTE',
+      'Synthetic: the committee votes again without the conflicted member.')`;
+    await tx`select api.open_package_vote(${f.meetingId}, ${packageId})`;
+  });
+  const again = await openVoteId(f);
+  await castVotes(again, [
+    ["icChair", "APPROVE"],
+    ["icDeputy", "APPROVE"],
+    ["icMemberA", "APPROVE"],
+  ]);
+  await closeVote(again);
+  await adoptionRecorded(packageId);
+  await reviewedAndSubmitted(f, packageId);
+  await ceoApproves(packageId, REPLACEMENT_SOURCES);
+  return { ...f, packageId, itemId, actionId: action!.id };
+}
+
+/** The wording a modification gives the action. */
+export const MODIFIED_ACTION = {
+  title: "Synthetic: add a second approver above the threshold",
+  description: "Synthetic: payments above the threshold need a second approver from Finance.",
+} as const;
+
+/**
+ * A corrective-action manager of the case records the replacement decision's disposition of the frozen action (the
+ * case manager, or the GRC Director as another manager), citing its primary document: a waiver, or a modification to
+ * MODIFIED_ACTION. The reason is the manager's; no page shows it back (R3).
+ */
+export async function disposedAs(
+  user: "caseManager" | "grcDirector",
+  actionId: string,
+  disposition: "WAIVE" | "MODIFY",
+  reason: string,
+): Promise<void> {
+  const reword = disposition === "MODIFY";
+  await as(
+    user,
+    (tx) => tx`
+      select api.dispose_superseded_corrective_action(${actionId}, ${disposition}, ${REPLACEMENT_SOURCES[0]}, ${reason},
+        ${reword ? MODIFIED_ACTION.title : null}::text, ${reword ? MODIFIED_ACTION.description : null}::text,
+        null::uuid, null::date)`,
   );
 }

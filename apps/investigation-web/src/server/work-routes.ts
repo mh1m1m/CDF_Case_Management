@@ -45,8 +45,11 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
     case "meetings":
     case "minutes":
       return "COMMITTEE";
-    // A legal review assigned to the caller is their own work (P12-3a): it comes to them from My Work.
+    // A legal review assigned to the caller is their own work (P12-3a): it comes to them from My Work. So does a
+    // corrective action, to the manager who disposes of it (P12-3b) and to its owner and verifier (P12-6); the case
+    // team also reaches it from the case's Proceedings tab, and its breadcrumbs lead back there.
     case "legal-reviews":
+    case "actions":
       return "MY_WORK";
     default:
       return undefined;
@@ -59,7 +62,9 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
  * on a missing page. The purpose routes of Phase 12 join this list as each one ships, under the root
  * notify.deep_link writes, and that page re-checks access in the database: meetings and minutes since P12-2a
  * (ADR-054), committees since P12-2b (ADR-055), legal reviews since P12-3a (ADR-057); my defence, grievances,
- * exports, actions, continuity imports, referrals and preliminary reviews to come.
+ * exports, actions, continuity imports, referrals and preliminary reviews to come. An action's page exists since
+ * P12-3b (ADR-058) for the case team's disposition of a frozen action alone, which My Work links directly
+ * (`itemHref`); /actions joins this list with P12-6, when the page serves its owner and verifier.
  */
 export const LIVE_PURPOSE_ROOTS: readonly string[] = [
   "/committees",
@@ -124,6 +129,12 @@ export function itemHref(i: WorkItem, live: readonly string[] = LIVE_PURPOSE_ROO
       return i.code === "LEGAL_REVIEW" && onCase
         ? `${onCase}/proceedings/legal-review-approval/${i.targetId}`
         : null;
+    case "CORRECTIVE_ACTION":
+      // P12-3b (ADR-058): a frozen action's disposition is recorded on the action's page, which A2 gives the case
+      // team. The owner's and the verifier's work there (ACTION_ASSIGNED, ACTION_RETURNED, ACTION_TO_VERIFY) waits
+      // for P12-6, so those rows, and the inbox's links under /actions, open nothing until the root goes live.
+      if (i.category === "ACTION_TO_DISPOSE") return `/actions/${i.targetId}#dispose`;
+      return live.includes("/actions") ? `/actions/${i.targetId}` : null;
     default: {
       const root = PURPOSE_ROOT[i.targetType];
       return root && live.includes(root) ? `${root}/${i.targetId}` : null;
