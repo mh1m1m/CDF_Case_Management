@@ -1,6 +1,6 @@
 # Owner Decisions from the Ambiguity Register
 
-> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)). Generated from one data set with its companion files, so counts agree across them.
+> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)); the built state of migration 2070 (pending merge) and the suites the 2060 closure tests landed in were added on 2026-10-15 ([CDF-223](https://linear.app/cdfcasemanagement/issue/CDF-223)). Generated from one data set with its companion files, so counts agree across them.
 
 Only R5 items: 15 decisions covering 12 register rows (4.8% of 251). Three of them, DEC-AMB-013, DEC-AMB-014 and DEC-AMB-015, are follow-ons on rows that already had a decision (AMB-051, and AMB-218 for DEC-AMB-015). Everything else is resolved from evidence, configuration or a source request.
 
