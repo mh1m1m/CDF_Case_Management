@@ -51,6 +51,7 @@
 | [ADR-054](ADR-054-meeting-screen-capabilities.md)                   | The meeting screen's capabilities                                               | Proposed |
 | [ADR-055](ADR-055-my-committees-and-meeting-logistics.md)           | My Committees and the meeting's logistics                                       | Proposed |
 | [ADR-056](ADR-056-package-builder-and-invite-choices.md)            | The recommendation package builder and the meeting's invite list                | Proposed |
+| [ADR-057](ADR-057-legal-review-and-authority-read-models.md)        | Legal review and the authority's decision: read models                          | Proposed |
 | [ADR-059](ADR-059-superseded-allegation-notice-rule.md)             | A superseded allegation needs no defence notice at adoption                     | Proposed |
 
 **Decision IDs DEC-61 and DEC-62 (CON-011).** Each ID names two different things. In ADR-018 §7 and ADR-022 they are owner card decisions: DEC-61 (owner card, restricted referral) and DEC-62 (owner card, restricted legal review). In the UX audit register O17 §17.7, the source of ADR-016, they are audit items, cited here as UX DEC-61 (the Stitch project) and UX DEC-62 (new case entities).

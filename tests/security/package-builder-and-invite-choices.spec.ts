@@ -46,7 +46,7 @@ import {
   voteOnPackage,
   type PackageFixture,
 } from "../support/decision";
-import { outcomes } from "../support/capabilities";
+import { outcomes, without2095 } from "../support/capabilities";
 import { concludeProceedings } from "../support/closure";
 
 const FIRM = "Synthetic: the documented reasoning of the committee.";
@@ -123,7 +123,8 @@ interface ItemsView {
   finding_votes: unknown[];
 }
 
-/** The caller's R2, or null when it is NOT_FOUND to them. Every capability a boolean, every list a list. */
+/** The caller's R2 without the keys 2095 adds (its own spec pins them), or null when it is NOT_FOUND to them. Every
+ *  capability a boolean, every list a list. */
 async function itemsView(s: OwnerScenario, user: UserKey, cp: string): Promise<ItemsView | null> {
   await s.as(user);
   let v: ItemsView | null = null;
@@ -136,7 +137,7 @@ async function itemsView(s: OwnerScenario, user: UserKey, cp: string): Promise<I
     if ((error as Error).message === "CDF_NOT_FOUND") return null;
     throw error;
   }
-  const seen = v as ItemsView | null;
+  const seen = without2095(v as ItemsView | null);
   if (seen) {
     expect(Object.keys(seen.capabilities), `${user}: the proceeding's capabilities`).toEqual([
       "may_create_package",
@@ -206,7 +207,7 @@ async function runAs(s: OwnerScenario, fn: string, cp: string): Promise<{ view?:
   return { view };
 }
 
-/** AGENT-09: the live read without 2086's keys is 2060's, for this caller, in this state. */
+/** AGENT-09: the live read without 2086's keys (and 2095's) is 2060's, for this caller, in this state. */
 async function sameAs2060(s: OwnerScenario, user: UserKey, cp: string): Promise<void> {
   await s.asOwner();
   await s.tx`select set_config('request.jwt.claims', ${claims(user)}, true)`;
@@ -214,7 +215,7 @@ async function sameAs2060(s: OwnerScenario, user: UserKey, cp: string): Promise<
   const after = await runAs(s, "api.committee_items_view", cp);
   expect(after.error, `${user}: the same refusal`).toBe(before.error);
   if (before.error === undefined)
-    expect(without2086(after.view), `${user}: 2060's read`).toEqual(before.view);
+    expect(without2086(without2095(after.view)), `${user}: 2060's read`).toEqual(before.view);
 }
 
 /** Callers of the package sweep: the secretary, the chair, two members, a legal reviewer without a seat, the case
