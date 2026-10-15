@@ -410,7 +410,9 @@ jobs:
         env:
           CDF_ENVIRONMENT: test
           # Every statement crosses regions (runner to the Tokyo pooler); the CI default of 30 s per test is too short.
-          CDF_DB_TEST_TIMEOUT_MS: "600000"
+          # The longest tests make about 7,800 round trips, 18 to 20 minutes at the 0.1375 to 0.155 s per round trip
+          # measured on DEV, so each test may take 30 minutes (HOSTED_DEV_VALIDATION.md §12).
+          CDF_DB_TEST_TIMEOUT_MS: "1800000"
         # Vitest assigns each test file to one shard by a hash of its path, so a new file lands in one of the two
         # without a list to maintain.
         run: >-
