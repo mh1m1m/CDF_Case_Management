@@ -1472,6 +1472,9 @@ describe("api.corrective_action_view (authz.can_view_corrective_action; R2, R3)"
       expect(await s.tx`select id from case_mgmt.case_record where id = ${caseB}`).toEqual([]);
       const team = (await read(s, ACTION, "caseManager", action))!;
       expect(team.origin).toEqual({
+        // Migration 2070 (ADR-043): where the action comes from.
+        source: "AUTHORITY_DECISION",
+        preliminary_proposal_id: null,
         recommendation_item_id: item,
         authority_decision_id: decision,
         governing_decision_id: decision,
