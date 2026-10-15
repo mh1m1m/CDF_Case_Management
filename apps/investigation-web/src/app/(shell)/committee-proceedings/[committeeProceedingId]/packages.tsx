@@ -3,7 +3,9 @@
 // its command would accept the caller now (UX-116), and the database decides again on submit. The builder offers only
 // what R1 gives the committee's secretary: the case's subjects and allegations by position and category, never their
 // text, and the sanction catalogue in force. An item's description is the secretary's text, which the committee's
-// members read; voted item by item, it opens the item's vote, which the minutes record.
+// members read; voted item by item, it opens the item's vote, which the minutes record. After the adoption the card
+// shows the package's legal review and the authority's decision (2095; P12-3a, ADR-057). The case team reads the same
+// card from the case's Proceedings tab, read-only: no form, and no link to the committee's own pages.
 import type { ReactNode } from "react";
 import Link from "next/link";
 import {
@@ -27,7 +29,15 @@ import {
   textareaClass,
 } from "@cdf/ui";
 import { actLabel, confirmation } from "../../confirmations";
-import { allegationCategory, allegationName, sanctionName, sanctionOption, subjectName } from "../labels";
+import {
+  allegationCategory,
+  allegationName,
+  itemLabeller,
+  sanctionName,
+  sanctionOption,
+  subjectName,
+} from "../labels";
+import { AuthoritySection, LegalReviewSection } from "./legal-authority";
 import {
   addItemAction,
   createPackageAction,
@@ -52,6 +62,9 @@ export function PackageCard({
   scope,
   catalogue,
   meetingNo,
+  readOnly = false,
+  packetHref = null,
+  footer,
 }: {
   t: Translator;
   committeeProceedingId: string;
@@ -61,12 +74,19 @@ export function PackageCard({
   catalogue: readonly SanctionCatalogueChoice[];
   /** The proceeding's meetings the caller may see, by id, with their number. */
   meetingNo: ReadonlyMap<string, number>;
+  /** The case side (P12-3a): the package as R2 gives it to the case team, without any form. */
+  readOnly?: boolean;
+  /** Where a packet R2 names to the caller opens (P12-3a); null where none opens. */
+  packetHref?: ((packetId: string) => string) | null;
+  /** The case side's own act on the package, at the card's end (the restricted case's authority, P12-3a). */
+  footer?: ReactNode;
 }) {
   const n = pkg.sequenceNo;
   const id = `package-${n}`;
   const cap = pkg.capabilities;
   // Items are numbered in the read model's order (the order they were added); a withdrawn item is no longer listed.
   const itemNo = new Map(pkg.items.map((i, k) => [i.itemId, k + 1] as const));
+  const sections = { t, committeeProceedingId, pkg, readOnly, packetHref, itemLabel: itemLabeller(t, pkg) };
   return (
     <CDFCard
       title={t("committeeProceedings.packageName", { n })}
@@ -103,13 +123,14 @@ export function PackageCard({
               n={k + 1}
               item={item}
               itemNo={itemNo}
+              readOnly={readOnly}
             />
           ))}
         </ol>
       )}
 
       {/* R1 refusing the secretary (CDF-226) leaves the builder out: an item names only what R1 offers. */}
-      {cap.mayAddItem && scope ? (
+      {!readOnly && cap.mayAddItem && scope ? (
         <AddItemForm
           t={t}
           committeeProceedingId={committeeProceedingId}
@@ -120,7 +141,7 @@ export function PackageCard({
         />
       ) : null}
 
-      {cap.maySubmitForVote ? (
+      {!readOnly && cap.maySubmitForVote ? (
         <div className="mt-4 border-t border-cdf-border pt-3" data-testid={`${id}-submit`}>
           <h3 className="mb-1 font-semibold">{t("committeeProceedings.submitTitle")}</h3>
           <p className="mb-3 text-sm text-cdf-text-secondary">{t("committeeProceedings.submitIntro")}</p>
@@ -138,7 +159,7 @@ export function PackageCard({
         </div>
       ) : null}
 
-      {pkg.openVoteIn.length > 0 ? (
+      {!readOnly && pkg.openVoteIn.length > 0 ? (
         <div className="mt-4 border-t border-cdf-border pt-3" data-testid={`${id}-open-vote`}>
           <h3 className="mb-1 font-semibold">{t("committeeProceedings.openVoteTitle")}</h3>
           <p className="mb-3 text-sm text-cdf-text-secondary">
@@ -176,7 +197,7 @@ export function PackageCard({
         </div>
       ) : null}
 
-      {cap.mayRecordAdoption ? (
+      {!readOnly && cap.mayRecordAdoption ? (
         <div className="mt-4 border-t border-cdf-border pt-3" data-testid={`${id}-adopt`}>
           <h3 className="mb-1 font-semibold">{t("committeeProceedings.adoptTitle")}</h3>
           <p className="mb-3 text-sm text-cdf-text-secondary">{t("committeeProceedings.adoptIntro")}</p>
@@ -194,7 +215,10 @@ export function PackageCard({
         </div>
       ) : null}
 
-      {cap.mayReturnToCommittee ? (
+      <LegalReviewSection {...sections} />
+      <AuthoritySection {...sections} />
+
+      {!readOnly && cap.mayReturnToCommittee ? (
         <details className="mt-4 border-t border-cdf-border pt-3" data-testid={`${id}-return`}>
           <summary className="cursor-pointer font-semibold">{t("committeeProceedings.returnTitle")}</summary>
           <p className="mt-2 mb-3 text-sm text-cdf-text-secondary">{t("committeeProceedings.returnIntro")}</p>
@@ -228,6 +252,7 @@ export function PackageCard({
           </CDFCommandForm>
         </details>
       ) : null}
+      {footer}
     </CDFCard>
   );
 }
@@ -240,6 +265,7 @@ function ItemView({
   n,
   item,
   itemNo,
+  readOnly,
 }: {
   t: Translator;
   committeeProceedingId: string;
@@ -247,6 +273,7 @@ function ItemView({
   n: number;
   item: PackageItemView;
   itemNo: ReadonlyMap<string, number>;
+  readOnly: boolean;
 }) {
   const id = `package-${packageNo}-item-${n}`;
   const list = (values: string[]) => formatList(t.locale, values.map(isolate));
@@ -326,7 +353,7 @@ function ItemView({
         </ul>
       ) : null}
 
-      {item.taintResolutions.length > 0 ? (
+      {!readOnly && item.taintResolutions.length > 0 ? (
         <div className="mt-3 border-t border-cdf-border pt-3" data-testid={`${id}-taint`}>
           <h5 className="mb-1 font-semibold">{t("committeeProceedings.taintTitle")}</h5>
           <p className="mb-3 text-sm text-cdf-text-secondary">{t("committeeProceedings.taintIntro")}</p>
@@ -390,7 +417,7 @@ function ItemView({
         </div>
       ) : null}
 
-      {item.capabilities.mayWithdraw ? (
+      {!readOnly && item.capabilities.mayWithdraw ? (
         <details className="mt-3 border-t border-cdf-border pt-3" data-testid={`${id}-withdraw`}>
           <summary className="cursor-pointer font-semibold">
             {t("committeeProceedings.withdrawTitle")}
@@ -433,7 +460,7 @@ function ItemView({
 }
 
 /** Checkboxes sending one value per ticked box; a server error on the field shows under the first box. */
-function Checks({
+export function Checks({
   id,
   name,
   legend,

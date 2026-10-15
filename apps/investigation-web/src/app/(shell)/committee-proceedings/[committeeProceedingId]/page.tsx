@@ -110,6 +110,9 @@ export default async function CommitteeProceedingPage({
                 scope={v.scope}
                 catalogue={v.catalogue}
                 meetingNo={meetingNo}
+                packetHref={(packetId) =>
+                  `/committee-proceedings/${p.committeeProceedingId}/packets/${packetId}`
+                }
               />
             ))}
             {items.capabilities.mayCreatePackage ? (

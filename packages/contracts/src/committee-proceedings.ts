@@ -1,12 +1,14 @@
 /**
  * The proceeding before the committee and the meeting's invite list (UX redesign Phase 12, slice P12-2c; ADR-056,
  * migrations 2060 and 2086): camel-case copies of `api.committee_items_view` (read model R2, with 2086's
- * capabilities), `api.committee_scope_choices` (R1), `api.recommendation_item_flags`, `decision.sanction_catalogue_entry`
- * and `api.meeting_invite_choices`. A subject or a case person is a position and a category, named only in DISPLAY_NAME
- * mode (the DEC-02 label card; ORDINAL until the owner answers it). Every capability is its command's own answer for the
- * caller now (UX-116), and the command checks again. Types and literal lists only.
+ * capabilities and 2095's legal review and authority half, ADR-057), `api.committee_scope_choices` (R1),
+ * `api.recommendation_item_flags`, `decision.sanction_catalogue_entry` and `api.meeting_invite_choices`. A subject or a
+ * case person is a position and a category, named only in DISPLAY_NAME mode (the DEC-02 label card; ORDINAL until the
+ * owner answers it). Every capability is its command's own answer for the caller now (UX-116), and the command checks
+ * again. Types and literal lists only.
  */
 import type {
+  AuthorityOutcome,
   CommitteeKind,
   CommitteeProceedingSummary,
   CommitteeSeat,
@@ -18,6 +20,7 @@ import type {
   SubjectCategory,
   VoteItemStatus,
 } from "./index";
+import type { PackageAuthority, PackageLegalReview, RecordSupersedes } from "./legal-reviews";
 
 /** How a package is put to the vote (`api.create_recommendation_package`): one vote, or one per item. */
 export const VOTE_GRANULARITIES = ["PACKAGE", "ITEM"] as const;
@@ -101,7 +104,27 @@ export interface RecommendationPackageView {
     maySubmitForVote: boolean;
     mayRecordAdoption: boolean;
     mayReturnToCommittee: boolean;
+    /** 2095: `api.request_legal_review` up to the reviewer, findings, minutes and reason chosen. */
+    mayRequestLegalReview: boolean;
+    maySubmitToAuthority: boolean;
+    /** `api.record_authority_decision` up to the authority and the decision chosen: an authority is still to decide. */
+    mayRecordAuthorityDecision: boolean;
   };
+  /**
+   * Why each act after the adoption is refused now, for whoever runs the package commands, once the package is where
+   * the act is done (ADOPTED to ask for a review or submit, AWAITING_AUTHORITY to record); null otherwise.
+   */
+  requestLegalReviewBlock: string | null;
+  submitBlock: string | null;
+  recordBlock: string | null;
+  /** The outcomes `api.record_authority_decision` accepts now: only RETURN_TO_COMMITTEE while a taint waits. */
+  recordOutcomes: AuthorityOutcome[];
+  /** What recording the round's last decision would supersede; null without an open conflict remediation. */
+  recordSupersedes: RecordSupersedes | null;
+  adoptedAt: string | null;
+  decidedAt: string | null;
+  legalReview: PackageLegalReview;
+  authority: PackageAuthority;
 }
 
 /** A vote on a finding in a meeting of the proceeding that the caller may deliberate in (R2). */

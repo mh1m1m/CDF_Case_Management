@@ -147,6 +147,43 @@ export function createCommitteeProceedingsService(deps: CommitteeProceedingsDeps
     }
   }
 
+  /**
+   * The proceeding as one of the caller's committees lists it on their seat, or null (recorded as ACCESS_DENIED): the
+   * seat basis every committee page of the proceeding starts from.
+   */
+  async function onSeat(
+    ctx: UserRequestContext,
+    committeeProceedingId: string,
+  ): Promise<Pick<CommitteeProceedingPage, "committee" | "mySeat" | "proceeding"> | null> {
+    try {
+      for (const c of await committees.myCommittees(ctx)) {
+        const view = await part(ctx, ["NOT_FOUND"], () => committees.committeeView(ctx, c.committeeId));
+        const p = view?.proceedings.find((x) => x.committeeProceedingId === committeeProceedingId);
+        if (view && p)
+          return {
+            committee: {
+              committeeId: view.committee.committeeId,
+              code: view.committee.code,
+              kind: view.committee.kind,
+            },
+            mySeat: view.mySeat.seat,
+            proceeding: p,
+          };
+      }
+    } catch (cause) {
+      throw toAppError(cause, ctx.requestId);
+    }
+    await recordDenial(
+      ctx,
+      "ACCESS_DENIED",
+      "committee_proceeding",
+      "committee_proceeding",
+      new AppError("NOT_FOUND", ctx.requestId),
+      committeeProceedingId,
+    );
+    return null;
+  }
+
   return {
     /**
      * The proceeding page, or null (the uniform 404, recorded as ACCESS_DENIED) unless one of the caller's committees
@@ -158,38 +195,8 @@ export function createCommitteeProceedingsService(deps: CommitteeProceedingsDeps
       ctx: UserRequestContext,
       committeeProceedingId: string,
     ): Promise<CommitteeProceedingPage | null> => {
-      let found: Pick<CommitteeProceedingPage, "committee" | "mySeat" | "proceeding"> | null = null;
-      try {
-        for (const c of await committees.myCommittees(ctx)) {
-          const view = await part(ctx, ["NOT_FOUND"], () => committees.committeeView(ctx, c.committeeId));
-          const p = view?.proceedings.find((x) => x.committeeProceedingId === committeeProceedingId);
-          if (view && p) {
-            found = {
-              committee: {
-                committeeId: view.committee.committeeId,
-                code: view.committee.code,
-                kind: view.committee.kind,
-              },
-              mySeat: view.mySeat.seat,
-              proceeding: p,
-            };
-            break;
-          }
-        }
-      } catch (cause) {
-        throw toAppError(cause, ctx.requestId);
-      }
-      if (!found) {
-        await recordDenial(
-          ctx,
-          "ACCESS_DENIED",
-          "committee_proceeding",
-          "committee_proceeding",
-          new AppError("NOT_FOUND", ctx.requestId),
-          committeeProceedingId,
-        );
-        return null;
-      }
+      const found = await onSeat(ctx, committeeProceedingId);
+      if (!found) return null;
       const items = await part(ctx, ["NOT_FOUND"], () => gateway.itemsView(ctx, committeeProceedingId));
       const builds = buildsPackages(items);
       const scope = builds
@@ -201,6 +208,32 @@ export function createCommitteeProceedingsService(deps: CommitteeProceedingsDeps
       const catalogue = adds ? await gateway.sanctionCatalogue(ctx) : [];
       return { ...found, items, scope, catalogue };
     },
+
+    /**
+     * The seat basis and R2, for a page of the proceeding's own (P12-3a: asking for a legal review, recording the
+     * authority's decision, a packet), without the builder's choices. Null, the uniform 404, unless the seat gives the
+     * proceeding (recorded as ACCESS_DENIED) and R2 admits the caller.
+     */
+    onSeat: async (
+      ctx: UserRequestContext,
+      committeeProceedingId: string,
+    ): Promise<
+      | (Pick<CommitteeProceedingPage, "committee" | "mySeat" | "proceeding"> & { items: CommitteeItemsView })
+      | null
+    > => {
+      const found = await onSeat(ctx, committeeProceedingId);
+      if (!found) return null;
+      const items = await part(ctx, ["NOT_FOUND"], () => gateway.itemsView(ctx, committeeProceedingId));
+      return items ? { ...found, items } : null;
+    },
+
+    /**
+     * R2 alone, for the case side (the Proceedings tab, P12-3a): the case team reads a proceeding's packages through
+     * the case, with every capability false. Null when the database refuses the caller (R2 admits the case team and
+     * the proceeding's seat holders without a meeting conflict).
+     */
+    items: (ctx: UserRequestContext, committeeProceedingId: string) =>
+      part(ctx, ["NOT_FOUND"], () => gateway.itemsView(ctx, committeeProceedingId)),
 
     /**
      * R1 alone, for the meeting's finding vote: null when the database refuses the caller (anyone but the committee's

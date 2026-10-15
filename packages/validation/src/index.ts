@@ -448,3 +448,5 @@ export * from "./meetings";
 // ---- Recommendation packages and the meeting's invite (migrations 1900 to 2060; UX redesign Phase 12 P12-2c,
 //      ADR-056) ---------------------------------------------------------------------------------------------------
 export * from "./committee-proceedings";
+// ---- Legal review and the authority's decision (migrations 1900 and 2030; UX redesign Phase 12 P12-3a, ADR-057) ----
+export * from "./legal-reviews";

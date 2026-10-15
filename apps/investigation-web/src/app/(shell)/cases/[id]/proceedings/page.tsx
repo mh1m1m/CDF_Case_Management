@@ -3,7 +3,9 @@
 // for a restricted case). It shows what RLS returned to the caller; the committee snapshot, and what a referral would
 // copy now (migration 2045), arrive as counts per seat and standing, never as people. A form appears only where the
 // database would accept its command (authz.can_edit_case on an active case; the case owner as Restricted Case
-// Authority for the approval), and every command checks again.
+// Authority for the approval), and every command checks again. Below them, where the Investigation Committee's
+// recommendation packages stand (R2 as the case team reads it; P12-3a, ADR-057): their legal review and the
+// authority's decision, read-only, and for the restricted case's authority, the way to approve a legal review.
 import type { Metadata } from "next";
 import {
   CLOSED_PROCEEDING_STATUSES,
@@ -48,6 +50,7 @@ import {
   updateProceedingStateAction,
 } from "../structure-actions";
 import { CaseWorkspace, loadCase, personName } from "../workspace";
+import { CaseRecommendations } from "./recommendations";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -210,6 +213,26 @@ export default async function CaseProceedingsPage({ params }: { params: Promise<
           p={byId(cp.proceedingId)}
         />
       ))}
+
+      {/* P12-3a (ADR-057): where the Investigation Committee's packages stand, as the case team reads them (R2). */}
+      {s.committeeProceedings
+        .filter((cp) => s.committees.find((k) => k.id === cp.committeeId)?.kind === "INVESTIGATION")
+        .map((cp) => {
+          const p = byId(cp.proceedingId);
+          return (
+            <CaseRecommendations
+              key={cp.id}
+              t={t}
+              ctx={ctx}
+              c={c}
+              actorId={actor.userId}
+              cp={cp}
+              committee={committeeName(cp.committeeId)}
+              k={p?.sequenceNo ?? 0}
+              number={p ? proceedingDisplayNumber(p.sequenceNo) : "—"}
+            />
+          );
+        })}
     </CaseWorkspace>
   );
 }

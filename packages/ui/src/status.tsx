@@ -8,6 +8,7 @@ import type {
   FindingResult,
   InterviewStatus,
   LegalHoldRequestStatus,
+  LegalReviewStatus,
   MeetingConflictConcernStatus,
   MeetingStatus,
   MinutesStatus,
@@ -49,6 +50,8 @@ interface Registry {
   concern: Record<MeetingConflictConcernStatus, StatusTone>;
   /** A recommendation package (P12-2c): amber while it waits on Legal, the authority or the secretary. */
   recommendationPackage: Record<RecommendationPackageStatus, StatusTone>;
+  /** A request for legal review (P12-3a): amber while it waits for the opinion; an opinion is a decision, not a win. */
+  legalReview: Record<LegalReviewStatus, StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -137,6 +140,7 @@ export const STATUS_TONES: Registry = {
     RETURNED_BY_AUTHORITY: "warning",
     DECIDED: "neutral",
   },
+  legalReview: { ASSIGNED: "warning", OPINION_GIVEN: "neutral", CANCELLED: "neutral" },
 };
 
 /** The tone for a status; an unknown code (a newer database value) falls back to neutral, never to red. */

@@ -1,16 +1,23 @@
-// CommitteeProceedingsGateway over PostgreSQL (UX redesign Phase 12 P12-2c; ADR-056, migrations 2060 and 2086). Reads
-// call only the purpose read models api.committee_items_view (R2) and api.committee_scope_choices (R1), the item flags
+// CommitteeProceedingsGateway over PostgreSQL (UX redesign Phase 12 P12-2c and P12-3a; ADR-056 and ADR-057,
+// migrations 2060, 2086 and 2095). Reads call only the purpose read models api.committee_items_view (R2, with 2095's
+// legal review and authority half) and api.committee_scope_choices (R1), the item flags
 // (api.recommendation_item_flags) and the sanction catalogue's reference view (decision.sanction_catalogue_entry); the
 // gateway renames their keys and reads no case table. Writes only call the package commands. Every method runs in its
 // own transaction under the caller's security context.
 import type {
+  AccountName,
   AllegationChoice,
+  AuthorityDecisionView,
+  AuthoritySubmissionView,
   CommitteeItemsView,
   CommitteeLabelMode,
   CommitteeScopeChoices,
   FindingChoice,
   FindingVoteView,
+  OpinionRevision,
+  PackageAuthorityRule,
   PackageItemView,
+  PackageLegalReviewRequest,
   RecommendationItemFlag,
   RecommendationPackageView,
   SanctionCatalogueChoice,
@@ -21,7 +28,7 @@ import type { CommitteeProceedingsGateway, UserRequestContext } from "@cdf/appli
 import { withUserContext, type Sql, type Tx } from "./security-context";
 
 // ---- The read models' JSON, as the database writes it (snake_case; timestamps as text) -------------------------
-interface RawSubject {
+export interface RawSubject {
   subject_id: string;
   position: number | string;
   subject_category: SubjectRef["subjectCategory"];
@@ -46,6 +53,93 @@ interface RawItem {
   taint_resolutions?: TaintResolution[] | null;
 }
 
+export interface RawAccount {
+  user_id: string;
+  display_name: string | null;
+  display_name_ar: string | null;
+}
+
+export interface RawRevision {
+  revision_id: string;
+  revision_no: number;
+  opinion: OpinionRevision["opinion"];
+  opinion_text: string | null;
+  given_at: string;
+}
+
+interface RawLegalReviewRequest {
+  request_id: string;
+  package_round: number;
+  status: PackageLegalReviewRequest["status"];
+  basis: PackageLegalReviewRequest["basis"];
+  reason: string;
+  requested_at: string;
+  reviewer: RawAccount;
+  opinion: PackageLegalReviewRequest["opinion"];
+  opinion_text: string | null;
+  opinion_at: string | null;
+  packet_id: string | null;
+  revisions: RawRevision[] | null;
+  cancellation: { reason: string; cancelled_at: string } | null;
+  capabilities?: { may_cancel?: boolean | null } | null;
+}
+
+interface RawAuthorityRule {
+  item_type: PackageAuthorityRule["itemType"];
+  rule_id: string | null;
+  authority_types: PackageAuthorityRule["authorityTypes"] | null;
+  source_status: PackageAuthorityRule["sourceStatus"];
+  coverage: PackageAuthorityRule["coverage"];
+  setting_disagreement: boolean | null;
+}
+
+interface RawSubmission {
+  submission_id: string;
+  package_round: number;
+  packet_id: string | null;
+  basis: AuthoritySubmissionView["basis"];
+  submitted_at: string;
+  requirements:
+    | {
+        item_id: string;
+        authority_type: AuthoritySubmissionView["requirements"][number]["authorityType"];
+        rule_source_status: AuthoritySubmissionView["requirements"][number]["ruleSourceStatus"];
+      }[]
+    | null;
+}
+
+interface RawDecision {
+  decision_id: string;
+  package_round: number;
+  authority_type: AuthorityDecisionView["authorityType"];
+  outcome: AuthorityDecisionView["outcome"];
+  decided_at: string;
+  decided_by_label: string;
+  recorded_at: string;
+  reason: string | null;
+  delegation_reference: string | null;
+  source_signature: AuthorityDecisionView["sourceSignature"];
+  unsigned_attestation: string | null;
+  sources: { position: number; reference: string; is_primary: boolean | null }[] | null;
+  scope:
+    | {
+        item_id: string;
+        item_outcome: AuthorityDecisionView["scope"][number]["itemOutcome"];
+        modification: string | null;
+      }[]
+    | null;
+  conditions:
+    | {
+        position: number;
+        kind: AuthorityDecisionView["conditions"][number]["kind"];
+        item_id: string | null;
+        text: string;
+        due_date: string | null;
+      }[]
+    | null;
+  superseded: { superseded_by: string; superseded_at: string } | null;
+}
+
 interface RawPackage {
   package_id: string;
   sequence_no: number;
@@ -55,11 +149,38 @@ interface RawPackage {
   items: RawItem[] | null;
   capabilities?: Partial<
     Record<
-      "may_add_item" | "may_submit_for_vote" | "may_record_adoption" | "may_return_to_committee",
+      | "may_add_item"
+      | "may_submit_for_vote"
+      | "may_record_adoption"
+      | "may_return_to_committee"
+      | "may_request_legal_review"
+      | "may_submit_to_authority"
+      | "may_record_authority_decision",
       boolean | null
     >
   > | null;
   open_vote_in?: string[] | null;
+  // 2095 (ADR-057).
+  request_legal_review_block?: string | null;
+  submit_block?: string | null;
+  record_block?: string | null;
+  record_outcomes?: RecommendationPackageView["recordOutcomes"] | null;
+  record_supersedes?: { decisions: number | string; corrective_actions: number | string } | null;
+  adopted_at?: string | null;
+  decided_at?: string | null;
+  legal_review?: { required?: boolean | null; requests?: RawLegalReviewRequest[] | null } | null;
+  authority?: {
+    rules?: RawAuthorityRule[] | null;
+    submissions?: RawSubmission[] | null;
+    decisions?: RawDecision[] | null;
+    to_decide?:
+      | {
+          authority_type: AuthorityDecisionView["authorityType"];
+          item_ids: string[] | null;
+          completes_round: boolean | null;
+        }[]
+      | null;
+  } | null;
 }
 
 interface RawFindingVote {
@@ -114,10 +235,27 @@ interface RawScopeChoices {
 
 // ---- Mapping --------------------------------------------------------------------------------------------------
 /** A capability or flag the database left out or null reads as false (fail closed). */
-const yes = (v: boolean | null | undefined): boolean => v === true;
-const each = <R, T>(v: readonly R[] | null | undefined, map: (r: R) => T): T[] => (v ?? []).map(map);
+export const yes = (v: boolean | null | undefined): boolean => v === true;
+export const each = <R, T>(v: readonly R[] | null | undefined, map: (r: R) => T): T[] => (v ?? []).map(map);
+/** A timestamp as an ISO instant; the database writes timestamptz as text in its own format. */
+export const iso = (v: string): string => new Date(v).toISOString();
+export const isoOrNull = (v: string | null | undefined): string | null => (v ? iso(v) : null);
 
-function subject(s: RawSubject): SubjectRef {
+export function account(a: RawAccount): AccountName {
+  return { userId: a.user_id, displayName: a.display_name ?? null, displayNameAr: a.display_name_ar ?? null };
+}
+
+export function revision(r: RawRevision): OpinionRevision {
+  return {
+    revisionId: r.revision_id,
+    revisionNo: r.revision_no,
+    opinion: r.opinion,
+    opinionText: r.opinion_text ?? null,
+    givenAt: iso(r.given_at),
+  };
+}
+
+export function subject(s: RawSubject): SubjectRef {
   return {
     subjectId: s.subject_id,
     position: Number(s.position),
@@ -147,6 +285,63 @@ function item(i: RawItem, flags: ReadonlyMap<string, RecommendationItemFlag[]>):
   };
 }
 
+function legalRequest(r: RawLegalReviewRequest): PackageLegalReviewRequest {
+  return {
+    requestId: r.request_id,
+    packageRound: r.package_round,
+    status: r.status,
+    basis: r.basis,
+    reason: r.reason,
+    requestedAt: iso(r.requested_at),
+    reviewer: account(r.reviewer),
+    opinion: r.opinion ?? null,
+    opinionText: r.opinion_text ?? null,
+    opinionAt: isoOrNull(r.opinion_at),
+    packetId: r.packet_id ?? null,
+    revisions: each(r.revisions, revision),
+    cancellation: r.cancellation
+      ? { reason: r.cancellation.reason, cancelledAt: iso(r.cancellation.cancelled_at) }
+      : null,
+    capabilities: { mayCancel: yes(r.capabilities?.may_cancel) },
+  };
+}
+
+function decision(d: RawDecision): AuthorityDecisionView {
+  return {
+    decisionId: d.decision_id,
+    packageRound: d.package_round,
+    authorityType: d.authority_type,
+    outcome: d.outcome,
+    decidedAt: iso(d.decided_at),
+    decidedByLabel: d.decided_by_label,
+    recordedAt: iso(d.recorded_at),
+    reason: d.reason ?? null,
+    delegationReference: d.delegation_reference ?? null,
+    sourceSignature: d.source_signature ?? null,
+    unsignedAttestation: d.unsigned_attestation ?? null,
+    sources: each(d.sources, (x) => ({
+      position: x.position,
+      reference: x.reference,
+      isPrimary: yes(x.is_primary),
+    })),
+    scope: each(d.scope, (x) => ({
+      itemId: x.item_id,
+      itemOutcome: x.item_outcome,
+      modification: x.modification ?? null,
+    })),
+    conditions: each(d.conditions, (x) => ({
+      position: x.position,
+      kind: x.kind,
+      itemId: x.item_id ?? null,
+      text: x.text,
+      dueDate: x.due_date ?? null,
+    })),
+    superseded: d.superseded
+      ? { supersededBy: d.superseded.superseded_by, supersededAt: iso(d.superseded.superseded_at) }
+      : null,
+  };
+}
+
 /** R2 as the page reads it, with the flags of each package's items (`item_id` → flags). */
 export function toCommitteeItemsView(
   v: RawItemsView,
@@ -169,6 +364,53 @@ export function toCommitteeItemsView(
         maySubmitForVote: yes(p.capabilities?.may_submit_for_vote),
         mayRecordAdoption: yes(p.capabilities?.may_record_adoption),
         mayReturnToCommittee: yes(p.capabilities?.may_return_to_committee),
+        mayRequestLegalReview: yes(p.capabilities?.may_request_legal_review),
+        maySubmitToAuthority: yes(p.capabilities?.may_submit_to_authority),
+        mayRecordAuthorityDecision: yes(p.capabilities?.may_record_authority_decision),
+      },
+      requestLegalReviewBlock: p.request_legal_review_block ?? null,
+      submitBlock: p.submit_block ?? null,
+      recordBlock: p.record_block ?? null,
+      recordOutcomes: [...(p.record_outcomes ?? [])],
+      recordSupersedes: p.record_supersedes
+        ? {
+            decisions: Number(p.record_supersedes.decisions),
+            correctiveActions: Number(p.record_supersedes.corrective_actions),
+          }
+        : null,
+      adoptedAt: isoOrNull(p.adopted_at),
+      decidedAt: isoOrNull(p.decided_at),
+      legalReview: {
+        required: yes(p.legal_review?.required),
+        requests: each(p.legal_review?.requests, legalRequest),
+      },
+      authority: {
+        rules: each(p.authority?.rules, (r) => ({
+          itemType: r.item_type,
+          ruleId: r.rule_id ?? null,
+          authorityTypes: [...(r.authority_types ?? [])],
+          sourceStatus: r.source_status ?? null,
+          coverage: r.coverage,
+          settingDisagreement: yes(r.setting_disagreement),
+        })),
+        submissions: each(p.authority?.submissions, (x) => ({
+          submissionId: x.submission_id,
+          packageRound: x.package_round,
+          packetId: x.packet_id ?? null,
+          basis: x.basis,
+          submittedAt: iso(x.submitted_at),
+          requirements: each(x.requirements, (q) => ({
+            itemId: q.item_id,
+            authorityType: q.authority_type,
+            ruleSourceStatus: q.rule_source_status,
+          })),
+        })),
+        decisions: each(p.authority?.decisions, decision),
+        toDecide: each(p.authority?.to_decide, (x) => ({
+          authorityType: x.authority_type,
+          itemIds: [...(x.item_ids ?? [])],
+          completesRound: yes(x.completes_round),
+        })),
       },
     })),
     findingVotes: each(v.finding_votes, (f) => ({

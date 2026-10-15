@@ -147,7 +147,7 @@ outcome or detail:
 - RESTRICTED_LEGAL_REVIEW_APPROVED, to the case's owner as its Restricted Case Authority and whoever recorded it, as
   for the restricted referral.
 
-The History tab's labels for these events come with the pages, in `packages/i18n`, in Arabic and English.
+The History tab names these events in Arabic and English (`packages/i18n`).
 
 ### 5. How each answer is computed
 
@@ -173,13 +173,94 @@ reviewer and scope (ruling 2) and the counts a re-decision would supersede (ruli
 
 ### 7. Not in this change
 
-- **The pages** come in the next change, with no migration: `/legal-reviews/{requestId}` goes live for the reviewer
-  (purpose banner, the packet as stored, the opinion forms); the approval card on the case's Proceedings tab and its
-  page; on the proceeding's page, the request and cancel forms, the submit and record forms, the as-submitted packet,
-  the decisions with SUPERSEDED, and the consequence preview.
+- **The pages** come in the next change, with no migration (the P12-3a amendment below): `/legal-reviews/{requestId}`
+  goes live for the reviewer (purpose banner, the packet as stored, the opinion forms); the approval card on the case's
+  Proceedings tab and its page; on the proceeding's page, the request and cancel forms, the submit and record forms,
+  the as-submitted packet, the decisions with SUPERSEDED, and the consequence preview.
 - **P12-3b** (2096, ADR-058, CDF-230): the case's corrective actions and their disposition.
 - **CDF-227** (a disposition's reason reaching an action's owner) was fixed by Rebase in 2090 (#87); **CDF-228** (two
   authorities in a replacement round) goes to Rebase with CDF-215 in 2170.
+
+## P12-3a amendment: the reviewer's page, the approval and the authority's forms (2026-10-15)
+
+The legal review and authority screens come on these read models, with no migration. They are purpose routes
+(ADR-016 D2; CDF-73 option D) and pages of the case's own; none reads a case table. Each action is a server action
+that runs the `api.*` command in the caller's security context, so the database checks again on submit.
+
+- **The reviewer's page.** `/legal-reviews/{requestId}` reads L1 and nothing else. It opens only for the request's
+  assignee while its packet is theirs to read. Anyone else, a cancelled request, a request the authority has decided
+  (with `PURPOSE_ACCESS_GRACE_DAYS` at its default of 0) and an id that names nothing get the same 404, and the refusal
+  is recorded as `ACCESS_DENIED` with the read's name only. The request is the reviewer's own work: the page belongs
+  to My Work, and the LEGAL_REVIEW_ASSIGNED row (2045) and the request's notice now open it (`/legal-reviews` joins the
+  live purpose roots). The row names neither the case's people nor the secretary's reason. The page shows the request
+  (its round, why a review, who asked and when, its status and the secretary's reason), the opinion and every later
+  opinion with their times, and a purpose banner that says what it does not show: the case, its narrative and
+  evidence, and anything the packet does not carry. The opinion form shows where `may_give_opinion` is true and the
+  later-opinion form where `may_give_superseding_opinion` is; otherwise the page says why in words (a conflict to
+  settle, the package moved on, the permission or clearance lost). An opinion other than "concurs" needs its text, as
+  the command does, and the form says before it is sent that "does not concur" returns the package.
+- **The packet.** `/legal-reviews/{requestId}/packet` reads L1, then the packet it names through `api.open_packet`,
+  which records `PACKET_VIEWED`, so only opening the packet is a read of it. The packet is what was stored when the
+  request was made and never changes: the adopted items with their sanction and its rule, the findings sent with their
+  reasons, the approved minutes with their votes, and earlier opinions, with the persons concerned named as stored
+  (ruling 4). The same view serves the committee's packet page and the case's.
+- **On the proceeding's page.** Each package gains two sections for whoever reads it through R2:
+  - _Legal review:_ whether the rules require one; each request in every round with its reviewer, status, opinion and
+    later opinions, or its cancellation and reason; and the packet sent, which opens on the proceeding's packet page
+    (`/committee-proceedings/{id}/packets/{packetId}`, only a packet R2 names to the caller). The secretary's link to
+    ask shows where `may_request_legal_review` is true. Where the package is adopted but the command would refuse (a
+    review open, a taint, the restricted case's approval still needed, the case past closure), the section says so in
+    words. Cancelling is a form on the request where `may_cancel` is true.
+  - _The authority's decision:_ who decides each adopted item type under the rule in force, with its source (owner
+    default, approved, or provisional while it awaits the CDF source, never hidden), no rule where none is in force,
+    and the `FINAL_DISCIPLINARY_AUTHORITY` setting's disagreement; the submit form where `may_submit_to_authority` is
+    true, else why; each submission with its requirements and the package as submitted; the authorities still to
+    decide, each with a link to record its decision where `may_record_authority_decision` is true and whether its
+    decision completes the round; and each decision as recorded, read-only: the outcome, when and by whom, the source
+    documents, the signature or the secretary's attestation, the delegation, the items one by one, the conditions and
+    the reason, marked SUPERSEDED with its date once a later decision replaced it (DEC-AMB-013).
+- **Asking for a legal review.** `/committee-proceedings/{id}/packages/{packageId}/legal-review` opens only where R2
+  says the caller may ask now; otherwise it is the same 404 as a package that does not exist. Only this page reads L2,
+  so the proceeding's page records no read of the choices. It lists the reviewers (every holder of the opinion
+  permission but the caller; the hint says that someone not cleared for the case is refused when the request is sent),
+  the findings by result, allegation number and category, and person by position (a name only in DISPLAY_NAME mode),
+  never their reasons, and the approved minutes by meeting and version. The packet carries the adopted items besides.
+  On a restricted case the page offers exactly the approval's reviewer, findings and minutes and says so, never the
+  approval's reason.
+- **Recording the authority's decision.** `/committee-proceedings/{id}/packages/{packageId}/decision/{authorityType}`
+  opens only where R2 lists that authority still to decide and the caller may record now; otherwise it is the same 404. It reads R2 only. The outcomes offered are `record_outcomes` (only a return to the committee while a taint
+  waits); the items this authority decides are listed, decided one by one for "approve partially" and "modify"; up to
+  ten further sources, one per line; conditions only with an approving outcome; and the time in Riyadh, never in the
+  future and never before the day of the adoption. Where a conflict remediation is open the page says, as counts only,
+  what completing the round would supersede and freeze (ruling 3). The schema checks the command's pairings field by
+  field before the database is asked.
+- **From the case.** The Proceedings tab shows, under each Investigation Committee proceeding, the committee's
+  packages as the case team reads R2, every capability false and so no form, with the legal review and the authority's
+  decision. The packets R2 names open on the case's own packet page (`/cases/{id}/proceedings/packets/{packetId}`). On
+  a restricted, active case the case's owner, its Restricted Case Authority, gets a link on each adopted package with
+  no review open in its round to `/cases/{id}/proceedings/legal-review-approval/{packageId}`, and the RESTRICTED_APPROVAL
+  row on a package in My Work (2045) opens the same page. The page finds the package through the case, so an id from
+  another case is the same 404, then reads L2 for the approval: NOT_FOUND or FORBIDDEN is the 404, and any other
+  refusal is said in words (the case not restricted, an approval already waiting, the case past closure).
+- **Confirmation and refusals.** Seven new server actions run seven commands, and each asks first with what changes,
+  whether it can be undone, who is affected and who is told. A refused command is recorded as `COMMAND_DENIED` with
+  the command and the outcome only, never a reason, opinion, source reference or condition typed.
+- **Not in this change.** The corrective actions a superseded decision freezes and their dispositions (P12-3b, 2096,
+  ADR-058); the secretary's sanction extract (P12-5); names in DISPLAY_NAME mode outside packets, until the owner
+  answers the DEC-02 card.
+- **Tests.** Unit: 61 new (schemas, the service, the gateway's mapping, the labels with every refusal code in both
+  languages, and the routes). `tests/integration/legal-reviews.spec.ts` (4): the secretary asks from L2's choices, and
+  the reviewer opens the request, reads the packet and gives an opinion and then a later one; the secretary submits
+  and records the CEO's decision with its sources and a condition, the case team reads it with every capability false,
+  and the reviewer loses the request once the authority decided; anyone else gets the uniform not-found, with
+  `ACCESS_DENIED` or `COMMAND_DENIED` recorded; on a restricted case the request waits for the owner's approval and then
+  takes exactly its reviewer, without its reason. `tests/e2e/legal-reviews.spec.ts` (6; Arabic and English, the
+  reviewer and the case team on a 390 px phone): asking from the package's card; the reviewer from My Work through
+  the packet to the opinion; the submission and the CEO's decision, read from the case; the restricted case's approval
+  from the case; and the 404s for the case team, a member, the reviewer outside their request, another holder of the
+  opinion permission, a platform administrator and forged ids. `tests/accessibility/legal-reviews.spec.ts` (6): axe at
+  1280 and 390 px and no sideways scroll at 1280, 390 and 320 px, with every disclosure open, on each page and each
+  confirmation, in both languages.
 
 ## Known limitations
 
@@ -192,7 +273,18 @@ reviewer and scope (ruling 2) and the counts a re-decision would supersede (ruli
   `api.record_authority_decision` do not check the proceeding's status. The page offers less than the commands accept,
   never more: a test pins that the secretary may still record a decision the page no longer shows. CDF-226 (2120)
   narrows the committee's own package commands; whether the authority's half should stay open on a closed proceeding
-  is for the coordinator.
+  is for the coordinator. Until then the pages follow R2: once the proceeding is closed, the proceeding's page shows
+  the secretary, who is not on the case team, no package, and the ask and record pages are the 404, so an authority's
+  decision that arrives after the proceeding closed cannot be recorded from the product.
+- **An approval waiting to be used.** No read model gives the case an unused approval, so the case owner's link stays
+  on the package while one waits; the approval page then says that an approved review of the round is already waiting
+  to be sent. The committee's ask page is where it is used.
+- **The reviewer's page ends with the decision.** With `PURPOSE_ACCESS_GRACE_DAYS` at its default of 0, a reviewer
+  who does not sit on the committee loses the request and its packet as soon as the authority decides (AMB-119). The
+  request stays on the committee's and the case's pages.
+- **Reads from the case.** The Proceedings tab reads R2 once for each of the case's Investigation Committee
+  proceedings, so each opening by the case team records `COMMITTEE_ITEMS_VIEWED` with counts only, as the committee's
+  page does.
 - **Two authorities in a replacement round** (CDF-228): the read model mirrors the record command as it stands.
 - **Answers are for now.** A flag can turn false between reading and submitting (a conflict upheld, an approval
   used, another authority's decision); the command checks again and the page shows its refusal.
