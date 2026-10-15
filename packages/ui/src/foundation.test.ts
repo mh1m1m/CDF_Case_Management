@@ -8,10 +8,15 @@ import {
   FORM_STATUSES,
   INTERVIEW_STATUSES,
   LEGAL_HOLD_REQUEST_STATUSES,
+  MEETING_CONFLICT_CONCERN_STATUSES,
+  MEETING_STATUSES,
+  MINUTES_STATUSES,
   RECORDS_STATES,
   REPORT_STATUSES,
+  VOTE_ITEM_STATUSES,
 } from "@cdf/contracts";
 import { describe, expect, it } from "vitest";
+import { CDFDescriptionList } from "./components";
 import { CDFDecisionPanel } from "./decision-panel";
 import { CDFDateTime, CDFIdentifier, CDFMeta, CDFRecordDate } from "./identifier";
 import {
@@ -33,6 +38,10 @@ describe("status registry", () => {
       ["evidenceVersion", EVIDENCE_VERSION_STATUSES],
       ["records", RECORDS_STATES],
       ["holdRequest", LEGAL_HOLD_REQUEST_STATUSES],
+      ["meeting", MEETING_STATUSES],
+      ["voteItem", VOTE_ITEM_STATUSES],
+      ["minutes", MINUTES_STATUSES],
+      ["concern", MEETING_CONFLICT_CONCERN_STATUSES],
     ];
     for (const [domain, codes] of domains)
       expect(Object.keys(STATUS_TONES[domain]).sort(), domain).toEqual([...codes].sort());
@@ -111,6 +120,16 @@ describe("bidi-safe identifiers", () => {
     );
     const ar = renderToStaticMarkup(h(CDFRecordDate, { value: "2026-10-13T11:05:00.000Z", locale: "ar" }));
     expect(ar).toContain('<span data-part="hijri" class="whitespace-nowrap">2 جمادى الأولى 1448هـ</span>');
+  });
+
+  it("stacks a description list in a narrow column, so a formal date never pushes past it", () => {
+    const items = [{ term: "Generated", value: "13 October 2026 (2 Jumada I 1448H)" }];
+    expect(renderToStaticMarkup(h(CDFDescriptionList, { items }))).toContain(
+      "sm:grid-cols-[max-content_1fr]",
+    );
+    expect(renderToStaticMarkup(h(CDFDescriptionList, { items, stacked: true }))).not.toContain(
+      "grid-cols-[",
+    );
   });
 
   it("isolates every part of a metadata line, and hides the separators", () => {

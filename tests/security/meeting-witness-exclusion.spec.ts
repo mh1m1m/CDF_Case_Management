@@ -7,6 +7,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { USERS, caseId, ownerScenario, type Scenario } from "../support/db";
 import { IC_SEATS, REASON, committeeIds, openWithPresent, scheduleMeeting, seat } from "../support/committee";
+import { concludeProceedings } from "../support/closure";
 
 const EXCLUSION = "Synthetic: unique-exclusion-marker-2010, the witness approached a member.";
 
@@ -218,10 +219,10 @@ describe("excluding a witness from a meeting (migration 2010, P11-G4, ADR-039)",
       await s.tx`select api.close_meeting(${f.meeting}, ${REASON})`;
       await s.expectError("CDF_CONFLICT:MEETING_NOT_ACTIVE", () => exclude(s, w2));
 
-      // Nor does a meeting whose case is no longer active.
+      // Nor does a meeting whose case is no longer active (it closes with no proceeding open: CON-022, migration 2060).
       const g = await another(s, f.committeeProceeding);
       const w3 = await invite(s, g, USERS.financeEmployee);
-      await s.as("caseManager");
+      await concludeProceedings(s, caseB);
       await s.tx`select api.transition_case(${caseB}, 'SCREEN_OUT', ${REASON})`;
       await s.as("committeeSecretary");
       await s.expectError("CDF_CONFLICT:CASE_NOT_ACTIVE", () => exclude(s, w3));

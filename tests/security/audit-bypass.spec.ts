@@ -17,6 +17,8 @@ import {
 } from "../support/db";
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 import { preliminaryReferral, unseatDemoSeats } from "../support/committee";
+import { setClosureAuthority } from "../support/closure";
+import { setPreliminaryCorrectiveTypes } from "../support/preliminary";
 import {
   clearAsIs,
   defenceNotice,
@@ -83,6 +85,10 @@ const NOT_STATE_CHANGING = new Set([
   // Direct referral and preliminary review (migration 1880): the caller's next actions and approval queue.
   "referral_available_actions",
   "preliminary_approval_queue",
+  // Corrective action from preliminary review (migration 2070): the recommendation's proposals and capability flags.
+  "preliminary_corrective_view",
+  // Raised case conflicts (migration 2080): the caller's readable concerns and capability flags.
+  "case_conflict_concerns",
   // Committee meetings (migration 1890): who has voted, and choices only after close.
   "vote_item_status",
   // Purpose read models of a meeting and its minutes (migration 2030 section 4): reads, like vote_item_status.
@@ -124,6 +130,9 @@ const NOT_STATE_CHANGING = new Set([
   "open_defence_packet_item",
   "sanction_extract_view",
   "my_sanction_extract_approvals",
+  // Migration 2060 (ADR-042): what a case viewer reads of closure (closures, requests; blockers and reopening requests
+  // only for those who may act on them). Not audited: the closure and reopening commands are.
+  "case_closure_view",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -306,6 +315,22 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "decide_conflict",
         actor: "caseManager",
         run: (s) => s.tx`select api.decide_conflict(${ids.conflict!}, 'CONFLICT_CLEARED', ${REASON})`,
+      },
+      // P11-G7 (migration 2080): case B's investigator raises a conflict about the GRC deputy; the case manager
+      // dismisses it (an upheld one would end the deputy's purposes on case B).
+      {
+        fn: "raise_case_conflict",
+        actor: "investigatorB",
+        run: async (s) =>
+          (ids.caseConflict = await one(
+            s,
+            s.tx`select api.raise_case_conflict(${caseB}, ${USERS.grcDeputy}, 'Synthetic: audit walk concern.') as id`,
+          )),
+      },
+      {
+        fn: "decide_case_conflict",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.decide_case_conflict(${ids.caseConflict!}, 'DISMISSED', ${REASON})`,
       },
       {
         fn: "reply_to_reporter",
@@ -1212,7 +1237,8 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "committeeSecretary",
         run: async (s) => {
           // Fixture: a deputy chair, an alternate member and an alternate secretary appointed after the referral (none
-          // sits on the Grievance Committee below, so its firewall is unaffected).
+          // sits on the Grievance Committee below, so its firewall is unaffected). The alternate is not case A's lead
+          // investigator: since migration 2080 (AMB-053) the amendment refuses a member who investigated the case.
           await s.as("platformAdmin");
           const deputy = await one(
             s,
@@ -1220,7 +1246,7 @@ describe("every state-changing command writes its audit event in the same transa
           );
           const alternate = await one(
             s,
-            s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.lead}, 'ALTERNATE_MEMBER', now(), null, 'DEMO-APPT-05') as id`,
+            s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.triage}, 'ALTERNATE_MEMBER', now(), null, 'DEMO-APPT-05') as id`,
           );
           await s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.grcDeputy}, 'ALTERNATE_SECRETARY', now(), null, 'DEMO-APPT-06')`;
           await s.as("committeeSecretary");
@@ -1244,7 +1270,7 @@ describe("every state-changing command writes its audit event in the same transa
             ["m2Chair", USERS.committeeChair],
             ["m2Member", USERS.committee],
             ["m2Deputy", USERS.investigatorB],
-            ["m2Alternate", USERS.lead],
+            ["m2Alternate", USERS.triage],
           ] as const) {
             ids[key] = rows.find((r) => r.user_id === user)!.id;
           }
@@ -1279,7 +1305,7 @@ describe("every state-changing command writes its audit event in the same transa
             ["committeeChair", "m2Chair"],
             ["committee", "m2Member"],
             ["investigatorB", "m2Deputy"],
-            ["lead", "m2Alternate"],
+            ["triage", "m2Alternate"],
           ] as const) {
             await s.as(key);
             await s.tx`select api.declare_meeting_conflict(${ids[seatKey]!}, 'NO_CONFLICT', null)`;
@@ -1354,7 +1380,7 @@ describe("every state-changing command writes its audit event in the same transa
       },
       {
         fn: "recuse_for_conflict",
-        actor: "lead",
+        actor: "triage",
         run: async (s) => {
           await s.tx`select api.cast_vote(${ids.m2Item!}, 'APPROVE', null)`;
           await s.as("grcDeputy");
@@ -1365,7 +1391,7 @@ describe("every state-changing command writes its audit event in the same transa
             s,
             s.tx`select api.open_vote_item(${ids.meeting2!}, 'OTHER', null, 'Walk second emergency item (synthetic)') as id`,
           );
-          await s.as("lead");
+          await s.as("triage");
           return s.tx`select api.recuse_for_conflict(${ids.m2Item2!}, 'Synthetic: related to a party.')`;
         },
       },
@@ -1614,6 +1640,65 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.approve_preliminary_recommendation(${ids.recommendation!}, 'APPROVE', null, null)`,
       },
+      // DEC-F41 (migration 2070): a corrective action from preliminary review. A second recommendation on case A keeps
+      // the matter with Compliance (NOT_SERIOUS); its preparer proposes a corrective action under a synthetic
+      // PRELIMINARY_CORRECTIVE_ACTION_TYPES; once endorsed and approved (fixtures), a corrective-action manager records
+      // the required authority's decision and opens the action.
+      {
+        fn: "propose_preliminary_corrective_action",
+        actor: "investigatorA",
+        run: async (s) => {
+          ids.correctiveRecommendation = await apart(
+            s,
+            async () => {
+              await setPreliminaryCorrectiveTypes(s as OwnerScenario, "CORRECTIVE_ACTION");
+              await s.as("investigatorA");
+              return one(
+                s,
+                s.tx`select api.prepare_preliminary_recommendation(${caseA}, 'NOT_SERIOUS',
+                  'Synthetic: the walk recommendation keeps the matter with Compliance.') as id`,
+              );
+            },
+            "investigatorA",
+          );
+          return (ids.preliminaryProposal = await one(
+            s,
+            s.tx`select api.propose_preliminary_corrective_action(${ids.correctiveRecommendation}, 'CORRECTIVE_ACTION',
+              'Synthetic: the walk corrective-action proposal.') as id`,
+          ));
+        },
+      },
+      {
+        fn: "record_preliminary_authority_decision",
+        actor: "caseManager",
+        run: async (s) => {
+          const authority = await apart(
+            s,
+            async () => {
+              await s.as("grcDirector");
+              await s.tx`select api.review_preliminary_recommendation(${ids.correctiveRecommendation!}, 'ENDORSE', null, null)`;
+              await s.as("grcSectorHead");
+              await s.tx`select api.approve_preliminary_recommendation(${ids.correctiveRecommendation!}, 'APPROVE', null, null)`;
+              await s.as("caseManager");
+              return one(
+                s,
+                s.tx`select authority_type from decision.preliminary_authority_requirement
+                     where proposal_id = ${ids.preliminaryProposal!}`,
+              );
+            },
+            "caseManager",
+          );
+          return s.tx`select api.record_preliminary_authority_decision(${ids.preliminaryProposal!}, ${authority},
+            'APPROVED', now(), 'Delegated executive (synthetic)', 'MEMO-WALK-2070', ${REASON})`;
+        },
+      },
+      {
+        fn: "open_preliminary_corrective_action",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.open_preliminary_corrective_action(${ids.preliminaryProposal!}, 'Synthetic: walk preliminary action',
+            'Synthetic: add a second approver for the walk.', ${USERS.financeEmployee}, current_date + 30)`,
+      },
       // Forms engine (CDF-50): an investigation form through save, prepare and review (its final state), a
       // committee form through review and approval by three different people, a draft withdrawn, and the
       // audited open of an instance.
@@ -1726,10 +1811,42 @@ describe("every state-changing command writes its audit event in the same transa
       },
       // Records lifecycle on the walk case (ADR-013): close, archive, hold and release, class, eligibility,
       // request, approval by someone else, logical execution. The class fixture is added before the walk.
+      // Closure (migration 2060, DEC-F40) with a synthetic closure authority (GRC_DIRECTOR; the setting is
+      // SOURCE_REQUIRED and migration-managed, so the owner fixture sets it): the case manager's closure is a request
+      // the GRC director approves. A reopening request is then rejected, so the case stays closed for the records steps.
       {
-        fn: "transition_case",
+        fn: "close_case",
         actor: "caseManager",
-        run: (s) => s.tx`select api.transition_case(${ids.case!}, 'SCREEN_OUT', ${REASON})`,
+        run: async (s) => {
+          await apart(s, () => setClosureAuthority(s as OwnerScenario, "GRC_DIRECTOR"), "caseManager");
+          return s.tx`select api.close_case(${ids.case!}, 'NO_ACTION', ${REASON})`;
+        },
+      },
+      {
+        fn: "decide_case_closure",
+        actor: "grcDirector",
+        run: async (s) => {
+          const request = await one(
+            s,
+            s.tx`select id from case_mgmt.case_closure_request where case_id = ${ids.case!} and status = 'AWAITING_APPROVAL'`,
+          );
+          return s.tx`select api.decide_case_closure(${request}, 'APPROVE', ${REASON})`;
+        },
+      },
+      {
+        fn: "request_case_reopening",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.reopening = await one(
+            s,
+            s.tx`select api.request_case_reopening(${ids.case!}, 'NEW_EVIDENCE', ${REASON},
+              'Synthetic: a further extract received after closure.', 'DEMO-WALK-REF', null) as id`,
+          )),
+      },
+      {
+        fn: "decide_case_reopening",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.decide_case_reopening(${ids.reopening!}, 'REJECT', ${REASON})`,
       },
       {
         fn: "transition_case",
@@ -2444,9 +2561,11 @@ describe("every state-changing command writes its audit event in the same transa
           s.tx`select api.record_custody_exception(${stored.kept!.evidenceId}, ${stored.kept!.versionId},
             'EXTERNAL_TRANSFER', ${REASON}, 'EXT-DEMO-WALK')`,
       },
+      // The case manager makes the redacted rendition; the lead, who neither chose the item nor made the rendition,
+      // clears it (CDF-217(1), migration 2060).
       {
         fn: "register_evidence_rendition",
-        actor: "lead",
+        actor: "caseManager",
         run: async (s) => {
           const [r] = await s.tx<{ v: string }[]>`
             select o_version_id as v from api.register_evidence_rendition(${stored.kept!.versionId}, 'walk-redacted.pdf',
@@ -2455,7 +2574,7 @@ describe("every state-changing command writes its audit event in the same transa
           await apart(
             s,
             () => s.tx`select api.complete_evidence_version(${ids.rendition!}, 'CLEAN', 'walk-scanner')`,
-            "lead",
+            "caseManager",
           );
           return r;
         },
@@ -2514,12 +2633,13 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "caseManager",
         run: (s) => s.tx`select api.withdraw_defence_packet(${ids.defencePacket!}, ${REASON})`,
       },
-      // A restricted case's packet (case 0003): its Restricted Case Authority decides it.
+      // A restricted case's packet (case 0003): its Restricted Case Authority reads what it approves (CDF-218(1),
+      // migration 2060), then decides it.
       {
-        fn: "decide_restricted_defence_packet",
+        fn: "defence_packet_approval_view",
         actor: "grcDirector",
         run: async (s) => {
-          const packet = await apart(
+          ids.restrictedPacket = await apart(
             s,
             async () => {
               const exec = await caseId("0003");
@@ -2543,8 +2663,14 @@ describe("every state-changing command writes its audit event in the same transa
             },
             "grcDirector",
           );
-          return s.tx`select api.decide_restricted_defence_packet(${packet}, 'APPROVE', ${REASON})`;
+          return s.tx`select api.defence_packet_approval_view(${ids.restrictedPacket!})`;
         },
+      },
+      {
+        fn: "decide_restricted_defence_packet",
+        actor: "grcDirector",
+        run: (s) =>
+          s.tx`select api.decide_restricted_defence_packet(${ids.restrictedPacket!}, 'APPROVE', ${REASON})`,
       },
       // The prior-sanctions extract: the committee secretary asks for the walk subject's prior final sanctions.
       {
@@ -2555,6 +2681,18 @@ describe("every state-changing command writes its audit event in the same transa
             s,
             s.tx`select api.request_sanction_extract(${ids.committeeProceeding!}, ${ids.subject!}, ${REASON}) as id`,
           )),
+      },
+      // The package-building read models (DEC-02, migration 2060): the secretary's choices and the items in front of
+      // the committee, both audited with counts.
+      {
+        fn: "committee_scope_choices",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.committee_scope_choices(${ids.committeeProceeding!})`,
+      },
+      {
+        fn: "committee_items_view",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.committee_items_view(${ids.committeeProceeding!})`,
       },
       // A row from the restricted case 0003 awaiting its authority (owner fixture: the walk has no final sanction there).
       {
@@ -2763,6 +2901,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_bcp_import",
       "authz.can_view_bcp_provenance",
       "authz.can_view_case",
+      "authz.can_view_case_conflict_concern",
       "authz.can_view_case_content",
       "authz.can_view_case_metadata",
       "authz.can_view_committee_proceeding",

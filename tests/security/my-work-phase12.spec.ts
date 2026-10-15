@@ -1147,7 +1147,8 @@ describe("api.committee_referral_preview: what a referral would copy, as counts 
     await ownerScenario(async (s) => {
       await seat(s, ic, [...IC_SEATS, ["investigatorB", "ALTERNATE_MEMBER"]]);
       // legalB has a declared conflict on the case (fixture as committee-access.spec): still seated, not cleared, and
-      // copied as excluded.
+      // copied as excluded. investigatorB, case B's investigator, sits as an alternate: since migration 2080 (AMB-053)
+      // a seat that judges is not cleared for a case its holder investigated, so is copied as excluded too.
       await s.asOwner();
       await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration)
                  values (${caseB}, ${USERS.legalB}, 'CONFLICT_DECLARED', 'Synthetic conflict')`;
@@ -1161,8 +1162,8 @@ describe("api.committee_referral_preview: what a referral would copy, as counts 
           { seat: "ALTERNATE_MEMBER", count: 1 },
         ],
         voting: 3,
-        cleared: 5,
-        not_cleared: 1,
+        cleared: 4,
+        not_cleared: 2,
         firewall_restricted: 0,
       });
       // AGENT-09 (3): the result and each seat element have exactly these keys; nothing per seat but its count.

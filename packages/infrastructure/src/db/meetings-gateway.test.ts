@@ -1,0 +1,345 @@
+// The meeting read models' mapping (Phase 12 P12-2a; ADR-054). The gateway renames keys and decides nothing, so these
+// pin the three things a screen relies on: the concern-only view stays concern-only, a capability the database left
+// out or null reads as false (fail closed), and an individual choice is never carried (AMB-083, rule 5).
+import { describe, expect, it } from "vitest";
+import { toMeetingView, toMinutesView, toVoteItemProgress } from "./meetings-gateway";
+
+type RawMeeting = Parameters<typeof toMeetingView>[0];
+type RawMinutes = Parameters<typeof toMinutesView>[0];
+type RawStatus = Parameters<typeof toVoteItemProgress>[0];
+
+const M = "33333333-3333-4333-8333-333333333333";
+const P = "55555555-5555-4555-8555-555555555555";
+const U = "a0000000-0000-4000-8000-000000000003";
+const AT = "2026-10-14 09:30:00+03";
+
+const concern = {
+  concern_id: "66666666-6666-4666-8666-666666666666",
+  participant_id: P,
+  raised_by: U,
+  raised_as: "MEMBER",
+  reason: "Synthetic: a concern.",
+  raised_at: AT,
+  status: "OPEN",
+  decided_by: null,
+  decided_as: null,
+  decision_reason: null,
+  decided_at: null,
+  reversal: null,
+  capabilities: { may_decide: true, may_reverse: null },
+} as const;
+
+describe("meeting read model mapping", () => {
+  it("the concern-only view carries only the meeting id, status, case reference and concerns", () => {
+    const raw = {
+      meeting_id: M,
+      status: "OPEN",
+      case: { case_id: null, case_number: null },
+      concerns: [concern],
+    } as unknown as RawMeeting;
+    expect(toMeetingView(raw)).toEqual({
+      view: "CONCERNS_ONLY",
+      meetingId: M,
+      status: "OPEN",
+      case: { caseId: null, caseNumber: null },
+      concerns: [
+        {
+          concernId: concern.concern_id,
+          participantId: P,
+          raisedBy: U,
+          raisedAs: "MEMBER",
+          reason: "Synthetic: a concern.",
+          raisedAt: "2026-10-14T06:30:00.000Z",
+          status: "OPEN",
+          decidedBy: null,
+          decidedAs: null,
+          decisionReason: null,
+          decidedAt: null,
+          reversal: null,
+          capabilities: { mayDecide: true, mayReverse: false },
+        },
+      ],
+    });
+  });
+
+  it("a full view's missing parts stay null, and missing or null capabilities are false", () => {
+    const raw = {
+      meeting_id: M,
+      committee_proceeding_id: M,
+      committee: { committee_id: M, code: "IC", kind: "INVESTIGATION" },
+      case: null,
+      logistics: {
+        sequence_no: 2,
+        purpose: "DELIBERATION",
+        mode: "IN_PERSON",
+        provider: "MANUAL",
+        status: "SCHEDULED",
+        location: null,
+        online_url: null,
+        scheduled_start: AT,
+        scheduled_end: null,
+        is_emergency: null,
+        opened_at: null,
+        closed_at: null,
+      },
+      me: null,
+      roster: null,
+      deliberation: null,
+      concerns: null,
+      acting_roles: null,
+      minutes: null,
+      capabilities: { can_manage: true, may_open: null },
+    } as unknown as RawMeeting;
+    const v = toMeetingView(raw);
+    expect(v.view).toBe("FULL");
+    if (v.view !== "FULL") return;
+    expect(v.case).toEqual({ caseId: null, caseNumber: null });
+    expect(v.logistics.isEmergency).toBe(false);
+    expect(v.logistics.scheduledStart).toBe("2026-10-14T06:30:00.000Z");
+    expect([v.me, v.roster, v.deliberation]).toEqual([null, null, null]);
+    expect([v.concerns, v.actingRoles, v.minutes]).toEqual([[], [], []]);
+    expect(v.capabilities).toEqual({
+      canManage: true,
+      mayOpen: false,
+      mayClose: false,
+      mayCancel: false,
+      mayOpenVote: false,
+      mayGenerateMinutes: false,
+      mayRaiseConcern: false,
+      mayDeclareConflict: false,
+      mayDeclareNoConflict: false,
+      mayAcknowledgeConfidentiality: false,
+    });
+  });
+
+  it("roster rows and vote items keep booleans only, and record_vote_for is a list", () => {
+    const raw = {
+      meeting_id: M,
+      committee_proceeding_id: M,
+      committee: { committee_id: M, code: "IC", kind: "INVESTIGATION" },
+      case: { case_id: M, case_number: "CDF-DEMO-2026-0002" },
+      logistics: {
+        sequence_no: 1,
+        purpose: "DELIBERATION",
+        mode: "IN_PERSON",
+        provider: "MANUAL",
+        status: "OPEN",
+        location: "Room 1 (synthetic)",
+        online_url: null,
+        scheduled_start: AT,
+        scheduled_end: AT,
+        is_emergency: false,
+        opened_at: AT,
+        closed_at: null,
+      },
+      me: null,
+      roster: [
+        {
+          participant_id: P,
+          participant_kind: "MEMBER",
+          user_id: U,
+          person_id: null,
+          display_name: "Member Alpha",
+          display_name_ar: null,
+          seat: "MEMBER",
+          invitee_role: null,
+          is_voting: true,
+          requires_coi: true,
+          coi_status: "NO_CONFLICT",
+          attendance: "PRESENT",
+          capabilities: null,
+        },
+      ],
+      deliberation: {
+        ballot_secrecy: "SECRET_BALLOT",
+        quorum: { quorum_type: "MAJORITY_ELIGIBLE", eligible: 3, present: 2, required: 2 },
+        vote_items: [
+          {
+            vote_item_id: M,
+            sequence_no: 1,
+            target_type: "OTHER",
+            finding_id: null,
+            package_id: null,
+            recommendation_item_id: null,
+            package_round: null,
+            title: "Synthetic business",
+            status: "OPEN",
+            result: null,
+            decided_by_casting_vote: null,
+            opened_at: AT,
+            closed_at: null,
+            tally: null,
+            i_have_voted: null,
+            i_have_noted: true,
+            record_vote_for: null,
+            capabilities: { may_vote: true },
+          },
+        ],
+        witness_exclusions: null,
+      },
+      concerns: [],
+      acting_roles: [],
+      minutes: [],
+      capabilities: {},
+    } as unknown as RawMeeting;
+    const v = toMeetingView(raw);
+    if (v.view !== "FULL") throw new Error("expected the full view");
+    expect(v.case).toEqual({ caseId: M, caseNumber: "CDF-DEMO-2026-0002" });
+    expect(v.roster?.[0]?.capabilities).toEqual({
+      mayRecordPresent: false,
+      mayRecordAbsent: false,
+      mayRecordExcusedConflict: false,
+      mayRecordExcusedAbsence: false,
+      mayRaiseConcern: false,
+    });
+    const item = v.deliberation?.voteItems[0];
+    expect(item).toMatchObject({ iHaveVoted: false, iHaveNoted: true, recordVoteFor: [], tally: null });
+    expect(item?.capabilities).toEqual({
+      mayVote: true,
+      mayClose: false,
+      mayCastCastingVote: false,
+      mayRevise: false,
+      mayRecuseForConflict: false,
+      mayRecordNote: false,
+    });
+    expect(v.deliberation?.witnessExclusions).toEqual([]);
+  });
+
+  it("vote progress says who has voted and never carries a choice, even where the read model returns one", () => {
+    const raw = {
+      vote_item_id: M,
+      status: "CLOSED",
+      result: "APPROVED",
+      ballot_secrecy: "COMMITTEE_AFTER_CLOSE",
+      casting_vote: null,
+      voters: [
+        {
+          participant_id: P,
+          user_id: U,
+          seat: "MEMBER",
+          activated_alternate: false,
+          replaced: null,
+          has_voted: true,
+          voted_at: AT,
+          source: "SELF",
+          choice: "APPROVE",
+        },
+      ],
+      notes: [{ participant_id: P, note: "Synthetic: a note." }],
+    } as unknown as RawStatus;
+    const p = toVoteItemProgress(raw);
+    expect(p).toEqual({
+      voteItemId: M,
+      status: "CLOSED",
+      ballotSecrecy: "COMMITTEE_AFTER_CLOSE",
+      voters: [
+        {
+          participantId: P,
+          userId: U,
+          seat: "MEMBER",
+          activatedAlternate: false,
+          replaced: false,
+          hasVoted: true,
+          votedAt: "2026-10-14T06:30:00.000Z",
+          source: "SELF",
+        },
+      ],
+    });
+    expect(JSON.stringify(p)).not.toMatch(/APPROVE|Synthetic: a note/);
+  });
+
+  it("minutes keep reviews and rulings null for a reader outside the deliberation, and tallies come from the snapshot", () => {
+    const raw = {
+      minutes_id: M,
+      meeting_id: M,
+      version_no: 1,
+      status: "APPROVED",
+      narrative: "Synthetic minutes.",
+      snapshot: {
+        meeting: {
+          id: M,
+          sequence_no: 1,
+          purpose: "DELIBERATION",
+          mode: "IN_PERSON",
+          opened_at: AT,
+          closed_at: AT,
+          is_emergency: false,
+        },
+        participants: [
+          {
+            participant_id: P,
+            kind: "MEMBER",
+            user_id: U,
+            person_id: null,
+            seat: "MEMBER",
+            invitee_role: null,
+            is_voting: true,
+            coi_status: "NO_CONFLICT",
+            attendance: "PRESENT",
+          },
+        ],
+        acting_roles: [],
+        vote_items: [
+          {
+            vote_item_id: M,
+            sequence_no: 1,
+            target_type: "OTHER",
+            finding_id: null,
+            title: "Synthetic business",
+            result: "APPROVED",
+            decided_by_casting_vote: false,
+            eligible: 3,
+            present: 3,
+            quorum_required: 2,
+            approve: 2,
+            reject: 1,
+            abstain: 0,
+            recused: 0,
+            absent: 0,
+            unable: 0,
+            excluded: 0,
+          },
+        ],
+        annexed_notes: [{ vote_item_id: M, participant_id: null, note: "Synthetic: an anonymous note." }],
+      },
+      reviewer_count: 0,
+      review_business_days: 5,
+      review_due_at: AT,
+      deemed_approval_enabled: false,
+      reminder_sent_at: null,
+      generated_at: AT,
+      finalised_at: AT,
+      case: null,
+      meeting: null,
+      reviews: null,
+      objection_rulings: null,
+      i_have_reviewed: null,
+      capabilities: null,
+    } as unknown as RawMinutes;
+    const v = toMinutesView(raw);
+    expect([v.meeting, v.reviews, v.objectionRulings, v.iHaveReviewed]).toEqual([null, null, null, null]);
+    expect(v.capabilities).toEqual({
+      mayReview: false,
+      mayRemind: false,
+      mayApplyDeemedApproval: false,
+      mayOverruleObjection: false,
+    });
+    expect(v.snapshot.voteItems[0]?.tally).toEqual({
+      eligible: 3,
+      present: 3,
+      quorumRequired: 2,
+      approve: 2,
+      reject: 1,
+      abstain: 0,
+      recused: 0,
+      absent: 0,
+      unable: 0,
+      excluded: 0,
+    });
+    expect(v.snapshot.annexedNotes).toEqual([
+      { voteItemId: M, participantId: null, note: "Synthetic: an anonymous note." },
+    ]);
+    // The snapshot's case person reference is not carried to the screen.
+    expect(JSON.stringify(v.snapshot.participants)).not.toContain("personId");
+  });
+});

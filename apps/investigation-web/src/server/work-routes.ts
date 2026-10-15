@@ -38,6 +38,10 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
       return "OVERSIGHT";
     case "admin":
       return "ADMINISTRATION";
+    // A meeting and its minutes are the committee's work (Phase 12 P12-2a); the area lists them from S5.
+    case "meetings":
+    case "minutes":
+      return "COMMITTEE";
     default:
       return undefined;
   }
@@ -46,12 +50,12 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
 /**
  * Purpose roots whose pages exist in this app (UX redesign S4). The database writes a notification's link (N18) and
  * a My Work row's target (2045); the inbox and My Work link to them only once the page has shipped, so nobody lands
- * on a missing page. The purpose routes of Phase 12 (committees, meetings, minutes, legal reviews, my defence,
- * grievances, exports, actions, continuity imports, and since migration 2040 referrals and preliminary reviews) join
- * this list as each one ships, under the root notify.deep_link writes, and that page re-checks access in the
- * database.
+ * on a missing page. The purpose routes of Phase 12 join this list as each one ships, under the root
+ * notify.deep_link writes, and that page re-checks access in the database: meetings and minutes since P12-2a
+ * (ADR-054); committees, legal reviews, my defence, grievances, exports, actions, continuity imports, referrals and
+ * preliminary reviews to come.
  */
-export const LIVE_PURPOSE_ROOTS: readonly string[] = [];
+export const LIVE_PURPOSE_ROOTS: readonly string[] = ["/meetings", "/minutes"];
 
 /**
  * The purpose page of each Phase 12 target (plan §3 routes; P12-2 to P12-6), by the root `notify.deep_link` writes.

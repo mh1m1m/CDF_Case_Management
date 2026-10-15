@@ -72,7 +72,7 @@ Two tables, a column, constraints, a trigger and functions in PostgreSQL; they m
 
 1. Who decides a conflict raised by another participant: the chair (the default here), the secretary, or the committee? This is configured per rule set, and no command sets it until the owner answers.
 2. ~~Is the subject of a raised conflict told of it, and heard, before the decision?~~ **Answered by DEC-F05 (owner, 2026-10-13):** no automatic entitlement to a separate hearing; the decider may ask for clarification or evidence where necessary; no mandatory hearing workflow unless governing policy requires one. As built, the subject does not read the concern.
-3. On the case itself (gap P11-G7), may someone raise another person's conflict, and does an upheld one suspend that person's case access? This is an access-model decision, so it is not built.
+3. ~~On the case itself (gap P11-G7), may someone raise another person's conflict, and does an upheld one suspend that person's case access?~~ **Answered by DEC-F38 (owner, 2026-10-13)** and built in migration 2080 (ADR-044): yes, and an upheld one suspends the person's purposes on the case, never their account.
 
 ## Requirements
 

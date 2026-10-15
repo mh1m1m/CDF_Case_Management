@@ -15,7 +15,43 @@ export type ConfirmAct =
   | "declareConflict"
   | "closeProceeding"
   | "referToCommittee"
-  | "approveRestrictedReferral";
+  | "approveRestrictedReferral"
+  // The committee's meeting and minutes (Phase 12 P12-2a, ADR-054).
+  | "openMeeting"
+  | "closeMeeting"
+  | "cancelMeeting"
+  | "declareMeetingConflict"
+  | "raiseMeetingConcern"
+  | "decideMeetingConcern"
+  | "reverseMeetingConcern"
+  | "openVoteItem"
+  | "castVote"
+  | "recuseForConflict"
+  | "recordVoteNote"
+  | "recordVoteForMember"
+  | "closeVoteItem"
+  | "castCastingVote"
+  | "generateMinutes"
+  | "reviewMinutes"
+  | "remindReviewers"
+  | "applyDeemedApproval"
+  | "overruleObjection";
+
+/** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
+const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
+  "openMeeting",
+  "raiseMeetingConcern",
+  "decideMeetingConcern",
+  "reverseMeetingConcern",
+  "openVoteItem",
+  "castVote",
+  "recordVoteNote",
+  "recordVoteForMember",
+  "castCastingVote",
+  "generateMinutes",
+  "reviewMinutes",
+  "remindReviewers",
+]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */
 const CASE_TRANSITIONS: Readonly<Record<string, ConfirmAct>> = {
@@ -44,6 +80,9 @@ export function confirmation(
   // "Who is told" only where the act's copy says it (Phase 12 consequence preview, ADR-030).
   const notifiedKey = `confirm.acts.${act}.notified`;
   const notified = t(notifiedKey as MessageKey);
+  // "Cancel" next to "Cancel interview" or "Cancel meeting" would be ambiguous, so those dialogs name what is kept.
+  const dismissKey = `confirm.acts.${act}.dismiss`;
+  const dismiss = t(dismissKey as MessageKey);
   return {
     title: part("title"),
     whatHappens: part("body"),
@@ -52,8 +91,8 @@ export function confirmation(
     ...(notified !== notifiedKey ? { notified } : {}),
     ...(facts?.length ? { facts } : {}),
     confirmLabel: actLabel(t, act),
-    // "Cancel" next to "Cancel interview" would be ambiguous, so that dialog says "Keep interview".
-    cancelLabel: act === "cancelInterview" ? part("dismiss") : t("confirm.cancel"),
+    cancelLabel: dismiss !== dismissKey ? dismiss : t("confirm.cancel"),
+    ...(FORWARD_ACTS.has(act) ? { tone: "primary" as const } : {}),
     labels: {
       whatHappens: t("confirm.whatHappens"),
       undo: t("confirm.canUndo"),

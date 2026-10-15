@@ -9,7 +9,7 @@ type P<K extends keyof CorrectiveActionGateway> = Parameters<CorrectiveActionGat
 interface ActionRow {
   id: string;
   case_id: string;
-  recommendation_item_id: string;
+  recommendation_item_id: string | null;
   action_type: CorrectiveActionType;
   sequence_no: number;
   title: string;

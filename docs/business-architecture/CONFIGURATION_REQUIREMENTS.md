@@ -1,6 +1,6 @@
 # Configuration Requirements
 
-> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)). Generated from one data set with its companion files, so counts agree across them.
+> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)); the built state of migration 2070 and the suites the 2060 closure tests landed in were added on 2026-10-15 ([CDF-223](https://linear.app/cdfcasemanagement/issue/CDF-223)). Generated from one data set with its companion files, so counts agree across them.
 
 All R3 rows (44), plus 57 settings that owner decisions or derivations name. Every setting below follows the same rules:
 

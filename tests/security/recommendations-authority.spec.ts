@@ -16,6 +16,7 @@ import {
   type UserKey,
 } from "../support/db";
 import { REASON, committeeIds, preliminaryReferral, seat } from "../support/committee";
+import { concludeProceedings, setClosureAuthority } from "../support/closure";
 import {
   DECISION_VOTERS,
   authorityRuleFor,
@@ -2641,21 +2642,26 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             await s.tx`select eligible, present from committee.quorum_state(${m!.id}, ${f.pkg}, 2)`,
           ).toEqual([{ eligible: 2, present: 2 }]);
           // The lead is offered no vote and casts none: not their own, not a recusal, not one written for them.
-          const mayVote = async (u: UserKey) => {
+          const offered = async (u: UserKey) => {
             await s.as(u);
             const [r] = await s.tx<
               {
                 v: {
                   deliberation: {
-                    vote_items: { vote_item_id: string; capabilities: { may_vote: boolean } }[];
+                    vote_items: {
+                      vote_item_id: string;
+                      capabilities: { may_vote: boolean; may_recuse_for_conflict: boolean };
+                    }[];
                   };
                 };
               }[]
             >`select api.meeting_view(${m!.id}) as v`;
-            return r!.v.deliberation.vote_items.find((i) => i.vote_item_id === vi!.id)!.capabilities.may_vote;
+            const c = r!.v.deliberation.vote_items.find((i) => i.vote_item_id === vi!.id)!.capabilities;
+            // may_recuse_for_conflict since 2065 (ADR-054).
+            return { vote: c.may_vote, recuse: c.may_recuse_for_conflict };
           };
-          expect(await mayVote("lead")).toBe(false);
-          expect(await mayVote("legal")).toBe(true);
+          expect(await offered("lead")).toEqual({ vote: false, recuse: false });
+          expect(await offered("legal")).toEqual({ vote: true, recuse: true });
           await s.as("lead");
           await s.expectError(
             "CDF_CONFLICT:EXCLUDED_BY_CONFLICT",
@@ -2692,6 +2698,60 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             select api.open_vote_item(${m!.id}, 'OTHER', null, 'Other business (synthetic)') as id`;
           await s.as("lead");
           await s.tx`select api.cast_vote(${other!.id}, 'APPROVE', null)`;
+        });
+      });
+
+      it("T-AMB-028: the secretary is offered no vote to record for an absent conflicted member on the re-vote, only on other business (migration 2065)", async () => {
+        await ownerScenario(async (s) => {
+          const { f } = await decidedByLead(s);
+          await upheldOnLead(s, f);
+          await s.as("committeeSecretary");
+          await resolve(s, f.sanction, "RE_VOTE");
+          await s.tx`select api.close_meeting(${f.meeting.meeting}, ${REASON})`;
+          const [m] = await s.tx<{ id: string }[]>`
+            select api.schedule_meeting(${f.meeting.committeeProceeding}, 'DELIBERATION', 'IN_PERSON',
+              'Meeting room (synthetic)', null, now() + interval '2 days', now() + interval '2 days 2 hours', ${REASON}) as id`;
+          const parts = await s.tx<{ id: string; user_id: string }[]>`
+            select id, user_id from committee.meeting_participant where meeting_id = ${m!.id}`;
+          const p = (u: UserKey) => parts.find((r) => r.user_id === USERS[u])!.id;
+          // The lead stays away; the chair and legal are present.
+          for (const u of ["committeeChair", "legal"] as const) {
+            await s.as(u);
+            await s.tx`select api.declare_meeting_conflict(${p(u)}, 'NO_CONFLICT', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.open_meeting(${m!.id}, ${REASON})`;
+          for (const u of ["committeeChair", "legal"] as const)
+            await s.tx`select api.record_attendance(${p(u)}, 'PRESENT')`;
+          await s.tx`select api.open_package_vote(${m!.id}, ${f.pkg})`;
+          const [vi] = await s.tx<{ id: string }[]>`
+            select id from committee.vote_item where package_id = ${f.pkg} and package_round = 2`;
+          const recordable = async (item: string) => {
+            await s.as("committeeSecretary");
+            const [r] = await s.tx<
+              { v: { deliberation: { vote_items: { vote_item_id: string; record_vote_for: string[] }[] } } }[]
+            >`select api.meeting_view(${m!.id}) as v`;
+            return r!.v.deliberation.vote_items.find((i) => i.vote_item_id === item)!.record_vote_for;
+          };
+          // DEC-AMB-013 on the secretary's path: the re-vote offers no vote to write for the lead, and the command
+          // refuses one.
+          expect(await recordable(vi!.id)).toEqual([]);
+          await s.expectError(
+            "CDF_CONFLICT:EXCLUDED_BY_CONFLICT",
+            (tx) => tx`select api.record_vote_for_member(${vi!.id}, ${p("lead")}, 'ABSENT', ${REASON}, null)`,
+          );
+          for (const u of ["committeeChair", "legal"] as const) {
+            await s.as(u);
+            await s.tx`select api.cast_vote(${vi!.id}, 'APPROVE', null)`;
+          }
+          await s.as("committeeSecretary");
+          await s.tx`select api.close_vote_item(${vi!.id}, null)`;
+          // Other business of the same meeting is not the package's: the lead's absence is recorded there.
+          const [other] = await s.tx<{ id: string }[]>`
+            select api.open_vote_item(${m!.id}, 'OTHER', null, 'Other business (synthetic)') as id`;
+          expect(await recordable(other!.id)).toEqual([p("lead")]);
+          await s.tx`select api.record_vote_for_member(${other!.id}, ${p("lead")}, 'ABSENT', ${REASON}, null)`;
+          expect(await recordable(other!.id)).toEqual([]);
         });
       });
 
@@ -3572,6 +3632,8 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           await s.tx`select api.submit_corrective_action_completion(${a1!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
           await s.as("caseManager");
           await s.tx`select api.verify_corrective_action(${a1!}, 'VERIFIED', null)`;
+          // No proceeding is left open (CON-022, migration 2060): the committee's work is concluded first.
+          await concludeProceedings(s, caseB);
           await closeCase(s);
           await s.asOwner();
           const [before] =
@@ -3584,8 +3646,8 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
             (tx) =>
               tx`select api.raise_meeting_conflict(${f.meeting.participant.lead!}, 'Synthetic: the lead is related.')`,
           );
-          // The validated conflict itself is written on the owner connection (validating it on a closed case belongs to
-          // migration 2060): a confirmed case conflict of the lead, whose vote decided round one.
+          // The validated conflict itself: a confirmed case conflict of the lead, whose vote decided round one, written as
+          // the case conflict process records it (fixture on the owner connection).
           await s.asOwner();
           await s.tx`update case_mgmt.conflict_check set is_current = false
                      where case_id = ${caseB} and user_id = ${USERS.lead} and is_current`;
@@ -3619,7 +3681,7 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
                  from decision.recommendation_package p where p.id = ${f.pkg}`,
           );
           // Nothing moved: the package is DECIDED in round one, its decision is not superseded and is unchanged, and
-          // the case stays CLOSED until the 2060 reopening.
+          // the case stays CLOSED until it is reopened.
           expect(await packageStatus(s, f.pkg)).toEqual({ status: "DECIDED", round_no: 1 });
           expect(await superseded(s, f.pkg)).toEqual([]);
           expect(await s.tx`select id from decision.conflict_remediation`).toEqual([]);
@@ -3628,6 +3690,116 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           ).toEqual([before]);
           expect(await s.tx`select records_state from case_mgmt.case_record where id = ${caseB}`).toEqual([
             { records_state: "CLOSED" },
+          ]);
+        });
+      });
+
+      it("T-AMB-131 (DEC-AMB-015 option A, migration 2060): a validated decisive conflict found after closure reopens the case only by the closure authority's approval; the authority decision is never edited", async () => {
+        await ownerScenario(async (s) => {
+          const {
+            f,
+            d1,
+            a: [a1],
+          } = await decidedWithActions(s, 1);
+          await s.as("financeEmployee");
+          await s.tx`select api.submit_corrective_action_completion(${a1!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
+          await s.as("caseManager");
+          await s.tx`select api.verify_corrective_action(${a1!}, 'VERIFIED', null)`;
+          await concludeProceedings(s, caseB);
+          await closeCase(s);
+          await s.asOwner();
+          const [before] =
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`;
+          /** A decided case conflict of `user`, as the case conflict process records it (owner fixture). */
+          const decided = async (user: UserKey, status = "CONFLICT_CONFIRMED") => {
+            await s.asOwner();
+            await s.tx`update case_mgmt.conflict_check set is_current = false
+                       where case_id = ${caseB} and user_id = ${USERS[user]} and is_current`;
+            await s.tx`insert into case_mgmt.conflict_check (case_id, user_id, status, declaration, decided_by, decided_at,
+                                                             decision_reason)
+              values (${caseB}, ${USERS[user]}, ${status}, 'Synthetic: related to the subject.',
+                      ${USERS.caseManager}, now(), 'Synthetic: the relationship is decided.')`;
+          };
+          const reopen = (tx: Scenario["tx"]) =>
+            tx<{ id: string }[]>`
+              select api.request_case_reopening(${caseB}, 'DECISIVE_POST_DECISION_CONFLICT', ${FIRM}, null, null,
+                ${f.pkg}) as id`;
+
+          // Fails closed while the closure authority is SOURCE_REQUIRED, before anything else is looked at.
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:CASE_CLOSURE_APPROVAL_RULE_REQUIRED", reopen);
+          await setClosureAuthority(s, "GRC_DIRECTOR");
+          // No validated conflict yet; then a conflict that could not have changed the result (legal rejected; without
+          // that vote the package is still approved): neither is a decisive conflict.
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:NO_VALIDATED_DECISIVE_CONFLICT", reopen);
+          await decided("legal");
+          await s.as("caseManager");
+          await s.expectError("CDF_CONFLICT:NO_VALIDATED_DECISIVE_CONFLICT", reopen);
+          // Legal's conflict is cleared; the lead's vote decided round one (two to one; one to one without it).
+          await decided("legal", "CONFLICT_CLEARED");
+          await decided("lead");
+          await s.as("caseManager");
+          // The conflict is not new evidence: evidence fields are refused for this reason, and so is a package that is
+          // not the case's.
+          await s.expectError(
+            "CDF_INVALID:new_evidence_description",
+            (tx) =>
+              tx`select api.request_case_reopening(${caseB}, 'DECISIVE_POST_DECISION_CONFLICT', ${FIRM},
+                   'Synthetic: the conflict is not evidence.', null, ${f.pkg})`,
+          );
+          await s.expectError(
+            "CDF_INVALID:package_id",
+            (tx) =>
+              tx`select api.request_case_reopening(${caseB}, 'DECISIVE_POST_DECISION_CONFLICT', ${FIRM}, null, null,
+                   ${randomUUID()})`,
+          );
+          const [r] = await reopen(s.tx);
+          await s.expectError("CDF_CONFLICT:REOPENING_REQUEST_PENDING", reopen);
+          // Only the closure authority decides, never the maker.
+          await s.expectError(
+            "CDF_FORBIDDEN",
+            (tx) => tx`select api.decide_case_reopening(${r!.id}, 'APPROVE', ${FIRM})`,
+          );
+          await s.as("grcDirector");
+          expect(await s.tx`select api.decide_case_reopening(${r!.id}, 'APPROVE', ${FIRM}) as r`).toEqual([
+            { r: "REOPENED" },
+          ]);
+          await s.asOwner();
+          expect(
+            await s.tx`select c.records_state, i.current_state from case_mgmt.case_record c
+                       join workflow.workflow_instance i on i.case_id = c.id where c.id = ${caseB}`,
+          ).toEqual([{ records_state: "ACTIVE", current_state: "INVESTIGATION" }]);
+          // The authority decision is untouched; the package is still DECIDED and tainted, so the case cannot close.
+          expect(
+            await s.tx`select to_jsonb(d) as row from decision.authority_decision d where d.id = ${d1}`,
+          ).toEqual([before]);
+          expect(await packageStatus(s, f.pkg)).toEqual({ status: "DECIDED", round_no: 1 });
+          await s.as("caseManager");
+          await s.expectError(
+            "CDF_CONFLICT:TAINTED_BY_CONFLICT",
+            (tx) => tx`select api.close_case(${caseB}, 'NO_ACTION', ${FIRM})`,
+          );
+          // Audited with codes and ids only; the justification stays in the request.
+          await s.asOwner();
+          expect(
+            await s.tx`select action, reason, metadata from audit.audit_event
+                       where case_id = ${caseB} and action like 'CASE_REOPENING_%' order by seq`,
+          ).toEqual([
+            {
+              action: "CASE_REOPENING_REQUESTED",
+              reason: null,
+              metadata: { reason_type: "DECISIVE_POST_DECISION_CONFLICT", package_id: f.pkg },
+            },
+            {
+              action: "CASE_REOPENING_DECIDED",
+              reason: null,
+              metadata: {
+                decision: "APPROVE",
+                reason_type: "DECISIVE_POST_DECISION_CONFLICT",
+                package_id: f.pkg,
+              },
+            },
           ]);
         });
       });

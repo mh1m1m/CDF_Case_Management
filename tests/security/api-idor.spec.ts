@@ -1421,6 +1421,120 @@ const EVIDENCE_HALF_PROBES: Probe<EvidenceHalfTargets>[] = [
   },
 ];
 
+interface ClosureTargets {
+  case: string;
+  closureRequest: string;
+  closedCase: string;
+  reopeningRequest: string;
+  committeeProceeding: string;
+  packet: string;
+}
+
+// Migration 2060 (ADR-042): closure and reopening, the package-building read models and the packet approval read.
+const CLOSURE_2060_PROBES: Probe<ClosureTargets>[] = [
+  {
+    fn: "close_case",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.close_case(${t.case}, 'NO_ACTION', ${REASON})`,
+  },
+  {
+    fn: "decide_case_closure",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_case_closure(${t.closureRequest}, 'APPROVE', ${REASON})`,
+  },
+  {
+    fn: "case_closure_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.case_closure_view(${t.case})`,
+  },
+  {
+    fn: "request_case_reopening",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.request_case_reopening(${t.closedCase}, 'NEW_EVIDENCE', ${REASON}, ${REASON}, 'DEMO-REF', null)`,
+  },
+  {
+    fn: "decide_case_reopening",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_case_reopening(${t.reopeningRequest}, 'APPROVE', ${REASON})`,
+  },
+  {
+    fn: "committee_scope_choices",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.committee_scope_choices(${t.committeeProceeding})`,
+  },
+  {
+    fn: "committee_items_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.committee_items_view(${t.committeeProceeding})`,
+  },
+  {
+    fn: "defence_packet_approval_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.defence_packet_approval_view(${t.packet})`,
+  },
+];
+
+// Migration 2070 (ADR-043, DEC-F41): a corrective action from preliminary review takes a preliminary recommendation or
+// one of its proposals; never a case.
+interface PreliminaryCorrectiveTargets {
+  recommendation: string;
+  proposal: string;
+}
+
+const PRELIMINARY_2070_PROBES: Probe<PreliminaryCorrectiveTargets>[] = [
+  {
+    fn: "propose_preliminary_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.propose_preliminary_corrective_action(${t.recommendation}, 'CORRECTIVE_ACTION', ${REASON})`,
+  },
+  {
+    fn: "record_preliminary_authority_decision",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_preliminary_authority_decision(${t.proposal}, 'CEO', 'APPROVED', now(),
+        'Probe authority label', 'MEMO-PROBE-2070', ${REASON})`,
+  },
+  {
+    fn: "open_preliminary_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.open_preliminary_corrective_action(${t.proposal}, 'Probe corrective action',
+        'Probe corrective action text.', ${self}, current_date + 30)`,
+  },
+  {
+    fn: "preliminary_corrective_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.preliminary_corrective_view(${t.recommendation})`,
+  },
+];
+
+// Migration 2080 (ADR-044, P11-G7): a raised case conflict takes a case or a concern.
+interface CaseConflictTargets {
+  case: string;
+  concern: string;
+}
+
+const CASE_CONFLICT_2080_PROBES: Probe<CaseConflictTargets>[] = [
+  {
+    fn: "raise_case_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.raise_case_conflict(${t.case}, ${"a0000000-0000-4000-8000-000000000014"}, ${REASON})`,
+  },
+  {
+    fn: "decide_case_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_case_conflict(${t.concern}, 'UPHELD', ${REASON})`,
+  },
+  {
+    fn: "case_conflict_concerns",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.case_conflict_concerns(${t.case})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1726,6 +1840,9 @@ describe("catalog guard", () => {
       ...CORRECTIVE_ACTION_PROBES.map((p) => p.fn),
       ...BCP_PROBES.map((p) => p.fn),
       ...EVIDENCE_HALF_PROBES.map((p) => p.fn),
+      ...CLOSURE_2060_PROBES.map((p) => p.fn),
+      ...PRELIMINARY_2070_PROBES.map((p) => p.fn),
+      ...CASE_CONFLICT_2080_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -2477,13 +2594,15 @@ describe("IDOR: exclusion records, Defence Packets and sanction extracts (migrat
     const { ic, gc } = await committeeIds();
     await ownerScenario(async (s) => {
       await ev.setPacketPolicy(s);
+      // The lead investigates case 0004 from before its referral: since migration 2080 (AMB-053) a member sitting on
+      // an open committee proceeding of a case is not assigned to investigate it.
+      await s.as("caseManager");
+      await s.tx`select api.assign_case(${case4}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
       const p = await ev.priorFinalSanction(s, { ic, gc, caseB, requestingCase: case4 }, true);
       const extract = await ev.requestExtract(s, p);
       await s.asOwner();
       const [row] = await s.tx<{ id: string }[]>`
         select id from decision.sanction_extract_row where extract_id = ${extract}`;
-      await s.as("caseManager");
-      await s.tx`select api.assign_case(${case4}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
       const kept = await ev.storeEvidence(s, "investigatorB", case4);
       const dropped = await ev.storeEvidence(s, "investigatorB", case4);
       await s.as("lead");
@@ -2535,6 +2654,226 @@ describe("IDOR: exclusion records, Defence Packets and sanction extracts (migrat
       ]) {
         expect(await s.tx`select id from ${s.tx(table)}`, table).toEqual([]);
       }
+    });
+  });
+});
+
+describe("IDOR: closure, reopening and the package-building read models (migration 2060)", () => {
+  // With a synthetic closure authority (GRC_DIRECTOR): a closure request pending on case B, which is also referred to
+  // the Investigation Committee; case 0004 closed by the authority's approval, with a reopening request pending; a
+  // draft Defence Packet on case B. None of these sees case B or 0004, holds a seat or is the subject.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    const ev = await import("../support/evidence");
+    const cl = await import("../support/closure");
+    const cm = await import("../support/committee");
+    const case4 = await caseId("0004");
+    const { ic } = await committeeIds();
+    await ownerScenario(async (s) => {
+      await cl.setClosureAuthority(s, "GRC_DIRECTOR");
+      expect(await cl.closeWith(s, caseB)).toBe("AWAITING_APPROVAL");
+      await s.as("caseManager");
+      await s.tx`select api.transition_case(${case4}, 'START_SCREENING', null)`;
+      expect(await cl.closeWith(s, case4)).toBe("AWAITING_APPROVAL");
+      await s.asOwner();
+      const requests = await s.tx<{ id: string; case_id: string }[]>`
+        select id, case_id from case_mgmt.case_closure_request where status = 'AWAITING_APPROVAL'`;
+      const closureRequest = requests.find((r) => r.case_id === caseB)!.id;
+      await s.as("grcDirector");
+      await s.tx`select api.decide_case_closure(${requests.find((r) => r.case_id === case4)!.id}, 'APPROVE', ${REASON})`;
+      const reopeningRequest = await cl.requestReopeningOnEvidence(s, case4);
+      await cm.seat(s, ic, cm.IC_SEATS);
+      const cp = await cm.refer(s, ic, caseB);
+      await ev.setPacketPolicy(s);
+      const n = await ev.defenceNotice(s, caseB);
+      const v = await ev.storeEvidence(s, "investigatorB", caseB);
+      const { packet } = await ev.packetWith(s, "caseManager", n.notice, [v.versionId]);
+
+      await s.as(actor);
+      const real: ClosureTargets = {
+        case: caseB,
+        closureRequest,
+        closedCase: case4,
+        reopeningRequest,
+        committeeProceeding: cp,
+        packet,
+      };
+      const random: ClosureTargets = {
+        case: randomUUID(),
+        closureRequest: randomUUID(),
+        closedCase: randomUUID(),
+        reopeningRequest: randomUUID(),
+        committeeProceeding: randomUUID(),
+        packet: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of CLOSURE_2060_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of ["case_mgmt.case_closure_request", "case_mgmt.case_closure"]) {
+        expect(await s.tx`select id from ${s.tx(table)}`, table).toEqual([]);
+      }
+      // Reopening requests have no reader at all: they are read through api.case_closure_view only.
+      await s.expectError("permission denied", (tx) => tx`select id from case_mgmt.case_reopening_request`);
+      // Nothing moved: both requests are still pending, case B is active and 0004 closed.
+      await s.asOwner();
+      expect(
+        await s.tx`select status from case_mgmt.case_closure_request where id = ${closureRequest}
+                   union all select status from case_mgmt.case_reopening_request where id = ${reopeningRequest}`,
+      ).toEqual([{ status: "AWAITING_APPROVAL" }, { status: "AWAITING_APPROVAL" }]);
+      expect(
+        await s.tx`select records_state from case_mgmt.case_record where id in (${caseB}, ${case4})
+                   order by records_state`,
+      ).toEqual([{ records_state: "ACTIVE" }, { records_state: "CLOSED" }]);
+    });
+  });
+});
+
+describe("IDOR: corrective action from preliminary review (migration 2070)", () => {
+  // Under a synthetic PRELIMINARY_CORRECTIVE_ACTION_TYPES and authority rule: investigator B's NOT_SERIOUS
+  // recommendation on case B, approved, with two corrective-action proposals, one approved by its authority (an action
+  // could open from it) and one still awaiting its authority. None of these sees case B.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    const { authorityRuleFor } = await import("../support/decision");
+    const { setPreliminaryCorrectiveTypes } = await import("../support/preliminary");
+    await ownerScenario(async (s) => {
+      await setPreliminaryCorrectiveTypes(s, "CORRECTIVE_ACTION");
+      await authorityRuleFor(s, "CORRECTIVE_ACTION");
+      await s.as("investigatorB");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseB}, 'NOT_SERIOUS', ${REASON}) as id`;
+      const proposals: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        const [p] = await s.tx<{ id: string }[]>`
+          select api.propose_preliminary_corrective_action(${r!.id}, 'CORRECTIVE_ACTION', ${REASON}) as id`;
+        proposals.push(p!.id);
+      }
+      await s.as("grcDirector");
+      await s.tx`select api.review_preliminary_recommendation(${r!.id}, 'ENDORSE', null, null)`;
+      await s.as("grcSectorHead");
+      await s.tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`;
+      await s.as("caseManager");
+      const [q] = await s.tx<{ authority_type: string }[]>`
+        select authority_type from decision.preliminary_authority_requirement where proposal_id = ${proposals[0]!}`;
+      await s.tx`select api.record_preliminary_authority_decision(${proposals[0]!}, ${q!.authority_type}, 'APPROVED',
+        now(), 'Chief Executive (synthetic)', 'MEMO-PROBE-2070', ${REASON})`;
+
+      await s.as(actor);
+      const mismatches: string[] = [];
+      for (const [label, proposal] of [
+        ["approved", proposals[0]!],
+        ["awaiting", proposals[1]!],
+      ] as const) {
+        const real: PreliminaryCorrectiveTargets = { recommendation: r!.id, proposal };
+        const random: PreliminaryCorrectiveTargets = { recommendation: randomUUID(), proposal: randomUUID() };
+        for (const probe of PRELIMINARY_2070_PROBES) {
+          const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+          const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+          if (onReal !== probe.outcome || onRandom !== probe.outcome)
+            mismatches.push(
+              `${probe.fn} (${label}): real=${onReal} random=${onRandom} expected=${probe.outcome}`,
+            );
+        }
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "case_mgmt.preliminary_corrective_proposal",
+        "decision.preliminary_authority_requirement",
+        "decision.preliminary_authority_decision",
+        "decision.corrective_action",
+      ]) {
+        expect(await s.tx`select case_id from ${s.tx(table)}`, table).toEqual([]);
+      }
+      // Nothing moved: one decision, no action, and no further proposal.
+      await s.asOwner();
+      expect(
+        await s.tx`select (select count(*)::int from case_mgmt.preliminary_corrective_proposal) as proposals,
+                          (select count(*)::int from decision.preliminary_authority_decision) as decisions,
+                          (select count(*)::int from decision.corrective_action
+                           where preliminary_proposal_id is not null) as actions`,
+      ).toEqual([{ proposals: 2, decisions: 1, actions: 0 }]);
+    });
+  });
+});
+
+describe("IDOR: raised case conflicts (migration 2080)", () => {
+  // On case B: investigator B raised a conflict about the GRC deputy, and the case manager one about investigator B
+  // that the GRC Director upheld (so investigator B no longer sees case B either). None of these sees case B.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await ownerScenario(async (s) => {
+      await s.as("investigatorB");
+      const [open] = await s.tx<{ id: string }[]>`
+        select api.raise_case_conflict(${caseB}, ${USERS.grcDeputy}, ${REASON}) as id`;
+      await s.as("caseManager");
+      const [upheld] = await s.tx<{ id: string }[]>`
+        select api.raise_case_conflict(${caseB}, ${USERS.investigatorB}, ${REASON}) as id`;
+      await s.as("grcDirector");
+      await s.tx`select api.decide_case_conflict(${upheld!.id}, 'UPHELD', ${REASON})`;
+
+      await s.as(actor);
+      const mismatches: string[] = [];
+      for (const [label, concern] of [
+        ["open", open!.id],
+        ["upheld", upheld!.id],
+      ] as const) {
+        const real: CaseConflictTargets = { case: caseB, concern };
+        const random: CaseConflictTargets = { case: randomUUID(), concern: randomUUID() };
+        for (const probe of CASE_CONFLICT_2080_PROBES) {
+          const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+          const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+          if (onReal !== probe.outcome || onRandom !== probe.outcome)
+            mismatches.push(
+              `${probe.fn} (${label}): real=${onReal} random=${onRandom} expected=${probe.outcome}`,
+            );
+        }
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select case_id from case_mgmt.case_conflict_concern`).toEqual([]);
+      // Nothing moved: the open concern is still open and nothing else was raised.
+      await s.asOwner();
+      expect(
+        await s.tx`select status, count(*)::int as n from case_mgmt.case_conflict_concern group by status
+                   order by status`,
+      ).toEqual([
+        { status: "OPEN", n: 1 },
+        { status: "UPHELD", n: 1 },
+      ]);
     });
   });
 });
@@ -2706,6 +3045,7 @@ describe("CDF-205 T-AMB-142 (AMB-231): no api.* function accepts an acting-as us
     "p_restricted_authority_id",
     "p_reviewer_id",
     "p_secretary_id",
+    "p_subject_user_id", // api.raise_case_conflict (2080): the person the concern is about; the raiser is derived
     "p_user_id",
   ];
 
