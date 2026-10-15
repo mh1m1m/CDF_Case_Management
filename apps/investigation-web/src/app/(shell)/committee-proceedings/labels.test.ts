@@ -26,6 +26,7 @@ import {
   resolveConflictTaintSchema,
   returnPackageToCommitteeSchema,
 } from "@cdf/validation";
+import { actLabel, type ConfirmAct } from "../confirmations";
 import { allegationCategory, allegationName, sanctionName, sanctionOption, subjectName } from "./labels";
 
 const LOCALES: Locale[] = ["ar", "en"];
@@ -164,4 +165,31 @@ describe("labels", () => {
       "no version in force",
     );
   });
+});
+
+describe("the package forms' accessible names", () => {
+  /** Each form's button: the act whose verb it shows, and the name that tells one package's form from another's. */
+  const forms: [ConfirmAct | "addItem", string, Record<string, unknown>][] = [
+    ["createRecommendationPackage", "createName", { ref: "IC-3F9A2C1B" }],
+    ["addItem", "addItemName", { n: 2 }],
+    ["submitPackageForVote", "submitName", { n: 2 }],
+    ["openPackageVote", "openVoteName", { n: 2 }],
+    ["openPackageVote", "openVoteInName", { n: 2, meeting: 3 }],
+    ["recordPackageAdoption", "adoptName", { n: 2 }],
+    ["returnPackageToCommittee", "returnName", { n: 2 }],
+    ["withdrawRecommendationItem", "withdrawName", { n: 2 }],
+    ["resolveConflictTaint", "taintName", { n: 2 }],
+  ];
+
+  for (const locale of LOCALES) {
+    it(`each starts with its visible label, in ${locale} (WCAG 2.5.3)`, () => {
+      const t = createTranslator(locale);
+      for (const [act, key, params] of forms) {
+        const visible = act === "addItem" ? t("committeeProceedings.addItem") : actLabel(t, act);
+        const name = t(`committeeProceedings.${key}` as MessageKey, params as never);
+        expect(name.startsWith(visible), `${key}: "${name}" starts with "${visible}"`).toBe(true);
+        expect(name.length, key).toBeGreaterThan(visible.length);
+      }
+    });
+  }
 });

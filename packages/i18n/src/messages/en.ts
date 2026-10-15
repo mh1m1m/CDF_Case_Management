@@ -3323,13 +3323,13 @@ export const en = {
     createTitle: "Create a recommendation package",
     createIntro:
       "A package holds the committee's recommendations for this proceeding. How it is voted is chosen now and does not change.",
-    createName: "Create a recommendation package: {ref}",
+    createName: "Create package: {ref}",
     created: "Package created.",
     addItemTitle: "Add an item",
     addItemIntro:
       "Each item is one recommendation. The people and allegations offered are this case's, by number and category.",
     addItem: "Add item",
-    addItemName: "Add an item to package {n}",
+    addItemName: "Add item: package {n}",
     itemAdded: "Item added.",
     itemTypeLabel: "Type",
     sanctionTitle: "Sanction",
@@ -3356,25 +3356,25 @@ export const en = {
     submitTitle: "Put the package to the committee's vote",
     submitIntro:
       "Its items cannot change while it is before the committee. The vote itself opens in an open meeting.",
-    submitName: "Put package {n} to the vote",
+    submitName: "Put to the vote: package {n}",
     submitted: "Package put to the vote.",
     openVoteTitle: "Open the package's vote",
     openVoteIntro: {
       PACKAGE: "One vote on the whole package opens in the meeting.",
       ITEM: "One vote per item opens in the meeting, each with the item's type and description.",
     },
-    openVoteInName: "Open the vote on package {n} in meeting {meeting}",
-    openVoteName: "Open the vote on package {n}",
+    openVoteInName: "Open vote: package {n}, meeting {meeting}",
+    openVoteName: "Open vote: package {n}",
     voteOpened: "Vote opened. The members vote on the meeting's page.",
     adoptTitle: "Record the committee's adoption",
     adoptIntro:
       "Every vote of this round is closed. The items the committee approved are adopted; if it approved none, the package goes back to draft.",
-    adoptName: "Record the adoption of package {n}",
+    adoptName: "Record adoption: package {n}",
     adoptionRecorded: "Recorded. The package shows the committee's result.",
     returnTitle: "Return the package to the committee",
     returnIntro:
       "The package goes back to draft, with your reason on record, so that the committee can change it and vote again.",
-    returnName: "Return package {n} to the committee",
+    returnName: "Return to committee: package {n}",
     returned: "Package returned to the committee.",
     returnReasonHint: "5 to 2,000 characters. Kept with the package.",
     withdrawTitle: "Withdraw this item",
@@ -3385,7 +3385,7 @@ export const en = {
     taintTitle: "Resolve the conflict on this item",
     taintIntro:
       "A member whose vote counted on this item has since declared a conflict. Record the committee's decision during an open meeting of this proceeding that you run.",
-    taintName: "Resolve the conflict on item {n}",
+    taintName: "Record decision: conflict on item {n}",
     taintResolved: "Decision recorded.",
     taintResolutionLabel: "The committee's decision",
     taintResolution: { RE_VOTE: "Vote again", CONFIRM: "Confirm the result" },
@@ -3411,7 +3411,8 @@ export const en = {
     invitePurposeTitle: "Whom this meeting may hear from",
     invitePurposeBody:
       "The people you may invite to this meeting: the case team, the legal reviewers of this proceeding's packages, and the case's people. This is not a directory, and opening it is recorded.",
-    invitePurposeNotShown: "Anyone else, and anything about the case beyond each person's part in it.",
+    invitePurposeNotShown:
+      "Not shown here: anyone else, and anything about the case beyond each person's part in it.",
     inviteNone: "No one can be invited now.",
     inviteAccountsTitle: "People with an account",
     inviteAccountsIntro: "Each person invited is told so. The message carries no reason and no case content.",
@@ -3443,7 +3444,7 @@ export const en = {
     findingVotePurposeTitle: "A finding before the committee",
     findingVotePurposeBody:
       "The findings the committee may vote on: the current version of each, recorded by the committee or in the proceeding that referred the case. Opening this page is recorded.",
-    findingVotePurposeNotShown: "A finding's reasons, and the case's narrative and evidence.",
+    findingVotePurposeNotShown: "Not shown here: a finding's reasons, and the case's narrative and evidence.",
     findingChoicesHiddenTitle: "Findings not available",
     findingChoicesHiddenBody: "The findings this vote can be on are not available to you now.",
     backToMeeting: "Back to meeting {n}",
