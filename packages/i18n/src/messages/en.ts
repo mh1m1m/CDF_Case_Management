@@ -2144,6 +2144,7 @@ export const en = {
     NON_COOPERATION: "Non-cooperation",
     RESOURCE_SHORTAGE: "Shortage of resources",
     SOVEREIGN_AUTHORITY: "A sovereign authority",
+    SUBJECT_UNTRACEABLE: "The subject cannot be traced",
     SYSTEM_MANDATED: "Required by the system",
   },
   outcomeCode: {

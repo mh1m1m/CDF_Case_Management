@@ -46,6 +46,7 @@
 | [ADR-042](ADR-042-case-closure-reopening-and-package-read-model.md) | Case closure, outcome and reopening; the package-building read model            | Proposed |
 | [ADR-043](ADR-043-preliminary-corrective-action.md)                 | Preliminary corrective action; closure fails closed with no authority in force  | Proposed |
 | [ADR-044](ADR-044-case-conflict-purpose-suspension.md)              | A conflict raised on the case; prior investigators do not judge it              | Proposed |
+| [ADR-045](ADR-045-case-structure-corrections.md)                    | Case structure and corrections without rewriting a record                       | Proposed |
 | [ADR-051](ADR-051-areas-and-my-work-phase-12.md)                    | Areas and My Work for Phase 12                                                  | Proposed |
 | [ADR-054](ADR-054-meeting-screen-capabilities.md)                   | The meeting screen's capabilities                                               | Proposed |
 
