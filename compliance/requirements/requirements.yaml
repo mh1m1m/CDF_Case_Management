@@ -878,6 +878,44 @@ requirements:
       ]
     notes: "No migration. The pages read only the purpose read models and the audited packet read, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. The reviewer's page and packet open only for the request's assignee while the packet is theirs; anyone else gets the same 404 as a missing request, with ACCESS_DENIED recorded. The ask page reads L2 only when opened; the record page reads R2 only. Packets show the persons concerned as stored (ruling 4); elsewhere people are by number and category until the owner answers the DEC-02 label card. Known limitations (ADR-057): once the proceeding is closed an authority's decision cannot be recorded from the product though the command accepts; an unused approval is not shown on the case; with the default grace of 0 days the reviewer's page ends with the decision. Not in this change: the corrective actions of a superseded decision (P12-3b, CDF-230) and the sanction extract (P12-5)."
 
+  - id: CDF-UX-021
+    title: "Corrective actions under a superseded decision: the case's actions with why each may not move, and on a frozen action what a disposition is checked against, offered only to whoever its command would accept now"
+    source:
+      [
+        Phase 12 plan P12-3,
+        UX-116,
+        ADR-016 D0 and D2,
+        ADR-033,
+        DEC-AMB-013,
+        DEC-AMB-014,
+        DEC-F19,
+        DEC-F28,
+        DEC-F41,
+        CDF-227,
+        coordinator rulings 2026-10-15 06:50,
+        ADR-058,
+      ]
+    external_ids: []
+    linear_issues: [CDF-230]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002096_superseded_decision_corrective_actions.sql,
+        api.case_corrective_actions,
+        api.corrective_action_view,
+        api.case_history,
+        api.dispose_superseded_corrective_action,
+      ]
+    tests:
+      [
+        tests/security/superseded-decision-corrective-actions.spec.ts,
+        tests/security/purpose-read-models-2040.spec.ts,
+        tests/security/case-history-roster.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+      ]
+    notes: "Database half (P12-3b); the pages follow with no migration. A1 lists a case's corrective actions to whoever may see the case, with why each may not move and may_dispose as the view answers it; not audited. The view keeps every answer 2090 gave, CDF-227's exclusion included, and while an action is frozen gives the case team the replacement decision and its source documents, whether the caller may name an owner, the owners a replacement may name (every active holder of CORRECTIVE_ACTION_OWN, on the seat basis; only to a manager who may dispose and name one) and the due date a replacement takes by default (none while the policy's default is SOURCE_REQUIRED). The case history gains the freezing and the disposition as codes and times only. Known limitations (ADR-058): two authorities in a replacement round (CDF-228, 2170); a listed owner may be refused at submit (ruling 1)."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

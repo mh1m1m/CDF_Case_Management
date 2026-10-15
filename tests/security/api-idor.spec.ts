@@ -1247,10 +1247,12 @@ const EXPORT_PROBES: Probe<ExportTargets>[] = [
   },
 ];
 
-// Corrective-action commands (migration 1940) take an approved recommendation item or an action; never a case.
+// Corrective-action commands (migration 1940) take an approved recommendation item or an action; the case's list of
+// them (migration 2096) takes the case.
 interface CorrectiveActionTargets {
   item: string;
   action: string;
+  case: string;
 }
 
 const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
@@ -1317,6 +1319,12 @@ const CORRECTIVE_ACTION_PROBES: Probe<CorrectiveActionTargets>[] = [
     fn: "corrective_action_view",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.corrective_action_view(${t.action})`,
+  },
+  // Migration 2096 (P12-3b, ADR-058): the case's corrective actions, NOT_FOUND unless authz.can_view_case.
+  {
+    fn: "case_corrective_actions",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.case_corrective_actions(${t.case})`,
   },
 ];
 
@@ -2613,8 +2621,12 @@ describe("IDOR: corrective actions (migration 1940)", () => {
         select api.open_corrective_action(${f.corrective}, 'Synthetic: strengthen controls',
           'Synthetic: add a second approver.', ${USERS.financeEmployee}, current_date + 30) as id`;
       await s.as(actor);
-      const real: CorrectiveActionTargets = { item: f.corrective, action: a!.id };
-      const random: CorrectiveActionTargets = { item: randomUUID(), action: randomUUID() };
+      const real: CorrectiveActionTargets = { item: f.corrective, action: a!.id, case: caseB };
+      const random: CorrectiveActionTargets = {
+        item: randomUUID(),
+        action: randomUUID(),
+        case: randomUUID(),
+      };
       const mismatches: string[] = [];
       for (const probe of CORRECTIVE_ACTION_PROBES) {
         const onReal = await outcomeOf(s, probe, real, USERS[actor]);

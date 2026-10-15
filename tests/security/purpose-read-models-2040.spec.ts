@@ -1481,6 +1481,8 @@ describe("api.corrective_action_view (authz.can_view_corrective_action; R2, R3)"
         decision_block: null,
         dispositions: [],
         disposition_options: [],
+        // Migration 2096 (ADR-058): the replacement decision, only while the action is frozen.
+        replacement: null,
       });
       await s.as("financeEmployee");
       await s.tx`select api.record_corrective_action_progress(${action}, 50, 'Synthetic: progress note.')`;
