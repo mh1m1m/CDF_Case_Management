@@ -1,6 +1,6 @@
 # ADR-045: Case structure and corrections without rewriting a record (migration 2090)
 
-- **Status:** Proposed (2026-10-15). Linear CDF-196 (rebase decision application). Implemented in migration 2090 (Rebase PR-C, first of 2090 to 2140, pending security review). Placement confirmed by the coordinator on 2026-10-15: "2090 Case structure and corrections (ADR-045), the ten rows as listed."
+- **Status:** Proposed (2026-10-15). Linear CDF-196 (rebase decision application) and CDF-227 (Security MEDIUM, §10). Implemented in migration 2090 (Rebase PR-C, first of 2090 to 2140, pending security review). Placement confirmed by the coordinator on 2026-10-15: "2090 Case structure and corrections (ADR-045), the ten rows as listed."
 - **Ambiguity rows** (all R2; owner-default answers from `docs/business-architecture/AMBIGUITY_REGISTER_200.md`):
   - AMB-003: "Never merge physically. Record a typed link (DUPLICATE_OF or RELATED) between the cases and conclude the duplicate preliminary review with DUPLICATE. Evidence, history and access stay on each case; a link grants no access to the linked case." Test T-AMB-002.
   - AMB-004: "A real split creates a new case through an authorised command that references the source case; subjects and allegations are re-created with provenance; evidence is linked by reference only after a need-to-know check; the source history is untouched." Test T-AMB-003.
@@ -13,6 +13,7 @@
   - AMB-093: "By an append-only correction record reviewed by the same attending non-conflicted members; the approved version stays." Test T-AMB-054.
   - AMB-223: "By an appended annotation with reason; originals stay."
 - **Coordinator rulings:** restricted-case access never grows without its authority; reasons never go in audit metadata; no permission is widened before 2160; the portal belongs to AGENT-02 and the BFF never reads case tables, so the subject correction stays on the database side and the privacy-incident record carries no case content or reporter identity in anything that leaves the database.
+- **CDF-227 (coordinator, 2026-10-15):** placed in 2090, the shape of CDF-225: "writer-side, those three events are recorded without the reason and without the reference; reader-side, corrective_action_view excludes reason and reference for an owner outside the case team so existing rows are covered; no event row rewritten; one negative test that walks every value in the owner's JSON."
 - **Protocol:** §18–§22, §24, §29, §39, §65, §82, §83, §87.
 
 ## Context
@@ -84,11 +85,20 @@ ADR-005 (append-only ledger) and the register's answers all point the same way: 
 
 `api.annotate_archived_record(case, target_kind, annotation, reason)`: NOT_FOUND unless the caller can see the record; FORBIDDEN without `ARCHIVE_RECORD_ADMINISTER` in catalogue scope; `CASE_ACTIVE`; `RECORD_DISPOSED`; INVALID target_kind. `records.record_annotation` is append-only and read as the record is read. The original record never changes. Restricted records are outside the catalogue scope, so they take no annotation here (fail closed).
 
-### 10. Reads, audit and grants
+### 10. A disposition's reason stays with the case team (CDF-227)
+
+When a replacement decision disposes of a frozen corrective action (DEC-AMB-014, migration 2030), `api.dispose_superseded_corrective_action` wrote the disposition's reason as the note of the `RETURNED`, `DUE_DATE_CHANGED` and `WAIVED` events it recorded on the action, and the replacement decision's document as the `WAIVED` event's reference. An action's history is read with the action (`corrective_action_event_read`, 1940), so an action owner outside the case team read both, although the disposition is the case team's: plan §4.1, and 2070's own view, give the owner no origin.
+
+- **Writer side.** The command records the three events without the reason and without the document; both stay in `decision.corrective_action_disposition`, read by the case team only. The 1940 check that tied a document to every `WAIVED` event becomes a one-way check (only a `WAIVED` event carries one) and a trigger: a `WAIVED` event without a document is refused unless the same person recorded a `WAIVE` or `REPLACE_WITH_NEW_ACTION` disposition of the action in the same transaction, which cites it. Every waiver still has its document; the direct waiver (1940) still writes it on the event.
+- **Reader side, so rows already written are covered.** `authz.corrective_event_withheld(event)` is true when the event is one a disposition wrote before 2090 (same action, recorded by the disposition's author, one of the three types, carrying its reason as the note or its document as the reference) and the caller can see the action but not the case. `corrective_action_event_read` leaves such a row out for that caller, and `api.corrective_action_view` returns it to them with its note and reference null. The case team reads every row and every value as before. No event row is rewritten.
+- The ledger event `CORRECTIVE_ACTION_DISPOSED` is unchanged: its reason is in the reason column, read by the case team and oversight, and its metadata carries no reason.
+- UX's migration 2096 (P12-3b) replaces `api.corrective_action_view` and must keep the exclusion; it builds against this shape.
+
+### 11. Reads, audit and grants
 
 - Every new table has RLS enabled with a select policy only, no write grants, and append-only or decide-once triggers that hold even for the table owner.
 - Audit events carry ids, codes and counts; every reason stays in its row.
-- No permission or role grant changes. One function is replaced with a narrowing-only change, keeping its signature: `authz.has_conflict` (§4, §5). Helpers and triggers are not executable by application roles.
+- No permission or role grant changes. Replaced with narrowing-only changes, keeping their signatures: `authz.has_conflict` (§4, §5), `api.dispose_superseded_corrective_action` and `api.corrective_action_view` (§10); the `corrective_action_event_read` policy is narrowed (§10). Helpers and triggers are not executable by application roles; `authz.corrective_event_withheld` is executable by `authenticated` because the policy calls it, and answers false for anyone who cannot see the action.
 - The catalogue: `CASE_SPLIT` is implemented; CASE_DETAILS, COMMITTEE_REGISTRY, MEETING_MINUTES, RECORDS_RETRIEVAL and DIRECT_REFERRAL name their new commands, delivered in 2090.
 
 ## Open questions and SOURCE_REQUIRED values
@@ -103,6 +113,7 @@ ADR-005 (append-only ledger) and the register's answers all point the same way: 
 
 - Duplicates are tied to their original, cases and allegations can be split, allegations withdrawn, subjects marked as placeholders, untraceable or deceased, and a wrongly identified person corrected, all without rewriting a record or widening anyone's access.
 - Closing a case as `DUPLICATE` now needs the link to the original first (one 2060 test updated).
+- A disposition's `WAIVED` event no longer carries the replacement decision's document; the disposition does (one 2030 test updated, §10). An action owner outside the case team reads an event a disposition wrote before 2090 only through the view, without its note and reference.
 - The allegation status gains a value and the `SUSPENSION_REASON` dimension gains `SUBJECT_UNTRACEABLE` (contracts and i18n updated). Nothing is renamed or removed (DEC-35).
 - PRODUCTION_SUBSTITUTION_REQUIRED: the privacy incident hand-off (§4); case numbering uses `CDF-DEMO` in this synthetic build (§5).
 
@@ -121,8 +132,9 @@ Tables, triggers and functions in PostgreSQL; they move to RDS PostgreSQL unchan
   - Referral versions; T-AMB-023 (membership annotation, snapshots unchanged, `SELF_CORRECTION`); AMB-091 pinned; T-AMB-054 (correction review, approved version unchanged, case team reads only an approved correction); records annotation; helpers internal.
 - `api-idor.spec.ts`: probes for the ten case-scoped functions with eight outsiders; `annotate_committee_membership` joins the administrative commands.
 - `audit-bypass.spec.ts`: walk steps for the eleven commands.
-- Updated: `case-closure-2060.spec.ts` (the DUPLICATE closure links the case first). The catalogue tests and the policy snapshot.
+- `recommendations-authority.spec.ts` (CDF-227, §10): the three events carry neither the reason nor the document and the dispositions keep both; with events written as 2030 wrote them, every value of the owner's view and of the owner's table read is walked and holds neither, while the history is complete; the case team reads every row and value; no row rewritten; a non-`WAIVED` event with a document and a `WAIVED` event with no document and no disposition are refused.
+- Updated: `case-closure-2060.spec.ts` (the DUPLICATE closure links the case first); `recommendations-authority.spec.ts` (the disposition's `WAIVED` event carries no document; the disposition does). The catalogue tests and the policy snapshot.
 
 ## Requirements
 
-AMB-003, AMB-004, AMB-008, AMB-027, AMB-032, AMB-033, AMB-045, AMB-091, AMB-093, AMB-223; T-AMB-002, T-AMB-003, T-AMB-014, T-AMB-023, T-AMB-054; catalogue S052, S090, S107, T1-B1.5-165; ADR-005; CDF-196.
+AMB-003, AMB-004, AMB-008, AMB-027, AMB-032, AMB-033, AMB-045, AMB-091, AMB-093, AMB-223; T-AMB-002, T-AMB-003, T-AMB-014, T-AMB-023, T-AMB-054; catalogue S052, S090, S107, T1-B1.5-165; ADR-005; CDF-196, CDF-227.

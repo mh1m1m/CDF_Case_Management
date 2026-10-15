@@ -1,10 +1,11 @@
 -- =============================================================================
--- 2090 Case structure and corrections (Rebase PR-C; CDF-196)
--- Requirements: §18–§22, §24, §29, §39, §65, §82, §83, §87; ambiguity rows AMB-003, AMB-004, AMB-008, AMB-027,
--- AMB-032, AMB-033, AMB-045, AMB-091, AMB-093 and AMB-223 (all R2); placement confirmed by the coordinator on
--- 2026-10-15 (PR-C split: 2090 case structure and corrections, ADR-045); coordinator rulings (restricted-case access
--- never grows without its authority; reasons never in audit metadata; no permission widened before 2160; the portal
--- belongs to AGENT-02 and the BFF never reads case tables, so the subject correction stays on the database side)
+-- 2090 Case structure and corrections (Rebase PR-C; CDF-196, CDF-227)
+-- Requirements: §18–§22, §24, §29, §39, §65, §82, §83, §87; ambiguity rows AMB-003, AMB-004, AMB-008, AMB-027, AMB-032,
+-- AMB-033, AMB-045, AMB-091, AMB-093 and AMB-223 (all R2); placement confirmed by the coordinator on 2026-10-15 (PR-C
+-- split: 2090 case structure and corrections, ADR-045); CDF-227 (Security MEDIUM) placed here by the coordinator on
+-- 2026-10-15 (writer side and reader side, the shape of CDF-225); coordinator rulings (restricted-case access never
+-- grows without its authority; reasons never in audit metadata; no permission widened before 2160; the portal belongs
+-- to AGENT-02 and the BFF never reads case tables, so the subject correction stays on the database side)
 --
 -- Every row here corrects or restructures a record without rewriting it (ADR-005): a status, a link, a successor row
 -- or an annotation is added, and the original stays readable to those who could read it.
@@ -42,10 +43,19 @@
 --      review for all reviewers and earlier versions are kept) and is pinned by a test here.
 --   9. AMB-223. A record past ACTIVE (not disposed) is corrected by an appended annotation with a reason, by records
 --      staff in catalogue scope; the original stays.
+--  10. CDF-227. A superseded corrective action's disposition no longer writes its reason as the note of the RETURNED,
+--      DUE_DATE_CHANGED and WAIVED events on the action, nor the replacement decision's document on the WAIVED event;
+--      both stay in the disposition, which is the case team's. For events already written, an action owner outside
+--      the case team no longer reads such an event in the table, and api.corrective_action_view returns it to them
+--      without its note and reference. No event row is rewritten.
 --
 -- Additive: ten tables, one column on the allegation, one SUSPENSION_REASON code, eleven api functions and their
--- helper and trigger functions. The allegation status check gains SUPERSEDED (no value removed). One function is
--- replaced with a narrowing-only change, keeping its signature: authz.has_conflict (2080). No permission or role grant
+-- helper and trigger functions. The allegation status check gains SUPERSEDED (no value removed). Replaced with
+-- narrowing-only changes, keeping their signatures: authz.has_conflict (2080), api.dispose_superseded_corrective_action
+-- (2030) and api.corrective_action_view (2070); the corrective_action_event_read policy (1940) is narrowed. The 1940
+-- check tying a document to every WAIVED event becomes a one-way check (only a WAIVED event carries one) and a trigger
+-- refusing a WAIVED event without one unless the WAIVE or REPLACE_WITH_NEW_ACTION disposition recorded with it, in the
+-- same transaction by the same person, cites it; every waiver still has its document. No permission or role grant
 -- changes; no catalogue code, status or option code is renamed or removed (DEC-35). Not built: copying evidence into
 -- a split case (it would need a need-to-know grant per item, a widening; evidence stays on the source case), and
 -- the screens and read models for these commands (Phase 12).
@@ -1233,7 +1243,384 @@ end;
 $$;
 
 -- =============================================================================
--- 10. Grants and the catalogue
+-- 10. A disposition's reason stays with the case team (CDF-227)
+-- =============================================================================
+-- 2030's api.dispose_superseded_corrective_action wrote the disposition's reason as the note of the RETURNED,
+-- DUE_DATE_CHANGED and WAIVED events it recorded on the action, and the replacement decision's document as the WAIVED
+-- event's reference. An action's history is read with the action (corrective_action_event_read, 1940), so an owner
+-- outside the case team read both, although the disposition itself is the case team's (2070's view gives the owner no
+-- origin). Writer side: those events are now recorded without the reason and without the reference, which stay in the
+-- disposition. Reader side, for rows already written: an owner outside the case team no longer reads such an event in
+-- the table, and api.corrective_action_view returns it to them without the note and the reference. No event row is
+-- rewritten; the case team reads every row as before.
+
+-- 10.1 A WAIVED event's document may now live in the disposition recorded with it. A non-WAIVED event still never
+-- carries one (the 1940 check, kept in this half), and a WAIVED event without one is refused unless the same person
+-- recorded a WAIVE or REPLACE_WITH_NEW_ACTION disposition of the action in the same transaction.
+alter table decision.corrective_action_event
+  add constraint corrective_action_event_reference_only_on_waiver
+  check (event_type = 'WAIVED' or source_document_reference is null);
+
+create function decision.guard_waiver_reference()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.event_type = 'WAIVED' and new.source_document_reference is null and not exists (
+       select 1 from decision.corrective_action_disposition x
+       where x.action_id = new.action_id and x.recorded_by = new.actor_id and x.recorded_at = now()
+         and x.disposition in ('WAIVE', 'REPLACE_WITH_NEW_ACTION')) then
+    raise exception 'a WAIVED corrective-action event cites its source document, or the disposition recorded with it does'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+create trigger corrective_action_event_waiver_reference before insert on decision.corrective_action_event
+  for each row execute function decision.guard_waiver_reference();
+
+-- The 1940 check required the document on every WAIVED event; 10.1 replaces it.
+alter table decision.corrective_action_event drop constraint corrective_action_event_check2;
+
+-- 10.2 Which rows an owner outside the case team does not read in full: an event a disposition wrote before this
+-- migration (same action, recorded by the disposition's author, RETURNED, DUE_DATE_CHANGED or WAIVED, carrying its
+-- reason as the note or its document as the reference). True only for a caller who can see the action and not the
+-- case, so it tells nobody anything about an event they cannot read.
+create function authz.corrective_event_withheld(p_event_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and exists (
+    select 1 from decision.corrective_action_event e
+    join decision.corrective_action_disposition x on x.action_id = e.action_id and x.recorded_by = e.actor_id
+    where e.id = p_event_id and e.event_type in ('RETURNED', 'DUE_DATE_CHANGED', 'WAIVED')
+      and (e.note = x.reason or e.source_document_reference = x.source_document_reference)
+      and authz.can_view_corrective_action(e.action_id)
+      and not authz.can_view_case(e.case_id));
+$$;
+
+-- The table read: such a row is left out for an owner outside the case team; the case team reads every row.
+alter policy corrective_action_event_read on decision.corrective_action_event
+  using (authz.can_view_corrective_action(action_id) and not authz.corrective_event_withheld(id));
+
+-- 10.3 The command, as in 2030, with the three events recorded without the reason or the document.
+create or replace function api.dispose_superseded_corrective_action(
+  p_action_id uuid, p_disposition text, p_source_document_reference text, p_reason text, p_title text,
+  p_description text, p_owner_id uuid, p_due_date date
+)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v decision.corrective_action;
+  v_governing uuid;
+  v_replacement uuid;
+  v_reference text;
+  v_reason text;
+  v_title text;
+  v_description text;
+  v_due date;
+  v_old_due date;
+  v_prior text;
+  v_version int;
+  v_new_id uuid;
+  v_new decision.corrective_action;
+  v_seq int;
+  v_id uuid;
+begin
+  v := decision.lock_action(p_action_id);
+  perform decision.require_manager(v.case_id);
+  if (select c.records_state from case_mgmt.case_record c where c.id = v.case_id) <> 'ACTIVE' then
+    perform api._fail('CONFLICT', 'CASE_NOT_ACTIVE');
+  end if;
+  perform pg_advisory_xact_lock(hashtext('decision.corrective_action:' || v.recommendation_item_id));
+  v_governing := decision.action_governing_decision(v.id);
+  v_replacement := decision.superseding_decision(v_governing);
+  if v_replacement is null then perform api._fail('CONFLICT', 'NOT_SUPERSEDED'); end if;
+  if exists (select 1 from decision.corrective_action_disposition x
+             where x.action_id = v.id and x.superseded_decision_id = v_governing) then
+    perform api._fail('CONFLICT', 'ALREADY_DISPOSED');
+  end if;
+  if p_disposition is null or p_disposition not in ('RE_ADOPT', 'MODIFY', 'WAIVE', 'REPLACE_WITH_NEW_ACTION') then
+    perform api._fail('INVALID', 'disposition');
+  end if;
+  v_reference := api._require_text(p_source_document_reference, 'source_document_reference', 3, 300);
+  if not exists (select 1 from decision.authority_decision_source x
+                 where x.decision_id = v_replacement and x.reference = v_reference) then
+    perform api._fail('INVALID', 'source_document_reference');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  if p_disposition <> 'WAIVE' and decision.approving_decision(v.recommendation_item_id) is distinct from v_replacement then
+    perform api._fail('CONFLICT', 'ITEM_NOT_APPROVED');
+  end if;
+  if (p_disposition in ('RE_ADOPT', 'MODIFY') and v.status = 'WAIVED')
+     or (p_disposition = 'MODIFY' and v.status = 'COMPLETED') then
+    perform api._fail('CONFLICT', 'ACTION_CLOSED');
+  end if;
+  if p_disposition in ('MODIFY', 'REPLACE_WITH_NEW_ACTION') then
+    v_title := api._require_text(p_title, 'title', 5, 200);
+    v_description := api._require_text(p_description, 'description', 10, 4000);
+  elsif p_title is not null then
+    perform api._fail('INVALID', 'title');
+  elsif p_description is not null then
+    perform api._fail('INVALID', 'description');
+  end if;
+  if p_disposition = 'REPLACE_WITH_NEW_ACTION' then
+    perform decision.require_owner_naming(v.case_id);
+    if not decision.owner_eligible(p_owner_id, v.case_id) then perform api._fail('INVALID', 'owner_id'); end if;
+  elsif p_owner_id is not null then
+    perform api._fail('INVALID', 'owner_id');
+  end if;
+  if (p_disposition in ('RE_ADOPT', 'WAIVE') and p_due_date is not null) or p_due_date < decision.local_today() then
+    perform api._fail('INVALID', 'due_date');
+  end if;
+  if p_disposition = 'REPLACE_WITH_NEW_ACTION' then
+    v_due := coalesce(p_due_date, decision.local_today() + (decision.current_corrective_policy(v.action_type)).default_due_days);
+    if v_due is null then perform api._fail('INVALID', 'due_date'); end if;
+    v_new_id := gen_random_uuid();
+  end if;
+  v_prior := v.status;
+  v_old_due := v.due_date;
+  if p_disposition = 'MODIFY' then v_version := v.version_no + 1; end if;
+
+  insert into decision.corrective_action_disposition (action_id, case_id, recommendation_item_id, superseded_decision_id,
+                                                      replacement_decision_id, disposition, prior_status,
+                                                      source_document_reference, reason, revised_version_no,
+                                                      replacement_action_id, recorded_by)
+  values (v.id, v.case_id, v.recommendation_item_id, v_governing, v_replacement, p_disposition, v.status, v_reference,
+          v_reason, v_version, v_new_id, v_actor)
+  returning id into v_id;
+
+  if p_disposition = 'MODIFY' then
+    -- The earlier wording is kept as a version before the row carries the new one.
+    if v.version_no = 1 then
+      insert into decision.corrective_action_version (action_id, version_no, case_id, title, description, recorded_by,
+                                                      recorded_at)
+      values (v.id, 1, v.case_id, v.title, v.description, v.created_by, v.created_at);
+    end if;
+    insert into decision.corrective_action_version (action_id, version_no, case_id, title, description, disposition_id,
+                                                    recorded_by)
+    values (v.id, v_version, v.case_id, v_title, v_description, v_id, v_actor);
+    update decision.corrective_action
+       set title = v_title, description = v_description, version_no = v_version, due_date = coalesce(p_due_date, due_date),
+           status = case when status = 'PENDING_VERIFICATION' then 'IN_PROGRESS' else status end,
+           completion_submitted_at = null, updated_at = now(), row_version = row_version + 1
+     where id = v.id
+    returning * into v;
+    if v_prior = 'PENDING_VERIFICATION' then
+      -- CDF-227: no reason on the owner's history; it stays in the disposition, for the case team.
+      perform decision.record_action_event(v, 'RETURNED', null, null, null, null, null, null);
+    end if;
+    if v.due_date <> v_old_due then
+      perform decision.record_action_event(v, 'DUE_DATE_CHANGED', null, null, null, null, v.due_date, null);
+    end if;
+  elsif p_disposition in ('WAIVE', 'REPLACE_WITH_NEW_ACTION') and v.status in ('OPEN', 'IN_PROGRESS', 'PENDING_VERIFICATION') then
+    update decision.corrective_action
+       set status = 'WAIVED', completion_submitted_at = null, waived_at = now(), updated_at = now(),
+           row_version = row_version + 1
+     where id = v.id
+    returning * into v;
+    -- CDF-227: neither the reason nor the replacement decision's document; both stay in the disposition.
+    perform decision.record_action_event(v, 'WAIVED', null, null, null, null, null, null);
+  end if;
+  -- The owner hears that their action changed (ids only, ADR-025) while they may still open it.
+  if (p_disposition = 'MODIFY' or (v.status = 'WAIVED' and v_prior <> 'WAIVED'))
+     and decision.owner_eligible(v.owner_id, v.case_id) then
+    perform notify.enqueue('CORRECTIVE_ACTION_CHANGED', v.owner_id, v.id, null,
+                           'action-changed:' || v.id || ':' || v.row_version);
+  end if;
+
+  if p_disposition = 'REPLACE_WITH_NEW_ACTION' then
+    select coalesce(max(a.sequence_no), 0) + 1 into v_seq from decision.corrective_action a
+     where a.recommendation_item_id = v.recommendation_item_id;
+    insert into decision.corrective_action (id, case_id, recommendation_item_id, authority_decision_id, action_type,
+                                            sequence_no, title, description, owner_id, due_date, created_by)
+    values (v_new_id, v.case_id, v.recommendation_item_id, v_replacement, v.action_type, v_seq, v_title, v_description,
+            p_owner_id, v_due, v_actor)
+    returning * into v_new;
+    perform decision.record_action_event(v_new, 'OPENED', null, null, null, p_owner_id, v_due, null);
+    perform notify.enqueue('CORRECTIVE_ACTION_ASSIGNED', p_owner_id, v_new.id, null,
+                           'action-assigned:' || v_new.id || ':' || v_seq || ':0');
+    perform audit.record_event('CORRECTIVE_ACTION_OPENED', 'BUSINESS', 'SUCCESS', v.case_id, 'corrective_action',
+      v_new.id::text, null,
+      jsonb_build_object('recommendation_item_id', v.recommendation_item_id, 'authority_decision_id', v_replacement,
+                         'action_type', v.action_type, 'sequence_no', v_seq, 'owner_id', p_owner_id, 'due_date', v_due,
+                         'due_date_from_policy', p_due_date is null, 'replaces_action_id', v.id,
+                         'disposition_id', v_id));
+  end if;
+  perform audit.record_event('CORRECTIVE_ACTION_DISPOSED', 'BUSINESS', 'SUCCESS', v.case_id, 'corrective_action',
+    v.id::text, v_reason,
+    jsonb_build_object('disposition_id', v_id, 'disposition', p_disposition,
+                       'recommendation_item_id', v.recommendation_item_id,
+                       'opened_under_decision_id', v.authority_decision_id, 'superseded_decision_id', v_governing,
+                       'replacement_decision_id', v_replacement, 'prior_status', v_prior, 'status', v.status,
+                       'source_document_reference', v_reference, 'revised_version_no', v_version,
+                       'replacement_action_id', v_new_id));
+  return v_id;
+end;
+$$;
+
+-- 10.4 The view, as in 2070, with such an event returned without its note and reference to a viewer outside the case
+-- team. UX's P12-3b (2096) replaces this function and keeps the exclusion.
+create or replace function api.corrective_action_view(p_action_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = ''
+as $$
+declare
+  v_me uuid := authz.current_user_id();
+  v decision.corrective_action;
+  v_case case_mgmt.case_record;
+  v_policy decision.corrective_action_policy;
+  v_team boolean;
+  v_manager boolean;
+  v_acts boolean;
+  v_naming boolean;
+  v_open boolean;
+  v_metadata boolean;
+  v_block text;
+  v_moves boolean;
+  v_waivable boolean;
+  v_frozen boolean;
+  v_replacement uuid;
+  v_approved boolean;
+begin
+  if p_action_id is null or not authz.can_view_corrective_action(p_action_id) then perform api._fail('NOT_FOUND'); end if;
+  select * into v from decision.corrective_action a where a.id = p_action_id;
+  select * into v_case from case_mgmt.case_record c where c.id = v.case_id;
+  v_policy := decision.current_corrective_policy(v.action_type);
+  v_team := authz.can_view_case(v.case_id);
+  -- decision.require_manager: CORRECTIVE_ACTION_MANAGE and the case itself.
+  v_manager := authz.has_permission('CORRECTIVE_ACTION_MANAGE') and v_team;
+  -- decision.require_owner (2040): whoever acts for the action (decision.acts_for_action, R2 included), with
+  -- CORRECTIVE_ACTION_OWN and their own case gate.
+  v_acts := coalesce(decision.acts_for_action(v, v_me), false) and authz.has_permission('CORRECTIVE_ACTION_OWN')
+            and authz.user_case_gate(v_me, v.case_id);
+  -- decision.require_owner_naming: an active case and, on a restricted one, its owner as its authority.
+  v_naming := v_case.records_state = 'ACTIVE'
+              and (not v_case.is_restricted
+                   or (v_case.owner_id = v_me and authz.is_restricted_case_authority(v_me, v_case.classification)));
+  v_open := v.status in ('OPEN', 'IN_PROGRESS');
+  v_metadata := authz.can_view_case_metadata(v.case_id);
+  -- decision.freeze_blocked_action (2030, DEC-AMB-003, DEC-AMB-013, DEC-AMB-014): no progress while the action may not
+  -- move; only an open action whose decision is tainted or under remediation may still be waived.
+  v_block := decision.action_block(v.id);
+  v_moves := v_block is null;
+  v_waivable := v_block is null or v_block in ('TAINTED_BY_CONFLICT', 'CONFLICT_REMEDIATION_OPEN');
+  -- api.dispose_superseded_corrective_action: a manager, on an ACTIVE case, while the action is frozen.
+  v_frozen := v_block = 'FROZEN_BY_SUPERSEDED_DECISION';
+  if v_frozen then
+    v_replacement := decision.superseding_decision(decision.action_governing_decision(v.id));
+    v_approved := decision.approving_decision(v.recommendation_item_id) is not distinct from v_replacement;
+  end if;
+  return jsonb_build_object(
+    'action_id', v.id, 'action_type', v.action_type, 'sequence_no', v.sequence_no, 'title', v.title,
+    'description', v.description, 'status', v.status, 'due_date', v.due_date, 'percent_complete', v.percent_complete,
+    'created_by', v.created_by, 'created_at', v.created_at, 'completion_submitted_at', v.completion_submitted_at,
+    'completed_at', v.completed_at, 'verified_by', v.verified_by, 'waived_at', v.waived_at,
+    'updated_at', v.updated_at, 'row_version', v.row_version,
+    -- DEC-AMB-014: the wording it carries and every earlier one (corrective_action_version_read: as the action).
+    'version_no', v.version_no,
+    'versions', coalesce((
+      select jsonb_agg(jsonb_build_object('version_no', x.version_no, 'title', x.title, 'description', x.description,
+                                          'recorded_by', x.recorded_by, 'recorded_at', x.recorded_at)
+             order by x.version_no)
+      from decision.corrective_action_version x where x.action_id = v.id), '[]'::jsonb),
+    'owner', jsonb_build_object(
+      'kind', v.owner_kind, 'accountable_user_id', v.owner_id,
+      'sector', (select jsonb_build_object('sector_id', s.id, 'code', s.code, 'name_en', s.name_en, 'name_ar', s.name_ar)
+                 from iam.sector s where s.id = v.owner_sector_id),
+      -- R3: a pool by code and name only, under the action's own visibility.
+      'pool', (select jsonb_build_object('code', p.code, 'name', p.name)
+               from decision.corrective_action_pool p where p.id = v.owner_pool_id),
+      'external_party_label', v.external_party_label),
+    -- The decision the action executes, to whoever sees the case only: an owner sees the card, never the case.
+    -- Why it cannot progress (DEC-AMB-013, DEC-AMB-014): to the case team only, with the origin. The decision it
+    -- executes now (governing: the replacement once re-adopted or modified) and the replacement decision's
+    -- dispositions of it (corrective_action_disposition_read: the case team), without their reasons (the card carries
+    -- no reason, R3).
+    'origin', case when v_team then jsonb_build_object(
+      'recommendation_item_id', v.recommendation_item_id, 'authority_decision_id', v.authority_decision_id,
+      -- DEC-F41 (2070): where it comes from, a package item and its decision or a preliminary proposal.
+      'source', case when v.preliminary_proposal_id is null then 'AUTHORITY_DECISION' else 'PRELIMINARY_REVIEW' end,
+      'preliminary_proposal_id', v.preliminary_proposal_id,
+      'governing_decision_id', decision.action_governing_decision(v.id), 'decision_block', v_block,
+      'dispositions', coalesce((
+        select jsonb_agg(jsonb_build_object(
+                 'disposition_id', x.id, 'disposition', x.disposition, 'superseded_decision_id', x.superseded_decision_id,
+                 'replacement_decision_id', x.replacement_decision_id, 'prior_status', x.prior_status,
+                 'source_document_reference', x.source_document_reference,
+                 'revised_version_no', x.revised_version_no, 'replacement_action_id', x.replacement_action_id,
+                 'recorded_by', x.recorded_by, 'recorded_at', x.recorded_at)
+               order by x.recorded_at, x.id)
+        from decision.corrective_action_disposition x where x.action_id = v.id), '[]'::jsonb),
+      -- What a disposition may be now, as api.dispose_superseded_corrective_action checks it.
+      'disposition_options', case when v_frozen then to_jsonb(array_remove(array[
+        case when v_approved and v.status <> 'WAIVED' then 'RE_ADOPT' end,
+        case when v_approved and v.status not in ('COMPLETED', 'WAIVED') then 'MODIFY' end,
+        'WAIVE',
+        case when v_approved then 'REPLACE_WITH_NEW_ACTION' end], null)) else '[]'::jsonb end) end,
+    -- corrective_action_policy_read: the evidence the policy in force asks for.
+    'policy', jsonb_build_object('completion_evidence', v_policy.completion_evidence,
+                                 'allowed_evidence_types', to_jsonb(v_policy.allowed_evidence_types)),
+    -- corrective_action_event_read: the action's history, as the action. CDF-227 (2090): an event a disposition wrote
+    -- before 2090 carries the disposition's reason or document; a viewer outside the case team gets it without them.
+    'events', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'event_id', e.id, 'event_type', e.event_type, 'actor_id', e.actor_id,
+               'note', case when not w.withheld then e.note end,
+               'evidence_reference', e.evidence_reference, 'evidence_type', e.evidence_type,
+               'percent_complete', e.percent_complete, 'owner_id', e.owner_id, 'due_date', e.due_date,
+               'source_document_reference', case when not w.withheld then e.source_document_reference end,
+               'created_at', e.created_at)
+             order by e.created_at, e.id)
+      from decision.corrective_action_event e
+      cross join lateral (select authz.corrective_event_withheld(e.id) as withheld) w
+      where e.action_id = v.id), '[]'::jsonb),
+    'case', jsonb_build_object(
+      'case_id', case when v_metadata then v.case_id end,
+      'case_number', case when v_metadata then v_case.case_number end),
+    'capabilities', jsonb_build_object(
+      -- api.record_corrective_action_progress and api.submit_corrective_action_completion.
+      'may_record_progress', coalesce(v_acts and v_open and v_moves, false),
+      'may_submit_completion', coalesce(v_acts and v_open and v_moves, false),
+      -- api.verify_corrective_action: never its owner or whoever submitted the completion.
+      'may_verify', coalesce(v_manager and v.status = 'PENDING_VERIFICATION' and v.owner_id is distinct from v_me
+                             and v_moves
+                             and not exists (select 1 from decision.corrective_action_event e
+                                             where e.action_id = v.id and e.event_type = 'COMPLETION_SUBMITTED'
+                                               and e.actor_id = v_me), false),
+      -- api.reopen_corrective_action.
+      'may_reopen', coalesce(v_manager and v.status = 'COMPLETED' and v_case.records_state = 'ACTIVE' and v_moves,
+                             false),
+      -- api.waive_corrective_action.
+      'may_waive', coalesce(authz.has_permission('CORRECTIVE_ACTION_WAIVE') and v_team
+                            and v.status not in ('COMPLETED', 'WAIVED') and v_case.records_state = 'ACTIVE'
+                            and v_waivable, false),
+      -- api.dispose_superseded_corrective_action (DEC-AMB-014).
+      'may_dispose', coalesce(v_manager and v_case.records_state = 'ACTIVE' and v_frozen, false),
+      -- api.change_corrective_action_due_date.
+      'may_change_due_date', coalesce(v_manager and v.status in ('OPEN', 'IN_PROGRESS', 'PENDING_VERIFICATION'), false),
+      -- api.assign_corrective_action_owner.
+      'may_assign_owner', coalesce(v_manager and v_open and v_naming, false),
+      -- api.set_corrective_action_owner_kind: USER or EXTERNAL_PARTY ...
+      'may_set_owner_kind', coalesce(v_manager and v_open and v_naming, false),
+      -- ... and ORG_UNIT or SHARED_POOL, never on a restricted case (R2: RESTRICTED_CASE_OWNER_KIND).
+      'may_set_shared_owner_kind', coalesce(v_manager and v_open and v_naming and not v_case.is_restricted, false)));
+end;
+$$;
+comment on function api.corrective_action_view(uuid) is
+  'Purpose read model of one corrective action (migration 2040 item 13; its source, a package item or a preliminary '
+  'proposal, since 2070): NOT_FOUND unless authz.can_view_corrective_action; the card and its history, its origin '
+  'only to the case team; a pool by code and name (R3); capabilities from the commands (R2 included). Since 2090 '
+  '(CDF-227): an event carrying a disposition''s reason or document reaches a viewer outside the case team without them.';
+
+-- =============================================================================
+-- 11. Grants and the catalogue
 -- =============================================================================
 revoke all on function
   case_mgmt.protect_case_link(), case_mgmt.guard_duplicate_closure(), case_mgmt.subject_status(uuid),
@@ -1242,7 +1629,7 @@ revoke all on function
   case_mgmt.successor_allegation(case_mgmt.allegation, uuid, text, text, uuid, text, text, uuid),
   case_mgmt.close_allegation(case_mgmt.allegation, text, text, text, uuid),
   case_mgmt.allegation_change_block(uuid, boolean), case_mgmt.split_family(uuid),
-  intake.snapshot_referral_submission(), committee.protect_minutes_correction()
+  intake.snapshot_referral_submission(), committee.protect_minutes_correction(), decision.guard_waiver_reference()
 from public, anon, authenticated;
 
 revoke all on function
@@ -1261,6 +1648,10 @@ grant execute on function
   api.propose_minutes_correction(uuid, text, text), api.review_minutes_correction(uuid, text, text),
   api.annotate_archived_record(uuid, text, text, text)
 to authenticated;
+
+-- Read by the corrective_action_event_read policy, so callable by the callers it serves (CDF-227).
+revoke all on function authz.corrective_event_withheld(uuid) from public;
+grant execute on function authz.corrective_event_withheld(uuid) to authenticated;
 
 -- The form and status catalogue (migration 1970) follows the schema: CASE_SPLIT is emitted (S090, S107; when a case may
 -- be split stays SOURCE_REQUIRED), and the modules name their new commands.
