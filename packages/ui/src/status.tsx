@@ -8,11 +8,15 @@ import type {
   FindingResult,
   InterviewStatus,
   LegalHoldRequestStatus,
+  MeetingConflictConcernStatus,
+  MeetingStatus,
+  MinutesStatus,
   ProceedingStatus,
   RecordsState,
   ReportAttachmentStatus,
   ReportStatus,
   ScanStatus,
+  VoteItemStatus,
 } from "@cdf/contracts";
 import type { ReactNode } from "react";
 
@@ -36,6 +40,12 @@ interface Registry {
   allegation: Record<"OPEN" | "SUBSTANTIATED" | "UNSUBSTANTIATED" | "WITHDRAWN", StatusTone>;
   /** A finding is a decision, never a failure, so every result is neutral; the words carry it. */
   finding: Record<FindingResult, StatusTone>;
+  /** A committee meeting, one of its votes, a version of its minutes and a conflict raised in it (P12-2a). */
+  meeting: Record<MeetingStatus, StatusTone>;
+  voteItem: Record<VoteItemStatus, StatusTone>;
+  minutes: Record<MinutesStatus, StatusTone>;
+  /** A raised conflict waits for its decider; the decision either way is not a failure. */
+  concern: Record<MeetingConflictConcernStatus, StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -104,6 +114,16 @@ export const STATUS_TONES: Registry = {
     NOT_SUBSTANTIATED: "neutral",
     INCONCLUSIVE: "neutral",
   },
+  meeting: { SCHEDULED: "info", OPEN: "info", CLOSED: "neutral", CANCELLED: "neutral" },
+  voteItem: { OPEN: "info", AWAITING_CASTING_VOTE: "warning", CLOSED: "neutral" },
+  minutes: {
+    IN_REVIEW: "warning",
+    CHANGES_REQUESTED: "warning",
+    APPROVED: "success",
+    DEEMED_APPROVED: "success",
+    SUPERSEDED: "neutral",
+  },
+  concern: { OPEN: "warning", UPHELD: "neutral", DISMISSED: "neutral" },
 };
 
 /** The tone for a status; an unknown code (a newer database value) falls back to neutral, never to red. */
