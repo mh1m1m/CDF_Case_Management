@@ -1475,6 +1475,41 @@ const CLOSURE_2060_PROBES: Probe<ClosureTargets>[] = [
   },
 ];
 
+// Migration 2070 (ADR-043, DEC-F41): a corrective action from preliminary review takes a preliminary recommendation or
+// one of its proposals; never a case.
+interface PreliminaryCorrectiveTargets {
+  recommendation: string;
+  proposal: string;
+}
+
+const PRELIMINARY_2070_PROBES: Probe<PreliminaryCorrectiveTargets>[] = [
+  {
+    fn: "propose_preliminary_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.propose_preliminary_corrective_action(${t.recommendation}, 'CORRECTIVE_ACTION', ${REASON})`,
+  },
+  {
+    fn: "record_preliminary_authority_decision",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.record_preliminary_authority_decision(${t.proposal}, 'CEO', 'APPROVED', now(),
+        'Probe authority label', 'MEMO-PROBE-2070', ${REASON})`,
+  },
+  {
+    fn: "open_preliminary_corrective_action",
+    outcome: "NOT_FOUND",
+    call: (tx, t, self) =>
+      tx`select api.open_preliminary_corrective_action(${t.proposal}, 'Probe corrective action',
+        'Probe corrective action text.', ${self}, current_date + 30)`,
+  },
+  {
+    fn: "preliminary_corrective_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.preliminary_corrective_view(${t.recommendation})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1781,6 +1816,7 @@ describe("catalog guard", () => {
       ...BCP_PROBES.map((p) => p.fn),
       ...EVIDENCE_HALF_PROBES.map((p) => p.fn),
       ...CLOSURE_2060_PROBES.map((p) => p.fn),
+      ...PRELIMINARY_2070_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -2675,6 +2711,84 @@ describe("IDOR: closure, reopening and the package-building read models (migrati
         await s.tx`select records_state from case_mgmt.case_record where id in (${caseB}, ${case4})
                    order by records_state`,
       ).toEqual([{ records_state: "ACTIVE" }, { records_state: "CLOSED" }]);
+    });
+  });
+});
+
+describe("IDOR: corrective action from preliminary review (migration 2070)", () => {
+  // Under a synthetic PRELIMINARY_CORRECTIVE_ACTION_TYPES and authority rule: investigator B's NOT_SERIOUS
+  // recommendation on case B, approved, with two corrective-action proposals, one approved by its authority (an action
+  // could open from it) and one still awaiting its authority. None of these sees case B.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    const { authorityRuleFor } = await import("../support/decision");
+    const { setPreliminaryCorrectiveTypes } = await import("../support/preliminary");
+    await ownerScenario(async (s) => {
+      await setPreliminaryCorrectiveTypes(s, "CORRECTIVE_ACTION");
+      await authorityRuleFor(s, "CORRECTIVE_ACTION");
+      await s.as("investigatorB");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseB}, 'NOT_SERIOUS', ${REASON}) as id`;
+      const proposals: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        const [p] = await s.tx<{ id: string }[]>`
+          select api.propose_preliminary_corrective_action(${r!.id}, 'CORRECTIVE_ACTION', ${REASON}) as id`;
+        proposals.push(p!.id);
+      }
+      await s.as("grcDirector");
+      await s.tx`select api.review_preliminary_recommendation(${r!.id}, 'ENDORSE', null, null)`;
+      await s.as("grcSectorHead");
+      await s.tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`;
+      await s.as("caseManager");
+      const [q] = await s.tx<{ authority_type: string }[]>`
+        select authority_type from decision.preliminary_authority_requirement where proposal_id = ${proposals[0]!}`;
+      await s.tx`select api.record_preliminary_authority_decision(${proposals[0]!}, ${q!.authority_type}, 'APPROVED',
+        now(), 'Chief Executive (synthetic)', 'MEMO-PROBE-2070', ${REASON})`;
+
+      await s.as(actor);
+      const mismatches: string[] = [];
+      for (const [label, proposal] of [
+        ["approved", proposals[0]!],
+        ["awaiting", proposals[1]!],
+      ] as const) {
+        const real: PreliminaryCorrectiveTargets = { recommendation: r!.id, proposal };
+        const random: PreliminaryCorrectiveTargets = { recommendation: randomUUID(), proposal: randomUUID() };
+        for (const probe of PRELIMINARY_2070_PROBES) {
+          const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+          const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+          if (onReal !== probe.outcome || onRandom !== probe.outcome)
+            mismatches.push(
+              `${probe.fn} (${label}): real=${onReal} random=${onRandom} expected=${probe.outcome}`,
+            );
+        }
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "case_mgmt.preliminary_corrective_proposal",
+        "decision.preliminary_authority_requirement",
+        "decision.preliminary_authority_decision",
+        "decision.corrective_action",
+      ]) {
+        expect(await s.tx`select case_id from ${s.tx(table)}`, table).toEqual([]);
+      }
+      // Nothing moved: one decision, no action, and no further proposal.
+      await s.asOwner();
+      expect(
+        await s.tx`select (select count(*)::int from case_mgmt.preliminary_corrective_proposal) as proposals,
+                          (select count(*)::int from decision.preliminary_authority_decision) as decisions,
+                          (select count(*)::int from decision.corrective_action
+                           where preliminary_proposal_id is not null) as actions`,
+      ).toEqual([{ proposals: 2, decisions: 1, actions: 0 }]);
     });
   });
 });

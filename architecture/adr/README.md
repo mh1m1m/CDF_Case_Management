@@ -44,6 +44,7 @@
 | [ADR-040](ADR-040-owner-finalization-decisions.md)                  | Applying the owner's Finalization Set and ambiguity decisions                   | Proposed |
 | [ADR-041](ADR-041-evidence-half-and-defence-packet.md)              | The evidence half of P11-G4, the Defence Packet and the prior-sanctions extract | Proposed |
 | [ADR-042](ADR-042-case-closure-reopening-and-package-read-model.md) | Case closure, outcome and reopening; the package-building read model            | Proposed |
+| [ADR-043](ADR-043-preliminary-corrective-action.md)                 | Preliminary corrective action; closure fails closed with no authority in force  | Proposed |
 | [ADR-051](ADR-051-areas-and-my-work-phase-12.md)                    | Areas and My Work for Phase 12                                                  | Proposed |
 | [ADR-054](ADR-054-meeting-screen-capabilities.md)                   | The meeting screen's capabilities                                               | Proposed |
 

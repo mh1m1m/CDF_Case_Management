@@ -1,6 +1,7 @@
 # ADR-033: Corrective-action tracking
 
 - **Status:** Proposed (2026-10-12). Linear CDF-203 (EPIC 12 corrective actions, CDF-17). Implemented in migration 1940 (local, pending security review). Security-sensitive.
+- **Amended:** ADR-043 (migration 2070, DEC-F41): an action may also come from an approved preliminary corrective proposal, where the configured rule permits its type; decision 1 below then reads "an approved decision or an approved preliminary proposal".
 - **Protocol:** §19, §29, §39, §65, §68, §83, §87; ADR-021, ADR-023, ADR-025, ADR-016 DEC-61, DEC-62; CDF-73 option D; owner Q&A Q69, Q72, Q79.
 
 ## Context
