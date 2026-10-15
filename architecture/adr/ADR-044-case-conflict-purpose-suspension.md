@@ -61,6 +61,8 @@ Separately, nothing stopped a committee member from judging a case they had inve
 - RLS on the table, select only (`authz.can_view_case_conflict_concern`). A concern is read by the raiser and by conflict managers who can see the case, never by its subject, even a conflict manager. There are no write grants.
 - `api.case_conflict_concerns(case)`: NOT_FOUND unless the case is visible. It returns `may_raise` and the readable concerns, with their reasons, decision and `may_decide`. The capability flags are the commands' checks in the commands' order, without locks; false, never null. Not audited (a read).
 - The new events are not in `api.case_history`'s catalogue, so they never reach history. The resulting `CASE_UNASSIGNED` and `CASE_ACCESS_REVOKED` show as any other team change does.
+- **The ledger (AGENT-09 R1 on PR #82; CDF-225).** The case-team branch of `audit_event_read` (migration 1410) admitted every `BUSINESS` event of a case the reader can view, so the subject read `CASE_CONFLICT_RAISED`, and with it who raised the concern. The same held on main since 2000 and 2030 for `MEETING_CONFLICT_RAISED`, `MEETING_CONFLICT_DECIDED` and `MEETING_CONFLICT_REVERSED` (CDF-225, placed in 2080 by the coordinator). The policy is altered so that branch leaves out these five events. The exclusion is on the reader side, so rows written before 2080 are covered and no ledger row is touched. The other two branches are unchanged: oversight (`AUDIT_VIEW`: Internal Audit, the DPO) and security monitoring read as before, and the case team reads every other `BUSINESS` event of the case.
+- Known limit: an oversight reader who is also the subject of a concern still reads its events, as they read the whole ledger by design (§29).
 
 ### 6. Catalogue
 
@@ -76,7 +78,7 @@ P11-G7 closes. T3-B1.2-050 names the case commands and loses its gap reference. 
 ## Consequences
 
 - Anyone on a case who may declare a conflict can now raise someone else's. A conflict manager decides it, and an upheld one removes that person from every purpose on the case at once, committees included.
-- No permission or role grant changes. Every replaced function only narrows. No catalogue code, status or option code is renamed or removed (DEC-35).
+- No permission or role grant changes. Every replaced function only narrows, and so does the altered audit read policy (§5). No catalogue code, status or option code is renamed or removed (DEC-35).
 - A committee member who investigated the case is excluded from its proceedings, and a sitting member is not assigned to investigate it. Fixtures that seated a case's investigator on that case's committee now see the member excluded (two tests updated).
 - The form catalogue table reflows in `FORM_CATALOGUE_RATIONALIZATION.md`: with P11-G7 closed, no form row has a gap reference, so the gap column narrows. The change is whitespace only.
 - PRODUCTION_SUBSTITUTION_REQUIRED: none. The commands are plain SQL; users come from the CDF IdP as everywhere else.
@@ -98,6 +100,8 @@ One table, a setting, a trigger and functions in PostgreSQL; they move to RDS Po
   - The assignment trigger and the amendment.
   - The setting turned off, and fail safe on any other value.
   - The helpers are not callable by application roles.
+  - The ledger (AGENT-09 R1, CDF-225): the subject and everyone else on the case read no `CASE_CONFLICT_*` row, open or dismissed; no subject, raiser, member or case-team reader reads a `MEETING_CONFLICT_*` row (raised, dismissed, upheld, reversed); oversight reads them all.
+- `tests/security/audit-read-policy.spec.ts`: the case-team branch leaves out the five events written as fixture rows (as before 2080), and oversight reads them.
 - IDOR probes for the three functions; audit walk steps for the two commands; the catalogue tests; the policy snapshot.
 - Updated:
   - `my-work-phase12.spec.ts`: case B's investigator, seated as an alternate, is now not cleared in the preview.

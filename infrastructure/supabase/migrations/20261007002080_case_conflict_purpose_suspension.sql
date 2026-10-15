@@ -37,12 +37,15 @@
 --      committee proceedings, the snapshot amendment refuses them, and a member sitting in an open proceeding of the
 --      case is not assigned to investigate it. Their investigation purpose stays (an unrelated, independent purpose).
 --   4. A read model of the case's raised conflicts, with capability flags from the commands.
+--   5. AGENT-09 R1 and CDF-225. The events of a raised conflict, on the case or in a meeting, leave the case-team
+--      branch of the audit read policy, so the subject never reads one there (rows written before 2080 included).
 --
 -- Additive: one setting, one table, three api functions and five helper and trigger functions. Replaced functions
 -- keep their signatures and only narrow: authz.has_conflict (1910), committee.open_committee_proceeding (1870),
 -- api.amend_proceeding_snapshot (2030) and api.committee_referral_preview (2045, so the preview still equals the
--- snapshot). No permission or role grant changes; no catalogue code, status or option code is renamed or removed
--- (DEC-35). Not built: reversing an upheld case conflict (it would restore access; AMB-055 covers a meeting only).
+-- snapshot); the audit_event_read policy (1410) is altered to narrow its case-team branch. No permission or role grant
+-- changes; no catalogue code, status or option code is renamed or removed (DEC-35). Not built: reversing an upheld
+-- case conflict (it would restore access; AMB-055 covers a meeting only).
 -- =============================================================================
 
 -- =============================================================================
@@ -554,7 +557,32 @@ end;
 $$;
 
 -- =============================================================================
--- 4. Grants and the catalogue
+-- 4. Raised conflicts stay out of the case team's ledger reads (AGENT-09 R1 on this PR; CDF-225)
+-- =============================================================================
+-- The case-team branch of audit_event_read (1410) admits every BUSINESS event of a case the reader can view. That
+-- showed a raised conflict's events to everyone on the case, the subject included, and with them the raiser
+-- (actor_id): CASE_CONFLICT_RAISED and CASE_CONFLICT_DECIDED here, and on main since 2000 and 2030 the meeting's
+-- MEETING_CONFLICT_RAISED, MEETING_CONFLICT_DECIDED and MEETING_CONFLICT_REVERSED (CDF-225). The rule is that the
+-- subject never reads a concern about them; the concern's readers already read it through its own table and read
+-- models. The exclusion is on the reader side, so rows written before 2080 are covered and no ledger row is touched
+-- (the ledger is append-only). Narrowing only: the two other branches are unchanged, so oversight (AUDIT_VIEW) and
+-- security monitoring read exactly as before, and the case team reads every other BUSINESS event of the case.
+alter policy audit_event_read on audit.audit_event
+  using (
+    -- was audit_business_read: internal audit reads business and administrative history.
+    (category in ('BUSINESS', 'ADMIN') and authz.has_permission('AUDIT_VIEW'))
+    -- was audit_security_read: security monitoring reads security events.
+    or (category = 'SECURITY' and authz.has_permission('SECURITY_EVENT_VIEW'))
+    -- was audit_case_team_read: case teams see the business history of cases they can view, except the events of a
+    -- raised conflict (2080).
+    or (category = 'BUSINESS' and case_id is not null
+        and action not in ('CASE_CONFLICT_RAISED', 'CASE_CONFLICT_DECIDED', 'MEETING_CONFLICT_RAISED',
+                           'MEETING_CONFLICT_DECIDED', 'MEETING_CONFLICT_REVERSED')
+        and authz.can_view_case(case_id))
+  );
+
+-- =============================================================================
+-- 5. Grants and the catalogue
 -- =============================================================================
 revoke all on function
   case_mgmt.protect_case_conflict_concern(), case_mgmt.prior_investigator_rule(),

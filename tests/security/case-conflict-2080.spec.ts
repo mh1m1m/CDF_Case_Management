@@ -5,6 +5,7 @@
 // subject fails the case gate: every purpose on that case stops, committee participation absolutely, while the
 // account and other cases stay. Every step runs through the api.* commands as `authenticated`; the owner connection
 // only sets the migration-managed setting (rolled back), reads rows and probes the table guards.
+import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   USERS,
@@ -505,6 +506,100 @@ describe("a member who investigated the case does not judge it (AMB-053)", () =>
         (tx) => tx`select authz.prior_investigator_conflicted(${USERS.lead}, ${caseB})`,
       );
       await s.expectError("permission denied", (tx) => tx`select case_mgmt.prior_investigator_rule()`);
+    });
+  });
+});
+
+// AGENT-09 R1 on #82 and CDF-225: the case-team branch of the audit read policy (migration 1410) let anyone who can
+// view the case select a raised conflict's events, the subject included, and with them who raised it. Since 2080 the
+// raised-conflict events stay out of that branch, rows written before 2080 included; oversight (AUDIT_VIEW) reads
+// them as before, and the case team reads every other BUSINESS event of the case as before.
+const RAISED_CONFLICT_EVENTS = [
+  "CASE_CONFLICT_RAISED",
+  "CASE_CONFLICT_DECIDED",
+  "MEETING_CONFLICT_RAISED",
+  "MEETING_CONFLICT_DECIDED",
+  "MEETING_CONFLICT_REVERSED",
+];
+async function conflictEventsSeenBy(s: Scenario, user: UserKey): Promise<string[]> {
+  await s.as(user);
+  const rows = await s.tx<{ action: string; actor_id: string | null }[]>`
+    select action, actor_id from audit.audit_event where action = any(${RAISED_CONFLICT_EVENTS}::text[]) order by seq`;
+  return rows.map((r) => r.action);
+}
+
+describe("the ledger keeps a raised conflict from the case team (AGENT-09 R1, CDF-225)", () => {
+  it("on the case: the subject and everyone else on the case read no CASE_CONFLICT_* row, open or dismissed", async () => {
+    await ownerScenario(async (s) => {
+      const marker = randomUUID();
+      await s.asOwner();
+      await s.tx`select audit.record_event('ADMIN_ACTION', 'BUSINESS', 'SUCCESS', ${caseB}, 'synthetic', ${marker},
+        'Synthetic R1 fixture', '{}'::jsonb, 'SYSTEM')`;
+      // AGENT-09's probe: the case manager raises a concern about case B's investigator.
+      const k = await raise(s, "caseManager", "investigatorB");
+      const team = ["investigatorB", "triage", "caseManager", "grcDirector", "grcDeputy"] as const;
+      for (const u of team) expect(await conflictEventsSeenBy(s, u), u).toEqual([]);
+
+      await decide(s, "grcDirector", k, "DISMISSED");
+      for (const u of team) expect(await conflictEventsSeenBy(s, u), u).toEqual([]);
+      // The subject keeps the case and reads its other business events, as before.
+      expect(await seesCase(s, "investigatorB")).toBe(true);
+      await s.as("investigatorB");
+      expect(await s.tx`select seq from audit.audit_event where object_id = ${marker}`).toHaveLength(1);
+      expect(await s.tx`select id from case_mgmt.case_conflict_concern`).toEqual([]);
+
+      // Oversight reads both, as every other business event.
+      for (const u of ["internalAudit", "dpo"] as const) {
+        expect(await conflictEventsSeenBy(s, u), u).toEqual([
+          "CASE_CONFLICT_RAISED",
+          "CASE_CONFLICT_DECIDED",
+        ]);
+      }
+    });
+  });
+
+  it("in a meeting (CDF-225): no subject, raiser, member or case-team reader reads a MEETING_CONFLICT_* row", async () => {
+    await ownerScenario(async (s) => {
+      await seat(
+        s,
+        ic,
+        IC_SEATS.map(([u, seatCode]) => [u, u === "lead" ? "DEPUTY_CHAIR" : seatCode]),
+      );
+      const f = await scheduleMeeting(s, ic, caseB);
+      await openWithPresent(s, f, ["committeeChair", "legal", "legalB", "lead"]);
+      await s.as("legal");
+      const [dismissed] = await s.tx<{ id: string }[]>`
+        select api.raise_meeting_conflict(${f.participant.lead!}, ${MEETING_REASON}) as id`;
+      const [upheld] = await s.tx<{ id: string }[]>`
+        select api.raise_meeting_conflict(${f.participant.legalB!}, ${MEETING_REASON}) as id`;
+      await s.as("committeeChair");
+      await s.tx`select api.decide_meeting_conflict(${dismissed!.id}, 'DISMISSED', ${MEETING_REASON})`;
+      await s.tx`select api.decide_meeting_conflict(${upheld!.id}, 'UPHELD', ${MEETING_REASON})`;
+      await s.as("lead");
+      await s.tx`select api.reverse_meeting_conflict_determination(${upheld!.id}, ${MEETING_REASON})`;
+
+      for (const u of [
+        "lead",
+        "legalB",
+        "legal",
+        "committeeChair",
+        "committeeSecretary",
+        "caseManager",
+        "investigatorB",
+        "triage",
+        "grcDirector",
+      ] as const) {
+        expect(await conflictEventsSeenBy(s, u), u).toEqual([]);
+      }
+      for (const u of ["internalAudit", "dpo"] as const) {
+        expect(await conflictEventsSeenBy(s, u), u).toEqual([
+          "MEETING_CONFLICT_RAISED",
+          "MEETING_CONFLICT_RAISED",
+          "MEETING_CONFLICT_DECIDED",
+          "MEETING_CONFLICT_DECIDED",
+          "MEETING_CONFLICT_REVERSED",
+        ]);
+      }
     });
   });
 });
