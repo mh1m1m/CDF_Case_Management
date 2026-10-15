@@ -87,6 +87,8 @@ const NOT_STATE_CHANGING = new Set([
   "preliminary_approval_queue",
   // Corrective action from preliminary review (migration 2070): the recommendation's proposals and capability flags.
   "preliminary_corrective_view",
+  // Raised case conflicts (migration 2080): the caller's readable concerns and capability flags.
+  "case_conflict_concerns",
   // Committee meetings (migration 1890): who has voted, and choices only after close.
   "vote_item_status",
   // Purpose read models of a meeting and its minutes (migration 2030 section 4): reads, like vote_item_status.
@@ -316,6 +318,22 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "decide_conflict",
         actor: "caseManager",
         run: (s) => s.tx`select api.decide_conflict(${ids.conflict!}, 'CONFLICT_CLEARED', ${REASON})`,
+      },
+      // P11-G7 (migration 2080): case B's investigator raises a conflict about the GRC deputy; the case manager
+      // dismisses it (an upheld one would end the deputy's purposes on case B).
+      {
+        fn: "raise_case_conflict",
+        actor: "investigatorB",
+        run: async (s) =>
+          (ids.caseConflict = await one(
+            s,
+            s.tx`select api.raise_case_conflict(${caseB}, ${USERS.grcDeputy}, 'Synthetic: audit walk concern.') as id`,
+          )),
+      },
+      {
+        fn: "decide_case_conflict",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.decide_case_conflict(${ids.caseConflict!}, 'DISMISSED', ${REASON})`,
       },
       {
         fn: "reply_to_reporter",
@@ -1222,7 +1240,8 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "committeeSecretary",
         run: async (s) => {
           // Fixture: a deputy chair, an alternate member and an alternate secretary appointed after the referral (none
-          // sits on the Grievance Committee below, so its firewall is unaffected).
+          // sits on the Grievance Committee below, so its firewall is unaffected). The alternate is not case A's lead
+          // investigator: since migration 2080 (AMB-053) the amendment refuses a member who investigated the case.
           await s.as("platformAdmin");
           const deputy = await one(
             s,
@@ -1230,7 +1249,7 @@ describe("every state-changing command writes its audit event in the same transa
           );
           const alternate = await one(
             s,
-            s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.lead}, 'ALTERNATE_MEMBER', now(), null, 'DEMO-APPT-05') as id`,
+            s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.triage}, 'ALTERNATE_MEMBER', now(), null, 'DEMO-APPT-05') as id`,
           );
           await s.tx`select api.appoint_committee_member(${ids.committee!}, ${USERS.grcDeputy}, 'ALTERNATE_SECRETARY', now(), null, 'DEMO-APPT-06')`;
           await s.as("committeeSecretary");
@@ -1254,7 +1273,7 @@ describe("every state-changing command writes its audit event in the same transa
             ["m2Chair", USERS.committeeChair],
             ["m2Member", USERS.committee],
             ["m2Deputy", USERS.investigatorB],
-            ["m2Alternate", USERS.lead],
+            ["m2Alternate", USERS.triage],
           ] as const) {
             ids[key] = rows.find((r) => r.user_id === user)!.id;
           }
@@ -1289,7 +1308,7 @@ describe("every state-changing command writes its audit event in the same transa
             ["committeeChair", "m2Chair"],
             ["committee", "m2Member"],
             ["investigatorB", "m2Deputy"],
-            ["lead", "m2Alternate"],
+            ["triage", "m2Alternate"],
           ] as const) {
             await s.as(key);
             await s.tx`select api.declare_meeting_conflict(${ids[seatKey]!}, 'NO_CONFLICT', null)`;
@@ -1364,7 +1383,7 @@ describe("every state-changing command writes its audit event in the same transa
       },
       {
         fn: "recuse_for_conflict",
-        actor: "lead",
+        actor: "triage",
         run: async (s) => {
           await s.tx`select api.cast_vote(${ids.m2Item!}, 'APPROVE', null)`;
           await s.as("grcDeputy");
@@ -1375,7 +1394,7 @@ describe("every state-changing command writes its audit event in the same transa
             s,
             s.tx`select api.open_vote_item(${ids.meeting2!}, 'OTHER', null, 'Walk second emergency item (synthetic)') as id`,
           );
-          await s.as("lead");
+          await s.as("triage");
           return s.tx`select api.recuse_for_conflict(${ids.m2Item2!}, 'Synthetic: related to a party.')`;
         },
       },
@@ -2885,6 +2904,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_bcp_import",
       "authz.can_view_bcp_provenance",
       "authz.can_view_case",
+      "authz.can_view_case_conflict_concern",
       "authz.can_view_case_content",
       "authz.can_view_case_metadata",
       "authz.can_view_committee_proceeding",

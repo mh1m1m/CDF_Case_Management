@@ -1517,6 +1517,31 @@ const PRELIMINARY_2070_PROBES: Probe<PreliminaryCorrectiveTargets>[] = [
   },
 ];
 
+// Migration 2080 (ADR-044, P11-G7): a raised case conflict takes a case or a concern.
+interface CaseConflictTargets {
+  case: string;
+  concern: string;
+}
+
+const CASE_CONFLICT_2080_PROBES: Probe<CaseConflictTargets>[] = [
+  {
+    fn: "raise_case_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.raise_case_conflict(${t.case}, ${"a0000000-0000-4000-8000-000000000014"}, ${REASON})`,
+  },
+  {
+    fn: "decide_case_conflict",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_case_conflict(${t.concern}, 'UPHELD', ${REASON})`,
+  },
+  {
+    fn: "case_conflict_concerns",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.case_conflict_concerns(${t.case})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1826,6 +1851,7 @@ describe("catalog guard", () => {
       ...EVIDENCE_HALF_PROBES.map((p) => p.fn),
       ...CLOSURE_2060_PROBES.map((p) => p.fn),
       ...PRELIMINARY_2070_PROBES.map((p) => p.fn),
+      ...CASE_CONFLICT_2080_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -2579,13 +2605,15 @@ describe("IDOR: exclusion records, Defence Packets and sanction extracts (migrat
     const { ic, gc } = await committeeIds();
     await ownerScenario(async (s) => {
       await ev.setPacketPolicy(s);
+      // The lead investigates case 0004 from before its referral: since migration 2080 (AMB-053) a member sitting on
+      // an open committee proceeding of a case is not assigned to investigate it.
+      await s.as("caseManager");
+      await s.tx`select api.assign_case(${case4}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
       const p = await ev.priorFinalSanction(s, { ic, gc, caseB, requestingCase: case4 }, true);
       const extract = await ev.requestExtract(s, p);
       await s.asOwner();
       const [row] = await s.tx<{ id: string }[]>`
         select id from decision.sanction_extract_row where extract_id = ${extract}`;
-      await s.as("caseManager");
-      await s.tx`select api.assign_case(${case4}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
       const kept = await ev.storeEvidence(s, "investigatorB", case4);
       const dropped = await ev.storeEvidence(s, "investigatorB", case4);
       await s.as("lead");
@@ -2804,6 +2832,63 @@ describe("IDOR: corrective action from preliminary review (migration 2070)", () 
   });
 });
 
+describe("IDOR: raised case conflicts (migration 2080)", () => {
+  // On case B: investigator B raised a conflict about the GRC deputy, and the case manager one about investigator B
+  // that the GRC Director upheld (so investigator B no longer sees case B either). None of these sees case B.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await ownerScenario(async (s) => {
+      await s.as("investigatorB");
+      const [open] = await s.tx<{ id: string }[]>`
+        select api.raise_case_conflict(${caseB}, ${USERS.grcDeputy}, ${REASON}) as id`;
+      await s.as("caseManager");
+      const [upheld] = await s.tx<{ id: string }[]>`
+        select api.raise_case_conflict(${caseB}, ${USERS.investigatorB}, ${REASON}) as id`;
+      await s.as("grcDirector");
+      await s.tx`select api.decide_case_conflict(${upheld!.id}, 'UPHELD', ${REASON})`;
+
+      await s.as(actor);
+      const mismatches: string[] = [];
+      for (const [label, concern] of [
+        ["open", open!.id],
+        ["upheld", upheld!.id],
+      ] as const) {
+        const real: CaseConflictTargets = { case: caseB, concern };
+        const random: CaseConflictTargets = { case: randomUUID(), concern: randomUUID() };
+        for (const probe of CASE_CONFLICT_2080_PROBES) {
+          const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+          const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+          if (onReal !== probe.outcome || onRandom !== probe.outcome)
+            mismatches.push(
+              `${probe.fn} (${label}): real=${onReal} random=${onRandom} expected=${probe.outcome}`,
+            );
+        }
+      }
+      expect(mismatches).toEqual([]);
+      expect(await s.tx`select case_id from case_mgmt.case_conflict_concern`).toEqual([]);
+      // Nothing moved: the open concern is still open and nothing else was raised.
+      await s.asOwner();
+      expect(
+        await s.tx`select status, count(*)::int as n from case_mgmt.case_conflict_concern group by status
+                   order by status`,
+      ).toEqual([
+        { status: "OPEN", n: 1 },
+        { status: "UPHELD", n: 1 },
+      ]);
+    });
+  });
+});
+
 describe("cross-case object substitution", () => {
   it("an insider on case A cannot act on case B's objects by passing them to commands", async () => {
     const seeded = await seedObjects("0002");
@@ -2971,6 +3056,7 @@ describe("CDF-205 T-AMB-142 (AMB-231): no api.* function accepts an acting-as us
     "p_restricted_authority_id",
     "p_reviewer_id",
     "p_secretary_id",
+    "p_subject_user_id", // api.raise_case_conflict (2080): the person the concern is about; the raiser is derived
     "p_user_id",
   ];
 
