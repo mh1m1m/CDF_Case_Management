@@ -833,6 +833,91 @@ describe("splitting a case (AMB-004)", () => {
     });
   });
 
+  it("the split family's fast path (no split link) answers as the full walk does, on split and unsplit cases", async () => {
+    await ownerScenario(async (s) => {
+      // A chain, source B → C1 → C2, and a RELATED link from case A, which the family never follows.
+      await subjectWithAllegation(s, caseB, "Employee Omega (synthetic)");
+      const second = await subjectWithAllegation(s, caseB, "Employee Psi (synthetic)");
+      const third = await subjectWithAllegation(s, caseB, "Employee Chi (synthetic)");
+      await s.as("caseManager");
+      await s.tx`select api.link_cases(${caseA}, ${caseB}, 'RELATED', ${REASON})`;
+      const c1 = await one(
+        s.tx`select api.split_case(${caseB}, ${[second.allegation, third.allegation]}::uuid[], 'Split case (synthetic)',
+          'Synthetic: the supplier matter.', ${REASON}) as id`,
+      );
+      const moved = await s.tx<{ id: string }[]>`
+        select id from case_mgmt.allegation where case_id = ${c1} order by created_at, id`;
+      const c2 = await one(
+        s.tx`select api.split_case(${c1}, ${[moved[1]!.id]}::uuid[], 'Second split (synthetic)',
+          'Synthetic: the contract matter.', ${REASON}) as id`,
+      );
+      // A conflict at each end of the chain.
+      await s.as("grcDeputy");
+      await s.tx`select api.declare_conflict(${caseB}, true, 'Synthetic: declared on the source case.')`;
+      await s.as("caseManager");
+      await s.tx`select api.assign_case(${c2}, ${USERS.lead}, 'LEAD_INVESTIGATOR', ${REASON})`;
+      await s.as("lead");
+      await s.tx`select api.declare_conflict(${c2}, true, 'Synthetic: declared on the last split case.')`;
+
+      await s.asOwner();
+      // The family: case_mgmt.split_family (fast path when there is no split link) against the full walk, every case.
+      const families = await s.tx<{ id: string; fast: string[]; walk: string[] }[]>`
+        select c.id,
+               (select array_agg(x order by x) from unnest(case_mgmt.split_family(c.id)) x) as fast,
+               (with recursive family (case_id) as (
+                  select c.id
+                  union
+                  select case when l.case_id = f.case_id then l.linked_case_id else l.case_id end
+                  from family f
+                  join case_mgmt.case_link l on l.link_type = 'SPLIT_FROM'
+                                            and (l.case_id = f.case_id or l.linked_case_id = f.case_id))
+                select array_agg(case_id order by case_id) from family) as walk
+        from case_mgmt.case_record c`;
+      expect(families.length).toBeGreaterThanOrEqual(6);
+      for (const f of families) expect(f.fast, f.id).toEqual(f.walk);
+      const chain = [caseB, c1, c2].sort();
+      expect(
+        Object.fromEntries(
+          families.filter((f) => [caseA, ...chain].includes(f.id)).map((f) => [f.id, f.fast]),
+        ),
+      ).toEqual({ [caseA]: [caseA], [caseB]: chain, [c1]: chain, [c2]: chain });
+
+      // The conflict answer, every case and every account, against 2090's rule evaluated on the full walk.
+      const answers = await s.tx<{ case_id: string; user_id: string; fast: boolean; walk: boolean }[]>`
+        select c.id as case_id, u.id as user_id, authz.has_conflict(c.id, u.id) as fast,
+               (with recursive family (case_id) as (
+                  select c.id
+                  union
+                  select case when l.case_id = f.case_id then l.linked_case_id else l.case_id end
+                  from family f
+                  join case_mgmt.case_link l on l.link_type = 'SPLIT_FROM'
+                                            and (l.case_id = f.case_id or l.linked_case_id = f.case_id))
+                select exists (
+                         select 1 from case_mgmt.conflict_check k join family f on f.case_id = k.case_id
+                         where k.user_id = u.id and k.is_current and k.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED'))
+                    or exists (
+                         select 1 from grievance.subject_portal_link l join family f on f.case_id = l.case_id
+                         where l.user_id = u.id
+                           and (l.revoked_at is null or case_mgmt.subject_status(l.subject_id) = 'MISIDENTIFIED'))
+                    or exists (
+                         select 1 from grievance.grievance g join family f on f.case_id = g.case_id
+                         where g.grievant_user_id = u.id)
+                    or exists (
+                         select 1 from case_mgmt.case_conflict_concern cc join family f on f.case_id = cc.case_id
+                         where cc.subject_user_id = u.id and cc.status = 'UPHELD')) as walk
+        from case_mgmt.case_record c cross join iam.user_profile u`;
+      expect(answers.length).toBeGreaterThanOrEqual(6 * Object.keys(USERS).length);
+      for (const a of answers) expect(a.fast, `${a.case_id} ${a.user_id}`).toBe(a.walk);
+      const conflicted = (caseId: string, user: string) =>
+        answers.find((a) => a.case_id === caseId && a.user_id === user)!.fast;
+      for (const caseId of chain) {
+        expect(conflicted(caseId, USERS.grcDeputy), caseId).toBe(true);
+        expect(conflicted(caseId, USERS.lead), caseId).toBe(true);
+      }
+      expect([conflicted(caseA, USERS.grcDeputy), conflicted(caseA, USERS.lead)]).toEqual([false, false]);
+    });
+  });
+
   it("a team member whose account is not active is not carried to the new case", async () => {
     await ownerScenario(async (s) => {
       await subjectWithAllegation(s, caseB, "Employee Omega (synthetic)");

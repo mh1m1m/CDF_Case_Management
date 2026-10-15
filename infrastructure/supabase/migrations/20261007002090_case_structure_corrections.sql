@@ -739,20 +739,31 @@ $$;
 -- =============================================================================
 -- 5. Splitting a case (AMB-004) and conflicts across the split family
 -- =============================================================================
--- Internal: the case and every case connected to it by SPLIT_FROM links, both ways.
+-- Internal: the case and every case connected to it by SPLIT_FROM links, both ways. Every case gate reaches it through
+-- authz.has_conflict, so it is kept cheap. Fast path: a case with no SPLIT_FROM link in either direction is its own
+-- family, returned without the recursive walk; the walk's first step would find no link, so the answer is the same
+-- (the tests pin fast path == walk on split and unsplit cases). PL/pgSQL keeps both plans for the session: written in
+-- SQL and called inside authz.has_conflict, the walk was planned again on every call.
 create function case_mgmt.split_family(p_case_id uuid)
 returns uuid[]
-language sql stable
+language plpgsql stable
 set search_path = ''
 as $$
-  with recursive family (case_id) as (
-    select p_case_id
-    union
-    select case when l.case_id = f.case_id then l.linked_case_id else l.case_id end
-    from family f
-    join case_mgmt.case_link l on l.link_type = 'SPLIT_FROM' and (l.case_id = f.case_id or l.linked_case_id = f.case_id)
-  )
-  select array_agg(case_id) from family;
+begin
+  if not exists (select 1 from case_mgmt.case_link l
+                 where l.link_type = 'SPLIT_FROM' and (l.case_id = p_case_id or l.linked_case_id = p_case_id)) then
+    return array[p_case_id];
+  end if;
+  return (
+    with recursive family (case_id) as (
+      select p_case_id
+      union
+      select case when l.case_id = f.case_id then l.linked_case_id else l.case_id end
+      from family f
+      join case_mgmt.case_link l on l.link_type = 'SPLIT_FROM' and (l.case_id = f.case_id or l.linked_case_id = f.case_id)
+    )
+    select array_agg(case_id) from family);
+end;
 $$;
 
 -- Replaced from 2080, same signature, narrowing only: (a) every branch looks at the whole split family, so a conflict
