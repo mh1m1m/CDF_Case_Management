@@ -144,6 +144,13 @@ interface ItemsView {
   }[];
 }
 
+/** R2's keys as 2060 returns them: 2086 adds the caller's capabilities beside them (ADR-056), pinned by its own spec. */
+const KEYS_2086 = ["capabilities", "open_vote_in", "taint_resolutions"];
+const keys2060 = (o: object) =>
+  Object.keys(o)
+    .filter((k) => !KEYS_2086.includes(k))
+    .sort();
+
 const scope = (tx: Scenario["tx"], cp: string | null) =>
   tx<{ v: ScopeChoices }[]>`select api.committee_scope_choices(${cp}) as v`;
 const items = (tx: Scenario["tx"], cp: string | null) =>
@@ -492,7 +499,7 @@ describe("what the items in front of the committee are about (api.committee_item
       const readers: UserKey[] = ["committeeSecretary", "committeeChair", "legal", "lead", "caseManager"];
       for (const u of readers) {
         const v = await itemsAs(s, u, b.cp);
-        expect(Object.keys(v).sort(), u).toEqual([
+        expect(keys2060(v), u).toEqual([
           "committee_proceeding_id",
           "finding_votes",
           "label_mode",
@@ -501,7 +508,7 @@ describe("what the items in front of the committee are about (api.committee_item
         expect(v.label_mode).toBe("ORDINAL");
         expect(v.packages.map((p) => [p.package_id, p.status])).toEqual([[b.pkg, "DRAFT"]]);
         const [sanction, corrective] = v.packages[0]!.items;
-        expect(Object.keys(sanction!).sort()).toEqual([
+        expect(keys2060(sanction!)).toEqual([
           "allegations",
           "case_wide",
           "committee_result",

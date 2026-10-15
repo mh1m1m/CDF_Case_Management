@@ -705,6 +705,12 @@ describe("every state-changing command writes its audit event in the same transa
           return ids.meeting;
         },
       },
+      // The runner's invite list (migration 2086, ADR-056): audited with counts.
+      {
+        fn: "meeting_invite_choices",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.meeting_invite_choices(${ids.meeting!})`,
+      },
       {
         fn: "invite_to_meeting",
         actor: "committeeSecretary",

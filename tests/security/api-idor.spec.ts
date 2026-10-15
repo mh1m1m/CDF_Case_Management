@@ -719,6 +719,12 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.committee_view(${t.committee})`,
   },
+  // Migration 2086 (ADR-056): the runner's invite list, NOT_FOUND to whoever cannot see the meeting, as for a random id.
+  {
+    fn: "meeting_invite_choices",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.meeting_invite_choices(${t.meeting})`,
+  },
   {
     fn: "generate_minutes",
     outcome: "NOT_FOUND",
