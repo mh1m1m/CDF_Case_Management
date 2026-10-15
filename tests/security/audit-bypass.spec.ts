@@ -133,6 +133,9 @@ const NOT_STATE_CHANGING = new Set([
   // Migration 2060 (ADR-042): what a case viewer reads of closure (closures, requests; blockers and reopening requests
   // only for those who may act on them). Not audited: the closure and reopening commands are.
   "case_closure_view",
+  // Migration 2085 (P12-2b, ADR-055): the caller's committees and one committee's page; reads like meeting_view.
+  "my_committees",
+  "committee_view",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's

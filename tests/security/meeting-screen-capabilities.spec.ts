@@ -29,6 +29,7 @@ import {
   type MeetingFixture,
 } from "../support/committee";
 import { concludeProceedings } from "../support/closure";
+import { answers, without2085 } from "../support/capabilities";
 
 const CONCERN = "Synthetic: a concern raised by the capability test.";
 const NOTE = "Synthetic: a note on the vote, for the capability test.";
@@ -186,7 +187,10 @@ async function sameAs2030(s: OwnerScenario, user: UserKey, meeting: string): Pro
 
 // ---- The caller's view, and what the commands answer -------------------------------------------------------------
 
-/** The caller's view, or null when it is NOT_FOUND to them. Every new key is a boolean or a list, never null. */
+/**
+ * The caller's view without the keys migration 2085 adds (its own spec tests those), or null when it is NOT_FOUND to
+ * them. Every new key is a boolean or a list, never null.
+ */
 async function view(s: OwnerScenario, user: UserKey, meeting: string): Promise<View | null> {
   await s.as(user);
   let v: View | null = null;
@@ -199,7 +203,7 @@ async function view(s: OwnerScenario, user: UserKey, meeting: string): Promise<V
     if ((error as Error).message === "CDF_NOT_FOUND") return null;
     throw error;
   }
-  const seen = v as View | null;
+  const seen = without2085(v as View | null);
   for (const r of seen?.roster ?? []) {
     expect(Object.keys(r.capabilities).sort(), `${user} roster row`).toEqual([...ROSTER_FLAGS]);
     for (const f of ROSTER_FLAGS) expect(typeof r.capabilities[f], `${user} ${f}`).toBe("boolean");
@@ -211,45 +215,6 @@ async function view(s: OwnerScenario, user: UserKey, meeting: string): Promise<V
     expect(Array.isArray(i.record_vote_for), `${user} record_vote_for`).toBe(true);
   }
   return seen;
-}
-
-/**
- * What the real commands answer for `user` now. Each probe runs in its own subtransaction inside one DO block, so the
- * whole set costs one round trip, and is rolled back whatever it did: accepted when the command returned, refused when
- * it raised a CDF_ error. Any other error (a constraint or trigger a capability does not model) fails the test.
- */
-async function answers(
-  s: OwnerScenario,
-  user: UserKey,
-  probes: Record<string, string>,
-): Promise<Record<string, boolean>> {
-  await s.as(user);
-  await s.tx`select set_config('cdf.test_probes', ${JSON.stringify(probes)}, true)`;
-  await s.tx.unsafe(`
-    do $probe$
-    declare
-      v_probe record;
-      v_out jsonb := '{}'::jsonb;
-    begin
-      for v_probe in select key, value from jsonb_each_text(current_setting('cdf.test_probes')::jsonb) loop
-        begin
-          execute v_probe.value;
-          raise exception 'PROBE_ACCEPTED';
-        exception when others then
-          if sqlerrm = 'PROBE_ACCEPTED' then
-            v_out := v_out || jsonb_build_object(v_probe.key, true);
-          elsif left(sqlerrm, 4) = 'CDF_' then
-            v_out := v_out || jsonb_build_object(v_probe.key, false);
-          else
-            raise;
-          end if;
-        end;
-      end loop;
-      perform set_config('cdf.test_answers', v_out::text, true);
-    end
-    $probe$`);
-  const [r] = await s.tx<{ a: string }[]>`select current_setting('cdf.test_answers') as a`;
-  return JSON.parse(r!.a) as Record<string, boolean>;
 }
 
 interface Withheld {
