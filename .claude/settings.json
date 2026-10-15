@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api -X PUT repos/mh1m1m/cdf_case_management/pulls/*/merge *)",
+      "Bash(gh api -X PUT repos/mh1m1m/cdf_case_management/pulls/*/update-branch *)",
+      "Bash(gh api -X POST repos/mh1m1m/cdf_case_management/pulls/*/ccr/ready_for_review)"
+    ]
+  }
+}
