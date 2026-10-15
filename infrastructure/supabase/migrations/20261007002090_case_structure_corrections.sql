@@ -742,8 +742,7 @@ $$;
 -- Internal: the case and every case connected to it by SPLIT_FROM links, both ways. Every case gate reaches it through
 -- authz.has_conflict, so it is kept cheap. Fast path: a case with no SPLIT_FROM link in either direction is its own
 -- family, returned without the recursive walk; the walk's first step would find no link, so the answer is the same
--- (the tests pin fast path == walk on split and unsplit cases). PL/pgSQL keeps both plans for the session: written in
--- SQL and called inside authz.has_conflict, the walk was planned again on every call.
+-- (the tests pin fast path == walk on split and unsplit cases). PL/pgSQL keeps both plans for the session.
 create function case_mgmt.split_family(p_case_id uuid)
 returns uuid[]
 language plpgsql stable
@@ -771,25 +770,34 @@ $$;
 -- MISIDENTIFIED still counts, so the correction never opens the case to the person it was wrongly about. Unchanged
 -- otherwise: a current declared or confirmed conflict, an active portal link (a party), the grievant, an upheld
 -- raised conflict.
+-- PL/pgSQL with generic plans, so its plans are kept for the session: as a SQL function called inside a SQL case gate
+-- (authz.user_case_gate) it was planned again on every call, before 2090 too, and on a fresh database PL/pgSQL's
+-- custom plans would be planned again as well. Same answers as the SQL rule on the walk (pinned); measured on UX's
+-- 2085 logistics sweep, about 28 s against about 33 s without 2090 and about 40 s with the SQL version.
 create or replace function authz.has_conflict(p_case_id uuid, p_user_id uuid)
 returns boolean
-language sql stable security definer
+language plpgsql stable security definer
 set search_path = ''
+set plan_cache_mode = force_generic_plan
 as $$
-  with family as (select unnest(case_mgmt.split_family(p_case_id)) as case_id)
-  select exists (
-           select 1 from case_mgmt.conflict_check k join family f on f.case_id = k.case_id
-           where k.user_id = p_user_id and k.is_current and k.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED'))
+declare
+  v_family uuid[] := case_mgmt.split_family(p_case_id);
+begin
+  return exists (
+           select 1 from case_mgmt.conflict_check k
+           where k.case_id = any (v_family) and k.user_id = p_user_id and k.is_current
+             and k.status in ('CONFLICT_DECLARED', 'CONFLICT_CONFIRMED'))
       or exists (
-           select 1 from grievance.subject_portal_link l join family f on f.case_id = l.case_id
-           where l.user_id = p_user_id
+           select 1 from grievance.subject_portal_link l
+           where l.case_id = any (v_family) and l.user_id = p_user_id
              and (l.revoked_at is null or case_mgmt.subject_status(l.subject_id) = 'MISIDENTIFIED'))
       or exists (
-           select 1 from grievance.grievance g join family f on f.case_id = g.case_id
-           where g.grievant_user_id = p_user_id)
+           select 1 from grievance.grievance g
+           where g.case_id = any (v_family) and g.grievant_user_id = p_user_id)
       or exists (
-           select 1 from case_mgmt.case_conflict_concern c join family f on f.case_id = c.case_id
-           where c.subject_user_id = p_user_id and c.status = 'UPHELD');
+           select 1 from case_mgmt.case_conflict_concern c
+           where c.case_id = any (v_family) and c.subject_user_id = p_user_id and c.status = 'UPHELD');
+end;
 $$;
 
 -- 5.1 The split. The caller edits the source case and may create cases. The new case keeps the source's
