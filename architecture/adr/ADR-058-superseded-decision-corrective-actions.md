@@ -182,6 +182,8 @@ The corrective-action screens come on these read models, with no migration. The 
 - **A form whose action moved on** (P12-3b). When another manager records a disposition while a form is open, the
   command refuses the second one and nothing is recorded; the page then shows the disposition recorded first, without
   the form, so the refusal's own words are not shown. The same holds for every form whose subject changes under it.
+  CDF-232 (coordinator, 2026-10-15): a page-level notice with only the refusal words the command returned, cleared
+  on navigation, in the first pages-only slice after P12-3b.
 
 ## Consequences
 
