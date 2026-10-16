@@ -1432,6 +1432,45 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
         expect(items.map((i) => i.item_kind)).toEqual(["RECOMMENDATION_ITEM", "FINDING"]);
       });
     });
+
+    it("2099 (CDF-247): neither the approval nor the request names a finding of a withdrawn allegation", async () => {
+      await ownerScenario(async (s) => {
+        const r = await restrictedAdopted(s);
+        // The case owner records a second allegation's finding in the same investigation.
+        await s.as("grcDirector");
+        const [p] = await s.tx<{ proceeding_id: string }[]>`
+          select proceeding_id from case_mgmt.finding where id = ${r.finding}`;
+        const [a2] = await s.tx<{ id: string }[]>`
+          select api.add_allegation(${r.caseExec}, 'BRIBERY', 'Synthetic: an allegation later withdrawn.', null, null,
+            null) as id`;
+        const [f2] = await s.tx<{ id: string }[]>`
+          select api.record_finding(${a2!.id}, null, ${p!.proceeding_id}, 'NOT_SUBSTANTIATED',
+            'Synthetic: finding rationale text.') as id`;
+        const approve = (tx: Scenario["tx"], ids: string[]) =>
+          tx`select api.approve_restricted_legal_review(${r.pkg}, ${USERS.legalB}, ${ids}::uuid[], null, ${REASON})`;
+        // Approved while the allegation was open; then it is withdrawn.
+        await approve(s.tx, [r.finding, f2!.id]);
+        await s.tx`select api.withdraw_allegation(${a2!.id}, ${REASON})`;
+        for (const ids of [[f2!.id], [r.finding, f2!.id]]) {
+          await s.expectError("CDF_CONFLICT:ALLEGATION_WITHDRAWN", (tx) => approve(tx, ids));
+        }
+        await s.expectError("CDF_CONFLICT:APPROVAL_ALREADY_PENDING", (tx) => approve(tx, [r.finding]));
+        // The request leaves the withdrawn allegation's finding out; the approval still covers the rest.
+        await s.as("committeeSecretary");
+        const ask = (tx: Scenario["tx"], ids: string[]) =>
+          tx<{ id: string }[]>`
+            select api.request_legal_review(${r.pkg}, ${USERS.legalB}, ${REASON}, ${ids}::uuid[], null) as id`;
+        for (const ids of [[f2!.id], [r.finding, f2!.id]]) {
+          await s.expectError("CDF_CONFLICT:ALLEGATION_WITHDRAWN", (tx) => ask(tx, ids));
+        }
+        const [req] = await ask(s.tx, [r.finding]);
+        await s.as("legalB");
+        expect(
+          await s.tx`select pi.source_id from decision.packet_item pi join decision.packet k on k.id = pi.packet_id
+                     where k.legal_review_request_id = ${req!.id} and pi.item_kind = 'FINDING'`,
+        ).toEqual([{ source_id: r.finding }]);
+      });
+    });
   });
 
   describe("authority rules and decisions (DEC-F13, CON-018)", () => {

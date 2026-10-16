@@ -118,6 +118,8 @@ When a replacement decision disposes of a frozen corrective action (DEC-AMB-014,
 - The allegation status gains a value and the `SUSPENSION_REASON` dimension gains `SUBJECT_UNTRACEABLE` (contracts and i18n updated). Nothing is renamed or removed (DEC-35).
 - PRODUCTION_SUBSTITUTION_REQUIRED: the privacy incident hand-off (§4); case numbering uses `CDF-DEMO` in this synthetic build (§5).
 - An adoption's defence-notice check leaves out a superseded allegation, as a withdrawn one, from migration 2092 (ADR-059, CDF-236): its successors carry the requirement.
+- A subject correction is also refused with `ALLEGATION_HAS_FINDINGS` while an open allegation about the wrong subject carries any finding, whoever it names (`SUBJECT_HAS_FINDINGS` is answered first), from migration 2099 (CDF-247): as after a split, no superseded allegation carries a finding.
+- A withdrawn allegation's findings stay with it (§2) but are put to no vote and no legal review, from migration 2099 (CDF-247): `api.open_vote_item`, `api.request_legal_review` and `api.approve_restricted_legal_review` refuse such a finding with `ALLEGATION_WITHDRAWN`, as R1 (2060) already leaves it out and CDF-213 refuses an item naming the allegation. Tests: `tests/security/findings-closed-allegations-2099.spec.ts` and the DEC-F20 block of `recommendations-authority.spec.ts`.
 
 ## Production mapping
 
