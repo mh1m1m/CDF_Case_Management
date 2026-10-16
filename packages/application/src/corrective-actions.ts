@@ -6,13 +6,25 @@
  *   3. runs the api.* command in the caller's security context (second enforcement point, authoritative),
  *   4. maps failures to safe AppErrors and records refusals as COMMAND_DENIED SECURITY events (§30).
  * Nothing here logs titles, descriptions, notes or references (§83).
+ *
+ * Phase 12 P12-3b (ADR-058, migration 2096): the case's actions (A1) and one action (A2) are read from their read
+ * models; an action or case the caller may not read is the uniform not-found, recorded as ACCESS_DENIED. A frozen
+ * action's disposition (DEC-AMB-014) is a command like the others.
  */
-import type { Actor, CorrectiveAction, CorrectiveActionStatus, Permission } from "@cdf/contracts";
+import type {
+  Actor,
+  CaseCorrectiveAction,
+  CorrectiveAction,
+  CorrectiveActionStatus,
+  CorrectiveActionView,
+  Permission,
+} from "@cdf/contracts";
 import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
 import {
   assignCorrectiveActionOwnerSchema,
   changeCorrectiveActionDueDateSchema,
+  disposeSupersededCorrectiveActionSchema,
   openCorrectiveActionSchema,
   recordCorrectiveActionProgressSchema,
   reopenCorrectiveActionSchema,
@@ -53,6 +65,15 @@ export interface CorrectiveActionGateway {
   waive(ctx: UserRequestContext, input: In<typeof waiveCorrectiveActionSchema>): Promise<void>;
   /** The actions the caller may see (their own as owner, or a case they can see); RLS decides. */
   list(ctx: UserRequestContext, filter: { caseId?: string; mine?: boolean }): Promise<CorrectiveAction[]>;
+  /** A1 (api.case_corrective_actions): the case's actions, for whoever may see the case. */
+  caseActions(ctx: UserRequestContext, caseId: string): Promise<CaseCorrectiveAction[]>;
+  /** A2 (api.corrective_action_view): one action; its origin for the case team only. */
+  view(ctx: UserRequestContext, actionId: string): Promise<CorrectiveActionView>;
+  /** The disposition's id (api.dispose_superseded_corrective_action). */
+  dispose(
+    ctx: UserRequestContext,
+    input: In<typeof disposeSupersededCorrectiveActionSchema>,
+  ): Promise<string>;
 }
 
 export interface CorrectiveActionDeps {
@@ -80,6 +101,31 @@ export function createCorrectiveActionService(deps: CorrectiveActionDeps) {
       );
     } catch {
       // Recording must never mask the original denial.
+    }
+  }
+
+  /** A read the database may refuse: null for NOT_FOUND or FORBIDDEN, recorded as ACCESS_DENIED; anything else thrown. */
+  async function read<T>(
+    ctx: UserRequestContext,
+    objectType: string,
+    name: string,
+    objectId: string,
+    run: () => Promise<T>,
+  ): Promise<T | null> {
+    try {
+      return await run();
+    } catch (cause) {
+      const error = toAppError(cause, ctx.requestId);
+      if (error.kind !== "NOT_FOUND" && error.kind !== "FORBIDDEN") throw error;
+      try {
+        await securityEvents.record(
+          { action: "ACCESS_DENIED", objectType, objectId, metadata: { read: name } },
+          ctx,
+        );
+      } catch {
+        // Recording must never mask the original denial.
+      }
+      return null;
     }
   }
 
@@ -222,9 +268,30 @@ export function createCorrectiveActionService(deps: CorrectiveActionDeps) {
         byAction,
       ),
 
+    /**
+     * The replacement decision's disposition of a frozen action (DEC-AMB-014): a corrective-action manager of the case;
+     * the database decides the case, the freeze, the source document, the owner and the date.
+     */
+    dispose: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "dispose_superseded_corrective_action",
+        disposeSupersededCorrectiveActionSchema,
+        raw,
+        MANAGER,
+        (i) => gateway.dispose(ctx, i),
+        byAction,
+      ),
+
     /** An owner's own actions; nothing of the case behind them (CDF-73 option D). */
     myActions: (ctx: UserRequestContext) => gateway.list(ctx, { mine: true }),
-    caseActions: (ctx: UserRequestContext, caseId: string) => gateway.list(ctx, { caseId }),
+    /** A1: the case's actions with why each may not move, or null (the uniform 404) for whoever may not see the case. */
+    caseActions: (ctx: UserRequestContext, caseId: string): Promise<CaseCorrectiveAction[] | null> =>
+      read(ctx, "case", "case_corrective_actions", caseId, () => gateway.caseActions(ctx, caseId)),
+    /** A2: one action, or null (the uniform 404) for whoever may not see it. */
+    view: (ctx: UserRequestContext, actionId: string): Promise<CorrectiveActionView | null> =>
+      read(ctx, "corrective_action", "corrective_action_view", actionId, () => gateway.view(ctx, actionId)),
   };
 }
 

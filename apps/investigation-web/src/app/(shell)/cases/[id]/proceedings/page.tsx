@@ -5,7 +5,8 @@
 // database would accept its command (authz.can_edit_case on an active case; the case owner as Restricted Case
 // Authority for the approval), and every command checks again. Below them, where the Investigation Committee's
 // recommendation packages stand (R2 as the case team reads it; P12-3a, ADR-057): their legal review and the
-// authority's decision, read-only, and for the restricted case's authority, the way to approve a legal review.
+// authority's decision, read-only, and for the restricted case's authority, the way to approve a legal review. Last,
+// the corrective actions that carry out the decisions and why each may not move (A1; P12-3b, ADR-058).
 import type { Metadata } from "next";
 import {
   CLOSED_PROCEEDING_STATUSES,
@@ -50,6 +51,7 @@ import {
   updateProceedingStateAction,
 } from "../structure-actions";
 import { CaseWorkspace, loadCase, personName } from "../workspace";
+import { CaseCorrectiveActions } from "./corrective-actions";
 import { CaseRecommendations } from "./recommendations";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -233,6 +235,9 @@ export default async function CaseProceedingsPage({ params }: { params: Promise<
             />
           );
         })}
+
+      {/* P12-3b (ADR-058): the actions that carry out the decisions, and why each may not move (A1). */}
+      <CaseCorrectiveActions t={t} ctx={ctx} caseId={c.id} />
     </CaseWorkspace>
   );
 }

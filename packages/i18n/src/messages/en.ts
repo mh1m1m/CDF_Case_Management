@@ -78,6 +78,7 @@ export const en = {
     committeePacket: "Packet of a recommendation package",
     legalReviewApproval: "Approve a legal review",
     casePacket: "Case packet of a recommendation package",
+    correctiveAction: "Corrective action",
   },
   errors: {
     UNAUTHENTICATED: "Your session has ended. Please sign in again.",
@@ -580,6 +581,42 @@ export const en = {
         affected: "The committee's secretary, and the reviewer you chose.",
         notified: "No one is sent a message. Your approval and its reason are kept in the audit log.",
       },
+      // A corrective action under a superseded decision (Phase 12 P12-3b, ADR-058).
+      disposeReAdopt: {
+        action: "Re-adopt",
+        title: "Re-adopt this action under the replacement decision?",
+        body: "The action carries on unchanged under the replacement decision, with its history and any completion kept. The disposition is kept with the document you cite and your reason.",
+        undo: "No. The replacement decision decides each action once.",
+        affected: "The action's owner, and the case team.",
+        notified: "No one is sent a message.",
+      },
+      disposeModify: {
+        action: "Modify",
+        title: "Modify this action under the replacement decision?",
+        body: "The action takes the new wording and, if you gave one, the new due date. The earlier wording stays on record as an earlier version. If its completion was waiting for verification, it goes back to its owner.",
+        undo: "No. The replacement decision decides each action once.",
+        affected: "The action's owner, and the case team.",
+        notified:
+          "The owner is told their action changed. The message carries no reason and no case content.",
+      },
+      disposeWaive: {
+        action: "Waive",
+        title: "Waive this action under the replacement decision?",
+        body: "If the action is still open, it is waived and its owner stops work on it. It no longer holds the case open.",
+        undo: "No. The replacement decision decides each action once.",
+        affected: "The action's owner, and the case team.",
+        notified:
+          "If the action was still open, its owner is told it changed. The message carries no reason and no case content.",
+      },
+      disposeReplace: {
+        action: "Replace",
+        title: "Replace this action with a new one?",
+        body: "If this action is still open, it is waived. A new action, with the wording, owner and due date you gave, opens under the replacement decision.",
+        undo: "No. The replacement decision decides each action once. The new action is managed like any other.",
+        affected: "The owner of this action, the owner of the new one, and the case team.",
+        notified:
+          "The new action's owner is told it is assigned to them, and this action's owner is told it changed if it was still open. The messages carry no reason and no case content.",
+      },
     },
   },
   /** Idle-session warning (CDF-57, WCAG 2.2.1). */
@@ -741,6 +778,21 @@ export const en = {
     membership_id: "Choose a current member of the committee.",
     alternate_participant_id: "Choose an alternate member of this meeting.",
     replaces_participant_id: "Choose a member this alternate may replace.",
+    // Why a case cannot close (migrations 2060 and 2070; Phase 12 P12-3b).
+    CONFLICT_REMEDIATION_OPEN: "A conflict upheld after the authority's decision is still being remedied.",
+    TAINTED_BY_CONFLICT:
+      "A member declared a conflict after the committee's vote, and the committee has not resolved it.",
+    FROZEN_BY_SUPERSEDED_DECISION:
+      "Corrective actions are frozen: a later decision superseded the one they carry out, and has not yet decided what happens to them.",
+    CORRECTIVE_ACTIONS_OUTSTANDING:
+      "Corrective actions are still open, or an approved recommendation or proposal has no action yet.",
+    OPEN_PROCEEDINGS: "A proceeding of the case is still open.",
+    GRIEVANCE_WINDOW_OPEN: "The period for a grievance against a decision notice has not ended.",
+    DECISION_NOT_FINAL:
+      "A decision is not final yet: a grievance is open, or a package or proposal waits for the authority.",
+    CLOSURE_APPROVAL_REQUIRED: "Closing this case needs the closure authority's approval.",
+    CASE_CLOSURE_APPROVAL_RULE_REQUIRED:
+      "The closure rule names no authority in force, so the case cannot close. Ask the rule administrator.",
     participant: "Only an invited witness can be excluded.",
   },
   validation: {
@@ -3953,6 +4005,156 @@ export const en = {
       conditions:
         "Conditions go only with an approving decision: up to 20, each with its kind and 5 to 2,000 characters.",
       reason: "Give a reason of the length shown.",
+    },
+  },
+  correctiveActions: {
+    // The case's corrective actions, on the Proceedings tab (A1).
+    caseTitle: "Corrective actions",
+    caseIntro:
+      "The actions that carry out the authority's decisions and approved preliminary proposals: who owns each, where it stands, and why it may not move.",
+    statusLabel: "Status",
+    dueLabel: "Due",
+    ownerLabel: "Owner",
+    progressLabel: "Progress",
+    progress: "{percent}%",
+    typeLabel: "Type",
+    sourceLabel: "Comes from",
+    status: {
+      OPEN: "Open",
+      IN_PROGRESS: "In progress",
+      PENDING_VERIFICATION: "Waiting for verification",
+      COMPLETED: "Completed",
+      WAIVED: "Waived",
+    },
+    type: { CORRECTIVE_ACTION: "Corrective action", GOVERNANCE_REMEDIATION: "Governance remediation" },
+    source: {
+      AUTHORITY_DECISION: "The authority's decision on a recommendation",
+      PRELIMINARY_REVIEW: "An approved preliminary review proposal",
+    },
+    owner: {
+      USER: "{name}",
+      ORG_UNIT: "{unit} (accountable: {name})",
+      SHARED_POOL: "{pool} (accountable: {name})",
+      EXTERNAL_PARTY: "{party} (accountable: {name})",
+      person: "A named person",
+    },
+    block: {
+      TAINTED_BY_CONFLICT: "On hold: a conflict after the vote",
+      CONFLICT_REMEDIATION_OPEN: "On hold: a conflict being remedied",
+      FROZEN_BY_SUPERSEDED_DECISION: "Frozen: its decision was superseded",
+      WAIVED_BY_SUPERSEDING_DECISION: "Waived by the replacement decision",
+      REPLACED_BY_NEW_ACTION: "Replaced by a new action",
+    },
+    blockBody: {
+      TAINTED_BY_CONFLICT:
+        "A member declared a conflict after the committee's vote on the item this action carries out, and the committee has not resolved it. Nobody records progress on the action until then.",
+      CONFLICT_REMEDIATION_OPEN:
+        "A conflict upheld after the authority's decision is being remedied. Nobody records progress on the action until the remediation ends.",
+      FROZEN_BY_SUPERSEDED_DECISION:
+        "A later decision of the authority superseded the decision this action carries out. Until the replacement decision decides what happens to it, nobody records progress on it, and the case cannot close.",
+      WAIVED_BY_SUPERSEDING_DECISION: "The replacement decision waived this action.",
+      REPLACED_BY_NEW_ACTION: "The replacement decision ended this action and opened a new one in its place.",
+    },
+    supersededOn: "The decision it carried out was superseded on {date}.",
+    disposeLink: "Decide what happens to it under the replacement decision",
+    replacedByLink: "Open the action that replaced it",
+    replacesLink: "Open the action it replaces",
+    // One action (A2).
+    breadcrumb: "Corrective action",
+    purposeTitle: "A corrective action of the case",
+    purposeBody:
+      "Where the action stands, where it comes from and why it may not move. When a later decision supersedes the one it carries out, the replacement decision's disposition of it is recorded here.",
+    purposeNotShown:
+      "Not shown here: the case's narrative and evidence, and the reason given for each disposition.",
+    cardPurposeTitle: "A corrective action",
+    cardPurposeBody: "The action's wording, status and due date.",
+    cardPurposeNotShown: "Not shown here: the case, where the action comes from, and why it may not move.",
+    cardTitle: "The action",
+    descriptionLabel: "What it requires",
+    createdLabel: "Opened on",
+    versionLabel: "Wording",
+    version: "Revised: version {n}",
+    earlierTitle: "Earlier wordings",
+    versionRecorded: "Version {n} · recorded on {date}",
+    originTitle: "Where it comes from",
+    governingLabel: "Carries out",
+    governing: {
+      ORIGINAL: "The decision it was opened under",
+      REPLACEMENT: "The replacement decision, which re-adopted or modified it",
+      NONE: "An approved preliminary review proposal",
+    },
+    blockTitle: "Why it may not move",
+    dispositionsTitle: "What the replacement decision decided",
+    disposition: {
+      RE_ADOPT: "Re-adopt unchanged",
+      MODIFY: "Modify",
+      WAIVE: "Waive",
+      REPLACE_WITH_NEW_ACTION: "Replace with a new action",
+    },
+    dispositionHint: {
+      RE_ADOPT: "The action carries on unchanged under the replacement decision.",
+      MODIFY:
+        "The action carries on under the replacement decision with new wording and, if you give one, a new due date. The earlier wording stays on record.",
+      WAIVE: "The action ends: if it is still open, its owner stops work on it.",
+      REPLACE_WITH_NEW_ACTION:
+        "The action ends, and a new action with its own wording, owner and due date opens under the replacement decision.",
+    },
+    dispositionName: "{disposition} · recorded on {date}",
+    citedLabel: "Source document cited",
+    priorStatusLabel: "Status before",
+    revisedVersion: "New wording: version {n}",
+    newActionLink: "Open the new action",
+    // Recording the disposition.
+    disposeTitle: "Decide what happens to it",
+    disposeIntro:
+      "Record what the replacement decision decides of this action, citing one of the documents it was recorded from. A disposition is final once recorded.",
+    onlyWaive:
+      "The replacement decision does not approve the item this action carries out, so the action can only be waived.",
+    documentLabel: "Source document",
+    documentHint: "One of the documents the replacement decision was recorded from.",
+    primaryDocument: "{reference} (main)",
+    reasonLabel: "Reason",
+    reasonHint:
+      "5 to 2,000 characters. Kept with the disposition for the case team; the owner does not see it.",
+    newTitleLabel: "New title",
+    newTitleHint: "5 to 200 characters.",
+    newDescriptionLabel: "What the action now requires",
+    newDescriptionHint: "10 to 4,000 characters.",
+    newOwnerLabel: "Owner of the new action",
+    newOwnerHint:
+      "People who can own a corrective action. Someone not cleared for this case is refused when you record.",
+    noOwners: "No one can own a corrective action now, so the action cannot be replaced.",
+    dueDateLabel: "Due date",
+    modifyDueHint: "Optional: leave it empty to keep the current due date, {date}. Today or later.",
+    replaceDueHint: "Optional: leave it empty for the policy's default, {date}. Today or later.",
+    replaceDueRequired:
+      "Needed: the policy sets no default due date for this type of action. Today or later.",
+    replaceNeedsAuthority:
+      "This case is restricted: only its Restricted Case Authority, the case owner, names the owner of a new action, so it cannot be replaced from your account.",
+    managerOnly:
+      "A case manager records what the replacement decision decides of this action while the case is active.",
+    disposed: "Disposition recorded.",
+    frozenListLabel: "Frozen actions:",
+    codes: {
+      NOT_SUPERSEDED:
+        "The decision this action carries out is not superseded, so there is nothing to decide.",
+      ALREADY_DISPOSED: "The replacement decision has already decided what happens to this action.",
+      ITEM_NOT_APPROVED:
+        "The replacement decision does not approve the item this action carries out, so the action can only be waived.",
+      ACTION_CLOSED:
+        "The action is closed: a waived action cannot be re-adopted or modified, and a completed one cannot be modified.",
+      RESTRICTED_CASE_AUTHORITY_REQUIRED:
+        "This case is restricted: only its Restricted Case Authority, the case owner, names the owner of a new action.",
+      CASE_NOT_ACTIVE: "The case is past closure, so this can no longer be done.",
+      disposition: "Choose what happens to the action.",
+      source_document_reference: "Choose one of the replacement decision's source documents.",
+      reason: "Give a reason of 5 to 2,000 characters.",
+      title: "Give the new title in 5 to 200 characters, only to modify or replace the action.",
+      description:
+        "Say what the action now requires in 10 to 4,000 characters, only to modify or replace it.",
+      owner_id: "Choose the new action's owner from the list: someone cleared for this case.",
+      due_date:
+        "Give a due date of today or later, only to modify or replace the action. A replacement needs one where the policy sets no default.",
     },
   },
 };

@@ -51,6 +51,8 @@ describe("routes", () => {
     // A legal review assigned to the caller is their own work (P12-3a).
     expect(areaOfPath("/legal-reviews/abc")).toBe("MY_WORK");
     expect(areaOfPath("/legal-reviews/abc/packet")).toBe("MY_WORK");
+    // So is a corrective action: its disposition (P12-3b), its owner's and its verifier's work (P12-6).
+    expect(areaOfPath("/actions/abc")).toBe("MY_WORK");
     expect(areaHref(area("COMMITTEE", "committees"))).toBe("/committees");
     expect(areaOfPath("/settings/access")).toBeUndefined();
   });
@@ -132,6 +134,34 @@ describe("routes", () => {
         item({ targetType: "RECOMMENDATION_PACKAGE", code: "LEGAL_REVIEW", targetId: "x", caseId: null }),
       ),
     ).toBeNull();
+  });
+  it("opens a frozen action's disposition on the action's page, and the owner's and verifier's work only with P12-6", () => {
+    const all = ["/meetings", "/minutes", "/legal-reviews", "/actions"];
+    // P12-3b (ADR-058): the page serves the case team's disposition, whatever roots are live, at its form.
+    for (const live of [all, []])
+      expect(
+        itemHref(
+          item({
+            category: "ACTION_TO_DISPOSE",
+            targetType: "CORRECTIVE_ACTION",
+            targetId: "x",
+            caseId: "c",
+          }),
+          live,
+        ),
+      ).toBe("/actions/x#dispose");
+    // The owner's and the verifier's rows open nothing until /actions goes live (P12-6), then the action's page.
+    for (const category of ["ACTION_ASSIGNED", "ACTION_RETURNED", "ACTION_TO_VERIFY"] as const) {
+      const i = item({
+        area: "MY_WORK",
+        category,
+        targetType: "CORRECTIVE_ACTION",
+        targetId: "x",
+        caseId: "c",
+      });
+      expect(itemHref(i), category).toBeNull();
+      expect(itemHref(i, all), category).toBe("/actions/x");
+    }
   });
 });
 
