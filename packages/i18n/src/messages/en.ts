@@ -823,6 +823,15 @@ export const en = {
     DISPOSITION_BLOCKED_BY_HOLD: "Disposition stopped by a legal hold",
     DISPOSITION_EXECUTED: "Disposition carried out",
     DISPOSITION_CERTIFICATE_ISSUED: "Disposition certificate issued",
+    // The package's legal review and the authority's decision (2095): codes and times only.
+    LEGAL_REVIEW_REQUESTED: "Legal review requested",
+    LEGAL_REVIEW_CANCELLED: "Legal review request cancelled",
+    LEGAL_OPINION_GIVEN: "Legal opinion given",
+    LEGAL_OPINION_SUPERSEDED: "Superseding legal opinion given",
+    RECOMMENDATION_PACKAGE_SUBMITTED_TO_AUTHORITY: "Recommendations submitted to the authority",
+    AUTHORITY_DECISION_RECORDED: "Authority's decision recorded",
+    AUTHORITY_DECISION_SUPERSEDED: "Authority's decision superseded by a new decision",
+    RESTRICTED_LEGAL_REVIEW_APPROVED: "Legal review approved by the Restricted Case Authority",
   },
   portal: {
     homeTitle: "Report a concern safely",
