@@ -57,20 +57,20 @@ jobs:
     name: Migrate, seed and test DEV (part ${{ matrix.shard }})
     runs-on: ubuntu-latest
     # Every statement of the suites is one round trip from the runner to the Tokyo pooler, and a round trip took
-    # 0.108 to 0.155 s in runs 38439738743 to 38535085113, depending on the run. Counted on a local database, the
-    # 1,053 tests with migration 2050 make 155,898 round trips: 282 to 402 minutes in one job at those rates, and
-    # GitHub-hosted jobs stop at 360. So the suites run as two Vitest shards, two jobs of the same run one after
-    # the other, each with its own report and its own limit. Never side by side: two sessions running the suites
-    # on DEV at once wait on each other at the audit ledger's chain lock and deadlock
-    # (compliance/evidence/HOSTED_DEV_VALIDATION.md §12). Each job repeats the migration, seed and drift steps,
-    # which find nothing more to do the second time.
+    # 0.108 to 0.155 s on DEV, depending on the run. Counted on a local database, the 1,229 tests of main 5dc652c
+    # (migration 2095) make 218,048 round trips: 418 to 563 minutes in one job at 0.115 to 0.155 s, and
+    # GitHub-hosted jobs stop at 360. So the suites run as three Vitest shards (two until a shard came within about
+    # 5,000 round trips of 300 minutes at 0.155 s), jobs of the same run one after the other, each with its own
+    # report and its own limit. Never side by side: two sessions running the suites on DEV at once wait on each
+    # other at the audit ledger's chain lock and deadlock (compliance/evidence/HOSTED_DEV_VALIDATION.md §12). Each
+    # job repeats the migration, seed and drift steps, which find nothing more to do after the first.
     timeout-minutes: 330
     strategy:
       max-parallel: 1
       fail-fast: false
       matrix:
         # A dispatch without the suites migrates once.
-        shard: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.test) && '[1, 2]' || '[1]') }}
+        shard: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.test) && '[1, 2, 3]' || '[1]') }}
     environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -404,7 +404,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
 
-      - name: Database, RLS and security suites against DEV (shard ${{ matrix.shard }} of 2)
+      - name: Database, RLS and security suites against DEV (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         id: suites
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.test }}
         env:
@@ -413,15 +413,15 @@ jobs:
           # The longest tests make about 7,800 round trips, 18 to 20 minutes at the 0.1375 to 0.155 s per round trip
           # measured on DEV, so each test may take 30 minutes (HOSTED_DEV_VALIDATION.md §12).
           CDF_DB_TEST_TIMEOUT_MS: "1800000"
-        # Vitest assigns each test file to one shard by a hash of its path, so a new file lands in one of the two
-        # without a list to maintain.
+        # Vitest assigns each test file to one shard by a hash of its path, so a new file lands in one of them
+        # without a list to maintain. The shard count is the matrix's job count, so the two cannot disagree.
         run: >-
-          pnpm test:db --shard=${{ matrix.shard }}/2 --reporter=default --reporter=github-actions --reporter=json
+          pnpm test:db --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=default --reporter=github-actions --reporter=json
           --outputFile.json=vitest-dev.json
 
       - name: Suite totals and failed tests as annotations (job logs are not readable from every client)
         if: ${{ always() && steps.suites.outcome != 'skipped' }}
-        run: node scripts/db/vitest-annotations.mjs vitest-dev.json "DB suites on DEV, shard ${{ matrix.shard }} of 2"
+        run: node scripts/db/vitest-annotations.mjs vitest-dev.json "DB suites on DEV, shard ${{ matrix.shard }} of ${{ strategy.job-total }}"
 
       - name: Evidence summary
         if: always()
@@ -431,7 +431,7 @@ jobs:
             echo "- Project: \`$SUPABASE_PROJECT_REF\` (cdf-case-dev)"
             echo "- Commit: \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`"
             echo "- Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo "- Trigger: ${{ github.event_name }} · Seed: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }} · Tests: ${{ github.event_name != 'workflow_dispatch' || inputs.test }} (shard ${{ matrix.shard }} of 2)"
+            echo "- Trigger: ${{ github.event_name }} · Seed: ${{ github.event_name != 'workflow_dispatch' || inputs.seed }} · Tests: ${{ github.event_name != 'workflow_dispatch' || inputs.test }} (shard ${{ matrix.shard }} of ${{ strategy.job-total }})"
             echo
             echo '```'
             if [ -n "$CDF_ADMIN_DATABASE_URL" ]; then
