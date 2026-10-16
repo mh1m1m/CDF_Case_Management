@@ -992,6 +992,23 @@ const DECISION_PROBES: Probe<DecisionTargets>[] = [
     call: (tx, t) =>
       tx`select api.record_sanction_execution(${t.item}, ${randomUUID()}, now(), 'HR-PROBE-0001')`,
   },
+  // Migration 2095 (ADR-057): the assigned reviewer's request, and the choices for asking for or approving a legal
+  // review, NOT_FOUND to whoever cannot see them, as for a random id.
+  {
+    fn: "legal_review_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.legal_review_view(${t.request})`,
+  },
+  {
+    fn: "legal_review_choices",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.legal_review_choices(${t.pkg}, 'REQUEST')`,
+  },
+  {
+    fn: "legal_review_choices",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.legal_review_choices(${t.pkg}, 'APPROVE')`,
+  },
 ];
 
 // Employee defence and grievance commands (migration 1910) take a subject, a portal link, a defence notice or a

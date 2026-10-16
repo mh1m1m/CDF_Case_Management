@@ -759,6 +759,60 @@ requirements:
       ]
     notes: "No migration. The pages read only the purpose read models, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. The proceeding's page opens only where the committee page lists the proceeding for a current seat; otherwise it is the same 404 as a missing one, with ACCESS_DENIED recorded. People are shown by number and category until the owner answers the DEC-02 label card. The invite and finding-vote pages read their choices only when opened, so the meeting page records no read of them. Not in this change: legal review, the authority's decision and the sanction extract (P12-3), and the runner's work in My Work (a later item)."
 
+  - id: CDF-UX-019
+    title: "Legal review and the authority's decision: the reviewer's own request, what a legal review may be asked for or approved with, and each act after the adoption offered only to whoever its command would accept now"
+    source:
+      [
+        Phase 12 plan P12-3,
+        UX-116,
+        ADR-016 D0 and D2,
+        DEC-02,
+        DEC-19,
+        DEC-62,
+        DEC-F12,
+        DEC-F13,
+        DEC-F19,
+        DEC-F20,
+        DEC-AMB-003,
+        DEC-AMB-013,
+        AMB-115,
+        AMB-117,
+        AMB-119,
+        coordinator rulings 2026-10-15 06:50,
+        ADR-057,
+      ]
+    external_ids: []
+    linear_issues: [CDF-229]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002095_legal_review_and_authority_read_models.sql,
+        api.legal_review_view,
+        api.legal_review_choices,
+        api.committee_items_view,
+        api.case_history,
+        decision.managed_package_refusal,
+        decision.legal_review_request_refusal,
+        decision.legal_review_cancel_refusal,
+        decision.legal_opinion_refusal,
+        decision.superseding_opinion_refusal,
+        decision.submit_refusal,
+        decision.record_refusal,
+        decision.round_requirements,
+        decision.authority_to_decide,
+        decision.package_authority_rules,
+        decision.record_supersedes,
+      ]
+    tests:
+      [
+        tests/security/legal-review-and-authority-read-models.spec.ts,
+        tests/security/package-builder-and-invite-choices.spec.ts,
+        tests/security/case-history-roster.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+      ]
+    notes: "Database half (P12-3a); the pages follow with no migration. L1 answers only the request's assignee while they may read its packet, and is not audited (the packet is read with api.open_packet, which is). L2 is audited with counts only and refuses as its command does; reviewers are on the seat basis (every active holder of LEGAL_OPINION_GIVE but the caller), and on a restricted case exactly the unused approval's reviewer and scope, never its reason. R2's new keys are true or non-empty only for whoever runs the package commands; what a re-decision would supersede is given as counts. The case history gains the package's legal-review and authority events as codes and times only. Known limitations: a review the secretary elects on a restricted case gives the Restricted Case Authority no My Work row (ruling 5); on a closed proceeding the authority commands still accept what R2 no longer shows (ADR-057)."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]
