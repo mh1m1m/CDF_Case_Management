@@ -6,7 +6,16 @@
 // notice or an item of evidence they could not already reach.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { USERS, admin, caseId, ownerScenario, scenario, type Scenario, type UserKey } from "../support/db";
+import {
+  USERS,
+  admin,
+  caseId,
+  ownerScenario,
+  reportId,
+  scenario,
+  type Scenario,
+  type UserKey,
+} from "../support/db";
 import {
   IC_SEATS,
   committeeIds,
@@ -796,6 +805,60 @@ describe("splitting a case (AMB-004)", () => {
         "CDF_CONFLICT:LINK_NOT_ENDABLE",
         (tx) => tx`select api.end_case_link(${splitLink}, ${REASON})`,
       );
+    });
+  });
+
+  it("splitting a restricted case keeps it restricted and widens nobody: the new case's viewers are within the source's", async () => {
+    await ownerScenario(async (s) => {
+      // A restricted case opened from a seeded report for the restricting officer, who makes the case manager its owner
+      // and grants Investigator Alpha the case; the case manager then splits it.
+      const report = await reportId("WB-SEED00000005");
+      await s.as("triage");
+      await s.tx`select api.triage_report(${report}, 'OPEN_CASE', ${REASON}, null, null)`;
+      const restricted = await one(
+        s.tx`select api.create_case_from_report(${report}, 'Restricted split probe', 'Synthetic restricted split probe.',
+          'CONFIDENTIAL'::core.classification_level, true, ${USERS.grcDirector}::uuid) as id`,
+      );
+      await s.as("grcDirector");
+      await s.tx`select api.assign_case(${restricted}, ${USERS.caseManager}, 'CASE_OWNER', ${REASON})`;
+      await s.tx`select api.grant_case_access(${restricted}, ${USERS.investigatorA}, 'CASE', ${REASON}, null)`;
+      await subjectWithAllegation(s, restricted, "Employee Omega (synthetic)");
+      const second = await subjectWithAllegation(s, restricted, "Employee Psi (synthetic)");
+      const created = await one(
+        s.tx`select api.split_case(${restricted}, ${[second.allegation]}::uuid[], 'Split case (synthetic)',
+          'Synthetic: the restricted matter.', ${REASON}) as id`,
+      );
+
+      // Same classification, restriction and owner.
+      await s.asOwner();
+      const [source, split] = await s.tx`
+        select classification, is_restricted, owner_id from case_mgmt.case_record
+        where id in (${restricted}, ${created}) order by id = ${created}`;
+      expect(source).toEqual({
+        classification: "CONFIDENTIAL",
+        is_restricted: true,
+        owner_id: USERS.caseManager,
+      });
+      expect(split).toEqual(source);
+      // Every user who can view the new case can view the source; the grant stays on the source.
+      const viewers = async (id: string) => {
+        const rows = await s.tx<{ id: string }[]>`
+          select u.id from iam.user_profile u where authz.user_can_view_case(u.id, ${id}) order by u.id`;
+        return rows.map((r) => r.id);
+      };
+      expect(await viewers(restricted)).toEqual([USERS.caseManager, USERS.investigatorA, USERS.grcDirector]);
+      expect(await viewers(created)).toEqual([USERS.caseManager, USERS.grcDirector]);
+
+      // Read as each: a case-wide reader sees neither, the grantee only the source, the owner both.
+      const seen = async (user: UserKey) => {
+        await s.as(user);
+        const rows = await s.tx<{ id: string }[]>`
+          select id from case_mgmt.case_record where id in (${restricted}, ${created})`;
+        return rows.map((r) => r.id);
+      };
+      expect(await seen("grcDeputy")).toEqual([]);
+      expect(await seen("investigatorA")).toEqual([restricted]);
+      expect((await seen("caseManager")).sort()).toEqual([restricted, created].sort());
     });
   });
 

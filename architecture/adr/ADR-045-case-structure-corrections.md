@@ -108,6 +108,7 @@ When a replacement decision disposes of a frozen corrective action (DEC-AMB-014,
 - Suspending a proceeding automatically when a subject is untraceable: not built; the case team suspends it with the reason.
 - Screens and read models for these commands: UX, Phase 12.
 - Portal follow-ons for AGENT-02 (§4): the production notification sender re-checks the subject link before sending; what the wrong person still reads as a grievant.
+- A minutes correction whose reviewer loses eligibility while it is in review (a conflict declared, for instance) can no longer be approved. A remaining reviewer can still reject it; once every remaining reviewer has approved, it stays in review, and with no withdrawal command it refuses further corrections to those minutes (`CORRECTION_IN_REVIEW`). It fails closed: the approved minutes stand unchanged. A withdrawal path waits for a decision (noted in security review).
 
 ## Consequences
 
@@ -128,7 +129,7 @@ Tables, triggers and functions in PostgreSQL; they move to RDS PostgreSQL unchan
   - Allegations: withdrawal (status, reason, nothing new hangs off it, immutable); content immutable while open; split (refusals, successors with provenance, evidence links by reference, superseded original); with findings, or in a recommendation.
   - Subject status: notices and portal links only for IDENTIFIED; findings still recorded; `SUBJECT_LINKED`; untraceable suspension reason; DECEASED refused on a sanction item.
   - Correction: T-AMB-014 (every notice path NOT_FOUND for the former holder; records added, not rewritten; the privacy incident read by security monitoring and the case team only, ids and counts only; still conflicted; MISIDENTIFIED final); refused with findings; no incident without a notice.
-  - Split: T-AMB-003 (classification, link, team, re-created subjects and allegations, no evidence; a member assigned only to the new case sees nothing of the source); conflicts across the family both ways; the family's fast path equal to the full walk, and every conflict answer equal to the walk's, on split (a chain, both directions) and unsplit cases; an inactive account not carried; FORBIDDEN without `CASE_CREATE`.
+  - Split: T-AMB-003 (classification, link, team, re-created subjects and allegations, no evidence; a member assigned only to the new case sees nothing of the source); a restricted case's split keeps its classification, restriction and owner, and its viewers are within the source's (a grant on the source is not carried); conflicts across the family both ways; the family's fast path equal to the full walk, and every conflict answer equal to the walk's, on split (a chain, both directions) and unsplit cases; an inactive account not carried; FORBIDDEN without `CASE_CREATE`.
   - Referral versions; T-AMB-023 (membership annotation, snapshots unchanged, `SELF_CORRECTION`); AMB-091 pinned; T-AMB-054 (correction review, approved version unchanged, case team reads only an approved correction); records annotation; helpers internal.
 - `api-idor.spec.ts`: probes for the ten case-scoped functions with eight outsiders; `annotate_committee_membership` joins the administrative commands.
 - `audit-bypass.spec.ts`: walk steps for the eleven commands.
