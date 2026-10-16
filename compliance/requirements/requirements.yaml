@@ -571,6 +571,45 @@ requirements:
       ]
     notes: "No migration. The pages read only the purpose read models, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. Naming who has not voted yet only to the meeting's runner is presentation: the database shows any deliberation reader who has voted (Q61, Q62), never a choice before the vote closes. Not in this change: scheduling and invitations (P12-2b), finding and package votes (P12-2c, after 2060). The concern-only view names no participant (UX backlog)."
 
+  - id: CDF-UX-015
+    title: "My Committees and the meeting's logistics: a seat holder's committees and proceedings on the seat basis only, and scheduling, adding a member, inviting, excluding a witness, accommodations, the secretary's path and the acting roles offered only to whoever their command would accept now"
+    source:
+      [
+        Phase 12 plan P12-2,
+        UX-116,
+        ADR-016 D0 and D2,
+        DEC-02,
+        DEC-F19,
+        DEC-22,
+        AMB-038,
+        AMB-156,
+        AMB-157,
+        AMB-158,
+        ADR-054 §5,
+        coordinator conditions 2026-10-14,
+        ADR-055,
+      ]
+    external_ids: []
+    linear_issues: [CDF-220]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002085_my_committees_and_meeting_logistics.sql,
+        api.my_committees,
+        api.committee_view,
+        api.meeting_view,
+        committee.seat_basis_proceeding,
+      ]
+    tests:
+      [
+        tests/security/my-committees-and-meeting-logistics.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+        tests/security/meeting-screen-capabilities.spec.ts,
+        tests/security/purpose-read-models.spec.ts,
+      ]
+    notes: "Database half (P12-2b); the pages follow with no migration. The committee page shows proceedings on the seat basis only, never through the case, with the committee as counts (DEC-F19) and the case number only under case-metadata visibility. The amendment's candidates are not filtered by clearance: the command answers NOT_CLEARED_FOR_CASE at submit. Not in this slice: inviting a case person (waits for 2060's label mode) and the runner's work in My Work (a later item)."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

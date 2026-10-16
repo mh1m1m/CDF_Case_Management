@@ -612,6 +612,7 @@ const REFERRAL_PROBES: Probe<ReferralTargets>[] = [
 // Committee meeting commands (migration 1890) take a committee proceeding, a meeting, a participant, a vote item,
 // minutes or a raised conflict (2000); never a case.
 interface MeetingTargets {
+  committee: string;
   committeeProceeding: string;
   meeting: string;
   participant: string;
@@ -721,6 +722,12 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     fn: "minutes_view",
     outcome: "NOT_FOUND",
     call: (tx, t) => tx`select api.minutes_view(${t.minutes})`,
+  },
+  // Migration 2085 (ADR-055): the committee page, NOT_FOUND without a current seat on the committee, as for a random id.
+  {
+    fn: "committee_view",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.committee_view(${t.committee})`,
   },
   {
     fn: "generate_minutes",
@@ -1707,6 +1714,8 @@ const GLOBAL_COMMANDS = [
   "grievance_queue",
   // Migration 2050: the sanction extract rows awaiting the caller as a restricted source case's authority.
   "my_sanction_extract_approvals",
+  // Migration 2085 (ADR-055): the committees where the caller holds a current seat.
+  "my_committees",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -2287,6 +2296,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
 
       await s.as(actor);
       const real: MeetingTargets = {
+        committee: ic!.id,
         committeeProceeding: cp!.id,
         meeting: m!.id,
         participant: p!.id,
@@ -2296,6 +2306,7 @@ describe("IDOR: committee meeting objects (migration 1890)", () => {
         witness: w!.id,
       };
       const random: MeetingTargets = {
+        committee: randomUUID(),
         committeeProceeding: randomUUID(),
         meeting: randomUUID(),
         participant: randomUUID(),
