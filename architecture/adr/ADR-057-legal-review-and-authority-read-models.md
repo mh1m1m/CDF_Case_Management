@@ -85,6 +85,7 @@ nothing; L2 and R2 are volatile because they audit. The helpers are `stable` and
     by allegation number and category, result, version and role, with the subject by position (a label only in
     DISPLAY_NAME mode). The command accepts any finding of the case, but the secretary sees only R1's. On a restricted
     request, exactly the approval's findings.
+    - **Amended by migration 2099 (CDF-247, 2026-10-16).** `api.request_legal_review`, `api.approve_restricted_legal_review` and `api.open_vote_item` refuse a finding of a withdrawn allegation (`ALLEGATION_WITHDRAWN`), and a subject correction is refused while an open allegation about the wrong subject carries any finding, so no superseded allegation carries one. On a restricted request L2 lists the approval's findings less a withdrawn allegation's; every finding it lists is still accepted, and the request may send the rest of the approval.
   - `minutes`: the proceeding's approved or deemed-approved minutes, by meeting and version. On a restricted request,
     exactly the approval's.
   - `items`: the adopted items the packet will carry.

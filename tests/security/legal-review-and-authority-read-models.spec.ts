@@ -22,8 +22,8 @@
 //     Otherwise it lists every holder but the caller (ruling 1; on a restricted request, exactly the approval's
 //     reviewer, ruling 2): a reviewer the command accepts is always listed, and a listed one is accepted unless the
 //     command answers INVALID for them. Every finding and minutes listed is accepted, and they are the committee's scope
-//     and the proceeding's approved minutes (on a restricted request, the approval's). One audit event with counts only
-//     per answer, none on a refusal.
+//     and the proceeding's approved minutes (on a restricted request, the approval's, less a withdrawn allegation's
+//     findings from migration 2099). One audit event with counts only per answer, none on a refusal.
 // Every step runs through the api.* commands as `authenticated`. The owner connection only installs 2086's definition,
 // reads the ground truth (the role assignments to revoke among it), counts the ledger and sets clearances (no command
 // writes them): raised for the restricted case, lowered to make a listed reviewer one the command refuses.
@@ -749,6 +749,13 @@ async function choices(
       where f.case_id = ${p!.case_id} and a.status <> 'WITHDRAWN'
         and decision.finding_in_committee_scope(f.id, ${p!.cp})`
   ).map((r) => r.id);
+  // 2099 (CDF-247): a withdrawn allegation's findings are refused by the commands, so a restricted request's choices
+  // leave them out of the approval's scope.
+  const withdrawn = (
+    await s.tx<{ id: string }[]>`
+      select f.id from case_mgmt.finding f join case_mgmt.allegation a on a.id = f.allegation_id
+      where f.case_id = ${p!.case_id} and a.status = 'WITHDRAWN'`
+  ).map((r) => r.id);
   const approvedMinutes = (
     await s.tx<{ id: string }[]>`
       select mi.id from committee.minutes mi join committee.meeting m on m.id = mi.meeting_id
@@ -793,9 +800,10 @@ async function choices(
           `${user}: ${keyOf(h)} is listed: accepted, or a choice the command refuses`,
         ).toContain(o[h]);
     }
-    // The findings and minutes: the committee's scope and the proceeding's approved minutes, or the approval's.
+    // The findings and minutes: the committee's scope and the proceeding's approved minutes, or the approval's (less a
+    // withdrawn allegation's findings, 2099).
     expect(sorted(v.findings.map((f) => f.finding_id)), `${user}: the findings`).toEqual(
-      sorted(scoped ? (approval?.finding_ids ?? []) : scope),
+      sorted(scoped ? (approval?.finding_ids ?? []).filter((f) => !withdrawn.includes(f)) : scope),
     );
     expect(sorted(v.minutes.map((m) => m.minutes_id)), `${user}: the minutes`).toEqual(
       sorted(scoped ? approvedMinutes.filter((m) => approval?.minutes_ids.includes(m)) : approvedMinutes),
@@ -1821,15 +1829,39 @@ describe("api.committee_items_view, api.legal_review_view and api.legal_review_c
       expect(
         (await choices(s, pkg!.id, "APPROVE", ["grcDirector"]))!.minutes.map((x) => x.minutes_id),
       ).toEqual([minutes!.id]);
+      //    2099 (CDF-247): this approval also names a second allegation's finding.
       await s.as("grcDirector");
-      await s.tx`select api.approve_restricted_legal_review(${pkg!.id}, ${USERS.legalB}, ${[finding!.id]}::uuid[],
-        null, ${REASON})`;
+      const [second] = await s.tx<{ id: string }[]>`
+        select api.add_allegation(${caseExec}, 'BRIBERY', 'Synthetic: a second allegation against Employee Phi.',
+          ${subject!.id}, null, null) as id`;
+      const [secondFinding] = await s.tx<{ id: string }[]>`
+        select api.record_finding(${second!.id}, null, ${proceeding!.id}, 'NOT_SUBSTANTIATED',
+          'Synthetic: the second allegation is not supported.') as id`;
+      await s.tx`select api.approve_restricted_legal_review(${pkg!.id}, ${USERS.legalB},
+        ${[finding!.id, secondFinding!.id]}::uuid[], null, ${REASON})`;
       const again = (await choices(s, pkg!.id, "REQUEST", ["committeeSecretary"]))!;
       expect([
         again.reviewers.map((r) => r.user_id),
-        again.findings.map((x) => x.finding_id),
+        sorted(again.findings.map((x) => x.finding_id)),
         again.minutes,
-      ]).toEqual([[USERS.legalB], [finding!.id], []]);
+      ]).toEqual([[USERS.legalB], sorted([finding!.id, secondFinding!.id]), []]);
+
+      // 6b. 2099 (CDF-247): the second allegation is withdrawn after the approval named its finding. The secretary is
+      //     offered the rest of the approval, every finding offered is accepted (the sweep), and that finding is
+      //     refused, as by the approval command now.
+      await s.as("grcDirector");
+      await s.tx`select api.withdraw_allegation(${second!.id}, ${REASON})`;
+      const rest = (await choices(s, pkg!.id, "REQUEST", ["committeeSecretary"]))!;
+      expect(rest.findings.map((x) => x.finding_id)).toEqual([finding!.id]);
+      expect(
+        await outcomes(s, "committeeSecretary", {
+          withdrawn: `select api.request_legal_review('${pkg!.id}', '${USERS.legalB}', '${REASON}', ${uuids([secondFinding!.id])}, null)`,
+          both: `select api.request_legal_review('${pkg!.id}', '${USERS.legalB}', '${REASON}', ${uuids([finding!.id, secondFinding!.id])}, null)`,
+        }),
+      ).toEqual({
+        withdrawn: "CDF_CONFLICT:ALLEGATION_WITHDRAWN",
+        both: "CDF_CONFLICT:ALLEGATION_WITHDRAWN",
+      });
 
       // 7. Asked again; then the case owner loses the GRC Director role, and with it the Restricted Case Authority.
       //    They still read the case as its owner, and may not approve (FORBIDDEN, as the command answers).
@@ -1872,7 +1904,7 @@ describe("api.committee_items_view, api.legal_review_view and api.legal_review_c
     });
   });
 
-  it("an allegation withdrawn after its finding (2090): L2 no longer lists the finding, as R1 does not, while the request command would still take it; the page offers less, never more", async () => {
+  it("an allegation withdrawn after its finding (2090): L2 no longer lists the finding, as R1 does not, and the request command refuses it (2099)", async () => {
     await ownerScenario(async (s) => {
       const f = await referredPackage(s, caseB);
       const cp = f.meeting.committeeProceeding;
@@ -1905,12 +1937,12 @@ describe("api.committee_items_view, api.legal_review_view and api.legal_review_c
       const withdrawn = await listed();
       expect(withdrawn).toEqual([f.finding]);
       expect(await r1()).toEqual(withdrawn);
-      // The request command takes any finding of the case, this one too.
+      // From migration 2099 (CDF-247) the request command refuses it too.
       expect(
         await outcomes(s, "committeeSecretary", {
           withdrawn: `select api.request_legal_review('${f.pkg}', '${USERS.legalB}', '${REASON}', ${uuids([found!.id])}, null)`,
         }),
-      ).toEqual({ withdrawn: true });
+      ).toEqual({ withdrawn: "CDF_CONFLICT:ALLEGATION_WITHDRAWN" });
     });
   });
 
