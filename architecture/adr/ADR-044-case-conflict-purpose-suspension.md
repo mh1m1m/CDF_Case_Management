@@ -63,6 +63,7 @@ Separately, nothing stopped a committee member from judging a case they had inve
 - The new events are not in `api.case_history`'s catalogue, so they never reach history. The resulting `CASE_UNASSIGNED` and `CASE_ACCESS_REVOKED` show as any other team change does.
 - **The ledger (AGENT-09 R1 on PR #82; CDF-225).** The case-team branch of `audit_event_read` (migration 1410) admitted every `BUSINESS` event of a case the reader can view, so the subject read `CASE_CONFLICT_RAISED`, and with it who raised the concern. The same held on main since 2000 and 2030 for `MEETING_CONFLICT_RAISED`, `MEETING_CONFLICT_DECIDED` and `MEETING_CONFLICT_REVERSED` (CDF-225, placed in 2080 by the coordinator). The policy is altered so that branch leaves out these five events. The exclusion is on the reader side, so rows written before 2080 are covered and no ledger row is touched. The other two branches are unchanged: oversight (`AUDIT_VIEW`: Internal Audit, the DPO) and security monitoring read as before, and the case team reads every other `BUSINESS` event of the case.
 - Known limit: an oversight reader who is also the subject of a concern still reads its events, as they read the whole ledger by design (§29).
+- That residual is placed with 2160 (S6, dual control and seat conflicts) by the coordinator on 2026-10-15: a subject holding an oversight seat is a seat-level conflict; backlog, narrowed from true to false only when built.
 
 ### 6. Catalogue
 

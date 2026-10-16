@@ -24,7 +24,17 @@ import {
   placeHold,
   requestDisposition,
 } from "../support/records";
-import { committeeIds, preliminaryReferral, unseatDemoSeats } from "../support/committee";
+import {
+  IC_SEATS,
+  committeeIds,
+  openItem,
+  openWithPresent,
+  preliminaryReferral,
+  scheduleMeeting,
+  seat,
+  unseatDemoSeats,
+  vote,
+} from "../support/committee";
 import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
 
 interface Targets {
@@ -1548,6 +1558,78 @@ const CASE_CONFLICT_2080_PROBES: Probe<CaseConflictTargets>[] = [
   },
 ];
 
+// Migration 2090 (ADR-045): case structure and corrections take a case, a case link, an allegation, a subject, a
+// minutes version or a minutes correction.
+interface CaseStructureTargets {
+  case: string;
+  link: string;
+  allegation: string;
+  subject: string;
+  minutes: string;
+  correction: string;
+}
+
+const CASE_STRUCTURE_2090_PROBES: Probe<CaseStructureTargets>[] = [
+  {
+    fn: "link_cases",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.link_cases(${t.case}, ${t.case}, 'RELATED', ${REASON})`,
+  },
+  {
+    fn: "end_case_link",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.end_case_link(${t.link}, ${REASON})`,
+  },
+  {
+    fn: "record_subject_status",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.record_subject_status(${t.subject}, 'UNTRACEABLE', ${REASON})`,
+  },
+  {
+    fn: "withdraw_allegation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_allegation(${t.allegation}, ${REASON})`,
+  },
+  {
+    fn: "split_allegation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.split_allegation(${t.allegation}, ${tx.json([
+        { category: "FRAUD", description: "Synthetic: probe part one." },
+        { category: "FRAUD", description: "Synthetic: probe part two." },
+      ] as never)}::jsonb, ${REASON})`,
+  },
+  {
+    fn: "correct_case_subject",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.correct_case_subject(${t.subject}, ${t.subject}, ${REASON})`,
+  },
+  {
+    fn: "split_case",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.split_case(${t.case}, ${[t.allegation]}::uuid[], 'Probe split (synthetic)',
+        'Synthetic probe summary text.', ${REASON})`,
+  },
+  {
+    fn: "propose_minutes_correction",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.propose_minutes_correction(${t.minutes}, 'Synthetic: probe correction text.', ${REASON})`,
+  },
+  {
+    fn: "review_minutes_correction",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.review_minutes_correction(${t.correction}, 'APPROVE', null)`,
+  },
+  {
+    fn: "annotate_archived_record",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.annotate_archived_record(${t.case}, 'CASE_RECORD', 'Synthetic: probe annotation text.', ${REASON})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1600,6 +1682,8 @@ const ADMIN_COMMANDS = [
   "set_invitee_type_rule",
   "appoint_conflict_authority",
   "end_conflict_authority",
+  // A correction to a committee seat (migration 2090, AMB-045): COMMITTEE_ADMIN only, an annotation with no case.
+  "annotate_committee_membership",
 ];
 // Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
 // Covered in referral-preliminary.spec.ts.
@@ -1858,6 +1942,7 @@ describe("catalog guard", () => {
       ...CLOSURE_2060_PROBES.map((p) => p.fn),
       ...PRELIMINARY_2070_PROBES.map((p) => p.fn),
       ...CASE_CONFLICT_2080_PROBES.map((p) => p.fn),
+      ...CASE_STRUCTURE_2090_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -2890,6 +2975,109 @@ describe("IDOR: raised case conflicts (migration 2080)", () => {
       ).toEqual([
         { status: "OPEN", n: 1 },
         { status: "UPHELD", n: 1 },
+      ]);
+    });
+  });
+});
+
+describe("IDOR: case structure and corrections (migration 2090)", () => {
+  // On case B: a RELATED link to case 0004, a subject with an open allegation, and the Investigation Committee's
+  // approved minutes of a closed meeting with a correction in review. None of these sees case B.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+  const VOTERS: UserKey[] = ["committeeChair", "legal", "legalB", "lead"];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    const { ic } = await committeeIds();
+    await ownerScenario(async (s) => {
+      const one = async (q: Promise<readonly Record<string, unknown>[]>) =>
+        Object.values((await q)[0]!)[0] as string;
+      await s.as("caseManager");
+      const link = await one(
+        s.tx`select api.link_cases(${caseB}, ${await caseId("0004")}, 'RELATED', ${REASON}) as id`,
+      );
+      const subject = await one(
+        s.tx`select api.add_case_subject(${caseB}, 'Employee Omega (synthetic)', 'EMPLOYEE', null) as id`,
+      );
+      const allegation = await one(
+        s.tx`select api.add_allegation(${caseB}, 'FRAUD', 'Synthetic: allegation against Employee Omega.',
+          ${subject}, null, null) as id`,
+      );
+      await seat(s, ic, IC_SEATS);
+      const f = await scheduleMeeting(s, ic, caseB);
+      await openWithPresent(s, f, VOTERS);
+      const item = await openItem(s, f.meeting);
+      for (const u of VOTERS) await vote(s, u, item, "APPROVE");
+      await s.as("committeeSecretary");
+      await s.tx`select api.close_vote_item(${item}, null)`;
+      await s.tx`select api.close_meeting(${f.meeting}, ${REASON})`;
+      const minutes = await one(
+        s.tx`select api.generate_minutes(${f.meeting}, 'Synthetic minutes narrative for the probe.') as id`,
+      );
+      for (const u of VOTERS) {
+        await s.as(u);
+        await s.tx`select api.review_minutes(${minutes}, 'APPROVE', null)`;
+      }
+      await s.as("committeeSecretary");
+      const correction = await one(
+        s.tx`select api.propose_minutes_correction(${minutes}, 'Synthetic: item one was approved.', ${REASON}) as id`,
+      );
+
+      await s.as(actor);
+      const real: CaseStructureTargets = { case: caseB, link, allegation, subject, minutes, correction };
+      const random: CaseStructureTargets = {
+        case: randomUUID(),
+        link: randomUUID(),
+        allegation: randomUUID(),
+        subject: randomUUID(),
+        minutes: randomUUID(),
+        correction: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of CASE_STRUCTURE_2090_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "case_mgmt.case_link",
+        "case_mgmt.subject_status_event",
+        "case_mgmt.allegation_status_change",
+        "case_mgmt.subject_correction",
+        "case_mgmt.privacy_incident",
+        "committee.minutes_correction",
+        "records.record_annotation",
+      ]) {
+        expect(await s.tx`select id from ${s.tx(table)}`, table).toEqual([]);
+      }
+      // Nothing moved: the link is active, the allegation open, the subject identified, the correction unreviewed.
+      await s.asOwner();
+      expect(
+        await s.tx`select (select count(*)::int from case_mgmt.case_link where ended_at is null) as links,
+                          (select status from case_mgmt.allegation where id = ${allegation}) as allegation,
+                          case_mgmt.subject_status(${subject}) as subject,
+                          (select status from committee.minutes_correction where id = ${correction}) as correction,
+                          (select count(*)::int from committee.minutes_correction_review) as reviews,
+                          (select count(*)::int from records.record_annotation) as annotations`,
+      ).toEqual([
+        {
+          links: 1,
+          allegation: "OPEN",
+          subject: "IDENTIFIED",
+          correction: "IN_REVIEW",
+          reviews: 0,
+          annotations: 0,
+        },
       ]);
     });
   });

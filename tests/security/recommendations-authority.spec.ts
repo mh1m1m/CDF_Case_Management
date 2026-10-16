@@ -3446,11 +3446,21 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
               title: "Synthetic: an independent payment review",
             },
           ]);
+          // CDF-227 (2090): the waiver cites the replacement decision's document in its disposition, the case team's,
+          // and the WAIVED event on the action's history carries neither the document nor the reason.
           expect(
-            await s.tx`select action_id, source_document_reference from decision.corrective_action_event
-                       where action_id in (${a2!}, ${a3!}) and event_type = 'WAIVED' order by action_id`,
+            await s.tx`select e.action_id, e.note, e.source_document_reference as event_reference,
+                         x.source_document_reference
+                       from decision.corrective_action_event e
+                       join decision.corrective_action_disposition x on x.action_id = e.action_id
+                       where e.action_id in (${a2!}, ${a3!}) and e.event_type = 'WAIVED' order by e.action_id`,
           ).toEqual(
-            [a2!, a3!].sort().map((id) => ({ action_id: id, source_document_reference: REPLACEMENT_SOURCE })),
+            [a2!, a3!].sort().map((id) => ({
+              action_id: id,
+              note: null,
+              event_reference: null,
+              source_document_reference: REPLACEMENT_SOURCE,
+            })),
           );
           // Waived and replaced actions are final on every path (the freeze trigger answers first, with the reason).
           await s.expectError(
@@ -3475,6 +3485,140 @@ describe("owner Finalization Set: packages, legal review and authority (migratio
           // Nothing is frozen any more: the case closes once the live actions are done.
           await s.as("caseManager");
           await s.expectError("CDF_CONFLICT:CORRECTIVE_ACTIONS_OUTSTANDING", () => closeCase(s));
+        });
+      });
+
+      it("CDF-227 (2090): a disposition's reason and the replacement decision's document stay with the case team: the events it records carry neither, and an owner outside the case team reads neither anywhere in the action's history, in the view or the table, events written before 2090 included; no event row is rewritten", async () => {
+        await ownerScenario(async (s) => {
+          const {
+            f,
+            a: [a1, a2],
+          } = await decidedWithActions(s, 2);
+          await s.as("financeEmployee");
+          await s.tx`select api.submit_corrective_action_completion(${a1!}, 'Synthetic: done.', 'SOP-DEMO-0202')`;
+          await supersede(s, f);
+          await s.as("caseManager");
+          await dispose(s, a1!, "MODIFY", { ...REVISED, due: 12 });
+          await dispose(s, a2!, "WAIVE");
+
+          // Writer side: RETURNED, DUE_DATE_CHANGED and WAIVED carry neither; the dispositions keep both.
+          await s.asOwner();
+          expect(
+            await s.tx`select event_type, note, source_document_reference from decision.corrective_action_event
+                       where action_id in (${a1!}, ${a2!}) and event_type in ('RETURNED', 'DUE_DATE_CHANGED', 'WAIVED')
+                       order by created_at, id`,
+          ).toEqual(
+            ["RETURNED", "DUE_DATE_CHANGED", "WAIVED"].map((event_type) => ({
+              event_type,
+              note: null,
+              source_document_reference: null,
+            })),
+          );
+          expect(
+            await s.tx`select disposition, reason, source_document_reference from decision.corrective_action_disposition
+                       where action_id in (${a1!}, ${a2!}) order by disposition`,
+          ).toEqual(
+            ["MODIFY", "WAIVE"].map((disposition) => ({
+              disposition,
+              reason: DISPOSAL,
+              source_document_reference: REPLACEMENT_SOURCE,
+            })),
+          );
+          // The events as 2030 wrote them, still on every database that ran it: the reason as the note, and the
+          // replacement decision's document on the waiver.
+          await s.tx`
+            insert into decision.corrective_action_event (action_id, case_id, event_type, actor_id, note, due_date,
+              source_document_reference)
+            values (${a1!}, ${caseB}, 'RETURNED', ${USERS.caseManager}, ${DISPOSAL}, null, null),
+                   (${a1!}, ${caseB}, 'DUE_DATE_CHANGED', ${USERS.caseManager}, ${DISPOSAL},
+                    (now() at time zone 'Asia/Riyadh')::date + 12, null),
+                   (${a2!}, ${caseB}, 'WAIVED', ${USERS.caseManager}, ${DISPOSAL}, null, ${REPLACEMENT_SOURCE})`;
+          const history = () =>
+            s.tx<{ row: Record<string, unknown> }[]>`
+              select to_jsonb(e) as row from decision.corrective_action_event e
+              where e.action_id in (${a1!}, ${a2!}) order by e.id`;
+          const stored = await history();
+          expect(stored).toHaveLength(9);
+          /** Every scalar in a JSON value, at any depth. */
+          const leaves = (v: unknown): unknown[] =>
+            v !== null && typeof v === "object" ? Object.values(v).flatMap(leaves) : [v];
+          const carriesEither = (v: unknown) =>
+            leaves(v).filter(
+              (x) => typeof x === "string" && (x.includes(DISPOSAL) || x.includes(REPLACEMENT_SOURCE)),
+            );
+
+          // Reader side: an owner outside the case team (the case itself is not theirs to read).
+          await s.as("financeEmployee");
+          expect(await s.tx`select id from case_mgmt.case_record where id = ${caseB}`).toEqual([]);
+          for (const [a, types] of [
+            [
+              a1!,
+              [
+                "OPENED",
+                "COMPLETION_SUBMITTED",
+                "RETURNED",
+                "DUE_DATE_CHANGED",
+                "RETURNED",
+                "DUE_DATE_CHANGED",
+              ],
+            ],
+            [a2!, ["OPENED", "WAIVED", "WAIVED"]],
+          ] as const) {
+            const card = (await actionView(s, a, "financeEmployee")) as ActionCard & {
+              events: { event_type: string; note: string | null; source_document_reference: string | null }[];
+            };
+            // Each value of the owner's card, walked: neither the reason nor the document, in any field.
+            expect(carriesEither(card)).toEqual([]);
+            // The events are all there, those written before 2090 without their note and reference.
+            expect(card.events.map((e) => e.event_type)).toEqual(types);
+          }
+          // The table: an event carrying either is not the owner's to read; the rest of the history is.
+          const owners = await s.tx<{ row: Record<string, unknown> }[]>`
+            select to_jsonb(e) as row from decision.corrective_action_event e
+            where e.action_id in (${a1!}, ${a2!}) order by e.id`;
+          expect(carriesEither(owners)).toEqual([]);
+          expect(owners).toHaveLength(6);
+          expect(await s.tx`select id from decision.corrective_action_disposition`).toEqual([]);
+
+          // The case team reads every row and every value, as before.
+          await s.as("caseManager");
+          expect(await history()).toEqual(stored);
+          const team = (await actionView(s, a2!)) as ActionCard & {
+            events: { note: string | null; source_document_reference: string | null }[];
+          };
+          expect(team.events.at(-1)).toMatchObject({
+            note: DISPOSAL,
+            source_document_reference: REPLACEMENT_SOURCE,
+          });
+
+          // No event row is rewritten: the stored history is unchanged and stays append-only.
+          await s.asOwner();
+          expect(await history()).toEqual(stored);
+          await s.expectError(
+            "decision.corrective_action_event is append-only",
+            (tx) => tx`update decision.corrective_action_event set note = null where action_id = ${a2!}`,
+          );
+          // Only a WAIVED event carries a document, and a WAIVED event without one needs the WAIVE or
+          // REPLACE_WITH_NEW_ACTION disposition recorded with it (a1 was modified, so its waiver would cite nothing).
+          await s.expectError(
+            'new row for relation "corrective_action_event" violates check constraint "corrective_action_event_reference_only_on_waiver"',
+            (tx) =>
+              tx`insert into decision.corrective_action_event (action_id, case_id, event_type, actor_id,
+                   source_document_reference)
+                 values (${a1!}, ${caseB}, 'RETURNED', ${USERS.caseManager}, ${REPLACEMENT_SOURCE})`,
+          );
+          await s.expectError(
+            "a WAIVED corrective-action event cites its source document, or the disposition recorded with it does",
+            (tx) =>
+              tx`insert into decision.corrective_action_event (action_id, case_id, event_type, actor_id)
+                 values (${a1!}, ${caseB}, 'WAIVED', ${USERS.caseManager})`,
+          );
+          await s.expectError(
+            "a WAIVED corrective-action event cites its source document, or the disposition recorded with it does",
+            (tx) =>
+              tx`insert into decision.corrective_action_event (action_id, case_id, event_type, actor_id)
+                 values (${a2!}, ${caseB}, 'WAIVED', ${USERS.financeEmployee})`,
+          );
         });
       });
 

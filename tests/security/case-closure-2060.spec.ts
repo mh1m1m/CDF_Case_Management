@@ -303,6 +303,8 @@ describe("closing with a closure authority configured (DEC-F40 maker/approver an
       const request = await pendingRequest(s, caseB);
       await s.as("caseManager");
       expect(await decide(s.tx, request, "RETURN")).toEqual([{ r: "RETURNED" }]);
+      // Since 2090 (AMB-003) a DUPLICATE closure needs an active DUPLICATE_OF link to the original.
+      await s.tx`select api.link_cases(${caseB}, ${caseA}, 'DUPLICATE_OF', 'Synthetic: same matter as case A.')`;
       expect(await closeWith(s, caseB, "DUPLICATE")).toBe("CLOSED");
       await s.as("caseManager");
       expect((await view(s, caseB)).closures).toEqual([
