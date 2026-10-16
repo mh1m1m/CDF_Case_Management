@@ -7,6 +7,7 @@
 // A row's arrangements (the acknowledgement and accommodations) come only to the runner; the caller's own are in their
 // part of the meeting.
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { RECORDABLE_ATTENDANCE, type MeetingParticipantView } from "@cdf/contracts";
 import { isolate, type MessageKey, type Translator } from "@cdf/i18n";
 import { CDFCard, CDFCommandForm, CDFField, inputClass, textareaClass } from "@cdf/ui";
@@ -35,6 +36,7 @@ export function MeetingParticipants({
   roster,
   myParticipantId,
   memberMayRaise,
+  inviteHref = null,
 }: {
   t: Translator;
   meetingId: string;
@@ -42,6 +44,8 @@ export function MeetingParticipants({
   myParticipantId: string | null;
   /** The meeting-level may_raise_concern of a member who does not run the meeting. */
   memberMayRaise: boolean;
+  /** The invite page, where api.meeting_view says the caller may invite (P12-2c). */
+  inviteHref?: string | null;
 }) {
   // Whom a member may raise a conflict about, as far as the roster shows: never oneself, never someone who has
   // declared a conflict or needs no declaration. The command checks the rest (an open concern, an exclusion).
@@ -309,6 +313,15 @@ export function MeetingParticipants({
             </CDFField>
           </RaiseForm>
         </details>
+      ) : null}
+
+      {inviteHref ? (
+        <div className="mt-4 border-t border-cdf-border pt-3" data-testid="meeting-invite">
+          <p className="mb-1 text-sm text-cdf-text-secondary">{t("committeeProceedings.inviteIntroLink")}</p>
+          <Link href={inviteHref} className="font-semibold underline" data-testid="meeting-invite-link">
+            {t("committeeProceedings.inviteLink")}
+          </Link>
+        </div>
       ) : null}
     </CDFCard>
   );

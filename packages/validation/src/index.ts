@@ -445,3 +445,6 @@ export * from "./case-structure";
 // ---- Committee meetings and minutes (migrations 1890 to 2050; UX redesign Phase 12 P12-2a and P12-2b, ADR-054 and
 //      ADR-055) ----------------------------------------------------------------------------------------------------
 export * from "./meetings";
+// ---- Recommendation packages and the meeting's invite (migrations 1900 to 2060; UX redesign Phase 12 P12-2c,
+//      ADR-056) ---------------------------------------------------------------------------------------------------
+export * from "./committee-proceedings";

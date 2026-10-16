@@ -154,11 +154,83 @@ spec's recommended default), and the legal reviewers of the proceeding's own pac
 
 ### 6. Not in this change
 
-- **The pages** come in the next change, with no migration: `/committee-proceedings/{id}` with the packages, the
-  builder and the finding votes; on the meeting page, the invite form, the FINDING target, opening a package's vote and
-  resolving a taint.
+- **The pages** come in the next change, with no migration (the P12-2c amendment below): `/committee-proceedings/{id}`
+  with the packages, the builder, opening a package's vote, resolving a taint and the finding votes; from the meeting
+  page, the invite form and the FINDING target, each on a page of its own.
 - **Legal review, the authority's decision and the sanction extract** stay in P12-3.
 - **The runner's work in My Work** stays a later item.
+
+## P12-2c amendment: the proceeding's page, the invite page and the finding-vote page (2026-10-15)
+
+The committee's package and vote screens come on these read models, with no migration. They are purpose routes
+(ADR-016 D2; CDF-73 option D): `/committee-proceedings/{id}` reads the seat basis (`api.my_committees` and
+`api.committee_view`), R2 with each item's flags (`api.recommendation_item_flags`) and, for whoever builds packages
+now, R1 and the sanction catalogue's reference view; `/meetings/{id}/invite` reads M2; `/meetings/{id}/finding-vote`
+reads R1. None reads a case table. Each action is a server action that runs the `api.*` command in the caller's
+security context, so the database checks again on submit.
+
+- **Which proceeding opens.** The page opens only where one of the caller's current seats gives the proceeding: it
+  must be on that committee's page (`api.committee_view` on the seat basis, ADR-055 §1), so every proceeding the
+  committee page lists opens and nothing else does (ruling 4). Otherwise it is the same 404 as an id that names
+  nothing, and the refusal is recorded as `ACCESS_DENIED` with the read's name only. The case team, who see a
+  proceeding through the case, a platform administrator and a committee role without a seat all get it (§21,
+  AMB-047). The page names the proceeding as the committee page does and says what it does not show (the case, its
+  narrative and its evidence). Where R2 shows no package, to a seat holder who declared a conflict in one of the
+  proceeding's meetings or to anyone once it is closed, the page says the packages are not shown, not why.
+- **Packages.** Each package shows its status, how it is voted and its round, and its active items: the type, the
+  secretary's description, the sanction (its catalogue label, or the text proposed outside the catalogue), the
+  people concerned by number and category (ORDINAL, ruling 2), the allegations by category, the items it depends on,
+  its alternatives group, whether it needs a legal justification, the committee's result, and each flag in words.
+- **Forms only where the command would accept them.** Creating a package shows where `may_create_package` is true;
+  adding an item where `may_add_item` is true and R1 gives the choices (where R1 refuses, as on a closed proceeding,
+  the builder is left out; CDF-226); putting the package to the vote, recording the adoption and returning it to the
+  committee where their flags are; opening its vote once for each meeting `open_vote_in` lists; withdrawing an item
+  where `may_withdraw` is; and resolving a taint with exactly the decisions `taint_resolutions` lists. The builder
+  offers R1's choices only: the case's people and its allegations that are not withdrawn, by number and category and
+  never their text, the package's own items to depend on, and the catalogue's active codes, each marked provisional
+  until its CDF source is approved. The schema checks the command's own pairings first (a sanction names one
+  catalogue code or one proposed text, never both, and at least one person; any other type names neither), so a
+  mistake shows field by field before the database is asked.
+- **Votes on findings.** The page lists the votes on findings in the proceeding's meetings that the caller may
+  deliberate in, as R2 gives them: the result, the allegation's category, the person by number, where the finding was
+  recorded and its version, never its rationale. Each links to its meeting, where the count and the result are.
+- **The invite page.** Linked from the roster for whoever runs the meeting (`may_invite`); anyone else gets the same
+  404 as a missing meeting. Only this page reads M2, so the meeting page, which re-renders while the meeting runs,
+  records no read of the candidates. Accounts are listed by name with their basis (the case team, or legal review of
+  this proceeding) and the case's people by number with their part in the case, never a name in ORDINAL mode, each
+  with exactly the roles the command accepts for them; one with none is listed without a form. Inviting an account
+  tells them, with no reason and no case content.
+- **The finding-vote page.** Linked from the meeting's votes for whoever may open a vote in an open meeting of the
+  Investigation Committee; anyone else gets the same 404. It reads R1 for the findings the committee may act on (the
+  current version of each, recorded by the committee or in the proceeding that referred the case), each by its
+  result, allegation, person and version, never its reasons. R1 answers only the committee's secretary, so anyone
+  else who runs the meeting is told the findings are not available to them. Once the vote is open the runner goes
+  back to the meeting, where the members vote.
+- **Where the pages lead.** The committee page links each proceeding's page; the meeting page links it for a seat
+  that gives the proceeding and, for the runner, the invite and finding-vote pages. The proceeding's page leads back
+  to its committee; the invite and finding-vote pages lead back to the meeting, through the committee for a seat
+  holder and through My Work otherwise.
+- **Confirmation and refusals.** Ten new server actions run ten commands. Nine ask for confirmation first, eight of
+  them with a new confirmation (opening a vote on a finding asks as the meeting's other votes do); adding an item to
+  a draft does not, because the item can be withdrawn while the package is a draft. A refused command is recorded as
+  `COMMAND_DENIED` with the command and the outcome only, never the reason, description or proposed sanction typed.
+- **Not in this change.** Legal review, the authority's decision and the sanction extract (P12-3); the runner's work
+  in My Work (a later item); names in DISPLAY_NAME mode, until the owner answers the DEC-02 card.
+- **Tests.** Unit: 40 new (schemas, services, gateways, labels, confirmations and routes).
+  `tests/integration/committee-proceedings.spec.ts` (4): the secretary builds a package from the page's choices, puts
+  it to the committee, opens its vote and records the adoption; a member reads the packages with no form, and the
+  case team, a platform administrator and an unknown id get the uniform not-found; the invite list holds the case's
+  person and the case team, never a directory, and an invitation leaves it and reaches the roster; a vote on a
+  finding opens on a finding the committee may act on, and members see what it is about, never why.
+  `tests/e2e/committee-proceedings.spec.ts` (6; Arabic and English, a member on a 390 px phone): the secretary builds
+  a package from the committee page, puts it to the vote and records the adoption while a member only reads; from the
+  meeting the secretary invites the case's person and opens a vote on the finding, which a member reads; a conflict
+  upheld after the vote taints the item and the secretary confirms the committee's result; and the 404s for a
+  platform administrator, the case team, a committee role without a seat and an unknown or malformed id, with the
+  invite and finding-vote pages a 404 to a member. `tests/accessibility/committee-proceedings.spec.ts` (4): axe at
+  1280 and 390 px and no sideways scroll at 1280, 390 and 320 px, with every disclosure open, for the secretary
+  building a package, adopting it and resolving a taint, for a member, and on the invite and finding-vote pages, with
+  their confirmations, in both languages.
 
 ## Known limitations
 

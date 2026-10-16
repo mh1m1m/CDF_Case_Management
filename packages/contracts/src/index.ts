@@ -1493,6 +1493,8 @@ export type MinutesStatus = (typeof MINUTES_STATUSES)[number];
 export * from "./meetings";
 /** My Committees and the committee's page (UX redesign P12-2b; ADR-055). */
 export * from "./committees";
+/** The proceeding before the committee and the meeting's invite list (UX redesign P12-2c; ADR-056). */
+export * from "./committee-proceedings";
 
 // ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
 export const RECOMMENDATION_ITEM_TYPES = [

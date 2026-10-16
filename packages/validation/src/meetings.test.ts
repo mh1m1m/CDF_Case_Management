@@ -116,12 +116,27 @@ describe("meeting schemas", () => {
 });
 
 describe("vote schemas", () => {
-  it("the screen opens votes on other business only; a vote on a finding waits for the package screens", () => {
+  it("a vote on other business names no finding; a vote on a finding names one (P12-2c)", () => {
     const r = openVoteItemSchema.safeParse({ meetingId: ID, title: "Synthetic business" });
     expect(r.success && r.data.targetType).toBe("OTHER");
+    const f = openVoteItemSchema.safeParse({
+      meetingId: ID,
+      targetType: "FINDING",
+      findingId: ID,
+      title: "Synthetic finding",
+    });
+    expect(f.success && f.data.findingId).toBe(ID);
     expect(
-      openVoteItemSchema.safeParse({ meetingId: ID, targetType: "FINDING", title: "Synthetic" }).success,
-    ).toBe(false);
+      messages(openVoteItemSchema.safeParse({ meetingId: ID, targetType: "FINDING", title: "Synthetic" })),
+    ).toEqual(["findingId:validation.required"]);
+    expect(
+      messages(openVoteItemSchema.safeParse({ meetingId: ID, findingId: ID, title: "Synthetic business" })),
+    ).toEqual(["findingId:validation.invalid"]);
+    for (const targetType of ["PACKAGE", "SANCTION", "RECOMMENDATION_ITEM"]) {
+      expect(openVoteItemSchema.safeParse({ meetingId: ID, targetType, title: "Synthetic" }).success).toBe(
+        false,
+      );
+    }
     expect(messages(openVoteItemSchema.safeParse({ meetingId: ID, title: "ab" }))).toEqual([
       "title:validation.tooShort",
     ]);

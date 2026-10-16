@@ -11,7 +11,7 @@
  * A read the database refuses is the uniform not-found, recorded as ACCESS_DENIED: the read models are stable and
  * write nothing themselves. Reasons, notes, narratives and comments are committee content: they are never logged.
  */
-import type { MeetingView, MinutesView, VoteItemProgress } from "@cdf/contracts";
+import type { MeetingInviteChoices, MeetingView, MinutesView, VoteItemProgress } from "@cdf/contracts";
 import type { SecurityEventSink } from "@cdf/audit";
 import {
   acknowledgeMeetingConfidentialitySchema,
@@ -28,6 +28,7 @@ import {
   decideMeetingConflictSchema,
   excludeMeetingWitnessSchema,
   generateMinutesSchema,
+  inviteToMeetingSchema,
   openMeetingSchema,
   openVoteItemSchema,
   overruleMinutesObjectionSchema,
@@ -110,6 +111,9 @@ export interface MeetingsGateway {
     ctx: UserRequestContext,
     input: In<typeof activateAlternateMemberSchema>,
   ): Promise<string>;
+  /** P12-2c (ADR-056): the runner's candidates (audited with counts) and the invitation (the new participant's id). */
+  inviteChoices(ctx: UserRequestContext, meetingId: string): Promise<MeetingInviteChoices>;
+  inviteToMeeting(ctx: UserRequestContext, input: In<typeof inviteToMeetingSchema>): Promise<string>;
 }
 
 export interface MeetingsDeps {
@@ -444,6 +448,36 @@ export function createMeetingsService(deps: MeetingsDeps) {
         raw,
         (i) => gateway.activateAlternateMember(ctx, i),
         (i) => i.alternateParticipantId,
+      ),
+
+    // ---- The meeting's invite (P12-2c; ADR-056) --------------------------------------------------------------------
+    /**
+     * The runner's candidates, checked in api.invite_to_meeting's order: null when the database refuses (NOT_FOUND or
+     * FORBIDDEN, recorded as ACCESS_DENIED; a case or meeting no longer active, not recorded).
+     */
+    inviteChoices: async (
+      ctx: UserRequestContext,
+      meetingId: string,
+    ): Promise<MeetingInviteChoices | null> => {
+      try {
+        return await gateway.inviteChoices(ctx, meetingId);
+      } catch (cause) {
+        const error = toAppError(cause, ctx.requestId);
+        if (error.kind === "CONFLICT") return null;
+        if (error.kind !== "NOT_FOUND" && error.kind !== "FORBIDDEN") throw error;
+        await recordDenial(ctx, "ACCESS_DENIED", "meeting", "meeting_invite_choices", error, meetingId);
+        return null;
+      }
+    },
+    /** Inviting an account sends them a notice with no case content (MEETING_INVITATION); the reason is never logged. */
+    inviteToMeeting: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "invite_to_meeting",
+        inviteToMeetingSchema,
+        raw,
+        (i) => gateway.inviteToMeeting(ctx, i),
+        (i) => i.meetingId,
       ),
   };
 }

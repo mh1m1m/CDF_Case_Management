@@ -704,6 +704,61 @@ requirements:
       ]
     notes: "Database half (P12-2c); the pages follow with no migration. The package capabilities ride 2060's audited read and are true only for the committee's secretary or alternate secretary who passes the case gate with no conflict in the proceeding. The invite list holds the case's persons and the accounts of the case team's active assignments and of the proceeding's legal reviewers, each with the roles the command accepts; whoever a declared conflict or a witness exclusion in the proceeding narrows out is absent; ORDINAL names no person. Known limitation: on a closed proceeding the package commands still accept what the page no longer offers (CDF-226, fixed in 2120)."
 
+  - id: CDF-UX-018
+    title: "The proceeding before the committee, the meeting's invite and a vote on a finding: purpose routes on the package, choice and invite read models, a seat's work only, forms only where the command would accept them, one 404 without a seat, in Arabic and English"
+    source:
+      [
+        Phase 12 plan P12-2,
+        UX-116,
+        ADR-016 D0 and D2,
+        CDF-73 option D,
+        DEC-02,
+        DEC-22,
+        AMB-026,
+        AMB-047,
+        AMB-156,
+        AMB-158,
+        coordinator rulings 2026-10-15,
+        ADR-056 P12-2c amendment,
+      ]
+    external_ids: []
+    linear_issues: [CDF-222]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.committee_items_view,
+        api.committee_scope_choices,
+        api.meeting_invite_choices,
+        api.meeting_view,
+        api.committee_view,
+        packages/application/src/committee-proceedings.ts,
+        packages/application/src/meetings.ts,
+        packages/validation/src/committee-proceedings.ts,
+        "apps/investigation-web/src/app/(shell)/committee-proceedings/[committeeProceedingId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/committee-proceedings/[committeeProceedingId]/packages.tsx",
+        "apps/investigation-web/src/app/(shell)/committee-proceedings/[committeeProceedingId]/actions.ts",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/invite/page.tsx",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/finding-vote/page.tsx",
+        "apps/investigation-web/src/app/(shell)/meetings/[meetingId]/actions.ts",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/integration/committee-proceedings.spec.ts,
+        tests/e2e/committee-proceedings.spec.ts,
+        tests/accessibility/committee-proceedings.spec.ts,
+        packages/application/src/committee-proceedings.test.ts,
+        packages/application/src/meetings.test.ts,
+        packages/validation/src/committee-proceedings.test.ts,
+        packages/validation/src/meetings.test.ts,
+        packages/infrastructure/src/db/committee-proceedings-gateway.test.ts,
+        packages/infrastructure/src/db/meetings-gateway.test.ts,
+        "apps/investigation-web/src/app/(shell)/committee-proceedings/labels.test.ts",
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+      ]
+    notes: "No migration. The pages read only the purpose read models, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. The proceeding's page opens only where the committee page lists the proceeding for a current seat; otherwise it is the same 404 as a missing one, with ACCESS_DENIED recorded. People are shown by number and category until the owner answers the DEC-02 label card. The invite and finding-vote pages read their choices only when opened, so the meeting page records no read of them. Not in this change: legal review, the authority's decision and the sanction extract (P12-3), and the runner's work in My Work (a later item)."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

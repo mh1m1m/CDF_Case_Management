@@ -121,12 +121,24 @@ export const reverseMeetingConflictSchema = z.object({ concernId: uuid, reason: 
 
 // ---- Votes (api.open_vote_item, api.cast_vote, api.revise_vote (AMB-081), api.recuse_for_conflict (AMB-077),
 //      api.record_vote_note (AMB-082), api.record_vote_for_member, api.close_vote_item, api.cast_casting_vote) ----
-/** A vote on other business; a vote on a finding needs a read of the findings that this screen does not have. */
-export const openVoteItemSchema = z.object({
-  meetingId: uuid,
-  targetType: choice(OPENABLE_VOTE_TARGETS).default("OTHER"),
-  title: requiredText(3, 300),
-});
+/**
+ * A vote on other business, or on a finding (P12-2c, ADR-056): a finding vote names the finding, other business names
+ * none. The database accepts only a finding the committee may act on (CDF-214), the one `api.committee_scope_choices`
+ * lists.
+ */
+export const openVoteItemSchema = z
+  .object({
+    meetingId: uuid,
+    targetType: choice(OPENABLE_VOTE_TARGETS).default("OTHER"),
+    findingId: uuid.optional(),
+    title: requiredText(3, 300),
+  })
+  .superRefine((v, ctx) => {
+    if (v.targetType === "FINDING" && !v.findingId)
+      ctx.addIssue({ code: "custom", message: "validation.required", path: ["findingId"] });
+    if (v.targetType !== "FINDING" && v.findingId)
+      ctx.addIssue({ code: "custom", message: "validation.invalid", path: ["findingId"] });
+  });
 export const castVoteSchema = z.object({
   voteItemId: uuid,
   choice: choice(MEMBER_VOTE_CHOICES),
