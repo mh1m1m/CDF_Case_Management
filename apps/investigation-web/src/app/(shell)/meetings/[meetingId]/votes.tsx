@@ -2,7 +2,9 @@
 // declared conflict closes it, rule 6). Counts and the result only, never how a member voted (AMB-083, rule 5). Who
 // has voted so far comes from api.vote_item_status: a count for the roster's readers, the names of the members present
 // who have not voted for the runner, who needs them to close the vote. Every form comes from the item's own
-// capabilities or record_vote_for; the database decides again on submit.
+// capabilities or record_vote_for; the database decides again on submit. A vote on a finding opens from its own page and
+// a recommendation package's from the proceeding's page (P12-2c, ADR-056); this card links them for the runner.
+import Link from "next/link";
 import {
   CASTING_VOTE_CHOICES,
   MEMBER_VOTE_CHOICES,
@@ -43,6 +45,8 @@ export function MeetingVotes({
   runner,
   mayOpenVote,
   progress,
+  findingVoteHref = null,
+  proceedingHref = null,
 }: {
   t: Translator;
   meetingId: string;
@@ -53,6 +57,10 @@ export function MeetingVotes({
   mayOpenVote: boolean;
   /** api.vote_item_status for each open item the caller may read. */
   progress: ReadonlyMap<string, VoteItemProgress>;
+  /** The finding-vote page, for whoever may open a vote in a meeting of the Investigation Committee. */
+  findingVoteHref?: string | null;
+  /** The proceeding's page, where a recommendation package is put to the vote. */
+  proceedingHref?: string | null;
 }) {
   const d = deliberation;
   const row = (participantId: string) => roster?.find((p) => p.participantId === participantId);
@@ -98,6 +106,24 @@ export function MeetingVotes({
         <details className="mt-4 border-t border-cdf-border pt-3" data-testid="open-vote">
           <summary className="cursor-pointer font-semibold">{t("meetings.openVoteTitle")}</summary>
           <p className="mt-2 mb-3 text-sm text-cdf-text-secondary">{t("meetings.openVoteIntro")}</p>
+          {findingVoteHref || proceedingHref ? (
+            <ul className="mb-3 grid gap-1" data-testid="open-vote-elsewhere">
+              {findingVoteHref ? (
+                <li>
+                  <Link href={findingVoteHref} className="underline" data-testid="open-finding-vote-link">
+                    {t("committeeProceedings.findingVoteLink")}
+                  </Link>
+                </li>
+              ) : null}
+              {proceedingHref ? (
+                <li>
+                  <Link href={proceedingHref} className="underline" data-testid="open-package-vote-link">
+                    {t("committeeProceedings.packageVoteLink")}
+                  </Link>
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
           <CDFCommandForm
             action={openVoteItemAction.bind(null, meetingId)}
             locale={t.locale}

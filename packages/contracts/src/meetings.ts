@@ -43,8 +43,12 @@ export const MEMBER_VOTE_CHOICES = ["APPROVE", "REJECT", "ABSTAIN", "RECUSED"] a
 export const RECORDED_FOR_MEMBER_CHOICES = ["ABSENT", "UNABLE_TO_VOTE", "RECUSED"] as const;
 /** The deciding vote on a tie (`api.cast_casting_vote`, DEC-F01, DEC-F03). */
 export const CASTING_VOTE_CHOICES = ["APPROVE", "REJECT"] as const;
-/** The vote items the meeting screen opens; FINDING waits for a read of the findings (P12-2c). */
-export const OPENABLE_VOTE_TARGETS = ["OTHER"] as const;
+/**
+ * The vote items the runner opens directly (`api.open_vote_item`): other business, or a finding the committee may act
+ * on (P12-2c, ADR-056, from `api.committee_scope_choices`). Package and item votes open from the package
+ * (`api.open_package_vote`).
+ */
+export const OPENABLE_VOTE_TARGETS = ["OTHER", "FINDING"] as const;
 export const MINUTES_REVIEW_DECISIONS = ["APPROVE", "REQUEST_CHANGES"] as const;
 export type MinutesReviewDecision = (typeof MINUTES_REVIEW_DECISIONS)[number];
 

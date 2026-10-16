@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
   createCaseStructureService,
+  createCommitteeProceedingsService,
   createCommitteesService,
   createEvidenceService,
   createFormsService,
@@ -16,6 +17,7 @@ import {
   createMeetingsService,
   createRecordsService,
   type CaseStructureService,
+  type CommitteeProceedingsService,
   type CommitteesService,
   type EvidenceService,
   type EvidenceStorage,
@@ -32,6 +34,7 @@ import {
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
   PostgresCaseStructureGateway,
+  PostgresCommitteeProceedingsGateway,
   PostgresCommitteesGateway,
   PostgresEvidenceGateway,
   PostgresFormsGateway,
@@ -60,6 +63,7 @@ const globalForApp = globalThis as unknown as {
   cdfCaseStructure?: CaseStructureService;
   cdfMeetings?: MeetingsService;
   cdfCommittees?: CommitteesService;
+  cdfCommitteeProceedings?: CommitteeProceedingsService;
 };
 
 function pool(): Sql {
@@ -161,6 +165,19 @@ export function committeesService(): CommitteesService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfCommittees;
+}
+
+/**
+ * The proceeding before the committee (ADR-056; Phase 12 P12-2c): the seat basis's read models, R1, R2 and the
+ * package commands only.
+ */
+export function committeeProceedingsService(): CommitteeProceedingsService {
+  globalForApp.cdfCommitteeProceedings ??= createCommitteeProceedingsService({
+    committees: new PostgresCommitteesGateway(pool()),
+    gateway: new PostgresCommitteeProceedingsGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfCommitteeProceedings;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

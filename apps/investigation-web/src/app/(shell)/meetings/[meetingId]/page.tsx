@@ -1,9 +1,11 @@
-// One committee meeting (UX redesign Phase 12 P12-2a and P12-2b; ADR-054, ADR-055; DEC-02, ADR-016 D2): a purpose
+// One committee meeting (UX redesign Phase 12 P12-2a to P12-2c; ADR-054 to ADR-056; DEC-02, ADR-016 D2): a purpose
 // route that reads api.meeting_view and nothing of the case. A missing meeting and one the caller may not see are the
 // same 404, and the refusal is recorded (ACCESS_DENIED). Each part shows only under its own read rule, and each action
 // only where its command's own answer says the caller may take it (UX-116); every command checks again in the
 // database. A caller with a current seat on the committee reaches the meeting from My Committees, and the breadcrumb
-// says so; anyone else from My Work.
+// says so; anyone else from My Work. P12-2c links the proceeding's page for a seat that gives the proceeding (the
+// committee page lists it), and, for the runner, the invite and finding-vote pages: those read their choices only
+// when opened, so this page, which re-renders while the meeting runs, records no read of them.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -76,7 +78,14 @@ export default async function MeetingPage({ params }: { params: Promise<{ meetin
     reads.filter((p): p is VoteItemProgress => p !== null).map((p) => [p.voteItemId, p] as const),
   );
   const seated = seats.some((c) => c.committeeId === m.committee.committeeId);
-  return <FullMeeting t={t} m={m} progress={progress} seated={seated} />;
+  // The committee page's own read (unaudited, the seat basis): the proceeding's page opens only where it lists it.
+  const committee = seated ? await committeesService().committee(ctx, m.committee.committeeId) : null;
+  const proceedingHref = committee?.proceedings.some(
+    (p) => p.committeeProceedingId === m.committeeProceedingId,
+  )
+    ? `/committee-proceedings/${m.committeeProceedingId}`
+    : null;
+  return <FullMeeting t={t} m={m} progress={progress} seated={seated} proceedingHref={proceedingHref} />;
 }
 
 function FullMeeting({
@@ -84,11 +93,14 @@ function FullMeeting({
   m,
   progress,
   seated,
+  proceedingHref,
 }: {
   t: Translator;
   m: MeetingFullView;
   progress: ReadonlyMap<string, VoteItemProgress>;
   seated: boolean;
+  /** The proceeding's page, where the caller's seat gives the proceeding (P12-2c). */
+  proceedingHref: string | null;
 }) {
   const L = m.logistics;
   const cap = m.capabilities;
@@ -149,6 +161,17 @@ function FullMeeting({
         {...(m.case.caseNumber ? {} : { notShown: t("meetings.purposeNoCase") })}
         testId="meeting-purpose-banner"
       />
+      {proceedingHref ? (
+        <p className="mb-4" data-testid="meeting-proceeding">
+          <Link
+            href={proceedingHref}
+            className="font-semibold underline"
+            data-testid="meeting-proceeding-link"
+          >
+            {t("committeeProceedings.proceedingLink")}
+          </Link>
+        </p>
+      ) : null}
       {conflicted ? (
         // Rule 6: a declared conflict closes the deliberation and the votes to the caller, and the page says so.
         <CDFAlert tone="warning" title={t("meetings.conflictTitle")} testId="meeting-conflict-banner">
@@ -168,6 +191,7 @@ function FullMeeting({
               roster={roster}
               myParticipantId={me?.participantId ?? null}
               memberMayRaise={cap.mayRaiseConcern && !cap.canManage}
+              inviteHref={cap.mayInvite ? `/meetings/${m.meetingId}/invite` : null}
             />
           ) : null}
           {m.deliberation ? (
@@ -179,6 +203,12 @@ function FullMeeting({
               runner={cap.canManage}
               mayOpenVote={cap.mayOpenVote}
               progress={progress}
+              findingVoteHref={
+                cap.mayOpenVote && m.committee.kind === "INVESTIGATION"
+                  ? `/meetings/${m.meetingId}/finding-vote`
+                  : null
+              }
+              proceedingHref={proceedingHref}
             />
           ) : null}
           <MeetingConcerns t={t} meetingId={m.meetingId} concerns={m.concerns} names={names} />

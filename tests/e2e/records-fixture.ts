@@ -642,11 +642,8 @@ export interface ReferralFixture {
   committeeProceedingId: string;
 }
 
-/**
- * A new case referred to the demo Investigation Committee after its preliminary review referred it (AMB-018). Fails
- * unless the demo committee holds its seats.
- */
-export async function referredCase(label: string): Promise<ReferralFixture> {
+/** Fails unless the demo Investigation Committee holds its seats. */
+async function requireSeatedDemoCommittee(): Promise<void> {
   const seated = await as(
     "platformAdmin",
     (tx) => tx<{ user_id: string }[]>`
@@ -660,6 +657,14 @@ export async function referredCase(label: string): Promise<ReferralFixture> {
     throw new Error(
       `the demo Investigation Committee is not seated (${unseated.join(", ")}); run pnpm db:reset`,
     );
+}
+
+/**
+ * A new case referred to the demo Investigation Committee after its preliminary review referred it (AMB-018). Fails
+ * unless the demo committee holds its seats.
+ */
+export async function referredCase(label: string): Promise<ReferralFixture> {
+  await requireSeatedDemoCommittee();
   const c = await screeningCase(label);
   await preliminaryReferral(c.caseId);
   const [referral] = await as(
@@ -677,6 +682,14 @@ export async function referredCase(label: string): Promise<ReferralFixture> {
  */
 export async function scheduledMeeting(label: string): Promise<MeetingFixture> {
   const { committeeProceedingId, ...c } = await referredCase(label);
+  return scheduledDeliberation(c, committeeProceedingId);
+}
+
+/** The secretary schedules an in-person deliberation of the proceeding for tomorrow. */
+async function scheduledDeliberation(
+  c: { caseId: string; caseNumber: string },
+  committeeProceedingId: string,
+): Promise<MeetingFixture> {
   const meetingId = await as("icSecretary", async (tx) => {
     const [m] = await tx<{ id: string }[]>`
       select api.schedule_meeting(${committeeProceedingId}, 'DELIBERATION', 'IN_PERSON', 'Meeting room 2 (synthetic)',
@@ -687,7 +700,7 @@ export async function scheduledMeeting(label: string): Promise<MeetingFixture> {
   const participant = Object.fromEntries(
     (Object.keys(IC_DEMO) as IcDemoUser[]).map((u) => {
       const row = roster.find((r) => r.user_id === USERS[u]);
-      if (!row) throw new Error(`scheduledMeeting: ${u} is not in the meeting`);
+      if (!row) throw new Error(`scheduledDeliberation: ${u} is not in the meeting`);
       return [u, row.participant_id];
     }),
   ) as Record<IcDemoUser, string>;
@@ -907,4 +920,120 @@ export async function settleMeeting(meetingId: string): Promise<void> {
     if (row?.v.capabilities?.may_review)
       await as(u, (tx) => tx`select api.review_minutes(${latest.minutes_id}, 'APPROVE', null)`);
   }
+}
+
+// ---- The proceeding before the committee (Phase 12 P12-2c; migration 2086, ADR-056) -------------------------------
+
+export interface ProceedingFixture extends MeetingFixture {
+  /** The proceeding the referral opened in the demo Investigation Committee. */
+  committeeProceedingId: string;
+  /** The case's one person concerned. Their name is never shown while labels are ordinal (DEC-02). */
+  subjectId: string;
+  /** The report's allegation, tied to them. */
+  allegationId: string;
+  /** The investigation's finding on it, which the committee may put to the vote (CDF-214). */
+  findingId: string;
+}
+
+/** The fixture's person concerned: a page that shows this name has broken the ordinal labels (DEC-02). */
+export const PROCEEDING_SUBJECT = "Employee Kappa (synthetic)";
+
+/**
+ * A case ready for a recommendation package and a vote on a finding: one person concerned, the report's allegation
+ * tied to them, the investigation's substantiated finding on it, and the person's defence notice on that allegation (a
+ * sanction is adopted only after one, AMB-026). The case is referred to the demo Investigation Committee from that
+ * investigation, so its finding is one the committee may act on, and the secretary opens a deliberation with the four
+ * voters present. Fails unless the demo committee holds its seats.
+ */
+export async function proceedingMeeting(label: string): Promise<ProceedingFixture> {
+  await requireSeatedDemoCommittee();
+  const c = await structureCase(label);
+  await preliminaryReferral(c.caseId);
+  const investigation = await openInvestigation(c.caseId);
+  const { subjectId, allegationId } = await as("caseManager", async (tx) => {
+    const [subject] = await tx<{ id: string }[]>`
+      select api.add_case_subject(${c.caseId}, ${PROCEEDING_SUBJECT}, 'EMPLOYEE', null) as id`;
+    const [a] = await tx<{ id: string }[]>`
+      select id from case_mgmt.allegation where case_id = ${c.caseId} order by created_at, id limit 1`;
+    await tx`select api.link_allegation_subject(${a!.id}, ${subject!.id}, 'Code of Conduct art. 7 (synthetic)', null)`;
+    await tx`select api.issue_defence_notice(${subject!.id}, 'Synthetic: you are invited to respond.',
+      ${[a!.id]}::uuid[], now() + interval '10 days')`;
+    return { subjectId: subject!.id, allegationId: a!.id };
+  });
+  const [finding] = await as(
+    "investigatorA",
+    (tx) => tx<{ id: string }[]>`
+      select api.record_finding(${allegationId}, null, ${investigation}, 'SUBSTANTIATED',
+        'Synthetic: the records support the allegation.') as id`,
+  );
+  const [referral] = await as(
+    "caseManager",
+    (tx) => tx<{ id: string }[]>`
+      select api.refer_case_to_committee(${c.caseId}, (select id from committee.committee where code = 'IC'),
+                                         ${investigation}, ${MEETING_REASON}) as id`,
+  );
+  const m = await scheduledDeliberation(c, referral!.id);
+  await openWithVoters(m);
+  return { ...m, committeeProceedingId: referral!.id, subjectId, allegationId, findingId: finding!.id };
+}
+
+/**
+ * The secretary creates a package voted as a whole or item by item, with one item: a written warning from the
+ * catalogue for the person concerned, on their allegation. Returns the package's id.
+ */
+export async function draftPackage(
+  f: ProceedingFixture,
+  granularity: "PACKAGE" | "ITEM" = "PACKAGE",
+): Promise<string> {
+  return as("icSecretary", async (tx) => {
+    const [p] = await tx<{ id: string }[]>`
+      select api.create_recommendation_package(${f.committeeProceedingId}, ${granularity}) as id`;
+    await tx`select api.add_recommendation_item(${p!.id}, 'DISCIPLINARY_SANCTION', 'WARNING', null,
+      'Synthetic: a written warning for the person concerned.', ${[f.subjectId]}::uuid[], ${[f.allegationId]}::uuid[],
+      false, '{}'::uuid[], null)`;
+    return p!.id;
+  });
+}
+
+/** The secretary puts the package to the committee and opens its vote in the meeting. */
+export async function packageVoteOpened(f: ProceedingFixture, packageId: string): Promise<void> {
+  await as("icSecretary", async (tx) => {
+    await tx`select api.submit_package_for_vote(${packageId})`;
+    await tx`select api.open_package_vote(${f.meetingId}, ${packageId})`;
+  });
+}
+
+/** Each open vote of the meeting, approved by every voter present, closed; so a conflict may then be raised. */
+export async function openVotesApproved(m: MeetingFixture): Promise<void> {
+  const items = (await meetingAs("icSecretary", m.meetingId)).deliberation?.vote_items ?? [];
+  for (const item of items.filter((v) => v.status === "OPEN")) {
+    await castVotes(
+      item.vote_item_id,
+      IC_VOTERS.map((u) => [u, "APPROVE"]),
+    );
+    await closeVote(item.vote_item_id);
+  }
+}
+
+/** The secretary records the committee's adoption of the package, once every vote of its round is closed. */
+export async function adoptionRecorded(packageId: string): Promise<void> {
+  await as("icSecretary", (tx) => tx`select api.record_package_adoption(${packageId})`);
+}
+
+/** The package put to the committee, its vote opened in the meeting and approved, and its adoption recorded. */
+export async function adoptedPackage(f: ProceedingFixture, packageId: string): Promise<void> {
+  await packageVoteOpened(f, packageId);
+  await openVotesApproved(f);
+  await adoptionRecorded(packageId);
+}
+
+/** The secretary opens a vote on the case's finding in the meeting; returns its id. */
+export async function findingVoteOpened(f: ProceedingFixture): Promise<string> {
+  const [v] = await as(
+    "icSecretary",
+    (tx) => tx<{ id: string }[]>`
+      select api.open_vote_item(${f.meetingId}, 'FINDING', ${f.findingId},
+        'Synthetic: is the allegation substantiated?') as id`,
+  );
+  return v!.id;
 }

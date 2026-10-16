@@ -1,4 +1,4 @@
-// The meetings service (Phase 12 P12-2a and P12-2b; ADR-054 and ADR-055): validation before the gateway, database refusals mapped to safe
+// The meetings service (Phase 12 P12-2a, P12-2b and P12-2c; ADR-054 to ADR-056): validation before the gateway, database refusals mapped to safe
 // errors and recorded as COMMAND_DENIED with the command and outcome only, and a refused read turned into the uniform
 // not-found with an ACCESS_DENIED event. Who may act, and when, is the database's: tests/security/
 // meeting-screen-capabilities.spec.ts and committee-meetings.spec.ts; the whole path is tests/integration/meetings.spec.ts.
@@ -56,6 +56,8 @@ function harness(refusal?: string) {
     activateActingChair: answer("activateActingChair", ITEM),
     activateActingSecretary: answer("activateActingSecretary", ITEM),
     activateAlternateMember: answer("activateAlternateMember", ITEM),
+    inviteChoices: answer("inviteChoices", { meetingId: MEETING, persons: [], accounts: [] }),
+    inviteToMeeting: answer("inviteToMeeting", PARTICIPANT),
   } as unknown as MeetingsGateway;
   const service = createMeetingsService({
     gateway,
@@ -184,6 +186,17 @@ describe("meetings service", () => {
             reason: "Synthetic: a member is absent.",
           }),
       ],
+      [
+        "invite_to_meeting",
+        (s) =>
+          s.inviteToMeeting(ctx, {
+            meetingId: MEETING,
+            inviteeRole: "WITNESS",
+            invitee: `person:${PARTICIPANT}`,
+            requiresCoi: true,
+            reason: "Synthetic: a witness.",
+          }),
+      ],
     ];
     for (const [command, run] of cases) {
       const { service, events } = harness("CDF_NOT_FOUND");
@@ -224,6 +237,66 @@ describe("meetings service", () => {
         },
       ],
     ]);
+  });
+
+  it("an invite sends the command the account or the person chosen, and never logs the reason (P12-2c)", async () => {
+    const reason = "Synthetic: why this witness is heard.";
+    const { service, calls } = harness();
+    const invite = { meetingId: MEETING, inviteeRole: "WITNESS", requiresCoi: true, reason };
+    expect(await service.inviteToMeeting(ctx, { ...invite, invitee: `person:${ITEM}` })).toEqual({
+      ok: true,
+      value: PARTICIPANT,
+    });
+    expect(await service.inviteToMeeting(ctx, { ...invite, invitee: `account:${ITEM}` })).toEqual({
+      ok: true,
+      value: PARTICIPANT,
+    });
+    expect(calls).toEqual([
+      ["inviteToMeeting", { ...invite, userId: undefined, personId: ITEM }],
+      ["inviteToMeeting", { ...invite, userId: ITEM, personId: undefined }],
+    ]);
+    const bad = await service.inviteToMeeting(ctx, { ...invite, invitee: `user:${ITEM}` });
+    expect(bad.ok === false && "fieldErrors" in bad).toBe(true);
+    expect(calls).toHaveLength(2);
+
+    const refused = harness("CDF_FORBIDDEN");
+    await refused.service.inviteToMeeting(ctx, { ...invite, invitee: `person:${ITEM}` });
+    expect(refused.events.map((e) => [e.objectId, e.metadata])).toEqual([
+      [MEETING, { command: "invite_to_meeting", outcome: "FORBIDDEN" }],
+    ]);
+    expect(JSON.stringify(refused.events)).not.toContain(reason);
+  });
+
+  it("the invite list is null for whoever the database refuses; only a refused caller is a security event", async () => {
+    expect(await harness().service.inviteChoices(ctx, MEETING)).toEqual({
+      meetingId: MEETING,
+      persons: [],
+      accounts: [],
+    });
+    for (const [refusal, outcome] of [
+      ["CDF_NOT_FOUND", "NOT_FOUND"],
+      ["CDF_FORBIDDEN", "FORBIDDEN"],
+    ] as const) {
+      const { service, events } = harness(refusal);
+      expect(await service.inviteChoices(ctx, MEETING), outcome).toBeNull();
+      expect(events).toEqual([
+        {
+          action: "ACCESS_DENIED",
+          objectType: "meeting",
+          objectId: MEETING,
+          metadata: { read: "meeting_invite_choices" },
+        },
+      ]);
+    }
+    // A case or meeting no longer active: nothing to invite to, and nothing to record.
+    for (const refusal of ["CDF_CONFLICT:CASE_NOT_ACTIVE", "CDF_CONFLICT:MEETING_NOT_ACTIVE"]) {
+      const { service, events } = harness(refusal);
+      expect(await service.inviteChoices(ctx, MEETING), refusal).toBeNull();
+      expect(events).toEqual([]);
+    }
+    await expect(harness("connection reset").service.inviteChoices(ctx, MEETING)).rejects.toMatchObject({
+      kind: "UNAVAILABLE",
+    });
   });
 
   it("a business conflict comes back with its code and is not a security event", async () => {

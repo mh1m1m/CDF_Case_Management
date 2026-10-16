@@ -45,7 +45,16 @@ export type ConfirmAct =
   | "acknowledgeForParticipant"
   | "activateActingChair"
   | "activateActingSecretary"
-  | "activateAlternateMember";
+  | "activateAlternateMember"
+  // Recommendation packages, the meeting's invite and votes on findings (Phase 12 P12-2c, ADR-056).
+  | "createRecommendationPackage"
+  | "withdrawRecommendationItem"
+  | "submitPackageForVote"
+  | "openPackageVote"
+  | "recordPackageAdoption"
+  | "returnPackageToCommittee"
+  | "resolveConflictTaint"
+  | "inviteToMeeting";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -68,6 +77,12 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   "activateActingChair",
   "activateActingSecretary",
   "activateAlternateMember",
+  "createRecommendationPackage",
+  "submitPackageForVote",
+  "openPackageVote",
+  "recordPackageAdoption",
+  "resolveConflictTaint",
+  "inviteToMeeting",
 ]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */
