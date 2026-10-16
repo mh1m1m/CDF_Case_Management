@@ -1,9 +1,10 @@
 // WCAG 2.2 AA on the Phase 12 P12-3b pages (ADR-058) in Arabic and English, at a desktop and a phone width and at
 // 320 px: the case's Proceedings tab with a corrective action frozen by a superseded decision, the overview naming it
 // under the closure step it holds, the action's page with every disposition's form open and a disposition's
-// confirmation, the page once the action is modified (its earlier wording and the disposition as recorded), and the
-// owner's card. Every disclosure is open. Each meeting made here is settled afterwards, and Investigator Alpha leaves
-// each case again, so the seed's "my cases" stay as they were. Synthetic cases only.
+// confirmation, the page once the action is modified (its earlier wording and the disposition as recorded), the
+// owner's card, and the refusal shown at the top of the page once its form has left it (CDF-232). Every disclosure is
+// open. Each meeting made here is settled afterwards, and Investigator Alpha leaves each case again, so the seed's
+// "my cases" stay as they were. Synthetic cases only.
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { audit } from "./axe";
@@ -96,5 +97,42 @@ for (const locale of ["ar", "en"] as const) {
     const owner = await signIn(browser, ACTION_OWNER.email, locale);
     await check(owner, `/actions/${f.actionId}`, "action-card", locale);
     await owner.context().close();
+  });
+
+  test(`${locale}: the refusal shown at the top of the page once its form has left passes axe and reflows`, async ({
+    browser,
+  }) => {
+    const f = await frozenAction(`refused-a11y-${locale}-${randomUUID().slice(0, 8)}`);
+    made.push({ meetingId: f.meetingId, caseId: f.caseId });
+    const manager = await signIn(browser, MANAGER, locale);
+    await manager.setViewportSize({ width: 1280, height: 900 });
+    await manager.goto(`/actions/${f.actionId}`);
+    await manager.getByTestId("dispose-RE_ADOPT").locator("summary").click();
+    const form = manager.getByTestId("dispose-RE_ADOPT-form");
+    await form.getByTestId("dispose-RE_ADOPT-document").selectOption(REPLACEMENT_SOURCES[0]);
+    await form
+      .getByTestId("dispose-RE_ADOPT-reason")
+      .fill("Synthetic: re-adopted for the accessibility check.");
+    // Meanwhile another manager waives it: the command refuses, and the page, read again, no longer offers the form.
+    await disposedAs(
+      "grcDirector",
+      f.actionId,
+      "WAIVE",
+      "Synthetic: waived meanwhile for the accessibility check.",
+    );
+    await form.locator('button[type="submit"]').click();
+    await manager.getByRole("dialog").getByTestId("confirm-submit").click();
+    const notice = manager.getByTestId("refusal-notice");
+    await expect(notice).toBeFocused();
+    await expect(manager.getByTestId("action-dispose")).toHaveCount(0);
+    // A width change is not a navigation, so the notice stays for each width.
+    for (const width of WIDTHS) {
+      await manager.setViewportSize({ width, height: 900 });
+      await expect(notice).toBeVisible();
+      if (width !== 320) await audit(manager);
+      const overflow = await manager.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+      expect(overflow, `horizontal overflow with the refusal notice at ${width}px`).toBe(false);
+    }
+    await manager.context().close();
   });
 }

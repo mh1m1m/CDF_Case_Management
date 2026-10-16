@@ -5,11 +5,11 @@
 // replacement decision decides of it, citing one of that decision's own source documents: a modification in English
 // (the action carries its new wording and keeps the earlier one), a replacement by a new action in Arabic. A form left
 // open while another manager records the disposition records nothing, and the page then shows the disposition
-// recorded first. The action's owner reads its card alone; an investigator on the case reads why it is frozen but
-// gets no form; anyone else, the committee's secretary included, and an id that names nothing get the same 404. No
-// page shows a disposition's reason (R3). Every meeting made here is settled afterwards, and Investigator Alpha leaves
-// each case again, so the seed's "my cases" stay as they were for the specs that count them (shell). Synthetic data
-// only.
+// recorded first, with the command's refusal at its top until the user navigates away (CDF-232). The action's owner
+// reads its card alone; an investigator on the case reads why it is frozen but gets no form; anyone else, the
+// committee's secretary included, and an id that names nothing get the same 404. No page shows a disposition's reason
+// (R3). Every meeting made here is settled afterwards, and Investigator Alpha leaves each case again, so the seed's
+// "my cases" stay as they were for the specs that count them (shell). Synthetic data only.
 import { randomUUID } from "node:crypto";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
@@ -262,6 +262,22 @@ test("ar: a form left open while another manager records the disposition records
   await expect(manager.getByTestId("action-disposition-2")).toHaveCount(0);
   await expect(manager.locator("main")).not.toContainText(waiver);
   await expect(manager.locator("main")).not.toContainText(REASON);
+  // CDF-232: the form left the page with its refusal, so the top of the page says why nothing was recorded: the
+  // class of refusal, the command's own words and the reference, nothing about the other manager or their decision.
+  // Focus, which the form's button held, moves to the notice; the refusal shows once.
+  const notice = manager.getByTestId("refusal-notice");
+  await expect(notice).toHaveAttribute("data-kind", "CONFLICT");
+  await expect(notice).toHaveText(
+    /^غير ممكن الآن\s*قرّر القرار البديل مصير هذا الإجراء بالفعل\. المرجع: [0-9a-f-]{36}$/,
+  );
+  await expect(notice).toBeFocused();
+  await expect(manager.locator("main").getByText("غير ممكن الآن")).toHaveCount(1);
+  await expect(manager.getByTestId("action-error")).toHaveCount(0);
+  // It clears on navigation: the breadcrumb back to the case's Proceedings tab shows no notice.
+  await manager.getByTestId("breadcrumbs").getByRole("link").last().click();
+  await expect(manager).toHaveURL(/\/proceedings$/);
+  await expect(manager.getByTestId("case-action-1")).toBeVisible();
+  await expect(manager.getByTestId("refusal-notice")).toHaveCount(0);
 });
 
 test("an investigator on the case reads why the action is frozen but gets no form; anyone else, and an id that names nothing, get the same 404", async ({
