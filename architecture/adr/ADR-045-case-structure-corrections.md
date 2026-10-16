@@ -117,6 +117,7 @@ When a replacement decision disposes of a frozen corrective action (DEC-AMB-014,
 - A disposition's `WAIVED` event no longer carries the replacement decision's document; the disposition does (one 2030 test updated, §10). An action owner outside the case team reads an event a disposition wrote before 2090 only through the view, without its note and reference.
 - The allegation status gains a value and the `SUSPENSION_REASON` dimension gains `SUBJECT_UNTRACEABLE` (contracts and i18n updated). Nothing is renamed or removed (DEC-35).
 - PRODUCTION_SUBSTITUTION_REQUIRED: the privacy incident hand-off (§4); case numbering uses `CDF-DEMO` in this synthetic build (§5).
+- An adoption's defence-notice check leaves out a superseded allegation, as a withdrawn one, from migration 2092 (ADR-059, CDF-236): its successors carry the requirement.
 
 ## Production mapping
 
