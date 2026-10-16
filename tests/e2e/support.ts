@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 export const PORTAL = "http://127.0.0.1:3001";
@@ -14,24 +16,53 @@ export async function contextIn(
 }
 
 type SessionCookies = Awaited<ReturnType<BrowserContext["cookies"]>>;
-const sessions = new Map<string, SessionCookies>();
+
+/**
+ * Each synthetic account's session cookies, one file per account in a git-ignored cache (CDF-249). The files outlive
+ * the worker Playwright restarts after a failed test and the step between the e2e and accessibility runs, which use
+ * the same database and servers, so a run signs each account in about once whatever fails or is retried.
+ */
+const SESSIONS = resolve("node_modules/.cache/cdf-e2e-sessions");
+const sessionFile = (email: string) => join(SESSIONS, `${email}.json`);
+
+function savedSession(email: string): SessionCookies | undefined {
+  try {
+    return JSON.parse(readFileSync(sessionFile(email), "utf8")) as SessionCookies;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveSession(email: string, context: BrowserContext) {
+  const cookies = (await context.cookies(APP)).filter((c) => c.name !== "cdf_locale");
+  mkdirSync(SESSIONS, { recursive: true });
+  // Written whole, then renamed into place, so a reader never sees half a file; the temporary name is the process's.
+  const temporary = `${sessionFile(email)}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(cookies));
+  renameSync(temporary, sessionFile(email));
+}
 
 /**
  * Signs a synthetic user in through the real login form in a fresh browser context. Later calls for the same
  * user reuse that session's cookies in a new context while it is still valid, so the combined e2e and
- * accessibility suites stay under the per-account login rate limit (10 per 15 minutes) without relaxing it.
+ * accessibility suites stay under the login rate limits without relaxing them: 10 per account and 50 per client
+ * per fixed 15-minute window, and in CI every sign-in comes from the one client.
  */
 export async function signIn(browser: Browser, email: string, locale: "ar" | "en" = "en"): Promise<Page> {
   const password = process.env.CDF_DEV_PASSWORD;
   if (!password) throw new Error("CDF_DEV_PASSWORD is not set");
-  const cached = sessions.get(email);
+  const cached = savedSession(email);
   if (cached) {
     const context = await contextIn(browser, locale, APP);
     await context.addCookies(cached);
     const page = await context.newPage();
     await page.goto("/");
-    if (await page.getByTestId("signed-in-as").isVisible()) return page;
-    sessions.delete(email);
+    if (await page.getByTestId("signed-in-as").isVisible()) {
+      // The visit renewed the session's idle window; keep the renewed cookie.
+      await saveSession(email, context);
+      return page;
+    }
+    rmSync(sessionFile(email), { force: true });
     await context.close();
   }
   const context = await contextIn(browser, locale, APP);
@@ -40,11 +71,12 @@ export async function signIn(browser: Browser, email: string, locale: "ar" | "en
   await page.getByLabel(locale === "en" ? "Email" : "البريد الإلكتروني").fill(email);
   await page.getByLabel(locale === "en" ? "Password" : "كلمة المرور").fill(password);
   await page.getByTestId("login-submit").click();
-  await expect(page.getByTestId("signed-in-as")).toBeVisible();
-  sessions.set(
-    email,
-    (await context.cookies(APP)).filter((c) => c.name !== "cdf_locale"),
-  );
+  // A refused sign-in (the rate limit, say) fails here with the page's own words, not a wait for the shell.
+  const refused = page.getByTestId("login-error");
+  await expect(page.getByTestId("signed-in-as").or(refused)).toBeVisible();
+  if (await refused.isVisible())
+    throw new Error(`Sign-in refused for ${email}: ${await refused.innerText()}`);
+  await saveSession(email, context);
   return page;
 }
 
