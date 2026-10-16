@@ -139,6 +139,9 @@ const NOT_STATE_CHANGING = new Set([
   // Migration 2095 (P12-3a, ADR-057): the assigned reviewer's request. Not audited: the packet is opened with
   // api.open_packet, which is.
   "legal_review_view",
+  // Migration 2096 (P12-3b, ADR-058): the case's corrective actions, read like corrective_action_view; the disposition
+  // command is audited.
+  "case_corrective_actions",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's

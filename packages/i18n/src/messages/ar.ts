@@ -896,6 +896,9 @@ export const ar: Messages = {
     AUTHORITY_DECISION_RECORDED: "تسجيل قرار صاحب الصلاحية",
     AUTHORITY_DECISION_SUPERSEDED: "استبدال قرار صاحب الصلاحية بقرار جديد",
     RESTRICTED_LEGAL_REVIEW_APPROVED: "موافقة صاحب الصلاحية على القضية المقيّدة على مراجعة قانونية",
+    // تجميد الإجراء التصحيحي والبت فيه (2096): الرموز والأوقات فقط.
+    CORRECTIVE_ACTION_FROZEN: "تجميد إجراء تصحيحي بسبب استبدال القرار",
+    CORRECTIVE_ACTION_DISPOSED: "البت في إجراء تصحيحي بموجب القرار البديل",
   },
   portal: {
     homeTitle: "أبلغ عن مخالفة بأمان",

@@ -910,6 +910,9 @@ export const en = {
     AUTHORITY_DECISION_RECORDED: "Authority's decision recorded",
     AUTHORITY_DECISION_SUPERSEDED: "Authority's decision superseded by a new decision",
     RESTRICTED_LEGAL_REVIEW_APPROVED: "Legal review approved by the Restricted Case Authority",
+    // A corrective action's freezing and disposition (2096): codes and times only.
+    CORRECTIVE_ACTION_FROZEN: "Corrective action frozen by a superseded decision",
+    CORRECTIVE_ACTION_DISPOSED: "Corrective action disposed of by the replacement decision",
   },
   portal: {
     homeTitle: "Report a concern safely",

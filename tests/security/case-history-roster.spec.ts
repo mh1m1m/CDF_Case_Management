@@ -125,6 +125,9 @@ const CATALOGUE = new Set([
     "AUTHORITY_DECISION_RECORDED",
   ],
   "AUTHORITY_DECISION_SUPERSEDED",
+  // Migration 2096: a corrective action's freezing and disposition, as codes and times
+  // (superseded-decision-corrective-actions.spec.ts covers their audiences).
+  ...["CORRECTIVE_ACTION_FROZEN", "CORRECTIVE_ACTION_DISPOSED"],
 ]);
 
 const history = (tx: Tx, id: string) => tx<HistoryRow[]>`select * from api.case_history(${id}, 500)`;
