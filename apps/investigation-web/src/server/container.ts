@@ -14,6 +14,7 @@ import {
   createInboxService,
   createInterviewService,
   createInvestigationService,
+  createLegalReviewsService,
   createMeetingsService,
   createRecordsService,
   type CaseStructureService,
@@ -25,6 +26,7 @@ import {
   type InboxService,
   type InterviewService,
   type InvestigationService,
+  type LegalReviewsService,
   type MeetingsService,
   type RecordsService,
 } from "@cdf/application";
@@ -41,6 +43,7 @@ import {
   PostgresInboxGateway,
   PostgresInterviewGateway,
   PostgresInvestigationGateway,
+  PostgresLegalReviewsGateway,
   PostgresMeetingsGateway,
   PostgresRecordsGateway,
   PostgresSecurityEventSink,
@@ -64,6 +67,7 @@ const globalForApp = globalThis as unknown as {
   cdfMeetings?: MeetingsService;
   cdfCommittees?: CommitteesService;
   cdfCommitteeProceedings?: CommitteeProceedingsService;
+  cdfLegalReviews?: LegalReviewsService;
 };
 
 function pool(): Sql {
@@ -178,6 +182,18 @@ export function committeeProceedingsService(): CommitteeProceedingsService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfCommitteeProceedings;
+}
+
+/**
+ * Legal review and the authority's decision (ADR-057; Phase 12 P12-3a): L1, L2, the audited packet read and the
+ * legal review and authority commands only.
+ */
+export function legalReviewsService(): LegalReviewsService {
+  globalForApp.cdfLegalReviews ??= createLegalReviewsService({
+    gateway: new PostgresLegalReviewsGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfLegalReviews;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

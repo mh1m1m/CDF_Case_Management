@@ -1495,6 +1495,8 @@ export * from "./meetings";
 export * from "./committees";
 /** The proceeding before the committee and the meeting's invite list (UX redesign P12-2c; ADR-056). */
 export * from "./committee-proceedings";
+/** Legal review and the authority's decision (UX redesign P12-3a; ADR-057). */
+export * from "./legal-reviews";
 
 // ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
 export const RECOMMENDATION_ITEM_TYPES = [

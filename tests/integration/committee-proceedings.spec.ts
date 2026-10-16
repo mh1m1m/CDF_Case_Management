@@ -13,7 +13,12 @@ import {
   type CommitteeProceedingsService,
   type MeetingsService,
 } from "@cdf/application";
-import type { CommitteeProceedingPage, MeetingFullView, MeetingView } from "@cdf/contracts";
+import {
+  isClosedAllegation,
+  type CommitteeProceedingPage,
+  type MeetingFullView,
+  type MeetingView,
+} from "@cdf/contracts";
 import {
   PostgresCommitteeProceedingsGateway,
   PostgresCommitteesGateway,
@@ -166,6 +171,9 @@ describe("the proceeding before the committee through the service (Phase 12 P12-
             maySubmitForVote: false,
             mayRecordAdoption: false,
             mayReturnToCommittee: false,
+            mayRequestLegalReview: false,
+            maySubmitToAuthority: false,
+            mayRecordAuthorityDecision: false,
           },
         ],
       ]);
@@ -250,6 +258,50 @@ describe("the proceeding before the committee through the service (Phase 12 P12-
     });
   });
 
+  it("the builder leaves out an allegation a correction superseded, and the command refuses it (CDF-238)", async () => {
+    await ownerScenario(async (s) => {
+      const { proceedings } = servicesIn(s);
+      const f = await proceedingWithMeeting(s);
+      const secretary = ctxFor("committeeSecretary");
+      // A second allegation about the same person, with no finding, which a correction splits (2090, ADR-045).
+      await s.as("caseManager");
+      const [added] = await s.tx<{ id: string }[]>`
+        select api.add_allegation(${caseB}, 'POLICY_BREACH', 'Synthetic: two separate matters in one allegation.',
+          ${f.subject}, null, null) as id`;
+      const [split] = await s.tx<{ ids: string[] }[]>`
+        select api.split_allegation(${added!.id}, ${s.tx.json([
+          { category: "POLICY_BREACH", description: "Synthetic: the first of the two matters." },
+          { category: "FRAUD", description: "Synthetic: the second of the two matters." },
+        ] as never)}::jsonb, 'Synthetic: the allegation covers two separate matters.') as ids`;
+
+      // R1 still lists it with its status; the builder offers its successors and leaves it out, as a withdrawn one.
+      const scope = page(await proceedings.proceeding(secretary, f.cp)).scope!;
+      expect(scope.allegations.find((a) => a.allegationId === added!.id)?.status).toBe("SUPERSEDED");
+      const offered = scope.allegations
+        .filter((a) => !isClosedAllegation(a.status))
+        .map((a) => a.allegationId);
+      expect(offered).not.toContain(added!.id);
+      expect(offered).toEqual(expect.arrayContaining([f.allegation, ...split!.ids]));
+
+      // What the builder no longer offers, the command refuses anyway.
+      const pkg = value<string>(
+        await proceedings.createPackage(secretary, { committeeProceedingId: f.cp, voteGranularity: "ITEM" }),
+      );
+      const item = (allegationId: string) =>
+        proceedings.addItem(secretary, {
+          packageId: pkg,
+          itemType: "DISCIPLINARY_SANCTION",
+          sanctionCode: "WARNING",
+          description: "Synthetic: written warning for the person concerned.",
+          subjectIds: [f.subject],
+          allegationIds: [allegationId],
+          requiresLegalJustification: false,
+        });
+      expect(outcome(await item(added!.id))).toBe("CONFLICT:ALLEGATION_SUPERSEDED");
+      expect(outcome(await item(split!.ids[0]!))).toBe("ok");
+    });
+  });
+
   it("a member reads the packages with no form; the case team, a platform administrator and an unknown id get the uniform not-found", async () => {
     await ownerScenario(async (s) => {
       const { proceedings } = servicesIn(s);
@@ -272,6 +324,9 @@ describe("the proceeding before the committee through the service (Phase 12 P12-
             maySubmitForVote: false,
             mayRecordAdoption: false,
             mayReturnToCommittee: false,
+            mayRequestLegalReview: false,
+            maySubmitToAuthority: false,
+            mayRecordAuthorityDecision: false,
           },
           [],
         ],
