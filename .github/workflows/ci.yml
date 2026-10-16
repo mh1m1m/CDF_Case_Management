@@ -122,7 +122,7 @@ jobs:
             done
             rm -f chunk_* filtered.log
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
@@ -170,7 +170,7 @@ jobs:
       - run: pnpm audit:deps
       - name: SBOM
         run: pnpm sbom
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: compliance/evidence/sbom.json
