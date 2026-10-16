@@ -664,6 +664,46 @@ requirements:
       ]
     notes: "No migration. The pages read only the purpose read models, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. The Committee area shows for a current seat alone (AMB-047): the application's floor is lifted and the database decides. An accommodation's text may concern health: never logged, never in an event, shown only where the view carries it. Not in this change: the invite form and case-person invitations (P12-2c), the runner's work in My Work (a later item)."
 
+  - id: CDF-UX-017
+    title: "The recommendation package builder and the meeting's invite list: each package action offered only to whoever its command would accept now, and one purpose-bound candidate list per meeting on the ruled bases, never a directory"
+    source:
+      [
+        Phase 12 plan P12-2,
+        UX-116,
+        ADR-016 D0 and D2,
+        DEC-02,
+        DEC-22,
+        DEC-AMB-003,
+        DEC-AMB-013,
+        AMB-026,
+        AMB-156,
+        AMB-158,
+        ADR-055 §7,
+        coordinator rulings 2026-10-15,
+        ADR-056,
+      ]
+    external_ids: []
+    linear_issues: [CDF-222]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002086_package_builder_and_invite_choices.sql,
+        api.committee_items_view,
+        api.meeting_invite_choices,
+        decision.manages_package,
+        decision.package_capabilities,
+        decision.package_vote_meetings,
+        decision.taint_resolutions,
+      ]
+    tests:
+      [
+        tests/security/package-builder-and-invite-choices.spec.ts,
+        tests/security/committee-scope-read-models.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+      ]
+    notes: "Database half (P12-2c); the pages follow with no migration. The package capabilities ride 2060's audited read and are true only for the committee's secretary or alternate secretary who passes the case gate with no conflict in the proceeding. The invite list holds the case's persons and the accounts of the case team's active assignments and of the proceeding's legal reviewers, each with the roles the command accepts; whoever a declared conflict or a witness exclusion in the proceeding narrows out is absent; ORDINAL names no person. Known limitation: on a closed proceeding the package commands still accept what the page no longer offers (CDF-226, fixed in 2120)."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]
