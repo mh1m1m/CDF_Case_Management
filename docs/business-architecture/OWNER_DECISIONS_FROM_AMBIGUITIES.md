@@ -1,8 +1,10 @@
 # Owner Decisions from the Ambiguity Register
 
-> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)); the built state of migration 2070 and the suites the 2060 closure tests landed in were added on 2026-10-15 ([CDF-223](https://linear.app/cdfcasemanagement/issue/CDF-223)); the built state of the 93 rows placed in 2030/2040, 2050 and 2060, and of 6 rows that 2045 or 2065 touched, was re-checked on 2026-10-16 against main 0f59062, which the Hosted DEV (Supabase) run [38804164091](https://github.com/mh1m1m/CDF_Case_Management/actions/runs/38804164091) tested green ([CDF-224](https://linear.app/cdfcasemanagement/issue/CDF-224)). Generated from one data set with its companion files, so counts agree across them.
+> SYNTHETIC-DATA REFERENCE IMPLEMENTATION. Not CDF production, not regulatory certification, and not final HR or legal conformance. Written 2026-10-13 for the owner appendix "CDF 200-Ambiguities Resolution Engine v1.0". Linear [CDF-204](https://linear.app/cdfcasemanagement/issue/CDF-204); the follow-on decisions DEC-AMB-013…015 and row AMB-251 were added the same day ([CDF-210](https://linear.app/cdfcasemanagement/issue/CDF-210)); the built state of migration 2070 and the suites the 2060 closure tests landed in were added on 2026-10-15 ([CDF-223](https://linear.app/cdfcasemanagement/issue/CDF-223)); the built state of the 93 rows placed in 2030/2040, 2050 and 2060, and of 6 rows that 2045 or 2065 touched, was re-checked on 2026-10-16 against main 0f59062, which the Hosted DEV (Supabase) run [38804164091](https://github.com/mh1m1m/CDF_Case_Management/actions/runs/38804164091) tested green ([CDF-224](https://linear.app/cdfcasemanagement/issue/CDF-224)); the placements of the eight gap rows tracked as CDF-239…246, and Fady's decisions of 2026-10-16 on AMB-113 and AMB-146, were added on 2026-10-16 ([CDF-248](https://linear.app/cdfcasemanagement/issue/CDF-248)). Generated from one data set with its companion files, so counts agree across them.
 
 Only R5 items: 15 decisions covering 12 register rows (4.8% of 251). Three of them, DEC-AMB-013, DEC-AMB-014 and DEC-AMB-015, are follow-ons on rows that already had a decision (AMB-051, and AMB-218 for DEC-AMB-015). Everything else is resolved from evidence, configuration or a source request.
+
+Fady decided two gaps left after delivery on 2026-10-16 (CDF-248): AMB-113 (CDF-241, option B) and AMB-146 (CDF-246, option A). They settle how a gap is built, not how the row resolves, so they are not R5 decisions: no class, resolution, risk or test ID changes, and the coordinator placed the other six gap rows itself. They are recorded at the end, under "Owner decisions on gap rows (2026-10-16)".
 
 **All 15 were decided on 2026-10-13.** Fady took the recommended option every time and added his own tightening to DEC-AMB-003, 006, 008, 011, 012, 013, 014 and 015. His decision text is reproduced below unedited. The decisions supersede the temporary fail-safe defaults; a fail-safe that is built today stays until the replacement rule and its negative tests are in place.
 
@@ -788,3 +790,47 @@ Impact: A separate conflict-reopening command for closed cases is designed later
 **Why:** Reuses the closure authority's existing reopening with full audit and then applies the rule you already set.
 
 **Temporary default (superseded on 2026-10-13):** Fail closed: a decisive conflict discovered only after closure has no entry, so there is no remediation and no reopening.
+
+## Owner decisions on gap rows (2026-10-16)
+
+Fady decided two gaps left after delivery on 2026-10-16 (CDF-248): AMB-113 (CDF-241, option B) and AMB-146 (CDF-246, option A). They settle how a gap is built, not how the row resolves, so they are not R5 decisions: no class, resolution, risk or test ID changes, and the coordinator placed the other six gap rows itself.
+
+**Decision owner:** Fady, 2026-10-16 17:09 UTC, in the project chat (message cmsg_01CvgBgRZnhwQfVHsucbRcQyNUznhTAt7KyiDrEz5BwTfH), relayed by the coordinator at 17:10 UTC. The coordinator had put both questions to him after its placement ruling of 15:44 UTC. The message ends with a line on the merge order of PRs #94 and #95, both merged by then, which is not part of the decisions.
+
+**His message (verbatim, without the closing line on the merge order), with an English rendering:**
+
+> أعتمد القرارين التاليين:
+
+(I approve the following two decisions:)
+
+> CDF-241 / AMB-113 → B — Wait for DoA source. لا نوسّع صلاحية الإحالة للإدارة القانونية إلى أي فئة جديدة بدون سند يحدد صاحب الصلاحية. يبقى Committee Secretary هو المستخدم الوحيد حاليًا، وتظل المسألة `SOURCE_REQUIRED` حتى ورود مصفوفة الصلاحيات/DoA أو تحديد الدور المعتمد. عندها يمكن تنفيذ التوسعة ضمن 2160. هذا أكثر اتساقًا مع مبدأ عدم توسيع الصلاحيات بالاستنتاج.
+
+(CDF-241 / AMB-113 → B — Wait for DoA source. We do not widen the power to refer to the Legal department to any new group without a source that names who holds that power. The Committee Secretary stays the only user for now, and the matter stays `SOURCE_REQUIRED` until the authority matrix (DoA) arrives or the approved role is named. The widening can then be built within 2160. This is more consistent with the principle of not widening permissions by inference.)
+
+> CDF-246 / AMB-146 → A — Nothing open. القرار يصبح نهائيًا بما يكفي للإغلاق عندما لا يوجد طلب reconsideration قائم أو pending ولا يوجد مسار آخر يمنع الإغلاق. لا ننشئ مهلة افتراضية غير مسندة بمصدر. إذا قُدّم طلب reconsideration، يمنع الإغلاق حتى يُحسم؛ وإذا لم يوجد طلب مفتوح، فلا تبقى القضية معلقة نظريًا إلى أجل غير معلوم.
+
+(CDF-246 / AMB-146 → A — Nothing open. A decision becomes final enough for closure when no reconsideration request is open or pending and no other path blocks closure. We do not create a default period that no source supports. If a reconsideration request is filed, it blocks closure until it is decided; and if no request is open, the case does not stay suspended, in theory, without end.)
+
+> والصياغة التنفيذية لـCDF-246 تكون:
+>
+> `CASE_CLOSURE_FINALITY = no open or pending reconsideration, grievance, proceeding, or other configured closure blocker.`
+>
+> وجود حق reconsideration بحد ذاته لا يمنع الإغلاق ما لم يوجد طلب فعلي قائم أو مدة نظامية موثقة لاحقًا.
+
+(And the executable wording for CDF-246 is: `CASE_CLOSURE_FINALITY = no open or pending reconsideration, grievance, proceeding, or other configured closure blocker.` A reconsideration right does not by itself block closure, unless an actual request is open or a statutory period is documented later.)
+
+### AMB-113 (CDF-241): option B, "Wait for DoA source"
+
+Register row AMB-113 (R1; class, resolution, risk and test ID unchanged). Status: decided on 2026-10-16, option B.
+
+**Placement:** Backlog, blocked on the source (the Linear title carries [BLOCKED: SOURCE_REQUIRED]); the widening ships in migration 2160 (ADR-053) once the Delegation of Authority or the approved role names who may refer.
+
+**Until then:** The committee secretary stays the only caller of `api.request_legal_review` (1900, replaced in 2030 and in 2099 with the same caller check). Nothing is widened.
+
+### AMB-146 (CDF-246): option A, "Nothing open"
+
+Register row AMB-146 (R2; class, resolution, risk and test ID unchanged). Status: decided on 2026-10-16, option A.
+
+**Placement:** The closure hold needs no build: the closure guard of 2060 already refuses closure while a grievance or reconsideration is open (`DECISION_NOT_FINAL`). The derived finality read model (the GRIEVANCE_FINALITY flag and a field of the closure view, read under CASE_CLOSURE_FINALITY) is placed in migration 2170.
+
+**Until then:** Closure is refused while a grievance or reconsideration is RECEIVED, AWAITING_ADMISSIBILITY_DECISION or ADMITTED (2060). An unused reconsideration right does not hold closure, and no default period exists.
