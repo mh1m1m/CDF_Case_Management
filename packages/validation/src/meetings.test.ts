@@ -1,13 +1,19 @@
-// Meeting and minutes schemas (Phase 12 P12-2a; ADR-054). The database re-checks every rule, including who may act;
-// these refuse early with the commands' own lengths and choices, so a form shows the problem before a round trip.
+// Meeting and minutes schemas (Phase 12 P12-2a and P12-2b; ADR-054 and ADR-055). The database re-checks every rule,
+// including who may act; these refuse early with the commands' own lengths and choices, so a form shows the problem
+// before a round trip.
 import { describe, expect, it } from "vitest";
 import {
+  activateActingChairSchema,
+  activateActingSecretarySchema,
+  activateAlternateMemberSchema,
+  amendProceedingSnapshotSchema,
   cancelMeetingSchema,
   castCastingVoteSchema,
   castVoteSchema,
   closeVoteItemSchema,
   declareMeetingConflictSchema,
   decideMeetingConflictSchema,
+  excludeMeetingWitnessSchema,
   generateMinutesSchema,
   openMeetingSchema,
   openVoteItemSchema,
@@ -15,12 +21,16 @@ import {
   raiseMeetingConflictSchema,
   recordAttendanceSchema,
   recordExcusedAbsenceSchema,
+  recordMeetingAccommodationSchema,
   recordVoteForMemberSchema,
   recordVoteNoteSchema,
   reverseMeetingConflictSchema,
   reviewMinutesSchema,
   reviseVoteSchema,
+  scheduleEmergencyMeetingSchema,
+  scheduleMeetingSchema,
 } from "./meetings";
+import { fieldErrors } from "./index";
 
 const ID = "8f8c2a52-4f0e-4b5a-9a43-0f7f2c1d9e10";
 const messages = (r: { success: boolean; error?: { issues: { message: string; path: PropertyKey[] }[] } }) =>
@@ -214,6 +224,164 @@ describe("minutes schemas", () => {
   it("overruling an objection needs a reason of 10 characters or more", () => {
     expect(messages(overruleMinutesObjectionSchema.safeParse({ minutesId: ID, reason: "short" }))).toEqual([
       "reason:validation.tooShort",
+    ]);
+  });
+});
+
+describe("scheduling a meeting (P12-2b)", () => {
+  const room = {
+    committeeProceedingId: ID,
+    purpose: "DELIBERATION",
+    mode: "IN_PERSON",
+    location: "Meeting room (synthetic)",
+    scheduledStart: "2026-11-02T10:00",
+    scheduledEnd: "2026-11-02T11:30",
+    reason: "Synthetic: first deliberation.",
+  };
+
+  it("reads the times as Riyadh time and needs the end after the start", () => {
+    const r = scheduleMeetingSchema.safeParse(room);
+    expect(r.success && [r.data.scheduledStart, r.data.scheduledEnd]).toEqual([
+      "2026-11-02T07:00:00.000Z",
+      "2026-11-02T08:30:00.000Z",
+    ]);
+    expect(messages(scheduleMeetingSchema.safeParse({ ...room, scheduledEnd: "2026-11-02T10:00" }))).toEqual([
+      "scheduledEnd:validation.endAfterStart",
+    ]);
+    expect(
+      messages(scheduleMeetingSchema.safeParse({ ...room, scheduledStart: "", scheduledEnd: "soon" })),
+    ).toEqual(["scheduledStart:validation.required", "scheduledEnd:validation.invalid"]);
+  });
+
+  it("asks for a place in a room and a link online, both when hybrid, and refuses the other instead of dropping it", () => {
+    const link = "https://meet.example.test/synthetic-1";
+    expect(messages(scheduleMeetingSchema.safeParse({ ...room, location: " " }))).toEqual([
+      "location:validation.required",
+    ]);
+    expect(messages(scheduleMeetingSchema.safeParse({ ...room, onlineUrl: link }))).toEqual([
+      "onlineUrl:validation.noLinkInPerson",
+    ]);
+    const online = { ...room, mode: "TEAMS", location: "" };
+    expect(messages(scheduleMeetingSchema.safeParse(online))).toEqual(["onlineUrl:validation.required"]);
+    expect(scheduleMeetingSchema.safeParse({ ...online, onlineUrl: link }).success).toBe(true);
+    expect(
+      messages(scheduleMeetingSchema.safeParse({ ...online, onlineUrl: link, location: "Room (synthetic)" })),
+    ).toEqual(["location:validation.noPlaceOnline"]);
+    expect(scheduleMeetingSchema.safeParse({ ...room, mode: "HYBRID", onlineUrl: link }).success).toBe(true);
+    expect(messages(scheduleMeetingSchema.safeParse({ ...room, mode: "HYBRID" }))).toEqual([
+      "onlineUrl:validation.required",
+    ]);
+  });
+
+  it("names each problem with a message the form can show, never the generic one", () => {
+    // fieldErrors passes on only validation.* keys: anything else would reach the form as "not valid".
+    const r = scheduleMeetingSchema.safeParse({ ...room, mode: "TEAMS" });
+    expect(r.success ? null : fieldErrors(r.error)).toEqual({
+      location: "validation.noPlaceOnline",
+      onlineUrl: "validation.required",
+    });
+  });
+
+  it("takes only an https link of 12 to 500 characters with no spaces, as the command does", () => {
+    const online = { ...room, mode: "TEAMS", location: undefined };
+    for (const onlineUrl of [
+      "http://meet.example.test/x",
+      "https://a b.example.test",
+      "https://x",
+      "javascript:alert(1)",
+    ]) {
+      expect(messages(scheduleMeetingSchema.safeParse({ ...online, onlineUrl }))).toEqual([
+        "onlineUrl:validation.httpsLink",
+      ]);
+    }
+    expect(
+      scheduleMeetingSchema.safeParse({ ...online, onlineUrl: `https://example.test/${"x".repeat(479)}` })
+        .success,
+    ).toBe(true);
+    expect(
+      scheduleMeetingSchema.safeParse({ ...online, onlineUrl: `https://example.test/${"x".repeat(480)}` })
+        .success,
+    ).toBe(false);
+  });
+
+  it("takes only the purposes and modes the command accepts", () => {
+    expect(scheduleMeetingSchema.safeParse({ ...room, purpose: "VOTE" }).success).toBe(false);
+    expect(scheduleMeetingSchema.safeParse({ ...room, mode: "PHONE" }).success).toBe(false);
+    expect(scheduleMeetingSchema.safeParse({ ...room, purpose: "HEARING" }).success).toBe(true);
+  });
+
+  it("an emergency meeting needs its own reason of 10 characters or more", () => {
+    expect(messages(scheduleEmergencyMeetingSchema.safeParse(room))).toEqual([
+      "emergencyReason:validation.required",
+    ]);
+    expect(
+      messages(scheduleEmergencyMeetingSchema.safeParse({ ...room, emergencyReason: "Urgent" })),
+    ).toEqual(["emergencyReason:validation.tooShort"]);
+    expect(
+      scheduleEmergencyMeetingSchema.safeParse({
+        ...room,
+        emergencyReason: "Synthetic: a deadline falls first.",
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("the proceeding's committee and the meeting's logistics (P12-2b)", () => {
+  it("adding a member to a proceeding names the membership and a reason of 10 characters or more", () => {
+    expect(
+      amendProceedingSnapshotSchema.safeParse({
+        committeeProceedingId: ID,
+        membershipId: ID,
+        reason: "Synthetic: appointed after referral.",
+      }).success,
+    ).toBe(true);
+    expect(
+      messages(
+        amendProceedingSnapshotSchema.safeParse({
+          committeeProceedingId: ID,
+          membershipId: "",
+          reason: "short",
+        }),
+      ),
+    ).toEqual(["membershipId:validation.invalid", "reason:validation.tooShort"]);
+  });
+
+  it("excluding a witness and each activation need a reason of 10 to 2,000 characters", () => {
+    const full = "Synthetic: the chair is absent today.";
+    expect(excludeMeetingWitnessSchema.safeParse({ participantId: ID, reason: full }).success).toBe(true);
+    expect(activateActingChairSchema.safeParse({ meetingId: ID, reason: full }).success).toBe(true);
+    expect(activateActingSecretarySchema.safeParse({ meetingId: ID, reason: full }).success).toBe(true);
+    for (const r of [
+      excludeMeetingWitnessSchema.safeParse({ participantId: ID, reason: "Too short" }),
+      activateActingChairSchema.safeParse({ meetingId: ID, reason: "Too short" }),
+      activateActingSecretarySchema.safeParse({ meetingId: ID, reason: "Too short" }),
+    ]) {
+      expect(messages(r)).toEqual(["reason:validation.tooShort"]);
+    }
+    expect(
+      activateAlternateMemberSchema.safeParse({
+        alternateParticipantId: ID,
+        replacesParticipantId: ID,
+        reason: full,
+      }).success,
+    ).toBe(true);
+    expect(
+      messages(activateAlternateMemberSchema.safeParse({ alternateParticipantId: ID, reason: full })),
+    ).toEqual(["replacesParticipantId:validation.invalid"]);
+  });
+
+  it("an accommodation is 5 to 2,000 characters", () => {
+    expect(
+      recordMeetingAccommodationSchema.safeParse({
+        participantId: ID,
+        details: "Step-free access (synthetic).",
+      }).success,
+    ).toBe(true);
+    expect(
+      messages(recordMeetingAccommodationSchema.safeParse({ participantId: ID, details: "Lift" })),
+    ).toEqual(["details:validation.tooShort"]);
+    expect(messages(recordMeetingAccommodationSchema.safeParse({ participantId: ID, details: "" }))).toEqual([
+      "details:validation.required",
     ]);
   });
 });

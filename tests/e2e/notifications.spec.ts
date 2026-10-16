@@ -4,7 +4,13 @@
 // not-found refusal and changes nothing.
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "./support";
-import { closeFixtureConnections, noticeRead, seatNotice, setNoticePreference } from "./records-fixture";
+import {
+  closeFixtureConnections,
+  demoCommitteeId,
+  noticeRead,
+  seatNotice,
+  setNoticePreference,
+} from "./records-fixture";
 
 test.afterAll(closeFixtureConnections);
 
@@ -45,8 +51,12 @@ for (const locale of ["ar", "en"] as const) {
     await expect(row).toHaveAttribute("data-read", "false");
     await expect(row).toContainText(text.seat);
     await expect(row.getByTestId(`notification-unread-${id}`)).toBeVisible();
-    // Its page has not shipped yet, so the notice links nowhere (S4: no dead links).
-    await expect(row.getByTestId(`notification-open-${id}`)).toHaveCount(0);
+    // The committee's page has shipped (P12-2b), so the notice leads there, and that page checks the seat again. A
+    // notice whose page has not shipped links nowhere (S4: no dead links; work-routes.test.ts).
+    await expect(row.getByTestId(`notification-open-${id}`)).toHaveAttribute(
+      "href",
+      `/committees/${await demoCommitteeId()}`,
+    );
 
     await row.getByRole("button", { name: `${text.markRead}: ${text.seat}` }).click();
     await expect(row).toHaveAttribute("data-read", "true");

@@ -220,14 +220,15 @@ export function navigationFor(actor: Pick<Actor, "permissions">) {
 /**
  * The permission floor of each shell area (audit §20.4). This is the application pre-check that the sidebar
  * intersects with `api.my_areas()`, which adds the live relationship (assignment, grant, task or item). Cases and
- * My Work have no floor because an assignment alone opens them; Committee (S5) and Reporting (S6) do not exist
- * yet. Every route still re-checks in the database: hiding an area is not enforcement.
+ * My Work have no floor because an assignment alone opens them, and My Committees none because a current seat alone
+ * does (AMB-047: work follows the seat, never a role; Phase 12 P12-2b, ADR-055). Reporting (S6) does not exist yet.
+ * Every route still re-checks in the database: hiding an area is not enforcement.
  */
 const AREA_FLOOR: Readonly<Record<WorkArea, readonly Permission[] | "ANY" | "NONE">> = {
   MY_WORK: "ANY",
   INTAKE: ["INTAKE_VIEW"],
   CASES: "ANY",
-  COMMITTEE: "NONE",
+  COMMITTEE: "ANY",
   RECORDS: [
     "RETENTION_TASK_VIEW",
     "DISPOSITION_TASK_VIEW",

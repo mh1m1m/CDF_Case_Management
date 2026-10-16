@@ -152,7 +152,70 @@ candidates are not filtered by clearance (§3).
 - **The runner's work in My Work** (meetings to open or close, votes to close, minutes to generate or remind). This
   is a separate item once 2085 and 2060 are both on `main` (coordinator, 15:05). The committee page shows that work
   from §3 and the meeting's capabilities.
-- **The pages.** They come in the next change, with no migration, as P12-2a did after 2065.
+- **The pages.** They come in the next change, with no migration, as P12-2a did after 2065 (the P12-2b amendment
+  below).
+
+## P12-2b amendment: the committee pages and the meeting's logistics (2026-10-14)
+
+The Committee area gains its pages on these read models, with no migration, and the meeting page gains its logistics.
+They are purpose routes (ADR-016 D2): `/committees` reads `api.my_committees`, `/committees/{id}` reads
+`api.committee_view`, and `/meetings/{id}` reads `api.meeting_view` as before. None reads a case table. Each action
+is a server action that runs the `api.*` command in the caller's security context, so the database checks again on
+submit.
+
+- **The area follows the seat.** The sidebar shows My Committees «لجاني» wherever `api.my_areas` lists the Committee
+  area, which it does for a current seat (2045). The application's floor for the area is lifted, because a seat alone
+  opens it and no role does (AMB-047); the database still decides. Without a current seat, `/committees` is the same
+  404 as a page that does not exist, and so is `/committees/{id}` for a committee where the caller holds none or an id
+  that names none; that refusal is recorded as `ACCESS_DENIED` with the read's name only. A platform administrator,
+  the case team and a holder of a committee role without a seat get the same 404 (§21).
+- **My Committees.** One row per committee: the seat and its dates, whether the committee is active, and the two
+  counts on the seat basis (open proceedings, and meetings scheduled or open). Never a case count.
+- **The committee page.** The caller's seat, the members by name and seat, the rules in force with their source
+  shown as a configured value (owner default, source required or approved; never presented as CDF policy), and the
+  proceedings on the seat basis, open ones first and closed ones folded away. Each proceeding shows its status and
+  dates, its meetings (each opens the meeting's page), the committee as counts (DEC-F19) and its rule snapshot. It is
+  named by its case number only where the view carries one; otherwise by the display-only reference of §3, with a
+  line saying that the case is not named to the viewer and that the reference is for that page only.
+- **Forms only where the command would accept them.** Scheduling shows where `may_schedule_meeting` or
+  `may_schedule_emergency_meeting` is true. The form states the proceeding's minimum notice and takes times in Riyadh
+  time; the emergency box sends `api.schedule_emergency_meeting` with its reason instead. The schema checks the
+  command's own pairings first (a place for a meeting in a room, an https link for one online, both when hybrid,
+  never the other, and the end after the start), so a mistake shows field by field before the database is asked;
+  the command still answers `NOTICE_TOO_SHORT` for a time too soon, and the form then points to the emergency path.
+  Adding a member shows where `may_amend_snapshot` is true and the view lists candidates, unfiltered by clearance;
+  the command answers `NOT_CLEARED_FOR_CASE`.
+- **The meeting's logistics.** The acting chair and the acting secretary activate from the meeting-level flags. On a
+  roster row, for the meeting's runner: excluding a witness, recording an accommodation, an alternate sitting for
+  one of the members its row lists (`alternate_for`), and, on a row without an account, the declaration and the
+  undertaking the secretary records for that person (ADR-054 §5) through the same commands. A participant records
+  their own accommodation in their part of the meeting. A row's acknowledgement and accommodations show only where
+  the view carries them: to the runner, never on another participant's page. An accommodation may concern health:
+  its text is never logged and never put in an event.
+- **Where a meeting leads back to.** A caller with a current seat on the meeting's committee goes back from the
+  meeting to the committee; anyone else to My Work. The seat comes from `api.my_committees`, never from a role.
+  Notices that link to `/committees/{id}` now open it (`LIVE_PURPOSE_ROOTS`).
+- **Confirmation and refusals.** Seven new server actions run eight commands; the secretary's path reuses the
+  declaration and acknowledgement actions. Nine acts ask for confirmation first; recording that a person without an
+  account declared no conflict does not, as for a member's own declaration. One act tells someone: scheduling tells
+  each member added that they are invited, with no reason and no case content. A refused command is recorded as
+  `COMMAND_DENIED` with the command and the outcome only, never the reason, details or emergency reason typed.
+- **Not in this change.** The invite form, its candidate list and the invitation of case persons (§7, P12-2c); the
+  runner's work in My Work (a later item).
+- **Tests.** Unit: 24 new (schemas, services, gateways, confirmations, routes and the area's floor).
+  `tests/integration/committees.spec.ts` (3): scheduling within the notice the proceeding copied and on the emergency
+  path, refused to a member; adding a member appointed after the referral from the candidates listed; and, without a
+  seat, the uniform not-found with its `ACCESS_DENIED` event. `tests/integration/meetings.spec.ts` gains one: the
+  secretary's path for a witness without an account, an accommodation a member may not record or read (its refusal
+  carries no details), an exclusion and a handover to the alternate secretary. `tests/e2e/committees.spec.ts` (6,
+  Arabic and English, a member on a 390 px phone): scheduling from My Committees, a field refused before the database
+  is asked, the emergency path and the way back to the committee; a member's own accommodation, the acting chair,
+  and the secretary's path, an accommodation and the exclusion for a witness, which a member never reads; adding a
+  member; and the 404s for a platform administrator, the case team and a committee role without a seat.
+  `tests/e2e/shell.spec.ts` adds `/committees` to the investigator's and the administrator's 404s, and
+  `tests/e2e/notifications.spec.ts` now expects a seat's notice to lead to the committee's page.
+  `tests/accessibility/committees.spec.ts` (4): axe at 1280 and 390 px and no sideways scroll at 1280, 390 and
+  320 px, with every disclosure open and the exclusion's confirmation, in both languages.
 
 ## Consequences
 

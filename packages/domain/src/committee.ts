@@ -39,6 +39,16 @@ export function proceedingDisplayNumber(sequenceNo: number): string {
   return `PRC-${String(sequenceNo).padStart(3, "0")}`;
 }
 
+/**
+ * The short reference a committee proceeding shows on the committee's page (ADR-055; DEC-22: an object or reference
+ * id): the committee's code and the first eight characters of the proceeding's id, as `IC-3F9A2C1B`. A proceeding has
+ * no display number, because a sequence would tell how many it has, restricted ones included. Display only: never a
+ * lookup key or a uniqueness assumption (eight characters can collide; the full id stays the key).
+ */
+export function proceedingShortRef(committeeCode: string, committeeProceedingId: string): string {
+  return `${committeeCode}-${committeeProceedingId.slice(0, 8).toUpperCase()}`;
+}
+
 export interface EffectivePeriod {
   effectiveFrom: string;
   effectiveTo: string | null;

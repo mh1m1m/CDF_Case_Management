@@ -1,8 +1,8 @@
 "use server";
-// The meeting page's commands (UX redesign Phase 12 P12-2a; ADR-054). Each one goes through the meetings service,
-// which validates with the shared schema and runs the api.* command in the caller's security context: the database
-// decides who may act and in which state. The ids are the ones the read model gave the page; a forged id meets the
-// same command and its refusal.
+// The meeting page's commands (UX redesign Phase 12 P12-2a and P12-2b; ADR-054, ADR-055). Each one goes through the
+// meetings service, which validates with the shared schema and runs the api.* command in the caller's security
+// context: the database decides who may act and in which state. The ids are the ones the read model gave the page; a
+// forged id meets the same command and its refusal.
 import { revalidatePath } from "next/cache";
 import type { CommandResult } from "@cdf/application";
 import { meetingsService, requireActor, type RequestScope } from "@/server/container";
@@ -84,6 +84,44 @@ export async function raiseConcernAction(
   return onMeeting(meetingId, form, participantId ? { participantId } : {}, (s, ctx, raw) =>
     s.raiseConcern(ctx, raw),
   );
+}
+
+/** P12-2b (ADR-055): the runner excludes an invited witness; the reason stays with the meeting. */
+export async function excludeWitnessAction(
+  meetingId: string,
+  participantId: string,
+  _: ActionState,
+  form: FormData,
+) {
+  return onMeeting(meetingId, form, { participantId }, (s, ctx, raw) => s.excludeWitness(ctx, raw));
+}
+/** For oneself, or, for the runner, for any participant (AMB-157); the details are never logged. */
+export async function recordAccommodationAction(
+  meetingId: string,
+  participantId: string,
+  _: ActionState,
+  form: FormData,
+) {
+  return onMeeting(meetingId, form, { participantId }, (s, ctx, raw) => s.recordAccommodation(ctx, raw));
+}
+/** The alternate on this row sits for the member the form names (one of the row's alternate_for). */
+export async function activateAlternateMemberAction(
+  meetingId: string,
+  alternateParticipantId: string,
+  _: ActionState,
+  form: FormData,
+) {
+  return onMeeting(meetingId, form, { alternateParticipantId }, (s, ctx, raw) =>
+    s.activateAlternateMember(ctx, raw),
+  );
+}
+
+// ---- Acting roles (P12-2b; DEC-F03, AMB-041) ------------------------------------------------------------------------
+export async function activateActingChairAction(meetingId: string, _: ActionState, form: FormData) {
+  return onMeeting(meetingId, form, { meetingId }, (s, ctx, raw) => s.activateActingChair(ctx, raw));
+}
+export async function activateActingSecretaryAction(meetingId: string, _: ActionState, form: FormData) {
+  return onMeeting(meetingId, form, { meetingId }, (s, ctx, raw) => s.activateActingSecretary(ctx, raw));
 }
 
 // ---- Raised conflicts ---------------------------------------------------------------------------------------------

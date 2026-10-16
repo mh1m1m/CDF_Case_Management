@@ -1024,25 +1024,51 @@ async function declare(
   }
 }
 
+/**
+ * The logistics tests' meeting: the committee seated, the meeting scheduled and three witnesses invited by the
+ * secretary: an employee with an account, a person of the case without one, and the case manager.
+ */
+async function invited(s: OwnerScenario): Promise<{
+  f: MeetingFixture;
+  subject: string;
+  userWitness: string;
+  personWitness: string;
+  caseWitness: string;
+}> {
+  await install(s);
+  const { witness: person, subject } = await people(s);
+  await seat(s, ic, LOGISTICS_SEATS);
+  const f = await scheduleMeeting(s, ic, caseB);
+  await s.as("committeeSecretary");
+  const [w] = await s.tx<{ id: string }[]>`
+    select api.invite_to_meeting(${f.meeting}, 'WITNESS', ${USERS.employeeB}, null, true, ${REASON}) as id`;
+  const [pw] = await s.tx<{ id: string }[]>`
+    select api.invite_to_meeting(${f.meeting}, 'WITNESS', null, ${person}, true, ${REASON}) as id`;
+  // The case manager, who sees the meeting through the case, is invited as a witness too.
+  const [cw] = await s.tx<{ id: string }[]>`
+    select api.invite_to_meeting(${f.meeting}, 'WITNESS', ${USERS.caseManager}, null, true, ${REASON}) as id`;
+  return { f, subject, userWitness: w!.id, personWitness: pw!.id, caseWitness: cw!.id };
+}
+
+/** The secretary records for the person; the witness records their own accommodation, the secretary another. */
+async function recorded(s: OwnerScenario, userWitness: string, personWitness: string): Promise<void> {
+  await s.as("committeeSecretary");
+  await s.tx`select api.declare_meeting_conflict(${personWitness}, 'NO_CONFLICT', null)`;
+  await s.tx`select api.acknowledge_meeting_confidentiality(${personWitness})`;
+  await s.tx`select api.record_meeting_accommodation(${userWitness}, ${ACCOMMODATION})`;
+  await s.tx`select api.record_meeting_accommodation(${personWitness}, ${ACCOMMODATION})`;
+  await s.as("employeeB");
+  await s.tx`select api.record_meeting_accommodation(${userWitness}, 'Synthetic: a quiet waiting room.')`;
+}
+
+// The logistics sweep runs in three parts, each from the same invitations and, where it needs them, the same records,
+// so that each part stays inside the 30 s per-test limit (the debt crosswalk's §5 watch item); every check of the
+// single test they replace is kept, in the same state.
 describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
-  it("invitations, exclusion, accommodations and the secretary's path for an invitee without an account follow their commands; arrangements are what RLS shows; a view writes nothing", async () => {
+  it("invitations, the secretary's path for an invitee without an account and accommodations follow their commands; arrangements are what RLS shows", async () => {
     await ownerScenario(async (s) => {
-      await install(s);
-      const { witness: person, subject } = await people(s);
-      await seat(s, ic, LOGISTICS_SEATS);
-      const f = await scheduleMeeting(s, ic, caseB);
+      const { f, subject, userWitness, personWitness } = await invited(s);
       const P = f.participant;
-      await s.as("committeeSecretary");
-      const [w] = await s.tx<{ id: string }[]>`
-        select api.invite_to_meeting(${f.meeting}, 'WITNESS', ${USERS.employeeB}, null, true, ${REASON}) as id`;
-      const [pw] = await s.tx<{ id: string }[]>`
-        select api.invite_to_meeting(${f.meeting}, 'WITNESS', null, ${person}, true, ${REASON}) as id`;
-      const userWitness = w!.id;
-      const personWitness = pw!.id;
-      // The case manager, who sees the meeting through the case, is invited as a witness too.
-      const [cw] = await s.tx<{ id: string }[]>`
-        select api.invite_to_meeting(${f.meeting}, 'WITNESS', ${USERS.caseManager}, null, true, ${REASON}) as id`;
-      const caseWitness = cw!.id;
       await logistics(s, f.meeting, subject);
       let v = await meetingView(s, "committeeSecretary", f.meeting);
       expect(v!.capabilities).toMatchObject({ may_invite: true });
@@ -1083,14 +1109,7 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
       });
       expect(theirs!.invitee_roles).toEqual([]);
 
-      // The secretary records for the person; the witness records their own accommodation, the secretary another.
-      await s.as("committeeSecretary");
-      await s.tx`select api.declare_meeting_conflict(${personWitness}, 'NO_CONFLICT', null)`;
-      await s.tx`select api.acknowledge_meeting_confidentiality(${personWitness})`;
-      await s.tx`select api.record_meeting_accommodation(${userWitness}, ${ACCOMMODATION})`;
-      await s.tx`select api.record_meeting_accommodation(${personWitness}, ${ACCOMMODATION})`;
-      await s.as("employeeB");
-      await s.tx`select api.record_meeting_accommodation(${userWitness}, 'Synthetic: a quiet waiting room.')`;
+      await recorded(s, userWitness, personWitness);
       await logistics(s, f.meeting, subject);
       v = await meetingView(s, "committeeSecretary", f.meeting);
       expect(flagsOn(v, personWitness)).toMatchObject({
@@ -1109,6 +1128,13 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
       // A member reads the roster, and nobody's arrangements but their own.
       for (const r of (await meetingView(s, "legal", f.meeting))!.roster!)
         expect(r.arrangements === null, r.participant_id).toBe(r.user_id !== USERS.legal);
+    });
+  });
+
+  it("a concern about a witness leaves them in until it is decided; an excluded witness is offered nothing on a row the runner still reads; a view writes nothing", async () => {
+    await ownerScenario(async (s) => {
+      const { f, subject, userWitness, personWitness, caseWitness } = await invited(s);
+      await recorded(s, userWitness, personWitness);
 
       // A concern about the witness with an account is open: not excluded until it is decided (CONCERN_OPEN).
       await declare(s, f, ["legal"]);
@@ -1128,7 +1154,7 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
       await s.tx`select api.exclude_meeting_witness(${personWitness}, ${EXCLUSION})`;
       await s.tx`select api.exclude_meeting_witness(${caseWitness}, ${EXCLUSION})`;
       await logistics(s, f.meeting, subject);
-      v = await meetingView(s, "committeeSecretary", f.meeting);
+      const v = await meetingView(s, "committeeSecretary", f.meeting);
       expect(flagsOn(v, personWitness)).toMatchObject(NONE_2085);
       expect(flagsOn(v, caseWitness)).toMatchObject(NONE_2085);
       expect(rowOf(v, personWitness)!.arrangements).toMatchObject({ confidentiality_acknowledged: true });
@@ -1147,6 +1173,20 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
       const written = await ledger(s);
       for (const u of MEETING_CALLERS) await meetingView(s, u, f.meeting);
       expect(await ledger(s)).toBe(written);
+    });
+  });
+
+  it("the invitee-type rule and the meeting's close: may_invite and invitee_roles follow their commands (INVITEE_TYPE_DISABLED, MEETING_NOT_ACTIVE)", async () => {
+    await ownerScenario(async (s) => {
+      const { f, subject, userWitness, personWitness, caseWitness } = await invited(s);
+      await recorded(s, userWitness, personWitness);
+      // The concern and the two exclusions of the test before, so this one starts where that one ends.
+      await declare(s, f, ["legal"]);
+      await s.as("legal");
+      await s.tx`select api.raise_meeting_conflict(${userWitness}, ${CONCERN})`;
+      await s.as("committeeSecretary");
+      await s.tx`select api.exclude_meeting_witness(${personWitness}, ${EXCLUSION})`;
+      await s.tx`select api.exclude_meeting_witness(${caseWitness}, ${EXCLUSION})`;
 
       // The rule enables the interpreter, then no type at all: may_invite and invitee_roles follow
       // (INVITEE_TYPE_DISABLED). Synthetic rule values for the test only.
@@ -1160,7 +1200,7 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
       for (const role of ROLES)
         await s.tx`select api.set_invitee_type_rule(${role}, false, true, null, 'SOURCE_REQUIRED', ${REASON})`;
       await logistics(s, f.meeting, subject);
-      v = await meetingView(s, "committeeSecretary", f.meeting);
+      let v = await meetingView(s, "committeeSecretary", f.meeting);
       expect(v!.capabilities!.may_invite).toBe(false);
       expect(v!.invitee_roles).toEqual([]);
 

@@ -15,6 +15,7 @@ import {
   legalReviewRequired,
   periodsOverlap,
   proceedingDisplayNumber,
+  proceedingShortRef,
   quorumThreshold,
   subjectPath,
   tallyVotes,
@@ -74,6 +75,10 @@ describe("quorum (Q51–Q54)", () => {
 describe("display numbers", () => {
   it("pads proceeding numbers", () => {
     expect(proceedingDisplayNumber(7)).toBe("PRC-007");
+  });
+  it("shortens a committee proceeding to its committee and the start of its id, never a count", () => {
+    expect(proceedingShortRef("IC", "3f9a2c1b-0d4e-4b7a-9c11-2e5f6a7b8c9d")).toBe("IC-3F9A2C1B");
+    expect(proceedingShortRef("GC", "00000000-0000-4000-8000-000000000001")).toBe("GC-00000000");
   });
 });
 

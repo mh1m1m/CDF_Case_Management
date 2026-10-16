@@ -35,7 +35,17 @@ export type ConfirmAct =
   | "reviewMinutes"
   | "remindReviewers"
   | "applyDeemedApproval"
-  | "overruleObjection";
+  | "overruleObjection"
+  // My Committees and the meeting's logistics (Phase 12 P12-2b, ADR-055).
+  | "scheduleMeeting"
+  | "amendProceedingSnapshot"
+  | "excludeWitness"
+  | "recordAccommodation"
+  | "declareForParticipant"
+  | "acknowledgeForParticipant"
+  | "activateActingChair"
+  | "activateActingSecretary"
+  | "activateAlternateMember";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -51,6 +61,13 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   "generateMinutes",
   "reviewMinutes",
   "remindReviewers",
+  "scheduleMeeting",
+  "amendProceedingSnapshot",
+  "recordAccommodation",
+  "acknowledgeForParticipant",
+  "activateActingChair",
+  "activateActingSecretary",
+  "activateAlternateMember",
 ]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */

@@ -1,11 +1,13 @@
-// Meeting and minutes commands (migrations 1890, 2000, 2030 and 2050; UX redesign Phase 12 P12-2a, ADR-054). One
-// schema per command; the database re-checks every rule, including who may act and in which state. The lengths
-// follow the commands' own checks. Error messages are i18n keys, never prose.
+// Committee meeting and minutes commands (migrations 1890, 2000, 2010, 2030 and 2050; UX redesign Phase 12 P12-2a and
+// P12-2b, ADR-054 and ADR-055). One schema per command; the database re-checks every rule, including who may act and
+// in which state. The lengths follow the commands' own checks. Error messages are i18n keys, never prose.
 import { z } from "zod";
 import {
   CASTING_VOTE_CHOICES,
   COI_DECLARATIONS,
   CONCERN_DECISIONS,
+  MEETING_MODES,
+  MEETING_PURPOSES,
   MEMBER_VOTE_CHOICES,
   MINUTES_REVIEW_DECISIONS,
   OPENABLE_VOTE_TARGETS,
@@ -33,10 +35,17 @@ const choice = <T extends readonly [string, ...string[]]>(values: T) =>
   z.enum(values, { message: "validation.required" });
 /** A checkbox the form sends as a boolean (formObject's booleans). */
 const flag = z.boolean({ message: "validation.invalid" });
-/** The meeting commands' reason (open, close, cancel, excuse, declare, recuse): 5 to 2000 characters. */
+/** The meeting commands' reason (schedule, open, close, cancel, excuse, declare, recuse): 5 to 2000 characters. */
 const reason = requiredText(5, 2000);
-/** A raised conflict, its decision and its reversal need a fuller reason: 10 to 2000 characters. */
-const concernReason = requiredText(10, 2000);
+/**
+ * A fuller reason, 10 to 2000 characters: a raised conflict, its decision and its reversal; excluding a witness; an
+ * activation; adding a member to a proceeding; an emergency.
+ */
+const fullReason = requiredText(10, 2000);
+
+/** A datetime-local or ISO value as a Date; a local value is Riyadh time (UTC+3, no daylight saving). */
+const asInstant = (v: string): Date =>
+  new Date(/([zZ]|[+-]\d{2}:?\d{2})$/.test(v) ? v : `${v}${v.length === 16 ? ":00" : ""}+03:00`);
 
 /**
  * When an absence or recusal happened, if not now (api.record_vote_for_member): datetime-local or ISO, local values
@@ -48,14 +57,27 @@ const optionalPastInstant = z
   .optional()
   .transform((v, ctx) => {
     if (!v) return undefined;
-    const withZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(v) ? v : `${v}${v.length === 16 ? ":00" : ""}+03:00`;
-    const d = new Date(withZone);
+    const d = asInstant(v);
     if (Number.isNaN(d.getTime())) {
       ctx.addIssue({ code: "custom", message: "validation.invalid" });
       return z.NEVER;
     }
     if (d.getTime() > Date.now()) {
       ctx.addIssue({ code: "custom", message: "validation.futureDate" });
+      return z.NEVER;
+    }
+    return d.toISOString();
+  });
+
+/** A required date and time (datetime-local or ISO, local values read as Riyadh time), as an ISO instant. */
+const instant = z
+  .string({ message: "validation.required" })
+  .trim()
+  .min(1, { message: "validation.required", abort: true })
+  .transform((v, ctx) => {
+    const d = asInstant(v);
+    if (Number.isNaN(d.getTime())) {
+      ctx.addIssue({ code: "custom", message: "validation.invalid" });
       return z.NEVER;
     }
     return d.toISOString();
@@ -89,13 +111,13 @@ export const acknowledgeMeetingConfidentialitySchema = z.object({ participantId:
 
 // ---- Raised conflicts (api.raise_meeting_conflict, ADR-038; api.decide_meeting_conflict, DEC-F04;
 //      api.reverse_meeting_conflict_determination, DEC-AMB-010) ---------------------------------------------------
-export const raiseMeetingConflictSchema = z.object({ participantId: uuid, reason: concernReason });
+export const raiseMeetingConflictSchema = z.object({ participantId: uuid, reason: fullReason });
 export const decideMeetingConflictSchema = z.object({
   concernId: uuid,
   decision: choice(CONCERN_DECISIONS),
-  reason: concernReason,
+  reason: fullReason,
 });
-export const reverseMeetingConflictSchema = z.object({ concernId: uuid, reason: concernReason });
+export const reverseMeetingConflictSchema = z.object({ concernId: uuid, reason: fullReason });
 
 // ---- Votes (api.open_vote_item, api.cast_vote, api.revise_vote (AMB-081), api.recuse_for_conflict (AMB-077),
 //      api.record_vote_note (AMB-082), api.record_vote_for_member, api.close_vote_item, api.cast_casting_vote) ----
@@ -152,4 +174,83 @@ export const reviewMinutesSchema = z
   });
 export const recordMinutesReminderSchema = z.object({ minutesId: uuid });
 export const applyMinutesDeemedApprovalSchema = z.object({ minutesId: uuid });
-export const overruleMinutesObjectionSchema = z.object({ minutesId: uuid, reason: concernReason });
+export const overruleMinutesObjectionSchema = z.object({ minutesId: uuid, reason: fullReason });
+
+// ---- Scheduling (api.schedule_meeting; api.schedule_emergency_meeting, AMB-061; P12-2b, ADR-055) ------------------
+/** The link committee.insert_meeting accepts: https, no spaces, 12 to 500 characters. */
+const ONLINE_LINK = /^https:\/\/\S+$/;
+const IN_ROOM: readonly string[] = ["IN_PERSON", "HYBRID"];
+const ONLINE: readonly string[] = ["TEAMS", "HYBRID"];
+
+const meetingFields = {
+  committeeProceedingId: uuid,
+  purpose: choice(MEETING_PURPOSES),
+  mode: choice(MEETING_MODES),
+  location: optionalText(2, 200),
+  onlineUrl: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined)),
+  scheduledStart: instant,
+  scheduledEnd: instant,
+  reason,
+};
+
+/**
+ * The command's own pairings: a place for a meeting in a room, a link for one online (HYBRID needs both), and never
+ * the other one, which the command refuses rather than drops; the end after the start. The notice the committee
+ * requires is the database's to check against the time chosen.
+ */
+interface MeetingTimeAndPlace {
+  mode: string;
+  location?: string | undefined;
+  onlineUrl?: string | undefined;
+  scheduledStart: string;
+  scheduledEnd: string;
+}
+const meetingChecks = (v: MeetingTimeAndPlace, ctx: z.RefinementCtx) => {
+  if (IN_ROOM.includes(v.mode) && !v.location)
+    ctx.addIssue({ code: "custom", message: "validation.required", path: ["location"] });
+  if (!IN_ROOM.includes(v.mode) && v.location)
+    ctx.addIssue({ code: "custom", message: "validation.noPlaceOnline", path: ["location"] });
+  if (ONLINE.includes(v.mode) && !v.onlineUrl)
+    ctx.addIssue({ code: "custom", message: "validation.required", path: ["onlineUrl"] });
+  if (!ONLINE.includes(v.mode) && v.onlineUrl)
+    ctx.addIssue({ code: "custom", message: "validation.noLinkInPerson", path: ["onlineUrl"] });
+  if (v.onlineUrl && (!ONLINE_LINK.test(v.onlineUrl) || v.onlineUrl.length < 12 || v.onlineUrl.length > 500))
+    ctx.addIssue({ code: "custom", message: "validation.httpsLink", path: ["onlineUrl"] });
+  if (Date.parse(v.scheduledEnd) <= Date.parse(v.scheduledStart))
+    ctx.addIssue({ code: "custom", message: "validation.endAfterStart", path: ["scheduledEnd"] });
+};
+
+export const scheduleMeetingSchema = z.object(meetingFields).superRefine(meetingChecks);
+/** Shorter notice than the committee's minimum, with the emergency recorded and its reason (AMB-061). */
+export const scheduleEmergencyMeetingSchema = z
+  .object({ ...meetingFields, emergencyReason: fullReason })
+  .superRefine(meetingChecks);
+
+// ---- The committee as a proceeding holds it (api.amend_proceeding_snapshot, AMB-038) ------------------------------
+/** A current member added after referral; the database refuses one not cleared for the case. */
+export const amendProceedingSnapshotSchema = z.object({
+  committeeProceedingId: uuid,
+  membershipId: uuid,
+  reason: fullReason,
+});
+
+// ---- The meeting's logistics (api.exclude_meeting_witness, migration 2010; api.record_meeting_accommodation,
+//      AMB-157; api.activate_acting_chair, api.activate_acting_secretary, api.activate_alternate_member, DEC-F03,
+//      AMB-041, AMB-042; P12-2b) --------------------------------------------------------------------------------
+export const excludeMeetingWitnessSchema = z.object({ participantId: uuid, reason: fullReason });
+/** What is arranged for the participant (it may concern health, AMB-157): 5 to 2000 characters. */
+export const recordMeetingAccommodationSchema = z.object({
+  participantId: uuid,
+  details: requiredText(5, 2000),
+});
+export const activateActingChairSchema = z.object({ meetingId: uuid, reason: fullReason });
+export const activateActingSecretarySchema = z.object({ meetingId: uuid, reason: fullReason });
+export const activateAlternateMemberSchema = z.object({
+  alternateParticipantId: uuid,
+  replacesParticipantId: uuid,
+  reason: fullReason,
+});

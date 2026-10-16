@@ -117,17 +117,27 @@ describe("shell areas (UX redesign S1, audit §20.4)", () => {
     expect(areaPermitted(actorOf("PLATFORM_ADMIN"), "INTAKE")).toBe(false);
   });
 
-  it("has no Committee or Reporting area before S5 and S6", () => {
-    for (const role of ROLES) {
-      expect(areaPermitted(actorOf(role), "COMMITTEE")).toBe(false);
-      expect(areaPermitted(actorOf(role), "REPORTING")).toBe(false);
-    }
+  it("has no Reporting area before S6", () => {
+    for (const role of ROLES) expect(areaPermitted(actorOf(role), "REPORTING")).toBe(false);
   });
 
   it("lets an assignment alone open My Work and Cases (the database decides the relationship)", () => {
     expect(areaPermitted({ permissions: [] }, "MY_WORK")).toBe(true);
     expect(areaPermitted({ permissions: [] }, "CASES")).toBe(true);
     expect(areaPermitted({ permissions: [] }, "RECORDS")).toBe(false);
+  });
+
+  it("shows My Committees only where the database lists a seat, never from a role (P12-2b, AMB-047)", () => {
+    // A seat alone opens the area: no permission is needed, and none is enough.
+    expect(areaPermitted({ permissions: [] }, "COMMITTEE")).toBe(true);
+    expect(shellAreas({ permissions: [] }, [area("COMMITTEE")]).map((a) => a.area)).toEqual(["COMMITTEE"]);
+    for (const role of [
+      "COMMITTEE_CHAIR",
+      "COMMITTEE_SECRETARY",
+      "COMMITTEE_MEMBER",
+      "PLATFORM_ADMIN",
+    ] as const)
+      expect(shellAreas(actorOf(role), [area("MY_WORK")]).map((a) => a.area)).toEqual(["MY_WORK"]);
   });
 });
 

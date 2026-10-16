@@ -1,6 +1,7 @@
 /**
- * The committee's meeting and minutes screens (UX redesign Phase 12 P12-2a; ADR-054, migrations 1890 to 2065). The
- * pages read the purpose read models (api.meeting_view, api.minutes_view, api.vote_item_status), never the case.
+ * The committee's meeting and minutes screens (UX redesign Phase 12 P12-2a and P12-2b; ADR-054 and ADR-055, migrations
+ * 1890 to 2085). The pages read the purpose read models (api.meeting_view, api.minutes_view, api.vote_item_status),
+ * never the case.
  * Each command:
  *   1. validates input with the shared Zod schema (§45),
  *   2. needs no permission code: who may act comes from the caller's seat, their part in the meeting and its state,
@@ -14,6 +15,9 @@ import type { MeetingView, MinutesView, VoteItemProgress } from "@cdf/contracts"
 import type { SecurityEventSink } from "@cdf/audit";
 import {
   acknowledgeMeetingConfidentialitySchema,
+  activateActingChairSchema,
+  activateActingSecretarySchema,
+  activateAlternateMemberSchema,
   applyMinutesDeemedApprovalSchema,
   cancelMeetingSchema,
   castCastingVoteSchema,
@@ -22,6 +26,7 @@ import {
   closeVoteItemSchema,
   declareMeetingConflictSchema,
   decideMeetingConflictSchema,
+  excludeMeetingWitnessSchema,
   generateMinutesSchema,
   openMeetingSchema,
   openVoteItemSchema,
@@ -29,6 +34,7 @@ import {
   raiseMeetingConflictSchema,
   recordAttendanceSchema,
   recordExcusedAbsenceSchema,
+  recordMeetingAccommodationSchema,
   recordMinutesReminderSchema,
   recordVoteForMemberSchema,
   recordVoteNoteSchema,
@@ -89,6 +95,21 @@ export interface MeetingsGateway {
     ctx: UserRequestContext,
     input: In<typeof overruleMinutesObjectionSchema>,
   ): Promise<void>;
+  /** P12-2b. Each returns the id of the row it records. */
+  excludeWitness(ctx: UserRequestContext, input: In<typeof excludeMeetingWitnessSchema>): Promise<string>;
+  recordAccommodation(
+    ctx: UserRequestContext,
+    input: In<typeof recordMeetingAccommodationSchema>,
+  ): Promise<string>;
+  activateActingChair(ctx: UserRequestContext, input: In<typeof activateActingChairSchema>): Promise<string>;
+  activateActingSecretary(
+    ctx: UserRequestContext,
+    input: In<typeof activateActingSecretarySchema>,
+  ): Promise<string>;
+  activateAlternateMember(
+    ctx: UserRequestContext,
+    input: In<typeof activateAlternateMemberSchema>,
+  ): Promise<string>;
 }
 
 export interface MeetingsDeps {
@@ -375,6 +396,54 @@ export function createMeetingsService(deps: MeetingsDeps) {
         raw,
         (i) => gateway.overruleMinutesObjection(ctx, i),
         (i) => i.minutesId,
+      ),
+
+    // ---- The meeting's logistics (P12-2b; ADR-055) ----------------------------------------------------------------
+    excludeWitness: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "exclude_meeting_witness",
+        excludeMeetingWitnessSchema,
+        raw,
+        (i) => gateway.excludeWitness(ctx, i),
+        (i) => i.participantId,
+      ),
+    /** Details of an accommodation may concern health (AMB-157): never logged, never in an event. */
+    recordAccommodation: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "record_meeting_accommodation",
+        recordMeetingAccommodationSchema,
+        raw,
+        (i) => gateway.recordAccommodation(ctx, i),
+        (i) => i.participantId,
+      ),
+    activateActingChair: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "activate_acting_chair",
+        activateActingChairSchema,
+        raw,
+        (i) => gateway.activateActingChair(ctx, i),
+        (i) => i.meetingId,
+      ),
+    activateActingSecretary: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "activate_acting_secretary",
+        activateActingSecretarySchema,
+        raw,
+        (i) => gateway.activateActingSecretary(ctx, i),
+        (i) => i.meetingId,
+      ),
+    activateAlternateMember: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "activate_alternate_member",
+        activateAlternateMemberSchema,
+        raw,
+        (i) => gateway.activateAlternateMember(ctx, i),
+        (i) => i.alternateParticipantId,
       ),
   };
 }
