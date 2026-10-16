@@ -1603,8 +1603,18 @@ const BATCH: Model = {
     "template_version",
     "updated_at",
     "workbook_id",
+    // Migration 2100 (AMB-205): whether the workbook was revoked as lost; may_approve follows it.
+    "workbook_revoked",
   ],
-  caps: ["may_apply", "may_cancel", "may_decide", "may_preview", "may_resolve_rows", "may_submit"],
+  caps: [
+    "may_apply",
+    "may_approve",
+    "may_cancel",
+    "may_decide",
+    "may_preview",
+    "may_resolve_rows",
+    "may_submit",
+  ],
   // Never the cells or the workbook's control block.
   never: ["cells", "control", "payload_hash", "DISPLAY_LABEL"],
 };
@@ -1632,6 +1642,10 @@ const batchProbes =
         tx`select api.decide_bcp_import(${b}, 'APPROVE', ${REASON}, ${(v?.submitted_hash as string | null) ?? SHA})`,
       (tx) =>
         tx`select api.decide_bcp_import(${b}, 'REJECT', ${REASON}, ${(v?.submitted_hash as string | null) ?? SHA})`,
+    ],
+    may_approve: [
+      (tx) =>
+        tx`select api.decide_bcp_import(${b}, 'APPROVE', ${REASON}, ${(v?.submitted_hash as string | null) ?? SHA})`,
     ],
     may_apply: [
       (tx) => tx`select api.apply_bcp_import(${b}, ${(v?.submitted_hash as string | null) ?? SHA})`,
@@ -1710,8 +1724,8 @@ describe("api.bcp_import_batch_view (authz.can_view_bcp_import)", () => {
       // Submitted: an approver who neither imported, prepared nor recorded it decides.
       await step("SUBMITTED", {
         caseManager: ["may_cancel", "may_preview"],
-        grcDirector: ["may_decide"],
-        grcDeputy: ["may_decide"],
+        grcDirector: ["may_approve", "may_decide"],
+        grcDeputy: ["may_approve", "may_decide"],
       });
       await s.as("grcDirector");
       await s.tx`select api.decide_bcp_import(${batch}, 'APPROVE', ${REASON}, ${p!.h})`;

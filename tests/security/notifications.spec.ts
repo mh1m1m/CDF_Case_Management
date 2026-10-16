@@ -23,9 +23,10 @@ import {
   seat,
 } from "../support/committee";
 
-let caseB: string, caseR: string, ic: string, gc: string;
+let caseA: string, caseB: string, caseR: string, ic: string, gc: string;
 
 beforeAll(async () => {
+  caseA = await caseId("0001");
   caseB = await caseId("0002");
   caseR = await caseId("0003");
   ({ ic, gc } = await committeeIds());
@@ -549,6 +550,112 @@ describe("ambiguity register: a misdelivered link opens nothing (CDF-205, ADR-02
       const [list] = await s.tx<{ n: unknown[] }[]>`select api.my_defence_notices() as n`;
       expect(list!.n).toEqual([]);
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.acknowledge_defence_notice(${n!.id})`);
+    });
+  });
+});
+
+describe("ambiguity register: an urgent matter (AMB-017, migration 2100)", () => {
+  const URGENT = "Synthetic: an urgent matter that cannot wait for normal pacing.";
+  const urgentFlag = (s: Scenario, target: string) =>
+    s.tx<{ id: string }[]>`select api.flag_case_urgent(${target}, ${URGENT}) as id`;
+  /** Every CASE_URGENT_FLAGGED row, as stored, read by the table owner. */
+  const sent = (s: OwnerScenario) =>
+    s.tx<{ recipient_id: string; row: Record<string, unknown> }[]>`
+      select recipient_id, to_jsonb(o) as row from notify.outbox o
+      where template_code = 'CASE_URGENT_FLAGGED' order by recipient_id, channel`;
+
+  it("T-AMB-007: an URGENT notification carries ids only and reaches only a GRC Director who can open the case, never the person who flagged it", async () => {
+    await ownerScenario(async (s) => {
+      // Only someone who sees the case, and edits it or prepares preliminary reviews; anyone else learns nothing.
+      for (const u of ["investigatorB", "employee", "grcSectorHead"] as UserKey[]) {
+        await s.as(u);
+        await s.expectError("CDF_NOT_FOUND", () => urgentFlag(s, caseA));
+      }
+      await s.as("grcDirector");
+      await s.tx`select api.grant_case_access(${caseA}, ${USERS.legal}, 'CASE', ${REASON}, null)`;
+      await s.as("legal");
+      await s.expectError("CDF_FORBIDDEN", () => urgentFlag(s, caseA));
+      await s.as("investigatorA");
+      await s.expectError(
+        "CDF_INVALID:reason",
+        (tx) => tx`select api.flag_case_urgent(${caseA}, 'too short')`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:NOT_URGENT",
+        (tx) => tx`select api.clear_case_urgent(${caseA}, ${URGENT})`,
+      );
+      const [flag] = await urgentFlag(s, caseA);
+      await s.expectError("CDF_CONFLICT:ALREADY_URGENT", () => urgentFlag(s, caseA));
+
+      // Both GRC Directors can open case 0001; the investigator who flagged it is not told.
+      await s.asOwner();
+      const rows = await sent(s);
+      expect(rows.map((r) => r.recipient_id)).toEqual(
+        [USERS.grcDirector, USERS.grcDirector, USERS.grcDeputy, USERS.grcDeputy].sort(),
+      );
+      for (const { row } of rows) {
+        expect(row).toMatchObject({ object_type: "CASE", object_id: caseA, deep_link: `/cases/${caseA}` });
+        // Ids and codes only: neither the reason nor the case number appears anywhere in what is sent.
+        for (const value of Object.values(row)) {
+          expect(JSON.stringify(value)).not.toContain("urgent matter");
+          expect(JSON.stringify(value)).not.toContain("CDF-DEMO");
+        }
+      }
+      const [stored] = await s.tx<{ notified_count: number; reason: string }[]>`
+        select notified_count, reason from case_mgmt.case_urgent_flag where id = ${flag!.id}`;
+      expect(stored).toEqual({ notified_count: 2, reason: URGENT });
+      const events = await s.tx<{ reason: string | null; metadata: unknown }[]>`
+        select reason, metadata from audit.audit_event where action = 'CASE_URGENT_FLAGGED' and object_id = ${flag!.id}`;
+      expect(events).toEqual([{ reason: null, metadata: { notified_count: 2 } }]);
+
+      // The flag is read with the case: a director sees it, an outsider does not.
+      await s.as("grcDeputy");
+      expect((await s.tx`select id from case_mgmt.case_urgent_flag where id = ${flag!.id}`).length).toBe(1);
+      await s.as("investigatorB");
+      expect(await s.tx`select id from case_mgmt.case_urgent_flag`).toEqual([]);
+
+      // A restricted case: only a director the authority let in is told. The Deputy cannot open case 0003, so nobody
+      // is, and the flag says so.
+      await s.as("grcDirector");
+      const [restricted] = await urgentFlag(s, caseR);
+      await s.asOwner();
+      expect((await sent(s)).length).toBe(4);
+      const [r] = await s.tx<{ notified_count: number }[]>`
+        select notified_count from case_mgmt.case_urgent_flag where id = ${restricted!.id}`;
+      expect(r!.notified_count).toBe(0);
+
+      // Clearing takes a reason, recalls nothing and tells nobody; the flag is kept and may be raised again.
+      await s.as("lead");
+      await s.expectError("CDF_INVALID:reason", (tx) => tx`select api.clear_case_urgent(${caseA}, null)`);
+      await s.tx`select api.clear_case_urgent(${caseA}, 'Synthetic: handled through the normal path.')`;
+      await s.expectError(
+        "CDF_CONFLICT:NOT_URGENT",
+        (tx) => tx`select api.clear_case_urgent(${caseA}, 'Synthetic: handled through the normal path.')`,
+      );
+      await s.asOwner();
+      expect((await sent(s)).length).toBe(4);
+      await s.as("lead");
+      await urgentFlag(s, caseA);
+      await s.asOwner();
+      expect((await sent(s)).length).toBe(8);
+
+      // Kept: the owner can neither rewrite nor delete a flag, and a cleared flag stays cleared.
+      await s.expectError(
+        `urgent flag ${flag!.id} can only be cleared, once`,
+        (tx) =>
+          tx`update case_mgmt.case_urgent_flag set reason = 'Synthetic: rewritten reason.' where id = ${flag!.id}`,
+      );
+      await s.expectError(
+        `urgent flag ${flag!.id} can only be cleared, once`,
+        (
+          tx,
+        ) => tx`update case_mgmt.case_urgent_flag set cleared_at = null, cleared_by = null, clear_reason = null
+                   where id = ${flag!.id}`,
+      );
+      await s.expectError(
+        "case_mgmt.case_urgent_flag is append-only",
+        (tx) => tx`delete from case_mgmt.case_urgent_flag where id = ${flag!.id}`,
+      );
     });
   });
 });

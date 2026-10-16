@@ -158,7 +158,7 @@ export type CaseTaskStatus = (typeof CASE_TASK_STATUSES)[number];
 
 export interface CaseTaskTypeDefinition {
   code: string;
-  category: "LEGAL" | "RECORDS";
+  category: "LEGAL" | "RECORDS" | "EXPERT";
   allowedCapabilities: readonly Permission[];
   eligibleRoles: readonly string[];
   /** Records tasks exist only once the case has left ACTIVE. */
@@ -194,6 +194,13 @@ export const CASE_TASK_TYPES = [
     allowedCapabilities: ["CASE_VIEW_METADATA", "DISPOSITION_TASK_VIEW", "DISPOSITION_TASK_EXECUTE"],
     eligibleRoles: ["RECORDS_OFFICER"],
     requiresClosed: true,
+  },
+  {
+    code: "EXTERNAL_EXPERT",
+    category: "EXPERT",
+    allowedCapabilities: ["CASE_VIEW_METADATA"],
+    eligibleRoles: ["EXTERNAL_EXPERT"],
+    requiresClosed: false,
   },
   {
     code: "LEGAL_HOLD_APPLICATION",
@@ -254,7 +261,7 @@ export interface MyCaseTask {
   caseId: string;
   caseNumber: string | null;
   taskType: CaseTaskType;
-  category: "LEGAL" | "RECORDS";
+  category: "LEGAL" | "RECORDS" | "EXPERT";
   purpose: string;
   scope: Permission[];
   status: CaseTaskStatus;
@@ -506,6 +513,7 @@ export const ROLES = [
   "SECTOR_HEAD",
   "COMPLIANCE_SECTION_MANAGER",
   "GRC_SECTOR_HEAD",
+  "EXTERNAL_EXPERT",
 ] as const;
 export type Role = (typeof ROLES)[number];
 
@@ -1645,6 +1653,8 @@ export const NOTIFICATION_TEMPLATES = [
   "DEFENCE_PACKET_APPROVAL_REQUESTED",
   "DEFENCE_PACKET_RELEASED",
   "SANCTION_EXTRACT_APPROVAL_REQUESTED",
+  // People and access (migration 2100, ADR-046)
+  "CASE_URGENT_FLAGGED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;

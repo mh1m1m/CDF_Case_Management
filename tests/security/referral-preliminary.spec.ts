@@ -1338,3 +1338,167 @@ describe("ambiguity register: preliminary review separation (CDF-205)", () => {
     });
   });
 });
+
+describe("ambiguity register: preliminary approval delegation (AMB-023, migration 2100)", () => {
+  const LIMIT_KEY = "MAX_PRELIMINARY_APPROVAL_DELEGATION_DAYS";
+  const delegate = (
+    s: Scenario,
+    to: string | null,
+    from = "now()",
+    days = 7,
+    evidence: string | null = "DEMO-DEL-2100",
+  ) =>
+    s.tx<{ id: string }[]>`
+      select api.delegate_preliminary_approval(${to}, ${from === "now()" ? null : from}::timestamptz,
+        now() + make_interval(days => ${days}), ${evidence}, ${REASON}) as id`;
+  const revoke = (s: Scenario, id: string) =>
+    s.tx`select api.revoke_preliminary_approval_delegation(${id}, 'Synthetic: the delegator is back.')`;
+  const seen = async (s: Scenario, user: UserKey) => {
+    await s.as(user);
+    return (await s.tx<{ id: string }[]>`select id from iam.preliminary_approval_delegation`).map(
+      (r) => r.id,
+    );
+  };
+
+  it("T-AMB-010: an approval by a non-delegate, or by a delegate inside or outside the window, is refused: the delegation is recorded and grants nothing until 2160", async () => {
+    await ownerScenario(async (s) => {
+      // A recommendation awaiting the GRC Sector Head's approval.
+      await s.as("investigatorA");
+      const [r] = await s.tx<{ id: string }[]>`
+        select api.prepare_preliminary_recommendation(${caseA}, 'NO_ACTION', 'Synthetic: no basis to proceed.') as id`;
+      await s.as("grcDirector");
+      await s.tx`select api.review_preliminary_recommendation(${r!.id}, 'ENDORSE', null, null)`;
+
+      // Only a holder of PRELIMINARY_APPROVE delegates, to another active internal account, forward in time, with an
+      // end, evidence and a reason.
+      for (const u of ["grcDirector", "sectorHead", "platformAdmin"] as UserKey[]) {
+        await s.as(u);
+        await s.expectError("CDF_FORBIDDEN", () => delegate(s, USERS.grcDeputy));
+      }
+      await s.as("grcSectorHead");
+      await s.expectError("CDF_INVALID:effective_from", () =>
+        delegate(s, USERS.grcDeputy, new Date(Date.now() - 86_400_000).toISOString()),
+      );
+      await s.expectError("CDF_INVALID:effective_to", () => delegate(s, USERS.grcDeputy, "now()", 0));
+      for (const to of [null, USERS.grcSectorHead, USERS.revoked, "00000000-0000-4000-8000-0000000000ff"]) {
+        await s.expectError("CDF_INVALID:delegate_id", () => delegate(s, to));
+      }
+      await s.expectError("CDF_INVALID:evidence_reference", () =>
+        delegate(s, USERS.grcDeputy, "now()", 7, null),
+      );
+      const [now] = await delegate(s, USERS.grcDeputy);
+      await s.expectError("CDF_CONFLICT:DELEGATION_OVERLAP", () => delegate(s, USERS.grcDeputy, "now()", 3));
+      const [later] = await delegate(
+        s,
+        USERS.investigatorB,
+        new Date(Date.now() + 10 * 86_400_000).toISOString(),
+        20,
+      );
+
+      // Nobody approves through it: the delegate inside the window, the delegate of a window not yet begun, and
+      // anyone else are all refused, and nothing waits in their queues.
+      await s.as("grcDeputy");
+      expect(await s.tx`select * from api.preliminary_approval_queue()`).toEqual([]);
+      await s.expectError(
+        "CDF_FORBIDDEN",
+        (tx) => tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`,
+      );
+      for (const u of ["investigatorB", "complianceManager", "employee"] as UserKey[]) {
+        await s.as(u);
+        expect(await s.tx`select * from api.preliminary_approval_queue()`, u).toEqual([]);
+        await s.expectError(
+          "CDF_NOT_FOUND",
+          (tx) => tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`,
+        );
+      }
+
+      // Read by the delegator, the delegate and a role administrator only.
+      expect((await seen(s, "grcSectorHead")).sort()).toEqual([now!.id, later!.id].sort());
+      expect(await seen(s, "grcDeputy")).toEqual([now!.id]);
+      expect((await seen(s, "platformAdmin")).length).toBe(2);
+      expect(await seen(s, "grcDirector")).toEqual([]);
+
+      // Revocation: the delegator or a role administrator; the delegate is FORBIDDEN, an outsider learns nothing.
+      await s.as("grcDeputy");
+      await s.expectError("CDF_FORBIDDEN", () => revoke(s, now!.id));
+      await s.as("grcDirector");
+      await s.expectError("CDF_NOT_FOUND", () => revoke(s, now!.id));
+      await s.as("grcSectorHead");
+      await revoke(s, now!.id);
+      await s.expectError("CDF_CONFLICT:DELEGATION_NOT_ACTIVE", () => revoke(s, now!.id));
+      await s.as("platformAdmin");
+      await revoke(s, later!.id);
+      // A revoked delegation no longer blocks a new one for the same window.
+      await s.as("grcSectorHead");
+      await delegate(s, USERS.grcDeputy);
+
+      // The real holder still approves; audit rows carry ids and dates, never the reason.
+      await s.tx`select api.approve_preliminary_recommendation(${r!.id}, 'APPROVE', null, null)`;
+      await s.asOwner();
+      const events = await s.tx<
+        { action: string; category: string; reason: string | null; keys: string[] }[]
+      >`
+        select action, category, reason, array(select jsonb_object_keys(metadata) order by 1) as keys
+        from audit.audit_event where object_id = ${now!.id} order by seq`;
+      expect(events).toEqual([
+        {
+          action: "PRELIMINARY_APPROVAL_DELEGATED",
+          category: "ADMIN",
+          reason: null,
+          keys: ["delegate_id", "effective_from", "effective_to"],
+        },
+        {
+          action: "PRELIMINARY_APPROVAL_DELEGATION_REVOKED",
+          category: "ADMIN",
+          reason: null,
+          keys: ["delegate_id"],
+        },
+      ]);
+
+      // Kept: revoked once, never rewritten or deleted, even by the table owner.
+      await s.expectError(
+        `delegation ${now!.id} can only be revoked, once`,
+        (tx) => tx`update iam.preliminary_approval_delegation set effective_to = now() + interval '90 days'
+                   where id = ${now!.id}`,
+      );
+      await s.expectError(
+        "iam.preliminary_approval_delegation is append-only",
+        (tx) => tx`delete from iam.preliminary_approval_delegation where id = ${now!.id}`,
+      );
+    });
+  });
+
+  it("no maximum is invented; once configured, a longer delegation is refused, and a malformed value refuses all (fail closed)", async () => {
+    await ownerScenario(async (s) => {
+      await s.as("grcSectorHead");
+      expect(await s.tx`select value, status from config.setting where key = ${LIMIT_KEY}`).toEqual([
+        { value: null, status: "SOURCE_REQUIRED" },
+      ]);
+      await delegate(s, USERS.grcDeputy, "now()", 400);
+      await s.asOwner();
+      await s.tx`update config.setting set value = '30', status = 'CONFIGURED', source_reference = 'SYNTHETIC-TEST'
+                 where key = ${LIMIT_KEY}`;
+      await s.as("grcSectorHead");
+      await s.expectError("CDF_CONFLICT:DELEGATION_TOO_LONG", () =>
+        delegate(s, USERS.investigatorB, "now()", 31),
+      );
+      await delegate(s, USERS.investigatorB, "now()", 30);
+      await s.asOwner();
+      await s.tx`update config.setting set value = 'thirty' where key = ${LIMIT_KEY}`;
+      await s.as("grcSectorHead");
+      await s.expectError("CDF_CONFLICT:DELEGATION_LIMIT_MISCONFIGURED", () =>
+        delegate(s, USERS.lead, "now()", 1),
+      );
+      // The table refuses it whatever the path, the owner connection included.
+      await s.asOwner();
+      await s.tx`update config.setting set value = '30' where key = ${LIMIT_KEY}`;
+      await s.expectError(
+        "CDF_CONFLICT:DELEGATION_TOO_LONG",
+        (tx) => tx`
+          insert into iam.preliminary_approval_delegation (delegator_id, delegate_id, effective_from, effective_to,
+                                                           evidence_reference, reason)
+          values (${USERS.grcSectorHead}, ${USERS.lead}, now(), now() + interval '31 days', 'DEMO-DEL-2100', ${REASON})`,
+      );
+    });
+  });
+});
