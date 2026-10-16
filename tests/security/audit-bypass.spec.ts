@@ -1114,6 +1114,23 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.apply_minutes_deemed_approval(${ids.minutes!})`;
         },
       },
+      // AMB-093 (migration 2090): the secretary proposes a correction to the deemed-approved minutes; a member who
+      // attended reviews it. The approved version never changes.
+      {
+        fn: "propose_minutes_correction",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.minutesCorrection = await one(
+            s,
+            s.tx`select api.propose_minutes_correction(${ids.minutes!}, 'Synthetic: the walk item was approved.',
+              ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "review_minutes_correction",
+        actor: "committee",
+        run: (s) => s.tx`select api.review_minutes_correction(${ids.minutesCorrection!}, 'APPROVE', null)`,
+      },
       {
         fn: "cancel_meeting",
         actor: "committeeSecretary",
@@ -1855,6 +1872,14 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "transition_case",
         actor: "caseManager",
         run: (s) => s.tx`select api.transition_case(${ids.case!}, 'ARCHIVE_CASE', null)`,
+      },
+      // AMB-223 (migration 2090): records staff annotate the archived record; the original stays.
+      {
+        fn: "annotate_archived_record",
+        actor: "records",
+        run: (s) =>
+          s.tx`select api.annotate_archived_record(${ids.case!}, 'CASE_CLOSURE', 'Synthetic: the closure note names the wrong week.',
+            ${REASON})`,
       },
       {
         // ADR-014 (CDF-73): legal reviewers act on a case through hold tasks, not role-wide visibility.
@@ -2722,6 +2747,126 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.decide_sanction_extract_row(${row}, 'APPROVE', ${REASON})`;
         },
       },
+      // Case structure and corrections (migration 2090, ADR-045), on case 0004 by the case manager: a link, ended; a
+      // subject's status; an allegation withdrawn and one split; a wrongly identified subject corrected; the case split.
+      {
+        fn: "link_cases",
+        actor: "caseManager",
+        run: async (s) =>
+          (ids.caseLink = await one(
+            s,
+            s.tx`select api.link_cases(${ids.case4!}, ${caseA}, 'RELATED', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "end_case_link",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.end_case_link(${ids.caseLink!}, ${REASON})`,
+      },
+      {
+        fn: "record_subject_status",
+        actor: "caseManager",
+        run: async (s) => {
+          const subject = await apart(
+            s,
+            () =>
+              one(
+                s,
+                s.tx`select api.add_case_subject(${ids.case4!}, 'Unidentified person (walk)', 'EMPLOYEE', null) as id`,
+              ),
+            "caseManager",
+          );
+          return s.tx`select api.record_subject_status(${subject}, 'UNIDENTIFIED', ${REASON})`;
+        },
+      },
+      {
+        fn: "withdraw_allegation",
+        actor: "caseManager",
+        run: async (s) => {
+          const a = await apart(
+            s,
+            () =>
+              one(
+                s,
+                s.tx`select api.add_allegation(${ids.case4!}, 'FRAUD', 'Synthetic: walk allegation to withdraw.', null, null, null) as id`,
+              ),
+            "caseManager",
+          );
+          return s.tx`select api.withdraw_allegation(${a}, ${REASON})`;
+        },
+      },
+      {
+        fn: "split_allegation",
+        actor: "caseManager",
+        run: async (s) => {
+          const a = await apart(
+            s,
+            () =>
+              one(
+                s,
+                s.tx`select api.add_allegation(${ids.case4!}, 'FRAUD', 'Synthetic: walk allegation to split.', null, null, null) as id`,
+              ),
+            "caseManager",
+          );
+          return s.tx`select api.split_allegation(${a}, ${s.tx.json([
+            { category: "FRAUD", description: "Synthetic: the walk invoice part." },
+            { category: "BRIBERY", description: "Synthetic: the walk gift part." },
+          ] as never)}::jsonb, ${REASON})`;
+        },
+      },
+      {
+        fn: "correct_case_subject",
+        actor: "caseManager",
+        run: async (s) => {
+          const [wrong, right] = await apart(
+            s,
+            async () => {
+              const w = await one(
+                s,
+                s.tx`select api.add_case_subject(${ids.case4!}, 'Employee Wrong (walk)', 'EMPLOYEE', null) as id`,
+              );
+              await s.tx`select api.add_allegation(${ids.case4!}, 'FRAUD', 'Synthetic: walk allegation, wrong person.', ${w}, null, null)`;
+              const r = await one(
+                s,
+                s.tx`select api.add_case_subject(${ids.case4!}, 'Employee Right (walk)', 'EMPLOYEE', null) as id`,
+              );
+              return [w, r];
+            },
+            "caseManager",
+          );
+          return s.tx`select api.correct_case_subject(${wrong}, ${right}, ${REASON})`;
+        },
+      },
+      {
+        fn: "split_case",
+        actor: "caseManager",
+        run: async (s) => {
+          const a = await apart(
+            s,
+            () =>
+              one(
+                s,
+                s.tx`select api.add_allegation(${ids.case4!}, 'FRAUD', 'Synthetic: walk allegation to move.', null, null, null) as id`,
+              ),
+            "caseManager",
+          );
+          return s.tx`select api.split_case(${ids.case4!}, ${[a]}::uuid[], 'Walk split case (synthetic)',
+            'Synthetic: the matter split from case 0004.', ${REASON})`;
+        },
+      },
+      // A correction to a committee seat (AMB-045) is an annotation by a committee administrator.
+      {
+        fn: "annotate_committee_membership",
+        actor: "platformAdmin",
+        run: async (s) => {
+          const m = await one(
+            s,
+            s.tx`select id from committee.membership where user_id <> ${USERS.platformAdmin}
+                 order by effective_from desc, id limit 1`,
+          );
+          return s.tx`select api.annotate_committee_membership(${m}, 'WRONG_REFERENCE', ${REASON})`;
+        },
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
@@ -2930,6 +3075,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_report",
       "authz.can_view_report_files",
       "authz.can_view_sector_roster",
+      "authz.corrective_event_withheld",
       "authz.current_clearance",
       "authz.current_roles",
       "authz.current_subject",

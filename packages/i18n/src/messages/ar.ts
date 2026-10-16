@@ -2203,6 +2203,7 @@ export const ar: Messages = {
     NON_COOPERATION: "عدم التعاون",
     RESOURCE_SHORTAGE: "نقص الموارد",
     SOVEREIGN_AUTHORITY: "جهة سيادية",
+    SUBJECT_UNTRACEABLE: "تعذّر الوصول إلى المشكو في حقه",
     SYSTEM_MANDATED: "مطلوب بحكم النظام",
   },
   outcomeCode: {
