@@ -2704,6 +2704,7 @@ export const en = {
       SUBSTANTIATED: "Substantiated",
       UNSUBSTANTIATED: "Not substantiated",
       WITHDRAWN: "Withdrawn",
+      SUPERSEDED: "Replaced by a correction",
     },
     peopleIntro:
       "Who works on this case, who has access and on what basis, and your own conflict-of-interest declaration.",

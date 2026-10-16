@@ -3,6 +3,7 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  ALLEGATION_STATUSES,
   EVIDENCE_STATUSES,
   EVIDENCE_VERSION_STATUSES,
   FORM_STATUSES,
@@ -42,6 +43,7 @@ describe("status registry", () => {
       ["voteItem", VOTE_ITEM_STATUSES],
       ["minutes", MINUTES_STATUSES],
       ["concern", MEETING_CONFLICT_CONCERN_STATUSES],
+      ["allegation", ALLEGATION_STATUSES],
     ];
     for (const [domain, codes] of domains)
       expect(Object.keys(STATUS_TONES[domain]).sort(), domain).toEqual([...codes].sort());

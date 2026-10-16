@@ -11,6 +11,7 @@ import Link from "next/link";
 import {
   RECOMMENDATION_ITEM_TYPES,
   VOTE_GRANULARITIES,
+  isClosedAllegation,
   type CommitteeScopeChoices,
   type PackageItemView,
   type RecommendationPackageView,
@@ -509,7 +510,8 @@ export function Checks({
 
 /**
  * Adding an item, for the committee's secretary while the package can change (`may_add_item`, 2086). The choices are
- * R1's: the case's subjects, its allegations that are not withdrawn (the command refuses those) and the package's
+ * R1's: the case's subjects, its allegations that are neither withdrawn nor superseded (the command refuses those,
+ * CDF-238) and the package's
  * items; the sanction catalogue is the codes in force, each marked provisional until its basis is approved.
  */
 function AddItemForm({
@@ -529,7 +531,7 @@ function AddItemForm({
 }) {
   const id = `package-${pkg.sequenceNo}-add`;
   const subjects = new Map(scope.subjects.map((s) => [s.subjectId, s] as const));
-  const allegations = scope.allegations.filter((a) => a.status !== "WITHDRAWN");
+  const allegations = scope.allegations.filter((a) => !isClosedAllegation(a.status));
   return (
     <details className="mt-4 border-t border-cdf-border pt-3" data-testid={id}>
       <summary className="cursor-pointer font-semibold">{t("committeeProceedings.addItemTitle")}</summary>

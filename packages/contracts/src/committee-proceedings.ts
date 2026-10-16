@@ -47,8 +47,23 @@ export type RecommendationItemFlag = (typeof RECOMMENDATION_ITEM_FLAGS)[number];
 /** Where a finding was recorded, seen from the committee proceeding. */
 export const FINDING_PROCEEDING_ROLES = ["COMMITTEE", "REFERRED", "OTHER"] as const;
 export type FindingProceedingRole = (typeof FINDING_PROCEEDING_ROLES)[number];
-export const ALLEGATION_STATUSES = ["OPEN", "SUBSTANTIATED", "UNSUBSTANTIATED", "WITHDRAWN"] as const;
+export const ALLEGATION_STATUSES = [
+  "OPEN",
+  "SUBSTANTIATED",
+  "UNSUBSTANTIATED",
+  "WITHDRAWN",
+  "SUPERSEDED",
+] as const;
 export type AllegationStatus = (typeof ALLEGATION_STATUSES)[number];
+/**
+ * An allegation that is withdrawn, or superseded by a correction (2090, ADR-045: a split, a subject correction or a
+ * case split), is closed: the database refuses anything new on it (a finding, an evidence link, a notice item, a
+ * package item) and any change to it, so no page offers one (CDF-238).
+ */
+export const CLOSED_ALLEGATION_STATUSES = ["WITHDRAWN", "SUPERSEDED"] as const;
+export function isClosedAllegation(status: string): boolean {
+  return (CLOSED_ALLEGATION_STATUSES as readonly string[]).includes(status);
+}
 /** A case person's part in the case (`case_mgmt.case_person.role`). */
 export const CASE_PERSON_ROLES = ["SUBJECT", "WITNESS", "AFFECTED_PARTY", "OTHER"] as const;
 export type CasePersonRole = (typeof CASE_PERSON_ROLES)[number];

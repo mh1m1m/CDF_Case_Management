@@ -2649,6 +2649,7 @@ export const ar: Messages = {
       SUBSTANTIATED: "ثبت",
       UNSUBSTANTIATED: "لم يثبت",
       WITHDRAWN: "سُحب",
+      SUPERSEDED: "استُبدل بتصحيح",
     },
     peopleIntro: "من يعمل على هذه القضية، ومن له وصول إليها وعلى أي أساس، وإفصاحك أنت عن تعارض المصالح.",
     reporter: {

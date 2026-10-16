@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createCaseStructureService, type CaseStructureService } from "@cdf/application";
-import { STATUS_CODES } from "@cdf/contracts";
+import { STATUS_CODES, isClosedAllegation } from "@cdf/contracts";
 import { PostgresCaseStructureGateway, PostgresSecurityEventSink, type Sql } from "@cdf/infrastructure";
 import { USERS, caseId, ownerScenario, type OwnerScenario, type UserKey } from "../support/db";
 import { committeeIds, preliminaryReferral, seat } from "../support/committee";
@@ -164,6 +164,66 @@ describe("case structure (Phase 12 P12-1)", () => {
         "FINDING_RECORDED",
         "FINDING_RECORDED",
       ]);
+    });
+  });
+
+  it("an allegation a correction superseded reads as closed, and the finding its form would send is refused (CDF-238)", async () => {
+    const case1 = await caseId("0001");
+    await ownerScenario(async (s) => {
+      const cs = structureIn(s);
+      const manager = ctxFor("caseManager");
+      const investigator = ctxFor("investigatorA");
+      const proceeding = value<string>(
+        await cs.openProceeding(manager, { caseId: case1, proceedingType: "INVESTIGATION", reason: REASON }),
+      );
+      const subject = value<string>(
+        await cs.addSubject(manager, {
+          caseId: case1,
+          displayLabel: "Employee Kappa (synthetic)",
+          subjectCategory: "EMPLOYEE",
+        }),
+      );
+      const allegation = value<string>(
+        await cs.addAllegation(manager, {
+          caseId: case1,
+          category: "POLICY_BREACH",
+          description: "Synthetic: two separate matters in one allegation.",
+          subjectId: subject,
+          policyReference: "",
+          lawReference: "",
+        }),
+      );
+      // A correction splits it (2090, ADR-045). No page sends one yet, so the case manager calls the command.
+      await s.as("caseManager");
+      const [split] = await s.tx<{ ids: string[] }[]>`
+        select api.split_allegation(${allegation}, ${s.tx.json([
+          { category: "POLICY_BREACH", description: "Synthetic: the first of the two matters." },
+          { category: "FRAUD", description: "Synthetic: the second of the two matters." },
+        ] as never)}::jsonb, ${REASON}) as ids`;
+      const successors = split!.ids;
+
+      // The tab reads it as closed by its status alone; its successors are open, about the same person.
+      const after = await cs.structure(manager, case1);
+      const read = (id: string) => after.allegations.find((a) => a.id === id)!;
+      expect(read(allegation).status).toBe("SUPERSEDED");
+      expect(isClosedAllegation(read(allegation).status)).toBe(true);
+      expect(successors.map((id) => [read(id).status, read(id).subjectId])).toEqual([
+        ["OPEN", subject],
+        ["OPEN", subject],
+      ]);
+
+      // The finding form the tab no longer shows on it: the database refuses the finding.
+      const finding = (allegationId: string) =>
+        cs.recordFinding(investigator, {
+          allegationId,
+          subjectId: "",
+          proceedingId: proceeding,
+          result: "SUBSTANTIATED",
+          rationale: "Synthetic: the records support it.",
+        });
+      expect(outcome(await finding(allegation))).toBe("CONFLICT:ALLEGATION_SUPERSEDED");
+      // A successor takes its finding as any open allegation does.
+      expect(outcome(await finding(successors[0]!))).toBe("ok");
     });
   });
 
