@@ -37,13 +37,15 @@ test("areas outside the caller's work answer the same 404 as a missing page", as
     "/oversight",
     "/oversight?view=security-events",
     "/records/legal-holds",
+    // My Committees follows a current seat, never a role (P12-2b, ADR-055).
+    "/committees",
   ])
     expect((await investigator.request.get(path)).status(), path).toBe(404);
   await investigator.context().close();
 
   // The administrator manages accounts, never case content (§21).
   const admin = await signIn(browser, "admin@example.test");
-  for (const path of ["/my-work", "/cases", "/intake"])
+  for (const path of ["/my-work", "/cases", "/intake", "/committees"])
     expect((await admin.request.get(path)).status(), path).toBe(404);
   await admin.goto("/admin/users");
   await expect(admin.getByTestId("user-register")).toBeVisible();

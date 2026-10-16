@@ -442,5 +442,6 @@ export * from "./notifications";
 // ---- Case structure (ADR-017 to ADR-019, migration 1870; UX redesign Phase 12 P12-1) ----------------------
 export * from "./case-structure";
 
-// ---- Committee meetings and minutes (migrations 1890 to 2050; UX redesign Phase 12 P12-2a, ADR-054) ------------
+// ---- Committee meetings and minutes (migrations 1890 to 2050; UX redesign Phase 12 P12-2a and P12-2b, ADR-054 and
+//      ADR-055) ----------------------------------------------------------------------------------------------------
 export * from "./meetings";

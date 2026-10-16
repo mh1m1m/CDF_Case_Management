@@ -1,8 +1,10 @@
-// MeetingsGateway over PostgreSQL (UX redesign Phase 12 P12-2a; ADR-054). Reads call only the purpose read models
-// (api.meeting_view and api.minutes_view of 2030 as replaced in 2065, api.vote_item_status), which decide what the
-// caller sees; the gateway renames their keys and reads no table. Writes only call the api.* meeting, vote and
-// minutes commands. Every method runs in its own transaction under the caller's security context.
+// MeetingsGateway over PostgreSQL (UX redesign Phase 12 P12-2a and P12-2b; ADR-054 and ADR-055). Reads call only the
+// purpose read models (api.meeting_view and api.minutes_view of 2030 as replaced in 2065 and 2085,
+// api.vote_item_status), which decide what the caller sees; the gateway renames their keys and reads no table. Writes
+// only call the api.* meeting, vote and minutes commands. Every method runs in its own transaction under the caller's
+// security context.
 import type {
+  MeetingAccommodationView,
   MeetingActingRoleView,
   MeetingConcernView,
   MeetingFullView,
@@ -70,12 +72,23 @@ interface RawParticipant {
   requires_coi: boolean;
   coi_status: MeetingParticipantView["coiStatus"];
   attendance: MeetingParticipantView["attendance"];
+  alternate_for?: string[] | null;
+  arrangements?: {
+    confidentiality_acknowledged: boolean | null;
+    accommodations: RawAccommodation[] | null;
+  } | null;
   capabilities: Caps<
     | "may_record_present"
     | "may_record_absent"
     | "may_record_excused_conflict"
     | "may_record_excused_absence"
     | "may_raise_concern"
+    | "may_exclude_witness"
+    | "may_record_accommodation"
+    | "may_declare_conflict"
+    | "may_declare_no_conflict"
+    | "may_acknowledge_confidentiality"
+    | "may_activate_alternate"
   > | null;
 }
 
@@ -110,6 +123,13 @@ interface RawVoteItem {
 interface RawCaseRef {
   case_id: string | null;
   case_number: string | null;
+}
+
+interface RawAccommodation {
+  accommodation_id: string;
+  details: string;
+  source: MeetingAccommodationView["source"];
+  recorded_at: Stamp;
 }
 
 /** The concern-only view (2030 section 4): the meeting's id and status, the case reference and the concerns. */
@@ -150,6 +170,7 @@ interface RawMeetingFull {
     attendance: MeetingSelfView["attendance"];
     confidentiality_ack_required: boolean;
     confidentiality_acknowledged: boolean;
+    accommodations?: RawAccommodation[] | null;
   } | null;
   roster: RawParticipant[] | null;
   deliberation: {
@@ -193,6 +214,13 @@ interface RawMeetingFull {
         finalised_at: Stamp | null;
       }[]
     | null;
+  invitee_roles?:
+    | {
+        invitee_role: MeetingFullView["inviteeRoles"][number]["inviteeRole"];
+        confidentiality_ack_required: boolean | null;
+        source_status: MeetingFullView["inviteeRoles"][number]["sourceStatus"];
+      }[]
+    | null;
   capabilities: Caps<
     | "can_manage"
     | "may_open"
@@ -204,6 +232,10 @@ interface RawMeetingFull {
     | "may_declare_conflict"
     | "may_declare_no_conflict"
     | "may_acknowledge_confidentiality"
+    | "may_invite"
+    | "may_record_accommodation"
+    | "may_activate_acting_chair"
+    | "may_activate_acting_secretary"
   > | null;
 }
 
@@ -362,8 +394,18 @@ function concern(c: RawConcern): MeetingConcernView {
   };
 }
 
+function accommodation(a: RawAccommodation): MeetingAccommodationView {
+  return {
+    accommodationId: a.accommodation_id,
+    details: a.details,
+    source: a.source,
+    recordedAt: isoReq(a.recorded_at),
+  };
+}
+
 function participant(p: RawParticipant): MeetingParticipantView {
   const c = p.capabilities;
+  const a = p.arrangements;
   return {
     participantId: p.participant_id,
     participantKind: p.participant_kind,
@@ -377,12 +419,25 @@ function participant(p: RawParticipant): MeetingParticipantView {
     requiresCoi: yes(p.requires_coi),
     coiStatus: p.coi_status,
     attendance: p.attendance,
+    alternateFor: p.alternate_for ?? [],
+    arrangements: a
+      ? {
+          confidentialityAcknowledged: yes(a.confidentiality_acknowledged),
+          accommodations: each(a.accommodations, accommodation),
+        }
+      : null,
     capabilities: {
       mayRecordPresent: yes(c?.may_record_present),
       mayRecordAbsent: yes(c?.may_record_absent),
       mayRecordExcusedConflict: yes(c?.may_record_excused_conflict),
       mayRecordExcusedAbsence: yes(c?.may_record_excused_absence),
       mayRaiseConcern: yes(c?.may_raise_concern),
+      mayExcludeWitness: yes(c?.may_exclude_witness),
+      mayRecordAccommodation: yes(c?.may_record_accommodation),
+      mayDeclareConflict: yes(c?.may_declare_conflict),
+      mayDeclareNoConflict: yes(c?.may_declare_no_conflict),
+      mayAcknowledgeConfidentiality: yes(c?.may_acknowledge_confidentiality),
+      mayActivateAlternate: yes(c?.may_activate_alternate),
     },
   };
 }
@@ -470,6 +525,7 @@ export function toMeetingView(m: RawMeetingView): MeetingView {
           attendance: me.attendance,
           confidentialityAckRequired: yes(me.confidentiality_ack_required),
           confidentialityAcknowledged: yes(me.confidentiality_acknowledged),
+          accommodations: each(me.accommodations, accommodation),
         }
       : null,
     roster: m.roster ? m.roster.map(participant) : null,
@@ -512,6 +568,11 @@ export function toMeetingView(m: RawMeetingView): MeetingView {
       generatedAt: isoReq(mi.generated_at),
       finalisedAt: iso(mi.finalised_at),
     })),
+    inviteeRoles: each(m.invitee_roles, (r) => ({
+      inviteeRole: r.invitee_role,
+      confidentialityAckRequired: yes(r.confidentiality_ack_required),
+      sourceStatus: r.source_status,
+    })),
     capabilities: {
       canManage: yes(c?.can_manage),
       mayOpen: yes(c?.may_open),
@@ -523,6 +584,10 @@ export function toMeetingView(m: RawMeetingView): MeetingView {
       mayDeclareConflict: yes(c?.may_declare_conflict),
       mayDeclareNoConflict: yes(c?.may_declare_no_conflict),
       mayAcknowledgeConfidentiality: yes(c?.may_acknowledge_confidentiality),
+      mayInvite: yes(c?.may_invite),
+      mayRecordAccommodation: yes(c?.may_record_accommodation),
+      mayActivateActingChair: yes(c?.may_activate_acting_chair),
+      mayActivateActingSecretary: yes(c?.may_activate_acting_secretary),
     },
   };
 }
@@ -839,5 +904,45 @@ export class PostgresMeetingsGateway implements MeetingsGateway {
 
   async overruleMinutesObjection(ctx: UserRequestContext, i: { minutesId: string; reason: string }) {
     await this.run(ctx, (tx) => tx`select api.overrule_minutes_objection(${i.minutesId}, ${i.reason})`);
+  }
+
+  // ---- The meeting's logistics (P12-2b; ADR-055) -------------------------------------------------------------------
+  excludeWitness(ctx: UserRequestContext, i: { participantId: string; reason: string }) {
+    return this.value<string>(
+      ctx,
+      (tx) => tx`select api.exclude_meeting_witness(${i.participantId}, ${i.reason}) as v`,
+    );
+  }
+
+  recordAccommodation(ctx: UserRequestContext, i: { participantId: string; details: string }) {
+    return this.value<string>(
+      ctx,
+      (tx) => tx`select api.record_meeting_accommodation(${i.participantId}, ${i.details}) as v`,
+    );
+  }
+
+  activateActingChair(ctx: UserRequestContext, i: { meetingId: string; reason: string }) {
+    return this.value<string>(
+      ctx,
+      (tx) => tx`select api.activate_acting_chair(${i.meetingId}, ${i.reason}) as v`,
+    );
+  }
+
+  activateActingSecretary(ctx: UserRequestContext, i: { meetingId: string; reason: string }) {
+    return this.value<string>(
+      ctx,
+      (tx) => tx`select api.activate_acting_secretary(${i.meetingId}, ${i.reason}) as v`,
+    );
+  }
+
+  activateAlternateMember(
+    ctx: UserRequestContext,
+    i: { alternateParticipantId: string; replacesParticipantId: string; reason: string },
+  ) {
+    return this.value<string>(
+      ctx,
+      (tx) => tx`
+        select api.activate_alternate_member(${i.alternateParticipantId}, ${i.replacesParticipantId}, ${i.reason}) as v`,
+    );
   }
 }

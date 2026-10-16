@@ -1491,6 +1491,8 @@ export const MINUTES_STATUSES = [
 export type MinutesStatus = (typeof MINUTES_STATUSES)[number];
 /** The meeting and minutes screens' read models (UX redesign P12-2a; ADR-054). */
 export * from "./meetings";
+/** My Committees and the committee's page (UX redesign P12-2b; ADR-055). */
+export * from "./committees";
 
 // ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
 export const RECOMMENDATION_ITEM_TYPES = [

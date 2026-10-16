@@ -1,7 +1,9 @@
-// One committee meeting (UX redesign Phase 12 P12-2a; ADR-054; DEC-02, ADR-016 D2): a purpose route that reads
-// api.meeting_view and nothing of the case. A missing meeting and one the caller may not see are the same 404, and the
-// refusal is recorded (ACCESS_DENIED). Each part shows only under its own read rule, and each action only where its
-// command's own answer says the caller may take it (UX-116); every command checks again in the database.
+// One committee meeting (UX redesign Phase 12 P12-2a and P12-2b; ADR-054, ADR-055; DEC-02, ADR-016 D2): a purpose
+// route that reads api.meeting_view and nothing of the case. A missing meeting and one the caller may not see are the
+// same 404, and the refusal is recorded (ACCESS_DENIED). Each part shows only under its own read rule, and each action
+// only where its command's own answer says the caller may take it (UX-116); every command checks again in the
+// database. A caller with a current seat on the committee reaches the meeting from My Committees, and the breadcrumb
+// says so; anyone else from My Work.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -28,11 +30,18 @@ import {
   textareaClass,
   type CDFProgressState,
 } from "@cdf/ui";
-import { meetingsService, requireActor } from "@/server/container";
+import { committeesService, meetingsService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
-import { confirmation } from "../../confirmations";
+import { confirmation, type ConfirmAct } from "../../confirmations";
 import { participantName } from "../meeting-labels";
-import { cancelMeetingAction, closeMeetingAction, generateMinutesAction, openMeetingAction } from "./actions";
+import {
+  activateActingChairAction,
+  activateActingSecretaryAction,
+  cancelMeetingAction,
+  closeMeetingAction,
+  generateMinutesAction,
+  openMeetingAction,
+} from "./actions";
 import { MeetingConcerns, type MeetingNames } from "./concerns";
 import { MeetingMyPart } from "./my-part";
 import { MeetingParticipants } from "./participants";
@@ -56,23 +65,30 @@ export default async function MeetingPage({ params }: { params: Promise<{ meetin
   if (!m) notFound();
   if (m.view === "CONCERNS_ONLY") return <ConcernsOnly t={t} m={m} />;
 
-  // Who has voted so far, on the votes still open; a refused read leaves the count out.
+  // Who has voted so far, on the votes still open; a refused read leaves the count out. Whether the caller holds a
+  // seat on the committee now decides only where the breadcrumb leads (P12-2b).
   const open = m.deliberation?.voteItems.filter((v) => v.status === "OPEN") ?? [];
-  const reads = await Promise.all(open.map((v) => meetingsService().voteItemProgress(ctx, v.voteItemId)));
+  const [reads, seats] = await Promise.all([
+    Promise.all(open.map((v) => meetingsService().voteItemProgress(ctx, v.voteItemId))),
+    committeesService().myCommittees(ctx),
+  ]);
   const progress = new Map(
     reads.filter((p): p is VoteItemProgress => p !== null).map((p) => [p.voteItemId, p] as const),
   );
-  return <FullMeeting t={t} m={m} progress={progress} />;
+  const seated = seats.some((c) => c.committeeId === m.committee.committeeId);
+  return <FullMeeting t={t} m={m} progress={progress} seated={seated} />;
 }
 
 function FullMeeting({
   t,
   m,
   progress,
+  seated,
 }: {
   t: Translator;
   m: MeetingFullView;
   progress: ReadonlyMap<string, VoteItemProgress>;
+  seated: boolean;
 }) {
   const L = m.logistics;
   const cap = m.capabilities;
@@ -94,10 +110,18 @@ function FullMeeting({
     <>
       <CDFBreadcrumbs
         label={t("shell.breadcrumb")}
-        items={[
-          { label: t("shell.area.MY_WORK"), href: "/my-work" },
-          { label: t("meetings.breadcrumb", { n }) },
-        ]}
+        items={
+          seated
+            ? [
+                { label: t("shell.area.COMMITTEE"), href: "/committees" },
+                { label: committee, href: `/committees/${m.committee.committeeId}` },
+                { label: t("meetings.breadcrumb", { n }) },
+              ]
+            : [
+                { label: t("shell.area.MY_WORK"), href: "/my-work" },
+                { label: t("meetings.breadcrumb", { n }) },
+              ]
+        }
       />
       <CDFPageHeader
         title={t("meetings.title", { committee, n })}
@@ -163,9 +187,9 @@ function FullMeeting({
         <div className="min-w-0">
           {myActions ? null : myPart}
           <Arrangements t={t} m={m} when={when} />
-          {m.actingRoles.length > 0 ? (
+          {m.actingRoles.length > 0 || cap.mayActivateActingChair || cap.mayActivateActingSecretary ? (
             <CDFCard title={t("meetings.actingTitle")} testId="meeting-acting">
-              <ul className="grid gap-2 text-sm">
+              <ul className="grid gap-2 text-sm" data-testid="acting-roles">
                 {m.actingRoles.map((a) => {
                   const basis = t(`meetings.actingBasis.${a.basis}` as MessageKey);
                   const replaced = a.replacesParticipantId
@@ -190,6 +214,38 @@ function FullMeeting({
                   );
                 })}
               </ul>
+              {cap.mayActivateActingChair ? (
+                <div className="mt-4 border-t border-cdf-border pt-3" data-testid="acting-chair">
+                  <h3 className="mb-1 font-semibold">{t("meetings.actingChairTitle")}</h3>
+                  <p className="mb-3 text-sm text-cdf-text-secondary">{t("meetings.actingChairIntro")}</p>
+                  <ReasonForm
+                    t={t}
+                    id="acting-chair"
+                    action={activateActingChairAction.bind(null, m.meetingId)}
+                    submitLabel={t("meetings.activateActingChair")}
+                    successMessage={t("meetings.actingChairActivated")}
+                    variant="secondary"
+                    confirmAct="activateActingChair"
+                    long
+                  />
+                </div>
+              ) : null}
+              {cap.mayActivateActingSecretary ? (
+                <div className="mt-4 border-t border-cdf-border pt-3" data-testid="acting-secretary">
+                  <h3 className="mb-1 font-semibold">{t("meetings.actingSecretaryTitle")}</h3>
+                  <p className="mb-3 text-sm text-cdf-text-secondary">{t("meetings.actingSecretaryIntro")}</p>
+                  <ReasonForm
+                    t={t}
+                    id="acting-secretary"
+                    action={activateActingSecretaryAction.bind(null, m.meetingId)}
+                    submitLabel={t("meetings.activateActingSecretary")}
+                    successMessage={t("meetings.actingSecretaryActivated")}
+                    variant="secondary"
+                    confirmAct="activateActingSecretary"
+                    long
+                  />
+                </div>
+              ) : null}
             </CDFCard>
           ) : null}
           {m.deliberation && m.deliberation.witnessExclusions.length > 0 ? (
@@ -364,7 +420,10 @@ function MeetingGuide({ t, m, when }: { t: Translator; m: MeetingFullView; when:
   );
 }
 
-/** A meeting command whose only field is its reason (open, close, cancel): 5 to 2,000 characters. */
+/**
+ * A meeting command whose only field is its reason: 5 to 2,000 characters (open, close, cancel), or 10 to 2,000 for an
+ * activation (`long`).
+ */
 function ReasonForm({
   t,
   id,
@@ -373,14 +432,16 @@ function ReasonForm({
   successMessage,
   variant,
   confirmAct,
+  long = false,
 }: {
   t: Translator;
   id: string;
   action: Parameters<typeof CDFCommandForm>[0]["action"];
   submitLabel: string;
   successMessage: string;
-  variant: "primary" | "danger";
-  confirmAct: "openMeeting" | "closeMeeting" | "cancelMeeting";
+  variant: "primary" | "secondary" | "danger";
+  confirmAct: ConfirmAct;
+  long?: boolean;
 }) {
   return (
     <CDFCommandForm
@@ -393,13 +454,17 @@ function ReasonForm({
       fieldLabels={{ reason: t("meetings.reasonLabel") }}
       confirm={confirmation(t, confirmAct)}
     >
-      <CDFField id={`${id}-reason`} label={t("meetings.reasonLabel")} hint={t("meetings.reasonHint")}>
+      <CDFField
+        id={`${id}-reason`}
+        label={t("meetings.reasonLabel")}
+        hint={long ? t("meetings.longReasonHint") : t("meetings.reasonHint")}
+      >
         <textarea
           id={`${id}-reason`}
           name="reason"
           className={textareaClass}
           aria-describedby={`${id}-reason-hint`}
-          minLength={5}
+          minLength={long ? 10 : 5}
           maxLength={2000}
           required
         />

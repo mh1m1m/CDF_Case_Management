@@ -1,4 +1,4 @@
-// The meetings service (Phase 12 P12-2a; ADR-054): validation before the gateway, database refusals mapped to safe
+// The meetings service (Phase 12 P12-2a and P12-2b; ADR-054 and ADR-055): validation before the gateway, database refusals mapped to safe
 // errors and recorded as COMMAND_DENIED with the command and outcome only, and a refused read turned into the uniform
 // not-found with an ACCESS_DENIED event. Who may act, and when, is the database's: tests/security/
 // meeting-screen-capabilities.spec.ts and committee-meetings.spec.ts; the whole path is tests/integration/meetings.spec.ts.
@@ -51,6 +51,11 @@ function harness(refusal?: string) {
     recordMinutesReminder: answer("recordMinutesReminder"),
     applyMinutesDeemedApproval: answer("applyMinutesDeemedApproval", "DEEMED_APPROVED"),
     overruleMinutesObjection: answer("overruleMinutesObjection"),
+    excludeWitness: answer("excludeWitness", ITEM),
+    recordAccommodation: answer("recordAccommodation", ITEM),
+    activateActingChair: answer("activateActingChair", ITEM),
+    activateActingSecretary: answer("activateActingSecretary", ITEM),
+    activateAlternateMember: answer("activateAlternateMember", ITEM),
   } as unknown as MeetingsGateway;
   const service = createMeetingsService({
     gateway,
@@ -148,6 +153,37 @@ describe("meetings service", () => {
         "overrule_minutes_objection",
         (s) => s.overruleMinutesObjection(ctx, { minutesId: MEETING, reason: "Synthetic overrule reason." }),
       ],
+      [
+        "exclude_meeting_witness",
+        (s) =>
+          s.excludeWitness(ctx, { participantId: PARTICIPANT, reason: "Synthetic: heard and released." }),
+      ],
+      [
+        "record_meeting_accommodation",
+        (s) =>
+          s.recordAccommodation(ctx, {
+            participantId: PARTICIPANT,
+            details: "Step-free access (synthetic).",
+          }),
+      ],
+      [
+        "activate_acting_chair",
+        (s) => s.activateActingChair(ctx, { meetingId: MEETING, reason: "Synthetic: the chair is absent." }),
+      ],
+      [
+        "activate_acting_secretary",
+        (s) =>
+          s.activateActingSecretary(ctx, { meetingId: MEETING, reason: "Synthetic: the secretary is away." }),
+      ],
+      [
+        "activate_alternate_member",
+        (s) =>
+          s.activateAlternateMember(ctx, {
+            alternateParticipantId: PARTICIPANT,
+            replacesParticipantId: ITEM,
+            reason: "Synthetic: a member is absent.",
+          }),
+      ],
     ];
     for (const [command, run] of cases) {
       const { service, events } = harness("CDF_NOT_FOUND");
@@ -157,6 +193,37 @@ describe("meetings service", () => {
         command,
       ).toEqual([{ command, outcome: "NOT_FOUND" }]);
     }
+  });
+
+  it("an accommodation's details never reach a security event: they may concern health (AMB-157)", async () => {
+    const { service, events } = harness("CDF_FORBIDDEN");
+    const details = "Synthetic: a health-related arrangement.";
+    const r = await service.recordAccommodation(ctx, { participantId: PARTICIPANT, details });
+    expect(r.ok === false && "error" in r && r.error.kind).toBe("FORBIDDEN");
+    expect(events.map((e) => [e.objectId, e.metadata])).toEqual([
+      [PARTICIPANT, { command: "record_meeting_accommodation", outcome: "FORBIDDEN" }],
+    ]);
+    expect(JSON.stringify(events)).not.toContain(details);
+  });
+
+  it("an activation names both rows to the gateway and returns the acting role's id", async () => {
+    const { service, calls } = harness();
+    const r = await service.activateAlternateMember(ctx, {
+      alternateParticipantId: PARTICIPANT,
+      replacesParticipantId: ITEM,
+      reason: "Synthetic: a member is absent.",
+    });
+    expect(r).toEqual({ ok: true, value: ITEM });
+    expect(calls).toEqual([
+      [
+        "activateAlternateMember",
+        {
+          alternateParticipantId: PARTICIPANT,
+          replacesParticipantId: ITEM,
+          reason: "Synthetic: a member is absent.",
+        },
+      ],
+    ]);
   });
 
   it("a business conflict comes back with its code and is not a security event", async () => {

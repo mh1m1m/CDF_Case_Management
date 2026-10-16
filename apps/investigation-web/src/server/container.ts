@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
   createCaseStructureService,
+  createCommitteesService,
   createEvidenceService,
   createFormsService,
   createInboxService,
@@ -15,6 +16,7 @@ import {
   createMeetingsService,
   createRecordsService,
   type CaseStructureService,
+  type CommitteesService,
   type EvidenceService,
   type EvidenceStorage,
   type FormsService,
@@ -30,6 +32,7 @@ import {
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
   PostgresCaseStructureGateway,
+  PostgresCommitteesGateway,
   PostgresEvidenceGateway,
   PostgresFormsGateway,
   PostgresInboxGateway,
@@ -56,6 +59,7 @@ const globalForApp = globalThis as unknown as {
   cdfInbox?: InboxService;
   cdfCaseStructure?: CaseStructureService;
   cdfMeetings?: MeetingsService;
+  cdfCommittees?: CommitteesService;
 };
 
 function pool(): Sql {
@@ -148,6 +152,15 @@ export function meetingsService(): MeetingsService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfMeetings;
+}
+
+/** My Committees and the committee's page (ADR-055; Phase 12 P12-2b): the seat basis's read models and commands only. */
+export function committeesService(): CommitteesService {
+  globalForApp.cdfCommittees ??= createCommitteesService({
+    gateway: new PostgresCommitteesGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfCommittees;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

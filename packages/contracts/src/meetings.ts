@@ -1,8 +1,8 @@
 /**
- * The meeting and minutes screens (UX redesign Phase 12, slice P12-2a; ADR-054, migrations 2030 and 2065): camel-case
- * copies of `api.meeting_view`, `api.minutes_view` and `api.vote_item_status`. A part is present only when its read
- * rule holds in the database, and every capability is its command's own answer, never a page rule (UX-116). Types
- * and literal lists only; the lists mirror the commands' checks.
+ * The meeting and minutes screens (UX redesign Phase 12, slices P12-2a and P12-2b; ADR-054 and ADR-055, migrations
+ * 2030, 2065 and 2085): camel-case copies of `api.meeting_view`, `api.minutes_view` and `api.vote_item_status`. A part
+ * is present only when its read rule holds in the database, and every capability is its command's own answer, never a
+ * page rule (UX-116). Types and literal lists only; the lists mirror the commands' checks.
  */
 import type {
   AttendanceStatus,
@@ -48,6 +48,10 @@ export const OPENABLE_VOTE_TARGETS = ["OTHER"] as const;
 export const MINUTES_REVIEW_DECISIONS = ["APPROVE", "REQUEST_CHANGES"] as const;
 export type MinutesReviewDecision = (typeof MINUTES_REVIEW_DECISIONS)[number];
 
+/** Who recorded an accommodation (`api.record_meeting_accommodation`, AMB-157): the participant, or the runner. */
+export const MEETING_ACCOMMODATION_SOURCES = ["SELF", "SECRETARY"] as const;
+export type MeetingAccommodationSource = (typeof MEETING_ACCOMMODATION_SOURCES)[number];
+
 export type ConcernRaisedAs = "MEMBER" | "SECRETARY";
 export type ConcernReversedAs = "CHAIR" | "DEPUTY_CHAIR" | "CONFLICT_AUTHORITY";
 export type ActingRoleActivatedAs = "SECRETARY" | "CHAIR" | "ACTING_CHAIR";
@@ -84,6 +88,14 @@ export interface MeetingConcernView {
   capabilities: { mayDecide: boolean; mayReverse: boolean };
 }
 
+/** An arrangement made for one participant (AMB-157); its details may concern health. */
+export interface MeetingAccommodationView {
+  accommodationId: string;
+  details: string;
+  source: MeetingAccommodationSource;
+  recordedAt: string;
+}
+
 /** The caller's own place in the meeting. */
 export interface MeetingSelfView {
   participantId: string;
@@ -96,6 +108,8 @@ export interface MeetingSelfView {
   attendance: AttendanceStatus;
   confidentialityAckRequired: boolean;
   confidentialityAcknowledged: boolean;
+  /** The caller's own accommodations (2085), for an invitee, who sees no roster. */
+  accommodations: MeetingAccommodationView[];
 }
 
 /** One roster row. Its capabilities are computed for the runner, or on the caller's own row; false elsewhere (2065). */
@@ -112,12 +126,26 @@ export interface MeetingParticipantView {
   requiresCoi: boolean;
   coiStatus: CoiStatus;
   attendance: AttendanceStatus;
+  /** On an alternate's row, the members it may replace now (2085); empty for anyone but the runner. */
+  alternateFor: string[];
+  /** The acknowledgement and accommodations (2085), for the runner and the participant themself; null otherwise. */
+  arrangements: { confidentialityAcknowledged: boolean; accommodations: MeetingAccommodationView[] } | null;
   capabilities: {
     mayRecordPresent: boolean;
     mayRecordAbsent: boolean;
     mayRecordExcusedConflict: boolean;
     mayRecordExcusedAbsence: boolean;
     mayRaiseConcern: boolean;
+    /**
+     * 2085. Each answers the command for this participant: for the runner on a row without an account, the
+     * secretary's path (ADR-054 §5).
+     */
+    mayExcludeWitness: boolean;
+    mayRecordAccommodation: boolean;
+    mayDeclareConflict: boolean;
+    mayDeclareNoConflict: boolean;
+    mayAcknowledgeConfidentiality: boolean;
+    mayActivateAlternate: boolean;
   };
 }
 
@@ -208,6 +236,18 @@ export interface MeetingCapabilities {
   mayDeclareConflict: boolean;
   mayDeclareNoConflict: boolean;
   mayAcknowledgeConfidentiality: boolean;
+  /** 2085: `api.invite_to_meeting` (the form comes with P12-2c); the caller's own accommodation; the activations. */
+  mayInvite: boolean;
+  mayRecordAccommodation: boolean;
+  mayActivateActingChair: boolean;
+  mayActivateActingSecretary: boolean;
+}
+
+/** A role `api.invite_to_meeting` accepts now (`committee.invitee_type_rule`, AMB-156, AMB-158). */
+export interface MeetingInviteeRoleRule {
+  inviteeRole: MeetingInviteeRole;
+  confidentialityAckRequired: boolean;
+  sourceStatus: "OWNER_DEFAULT" | "SOURCE_REQUIRED" | "APPROVED";
 }
 
 /** The whole meeting, for a caller who passes `authz.can_view_meeting`. */
@@ -239,6 +279,8 @@ export interface MeetingFullView {
   concerns: MeetingConcernView[];
   actingRoles: MeetingActingRoleView[];
   minutes: MeetingMinutesRef[];
+  /** For whoever may invite; empty for anyone else (2085). */
+  inviteeRoles: MeetingInviteeRoleRule[];
   capabilities: MeetingCapabilities;
 }
 
