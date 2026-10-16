@@ -62,7 +62,12 @@ export type ConfirmAct =
   | "giveSupersedingLegalOpinion"
   | "submitToAuthority"
   | "recordAuthorityDecision"
-  | "approveRestrictedLegalReview";
+  | "approveRestrictedLegalReview"
+  // A corrective action under a superseded decision (Phase 12 P12-3b, ADR-058).
+  | "disposeReAdopt"
+  | "disposeModify"
+  | "disposeWaive"
+  | "disposeReplace";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -97,6 +102,9 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   "submitToAuthority",
   "recordAuthorityDecision",
   "approveRestrictedLegalReview",
+  // The action carries on under the replacement decision; waiving or replacing it ends it.
+  "disposeReAdopt",
+  "disposeModify",
 ]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */

@@ -3,6 +3,7 @@
 // and the latest business events. Everything shown is what the database returned for this viewer; every step
 // is re-checked by api.transition_case.
 import type { Metadata } from "next";
+import Link from "next/link";
 import { PRIORITIES, type TransitionOption } from "@cdf/contracts";
 import type { MessageKey } from "@cdf/i18n";
 import {
@@ -21,7 +22,7 @@ import {
   textareaClass,
 } from "@cdf/ui";
 import { isHandOver, lastReturn, progressSteps, stateByCode } from "@cdf/workflow";
-import { investigationService } from "@/server/container";
+import { correctiveActionService, investigationService } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { overdueKeys } from "@/server/work-routes";
 import { confirmation, transitionAct } from "../../confirmations";
@@ -82,6 +83,13 @@ export default async function CaseOverviewPage({
   const canDo = enabled.filter((tr) => tr.allowed);
   const blocked = enabled.filter((tr) => !tr.allowed);
   const later = c.transitions.filter((tr) => !tr.enabled);
+  // A step out of ACTIVE that a superseded decision's frozen actions refuse (DEC-AMB-014) names those actions, from
+  // the case team's list of the case's actions (A1; P12-3b, ADR-058), each linked to the page where it is disposed of.
+  const frozen = blocked.some((tr) => tr.blockingReasons.includes("FROZEN_BY_SUPERSEDED_DECISION"))
+    ? ((await correctiveActionService().caseActions(ctx, id)) ?? []).filter(
+        (a) => a.decisionBlock === "FROZEN_BY_SUPERSEDED_DECISION",
+      )
+    : [];
   // Forward steps first, controlled acts (close, return, archive) after them.
   const ordered = [...canDo].sort(
     (a, b) => Number(!!transitionAct(a.code, a.toState)) - Number(!!transitionAct(b.code, b.toState)),
@@ -221,6 +229,24 @@ export default async function CaseOverviewPage({
                           <li key={r}>{t.code("codes", r, "errors.CONFLICT")}</li>
                         ))}
                       </ul>
+                      {tr.blockingReasons.includes("FROZEN_BY_SUPERSEDED_DECISION") && frozen.length > 0 ? (
+                        <div className="mt-1 text-sm" data-testid={`frozen-${tr.code}`}>
+                          <p>{t("correctiveActions.frozenListLabel")}</p>
+                          <ul className="list-disc ps-5">
+                            {frozen.map((a) => (
+                              <li key={a.actionId}>
+                                <Link
+                                  href={`/actions/${a.actionId}`}
+                                  className="underline underline-offset-4"
+                                  data-testid={`frozen-${tr.code}-${a.sequenceNo}`}
+                                >
+                                  <bdi dir="auto">{a.title}</bdi>
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                       {tr.blockingReasons.includes("MISSING_PERMISSION") && tr.eligibleRoles.length > 0 ? (
                         <p className="mt-1 text-sm" data-testid={`who-can-${tr.code}`}>
                           {t("caseWorkspace.whoCan", {

@@ -111,11 +111,64 @@ only a manager who may dispose of the action and name its owner reads them.
 
 ### 6. Not in this change
 
-- **The pages** come in the next change, with no migration: the case's corrective actions under the decision, frozen
-  ones marked with what they hold; the action's page for the case team; the disposition form with its consequence
-  preview; and the frozen actions listed where closure is refused.
+- **The pages** come in the next change, with no migration: see the P12-3b amendment below.
 - **The command and the tables** are unchanged.
 - **CDF-228** (two authorities in a replacement round) goes to the Rebase thread's 2170.
+
+## P12-3b amendment: the case's actions, the action's page and the disposition forms (2026-10-15)
+
+The corrective-action screens come on these read models, with no migration. The action's page is a purpose route
+(ADR-016 D2; CDF-73 option D); none of the pages reads a case table. The disposition is a server action that runs
+`api.dispose_superseded_corrective_action` in the caller's security context, so the database checks again on submit.
+
+- **The case's actions.** The Proceedings tab lists A1 to whoever may see the case: each action's title, status,
+  owner (their kind and the accountable person's name), due date, progress and source, why it may not move (the
+  decision not yet in force, awaiting final approval, frozen, waived or replaced), and, for a frozen one, the day its
+  decision was superseded. Each title opens the action's page. A link to record the disposition
+  (`/actions/{id}#dispose`) shows only where `may_dispose` is true; a replaced action and its replacement link to each
+  other. No disposition's reason is shown (R3).
+- **The action's page.** `/actions/{actionId}` reads A2. Whoever may see the action reads its card: the wording it
+  carries now and every earlier one, its status, owner and due date, and nothing of the case; the owner sees their own
+  name. The case team also reads where it comes from: the decision it carries out now (the one it was opened under, the
+  replacement decision once that re-adopted or modified it, or none), while it is frozen the replacement decision with
+  its source documents, why it may not move, and each disposition recorded (its code, the document cited, the wording
+  it set and the action that replaced it), never its reason. Their breadcrumbs lead back to the case's Proceedings
+  tab, the owner's to My Work. Anyone else, and an id that names nothing, get the same 404, and the refusal is recorded
+  as `ACCESS_DENIED` with the read's name only. A purpose banner says what the page does not show: to the case team,
+  the case's narrative and evidence and each disposition's reason; to anyone else, the case, where the action comes
+  from and why it may not move.
+- **The disposition forms.** Where `may_dispose` is true, one form for each disposition in `disposition_options`:
+  re-adopt, modify (new wording and, optionally, a new due date), waive, and replace with a new action (new wording,
+  an owner chosen from `owner_candidates` and a due date, optional only where `default_due_date` is set). Replacing
+  shows only where `may_name_owner` is true; otherwise the page says why (the restricted case's authority must own the
+  case, or no one can be named its owner). Each form cites one of the replacement decision's own source documents, the
+  primary one first. Where the replacement decision rejected the item, the page says that only a waiver is open. A
+  member of the case team who may not dispose of the action reads that it is not theirs to dispose of, and no form.
+  Each disposition asks first with what changes, whether it can be undone, who is affected and who is told (four new
+  confirmations). A refused command is recorded as `COMMAND_DENIED` with the command and the outcome only, never the
+  reason, wording or document typed. The schema checks each disposition's fields before the database is asked.
+- **Where closure is refused.** On the case's overview, a step out of ACTIVE refused because an action is frozen
+  (`FROZEN_BY_SUPERSEDED_DECISION`, 2070) lists the frozen actions from A1, each linked to its page.
+- **My Work.** The ACTION_TO_DISPOSE row (2045) opens the action's disposition (`/actions/{id}#dispose`). The owner's
+  and the verifier's rows (ACTION_ASSIGNED, ACTION_RETURNED, ACTION_TO_VERIFY) open nothing until P12-6 brings their
+  controls, when `/actions` joins the live purpose roots.
+- **Not in this change.** The owner's progress and completion and the verifier's controls (P12-6); the History tab
+  already names the two events (§3).
+- **Tests.** Unit: 30 new (the labels with every code and refusal in both languages and the schema's messages, the
+  service, the gateway's mapping and the route), and the confirmation and status tests cover the new acts and
+  statuses. `tests/integration/corrective-actions.spec.ts` (2): after a conflict upheld against a voter and a re-vote,
+  the manager reads the frozen action in A1 and A2 with the replacement decision's sources and owners, is refused the
+  superseded decision's own document, modifies the action, and is then refused a second disposition; the owner reads
+  the card alone; anyone else, and an id that names nothing, get the uniform not-found, with `ACCESS_DENIED` or
+  `COMMAND_DENIED` recorded and nothing changed. `tests/e2e/corrective-actions.spec.ts` (6; Arabic and English, the
+  owner on a 390 px phone): the manager from the Proceedings tab, the overview's refused step and My Work to the form,
+  then a modification (English) and a replacement with a new owner (Arabic) read back on the action, the case and the
+  overview; the owner's card; a form left open while another manager records a disposition; the case's investigator
+  reading why with no form; and the 404s for others and forged ids. `tests/accessibility/corrective-actions.spec.ts`
+  (4): axe at 1280 and 390 px and no sideways scroll at 1280, 390 and 320 px, with every disclosure open, on the
+  Proceedings tab, the overview, the action's page with its forms and with a recorded disposition, the owner's card and
+  a confirmation, in both languages. The browser fixture sets a `SOURCE_REQUIRED` corrective-action rule and grants
+  `IMPLEMENTATION_OWNER` to a synthetic user, in test databases only.
 
 ## Known limitations
 
@@ -126,6 +179,11 @@ only a manager who may dispose of the action and name its owner reads them.
   without the reason and the document (2090); the case team reads them whole.
 - **Answers are for now.** A flag can turn false between reading and submitting (another manager disposes of the
   action first, a role ends, the policy changes); the command checks again and the page shows its refusal.
+- **A form whose action moved on** (P12-3b). When another manager records a disposition while a form is open, the
+  command refuses the second one and nothing is recorded; the page then shows the disposition recorded first, without
+  the form, so the refusal's own words are not shown. The same holds for every form whose subject changes under it.
+  CDF-232 (coordinator, 2026-10-15): a page-level notice with only the refusal words the command returned, cleared
+  on navigation, in the first pages-only slice after P12-3b.
 
 ## Consequences
 
