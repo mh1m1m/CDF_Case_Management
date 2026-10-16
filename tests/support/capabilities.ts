@@ -1,6 +1,7 @@
-// Capability-flag test helpers (migrations 2065 and 2085; the coordinator's conditions of 2026-10-14): what the real
-// commands answer, run and rolled back, and the keys migration 2085 adds to api.meeting_view, so that 2065's spec
-// keeps testing 2065's keys on the live function.
+// Capability-flag test helpers (migrations 2065, 2085 and 2095; the coordinator's conditions of 2026-10-14): what the
+// real commands answer, run and rolled back; the keys migration 2085 adds to api.meeting_view, so that 2065's spec keeps
+// testing 2065's keys on the live function; and the keys migration 2095 adds to api.committee_items_view, so that
+// 2086's spec keeps testing 2086's keys on it.
 import type { OwnerScenario, UserKey } from "./db";
 
 /**
@@ -101,5 +102,41 @@ export function without2085<V>(view: V): V {
   }
   for (const f of MEETING_FLAGS_2085) delete v.capabilities?.[f];
   delete v.invitee_roles;
+  return v as V;
+}
+
+// ---- api.committee_items_view (R2): the keys migration 2095 adds ----------------------------------------------------
+
+/** On each package's capabilities. */
+export const PACKAGE_FLAGS_2095 = [
+  "may_record_authority_decision",
+  "may_request_legal_review",
+  "may_submit_to_authority",
+] as const;
+/** On each package, beside its capabilities. */
+export const PACKAGE_KEYS_2095 = [
+  "adopted_at",
+  "authority",
+  "decided_at",
+  "legal_review",
+  "record_block",
+  "record_outcomes",
+  "record_supersedes",
+  "request_legal_review_block",
+  "submit_block",
+] as const;
+
+interface ItemsViewWith2095Keys {
+  packages?: (Record<string, unknown> & { capabilities?: Record<string, unknown> })[] | null;
+}
+
+/** R2 without the keys 2095 adds: what 2086's api.committee_items_view returned. Null stays null. */
+export function without2095<V>(view: V): V {
+  if (view === null || view === undefined) return view;
+  const v = structuredClone(view) as ItemsViewWith2095Keys;
+  for (const p of v.packages ?? []) {
+    for (const k of PACKAGE_KEYS_2095) delete p[k];
+    for (const f of PACKAGE_FLAGS_2095) delete p.capabilities?.[f];
+  }
   return v as V;
 }

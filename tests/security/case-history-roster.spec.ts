@@ -111,6 +111,20 @@ const CATALOGUE = new Set([
   ...["PROCEEDING_OPENED", "PROCEEDING_STATE_CHANGED", "PROCEEDING_CLOSED", "COMMITTEE_PROCEEDING_OPENED"],
   ...["CASE_SUBJECT_ADDED", "ALLEGATION_ADDED", "ALLEGATION_SUBJECT_LINKED", "FINDING_RECORDED"],
   ...["EVIDENCE_LINKED", "RESTRICTED_COMMITTEE_REFERRAL_APPROVED"],
+  // Migration 2095: the package's legal review and authority events, as codes and times
+  // (legal-review-and-authority-read-models.spec.ts covers their audiences).
+  ...[
+    "RESTRICTED_LEGAL_REVIEW_APPROVED",
+    "LEGAL_REVIEW_REQUESTED",
+    "LEGAL_REVIEW_CANCELLED",
+    "LEGAL_OPINION_GIVEN",
+  ],
+  ...[
+    "LEGAL_OPINION_SUPERSEDED",
+    "RECOMMENDATION_PACKAGE_SUBMITTED_TO_AUTHORITY",
+    "AUTHORITY_DECISION_RECORDED",
+  ],
+  "AUTHORITY_DECISION_SUPERSEDED",
 ]);
 
 const history = (tx: Tx, id: string) => tx<HistoryRow[]>`select * from api.case_history(${id}, 500)`;

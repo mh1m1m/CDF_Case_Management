@@ -809,6 +809,15 @@ export const ar: Messages = {
     DISPOSITION_BLOCKED_BY_HOLD: "إيقاف الإتلاف بسبب حجز قانوني",
     DISPOSITION_EXECUTED: "تنفيذ الإتلاف",
     DISPOSITION_CERTIFICATE_ISSUED: "إصدار شهادة الإتلاف",
+    // المراجعة القانونية للحزمة وقرار صاحب الصلاحية (2095): الرموز والأوقات فقط.
+    LEGAL_REVIEW_REQUESTED: "طلب مراجعة قانونية",
+    LEGAL_REVIEW_CANCELLED: "إلغاء طلب المراجعة القانونية",
+    LEGAL_OPINION_GIVEN: "تقديم الرأي القانوني",
+    LEGAL_OPINION_SUPERSEDED: "تقديم رأي قانوني يحل محل الرأي السابق",
+    RECOMMENDATION_PACKAGE_SUBMITTED_TO_AUTHORITY: "رفع التوصيات إلى صاحب الصلاحية",
+    AUTHORITY_DECISION_RECORDED: "تسجيل قرار صاحب الصلاحية",
+    AUTHORITY_DECISION_SUPERSEDED: "استبدال قرار صاحب الصلاحية بقرار جديد",
+    RESTRICTED_LEGAL_REVIEW_APPROVED: "موافقة صاحب الصلاحية على القضية المقيّدة على مراجعة قانونية",
   },
   portal: {
     homeTitle: "أبلغ عن مخالفة بأمان",

@@ -136,6 +136,9 @@ const NOT_STATE_CHANGING = new Set([
   // Migration 2085 (P12-2b, ADR-055): the caller's committees and one committee's page; reads like meeting_view.
   "my_committees",
   "committee_view",
+  // Migration 2095 (P12-3a, ADR-057): the assigned reviewer's request. Not audited: the packet is opened with
+  // api.open_packet, which is.
+  "legal_review_view",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
@@ -941,6 +944,12 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "record_package_adoption",
         actor: "committeeSecretary",
         run: (s) => s.tx`select api.record_package_adoption(${ids.pkg!})`,
+      },
+      {
+        // Migration 2095 (P12-3a, ADR-057): what a review may be asked for with, read when the request form opens.
+        fn: "legal_review_choices",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.legal_review_choices(${ids.pkg!}, 'REQUEST')`,
       },
       {
         // AMB-115 (migration 2030): a request sent to the wrong reviewer is cancelled before the real one.
