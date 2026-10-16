@@ -47,6 +47,7 @@ describe("routes", () => {
     expect(areaOfPath("/minutes/abc")).toBe("COMMITTEE");
     expect(areaOfPath("/committees")).toBe("COMMITTEE");
     expect(areaOfPath("/committees/abc")).toBe("COMMITTEE");
+    expect(areaOfPath("/committee-proceedings/abc")).toBe("COMMITTEE");
     expect(areaHref(area("COMMITTEE", "committees"))).toBe("/committees");
     expect(areaOfPath("/settings/access")).toBeUndefined();
   });

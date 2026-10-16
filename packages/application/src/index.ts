@@ -44,3 +44,9 @@ export { createMeetingsService } from "./meetings";
 export type { MeetingsDeps, MeetingsGateway, MeetingsService } from "./meetings";
 export { createCommitteesService } from "./committees";
 export type { CommitteesDeps, CommitteesGateway, CommitteesService } from "./committees";
+export { buildsPackages, createCommitteeProceedingsService } from "./committee-proceedings";
+export type {
+  CommitteeProceedingsDeps,
+  CommitteeProceedingsGateway,
+  CommitteeProceedingsService,
+} from "./committee-proceedings";

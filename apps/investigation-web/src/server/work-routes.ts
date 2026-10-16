@@ -38,8 +38,10 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
       return "OVERSIGHT";
     case "admin":
       return "ADMINISTRATION";
-    // My Committees (P12-2b), and a meeting and its minutes, which are the committee's work (P12-2a).
+    // My Committees (P12-2b), a proceeding before the committee (P12-2c), and a meeting and its minutes, which are
+    // the committee's work (P12-2a).
     case "committees":
+    case "committee-proceedings":
     case "meetings":
     case "minutes":
       return "COMMITTEE";

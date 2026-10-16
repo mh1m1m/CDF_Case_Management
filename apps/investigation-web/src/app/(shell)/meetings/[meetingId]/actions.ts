@@ -1,9 +1,10 @@
 "use server";
-// The meeting page's commands (UX redesign Phase 12 P12-2a and P12-2b; ADR-054, ADR-055). Each one goes through the
+// The meeting page's commands (UX redesign Phase 12 P12-2a to P12-2c; ADR-054 to ADR-056). Each one goes through the
 // meetings service, which validates with the shared schema and runs the api.* command in the caller's security
 // context: the database decides who may act and in which state. The ids are the ones the read model gave the page; a
 // forged id meets the same command and its refusal.
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type { CommandResult } from "@cdf/application";
 import { meetingsService, requireActor, type RequestScope } from "@/server/container";
 import { formObject, toActionState, type ActionState } from "@/server/actions-helpers";
@@ -200,6 +201,48 @@ export async function castCastingVoteAction(
   form: FormData,
 ) {
   return onMeeting(meetingId, form, { voteItemId }, (s, ctx, raw) => s.castCastingVote(ctx, raw));
+}
+
+/**
+ * P12-2c (ADR-056): a vote on a finding, from the meeting's finding-vote page. Once it is open the runner goes back to
+ * the meeting, where the vote is cast and closed.
+ */
+export async function openFindingVoteAction(meetingId: string, _: ActionState, form: FormData) {
+  const { ctx } = await requireActor();
+  const result = await meetingsService().openVoteItem(ctx, {
+    ...formObject(form),
+    targetType: "FINDING",
+    meetingId,
+  });
+  if (result.ok) {
+    revalidatePath(`/meetings/${meetingId}`);
+    redirect(`/meetings/${meetingId}`);
+  }
+  return toActionState(result, form);
+}
+
+// ---- The invite (P12-2c; ADR-056) ----------------------------------------------------------------------------------
+/**
+ * One candidate from the invite list, bound as `account:<id>` or `person:<id>`; the database checks again that the
+ * candidate is one the meeting may hear from. Inviting an account sends them a notice with no case content.
+ */
+export async function inviteToMeetingAction(
+  meetingId: string,
+  invitee: string,
+  _: ActionState,
+  form: FormData,
+) {
+  const { ctx } = await requireActor();
+  const result = await meetingsService().inviteToMeeting(ctx, {
+    ...formObject(form, ["requiresCoi"]),
+    invitee,
+    meetingId,
+  });
+  if (result.ok) {
+    revalidatePath(`/meetings/${meetingId}`);
+    revalidatePath(`/meetings/${meetingId}/invite`);
+  }
+  return toActionState(result, form);
 }
 
 // ---- Minutes ------------------------------------------------------------------------------------------------------

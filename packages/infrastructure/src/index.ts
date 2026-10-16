@@ -22,6 +22,7 @@ export { PostgresInboxGateway } from "./db/inbox-gateway";
 export { PostgresCaseStructureGateway } from "./db/case-structure-gateway";
 export { PostgresMeetingsGateway } from "./db/meetings-gateway";
 export { PostgresCommitteesGateway } from "./db/committees-gateway";
+export { PostgresCommitteeProceedingsGateway } from "./db/committee-proceedings-gateway";
 export {
   REDACTED,
   isDeniedKey,

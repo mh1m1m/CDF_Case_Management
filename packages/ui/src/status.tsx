@@ -12,6 +12,7 @@ import type {
   MeetingStatus,
   MinutesStatus,
   ProceedingStatus,
+  RecommendationPackageStatus,
   RecordsState,
   ReportAttachmentStatus,
   ReportStatus,
@@ -46,6 +47,8 @@ interface Registry {
   minutes: Record<MinutesStatus, StatusTone>;
   /** A raised conflict waits for its decider; the decision either way is not a failure. */
   concern: Record<MeetingConflictConcernStatus, StatusTone>;
+  /** A recommendation package (P12-2c): amber while it waits on Legal, the authority or the secretary. */
+  recommendationPackage: Record<RecommendationPackageStatus, StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -124,6 +127,16 @@ export const STATUS_TONES: Registry = {
     SUPERSEDED: "neutral",
   },
   concern: { OPEN: "warning", UPHELD: "neutral", DISMISSED: "neutral" },
+  recommendationPackage: {
+    DRAFT: "info",
+    VOTING: "info",
+    ADOPTED: "warning",
+    IN_LEGAL_REVIEW: "warning",
+    RETURNED_BY_LEGAL: "warning",
+    AWAITING_AUTHORITY: "warning",
+    RETURNED_BY_AUTHORITY: "warning",
+    DECIDED: "neutral",
+  },
 };
 
 /** The tone for a status; an unknown code (a newer database value) falls back to neutral, never to red. */

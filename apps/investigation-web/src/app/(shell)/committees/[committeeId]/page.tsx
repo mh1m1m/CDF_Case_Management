@@ -16,7 +16,6 @@ import {
   type CommitteeView,
   type RuleSourceStatus,
 } from "@cdf/contracts";
-import { proceedingShortRef } from "@cdf/domain";
 import { formatDate, formatDateTime, formatDays, isolate, type MessageKey, type Translator } from "@cdf/i18n";
 import {
   CDFBadge,
@@ -37,6 +36,7 @@ import { committeesService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { confirmation } from "../../confirmations";
 import { participantName } from "../../meetings/meeting-labels";
+import { proceedingLabel } from "../proceeding-label";
 import { amendProceedingSnapshotAction, scheduleMeetingAction } from "./actions";
 
 /** Unique translated title (WCAG 2.4.2, UX-082); never a case number or committee content. */
@@ -138,13 +138,6 @@ export default async function CommitteePage({ params }: { params: Promise<{ comm
   );
 }
 
-/** The proceeding's name on this page: its case where the caller may see it, otherwise a display-only reference. */
-function proceedingLabel(t: Translator, code: string, p: CommitteeProceedingSummary): string {
-  return p.case.caseNumber
-    ? t("committees.proceedingOfCase", { number: isolate(p.case.caseNumber) })
-    : t("committees.proceedingRef", { ref: isolate(proceedingShortRef(code, p.committeeProceedingId)) });
-}
-
 function ProceedingCard({ t, v, p }: { t: Translator; v: CommitteeView; p: CommitteeProceedingSummary }) {
   const id = `proceeding-${p.committeeProceedingId}`;
   const label = proceedingLabel(t, v.committee.code, p);
@@ -168,6 +161,16 @@ function ProceedingCard({ t, v, p }: { t: Translator; v: CommitteeView; p: Commi
       <p className="mb-3 text-sm">
         {t("committees.referredOn", { date: date(p.referredAt) })}
         {p.closedAt ? ` ${t("committees.closedOn", { date: date(p.closedAt) })}` : null}
+      </p>
+      {/* The proceeding's page gates on this same list (P12-2c), so every proceeding shown here opens. */}
+      <p className="mb-3">
+        <Link
+          href={`/committee-proceedings/${p.committeeProceedingId}`}
+          className="font-semibold underline"
+          data-testid={`${id}-open`}
+        >
+          {t("committeeProceedings.openProceeding")}
+        </Link>
       </p>
 
       <h3 className="mb-2 font-semibold">{t("committees.meetingsTitle")}</h3>

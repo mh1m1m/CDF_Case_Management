@@ -3,11 +3,12 @@
 // capability or list the database left out or null reads as false or empty (fail closed, which is also what a page
 // sees against 2065's read model before 2085), and an individual choice is never carried (AMB-083, rule 5).
 import { describe, expect, it } from "vitest";
-import { toMeetingView, toMinutesView, toVoteItemProgress } from "./meetings-gateway";
+import { toMeetingInviteChoices, toMeetingView, toMinutesView, toVoteItemProgress } from "./meetings-gateway";
 
 type RawMeeting = Parameters<typeof toMeetingView>[0];
 type RawMinutes = Parameters<typeof toMinutesView>[0];
 type RawStatus = Parameters<typeof toVoteItemProgress>[0];
+type RawInvite = Parameters<typeof toMeetingInviteChoices>[0];
 
 const M = "33333333-3333-4333-8333-333333333333";
 const P = "55555555-5555-4555-8555-555555555555";
@@ -317,6 +318,53 @@ describe("meeting read model mapping", () => {
       mayActivateActingChair: false,
       mayActivateActingSecretary: false,
     });
+  });
+
+  it("the invite list keeps a person to its position and roles, an account to its names and bases (P12-2c)", () => {
+    expect(
+      toMeetingInviteChoices({
+        meeting_id: M,
+        label_mode: "ORDINAL",
+        persons: null,
+        accounts: null,
+      } as unknown as RawInvite),
+    ).toEqual({ meetingId: M, labelMode: "ORDINAL", persons: [], accounts: [] });
+    const v = toMeetingInviteChoices({
+      meeting_id: M,
+      label_mode: "ORDINAL",
+      persons: [
+        {
+          person_id: P,
+          position: "2",
+          case_roles: ["WITNESS"],
+          label: null,
+          invitee_roles: ["WITNESS", "EXPERT"],
+        },
+        { person_id: M, position: 3, case_roles: null, invitee_roles: null },
+      ],
+      accounts: [
+        {
+          user_id: U,
+          display_name: "Investigator Beta",
+          display_name_ar: null,
+          bases: ["CASE_TEAM", "LEGAL_REVIEW"],
+          invitee_roles: ["LEGAL", "INFORMATION_PROVIDER"],
+        },
+      ],
+    } as unknown as RawInvite);
+    expect(v.persons).toEqual([
+      { personId: P, position: 2, caseRoles: ["WITNESS"], label: null, inviteeRoles: ["WITNESS", "EXPERT"] },
+      { personId: M, position: 3, caseRoles: [], label: null, inviteeRoles: [] },
+    ]);
+    expect(v.accounts).toEqual([
+      {
+        userId: U,
+        displayName: "Investigator Beta",
+        displayNameAr: null,
+        bases: ["CASE_TEAM", "LEGAL_REVIEW"],
+        inviteeRoles: ["LEGAL", "INFORMATION_PROVIDER"],
+      },
+    ]);
   });
 
   it("vote progress says who has voted and never carries a choice, even where the read model returns one", () => {

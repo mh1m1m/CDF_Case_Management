@@ -1,13 +1,16 @@
-// MeetingsGateway over PostgreSQL (UX redesign Phase 12 P12-2a and P12-2b; ADR-054 and ADR-055). Reads call only the
-// purpose read models (api.meeting_view and api.minutes_view of 2030 as replaced in 2065 and 2085,
-// api.vote_item_status), which decide what the caller sees; the gateway renames their keys and reads no table. Writes
-// only call the api.* meeting, vote and minutes commands. Every method runs in its own transaction under the caller's
-// security context.
+// MeetingsGateway over PostgreSQL (UX redesign Phase 12 P12-2a, P12-2b and P12-2c; ADR-054 to ADR-056). Reads call only
+// the purpose read models (api.meeting_view and api.minutes_view of 2030 as replaced in 2065 and 2085,
+// api.vote_item_status, api.meeting_invite_choices of 2086), which decide what the caller sees; the gateway renames
+// their keys and reads no table. Writes only call the api.* meeting, vote, invite and minutes commands. Every method
+// runs in its own transaction under the caller's security context.
 import type {
+  InviteAccountChoice,
+  InvitePersonChoice,
   MeetingAccommodationView,
   MeetingActingRoleView,
   MeetingConcernView,
   MeetingFullView,
+  MeetingInviteChoices,
   MeetingParticipantView,
   MeetingSelfView,
   MeetingView,
@@ -478,6 +481,51 @@ const caseRef = (c: RawCaseRef | null) => ({
   caseNumber: c?.case_number ?? null,
 });
 
+/** `api.meeting_invite_choices` (2086), as the database writes it. */
+interface RawInviteChoices {
+  meeting_id: string;
+  label_mode: MeetingInviteChoices["labelMode"];
+  persons:
+    | {
+        person_id: string;
+        position: number | string;
+        case_roles: InvitePersonChoice["caseRoles"] | null;
+        label: string | null;
+        invitee_roles: InvitePersonChoice["inviteeRoles"] | null;
+      }[]
+    | null;
+  accounts:
+    | {
+        user_id: string;
+        display_name: string | null;
+        display_name_ar: string | null;
+        bases: InviteAccountChoice["bases"] | null;
+        invitee_roles: InviteAccountChoice["inviteeRoles"] | null;
+      }[]
+    | null;
+}
+
+export function toMeetingInviteChoices(v: RawInviteChoices): MeetingInviteChoices {
+  return {
+    meetingId: v.meeting_id,
+    labelMode: v.label_mode,
+    persons: (v.persons ?? []).map((p) => ({
+      personId: p.person_id,
+      position: Number(p.position),
+      caseRoles: [...(p.case_roles ?? [])],
+      label: p.label ?? null,
+      inviteeRoles: [...(p.invitee_roles ?? [])],
+    })),
+    accounts: (v.accounts ?? []).map((a) => ({
+      userId: a.user_id,
+      displayName: a.display_name ?? null,
+      displayNameAr: a.display_name_ar ?? null,
+      bases: [...(a.bases ?? [])],
+      inviteeRoles: [...(a.invitee_roles ?? [])],
+    })),
+  };
+}
+
 export function toMeetingView(m: RawMeetingView): MeetingView {
   // The concern-only view has no logistics (2030 section 4): the caller sees one of the meeting's concerns only.
   if (!("logistics" in m)) {
@@ -807,10 +855,14 @@ export class PostgresMeetingsGateway implements MeetingsGateway {
     );
   }
 
-  openVoteItem(ctx: UserRequestContext, i: { meetingId: string; targetType: string; title: string }) {
+  openVoteItem(
+    ctx: UserRequestContext,
+    i: { meetingId: string; targetType: string; findingId?: string | undefined; title: string },
+  ) {
     return this.value<string>(
       ctx,
-      (tx) => tx`select api.open_vote_item(${i.meetingId}, ${i.targetType}, null, ${i.title}) as v`,
+      (tx) => tx`
+        select api.open_vote_item(${i.meetingId}, ${i.targetType}, ${i.findingId ?? null}, ${i.title}) as v`,
     );
   }
 
@@ -943,6 +995,36 @@ export class PostgresMeetingsGateway implements MeetingsGateway {
       ctx,
       (tx) => tx`
         select api.activate_alternate_member(${i.alternateParticipantId}, ${i.replacesParticipantId}, ${i.reason}) as v`,
+    );
+  }
+
+  // ---- The meeting's invite (P12-2c; ADR-056) ----------------------------------------------------------------------
+  async inviteChoices(ctx: UserRequestContext, meetingId: string): Promise<MeetingInviteChoices> {
+    return toMeetingInviteChoices(
+      await this.value<RawInviteChoices>(
+        ctx,
+        (tx) => tx`select api.meeting_invite_choices(${meetingId}) as v`,
+      ),
+    );
+  }
+
+  /** One of `userId` and `personId`, as the schema splits the candidate chosen. */
+  inviteToMeeting(
+    ctx: UserRequestContext,
+    i: {
+      meetingId: string;
+      inviteeRole: string;
+      userId?: string | undefined;
+      personId?: string | undefined;
+      requiresCoi: boolean;
+      reason: string;
+    },
+  ) {
+    return this.value<string>(
+      ctx,
+      (tx) => tx`
+        select api.invite_to_meeting(${i.meetingId}, ${i.inviteeRole}, ${i.userId ?? null}, ${i.personId ?? null},
+          ${i.requiresCoi}, ${i.reason}) as v`,
     );
   }
 }
