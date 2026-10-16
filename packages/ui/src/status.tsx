@@ -1,6 +1,7 @@
 // One status registry and the three indicators (UX-136, UX-059, UX-047; audit RC-13 and §15.11).
 // Pages never pick a colour for a status: they name the domain and the status code, and the registry decides.
 import type {
+  AllegationStatus,
   CaseTaskStatus,
   EvidenceStatus,
   EvidenceVersionStatus,
@@ -8,6 +9,7 @@ import type {
   FindingResult,
   InterviewStatus,
   LegalHoldRequestStatus,
+  LegalReviewStatus,
   MeetingConflictConcernStatus,
   MeetingStatus,
   MinutesStatus,
@@ -38,7 +40,7 @@ interface Registry {
   notification: Record<"UNREAD" | "READ", StatusTone>;
   /** A proceeding inside a case (ADR-017; Phase 12). */
   proceeding: Record<ProceedingStatus, StatusTone>;
-  allegation: Record<"OPEN" | "SUBSTANTIATED" | "UNSUBSTANTIATED" | "WITHDRAWN", StatusTone>;
+  allegation: Record<AllegationStatus, StatusTone>;
   /** A finding is a decision, never a failure, so every result is neutral; the words carry it. */
   finding: Record<FindingResult, StatusTone>;
   /** A committee meeting, one of its votes, a version of its minutes and a conflict raised in it (P12-2a). */
@@ -49,6 +51,8 @@ interface Registry {
   concern: Record<MeetingConflictConcernStatus, StatusTone>;
   /** A recommendation package (P12-2c): amber while it waits on Legal, the authority or the secretary. */
   recommendationPackage: Record<RecommendationPackageStatus, StatusTone>;
+  /** A request for legal review (P12-3a): amber while it waits for the opinion; an opinion is a decision, not a win. */
+  legalReview: Record<LegalReviewStatus, StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -110,7 +114,13 @@ export const STATUS_TONES: Registry = {
     CONCLUDED: "success",
     CANCELLED: "neutral",
   },
-  allegation: { OPEN: "info", SUBSTANTIATED: "neutral", UNSUBSTANTIATED: "neutral", WITHDRAWN: "neutral" },
+  allegation: {
+    OPEN: "info",
+    SUBSTANTIATED: "neutral",
+    UNSUBSTANTIATED: "neutral",
+    WITHDRAWN: "neutral",
+    SUPERSEDED: "neutral",
+  },
   finding: {
     SUBSTANTIATED: "neutral",
     PARTIALLY_SUBSTANTIATED: "neutral",
@@ -137,6 +147,7 @@ export const STATUS_TONES: Registry = {
     RETURNED_BY_AUTHORITY: "warning",
     DECIDED: "neutral",
   },
+  legalReview: { ASSIGNED: "warning", OPINION_GIVEN: "neutral", CANCELLED: "neutral" },
 };
 
 /** The tone for a status; an unknown code (a newer database value) falls back to neutral, never to red. */

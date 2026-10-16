@@ -31,6 +31,21 @@ const noPackage = {
   maySubmitForVote: false,
   mayRecordAdoption: false,
   mayReturnToCommittee: false,
+  mayRequestLegalReview: false,
+  maySubmitToAuthority: false,
+  mayRecordAuthorityDecision: false,
+};
+/** A package's legal review and authority half (2095) where nothing has happened yet. */
+const notReviewed = {
+  requestLegalReviewBlock: null,
+  submitBlock: null,
+  recordBlock: null,
+  recordOutcomes: [],
+  recordSupersedes: null,
+  adoptedAt: null,
+  decidedAt: null,
+  legalReview: { required: false, requests: [] },
+  authority: { rules: [], submissions: [], decisions: [], toDecide: [] },
 };
 /** R2 with the caller's answers: may create a package, and a package that may (or may not) take items. */
 function items(mayCreatePackage: boolean, mayAddItem?: boolean): CommitteeItemsView {
@@ -51,6 +66,7 @@ function items(mayCreatePackage: boolean, mayAddItem?: boolean): CommitteeItemsV
               items: [],
               openVoteIn: [],
               capabilities: { ...noPackage, mayAddItem },
+              ...notReviewed,
             },
           ],
     findingVotes: [],
@@ -241,6 +257,52 @@ describe("committee proceeding page", () => {
     expect(buildsPackages(items(false, false))).toBe(false);
     expect(buildsPackages(items(true))).toBe(true);
     expect(buildsPackages(items(false, true))).toBe(true);
+  });
+});
+
+describe("the proceeding's own pages and the case side (P12-3a)", () => {
+  it("a proceeding page of its own starts from the seat basis: none, and R2 is never read", async () => {
+    const { service, calls, events } = harness({ proceedings: { [C1]: [OTHER] } });
+    expect(await service.onSeat(ctx, PROCEEDING)).toBeNull();
+    expect(calls).toEqual([["myCommittees"], ["committeeView", C1]]);
+    expect(events.map((e) => [e.action, e.objectType, e.objectId])).toEqual([
+      ["ACCESS_DENIED", "committee_proceeding", PROCEEDING],
+    ]);
+  });
+
+  it("on the seat: the committee, the seat and R2, without the builder's choices", async () => {
+    const r2 = items(true, true);
+    const { service, calls, events } = harness({ items: r2 });
+    expect(await service.onSeat(ctx, PROCEEDING)).toEqual({
+      committee: { committeeId: C1, code: "IC", kind: "INVESTIGATION" },
+      mySeat: "SECRETARY",
+      proceeding: { committeeProceedingId: PROCEEDING },
+      items: r2,
+    });
+    expect(calls.map((c) => c[0])).toEqual(["myCommittees", "committeeView", "itemsView"]);
+    expect(events).toEqual([]);
+  });
+
+  it("R2 refusing the seat holder (a conflict in one of its meetings) is the same null", async () => {
+    const { service, events } = harness({ items: "CDF_NOT_FOUND" });
+    expect(await service.onSeat(ctx, PROCEEDING)).toBeNull();
+    expect(events).toEqual([]);
+    await expect(
+      harness({ items: "connection reset" }).service.onSeat(ctx, PROCEEDING),
+    ).rejects.toMatchObject({ kind: "UNAVAILABLE" });
+  });
+
+  it("R2 alone for the case side: no seat is asked for, and a refusal is null", async () => {
+    const r2 = items(false, false);
+    const { service, calls } = harness({ items: r2 });
+    expect(await service.items(ctx, PROCEEDING)).toBe(r2);
+    expect(calls).toEqual([["itemsView", PROCEEDING]]);
+    const refused = harness({ items: "CDF_NOT_FOUND" });
+    expect(await refused.service.items(ctx, PROCEEDING)).toBeNull();
+    expect(refused.events).toEqual([]);
+    await expect(harness({ items: "connection reset" }).service.items(ctx, PROCEEDING)).rejects.toMatchObject(
+      { kind: "UNAVAILABLE" },
+    );
   });
 });
 

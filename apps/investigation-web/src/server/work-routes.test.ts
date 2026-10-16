@@ -48,6 +48,9 @@ describe("routes", () => {
     expect(areaOfPath("/committees")).toBe("COMMITTEE");
     expect(areaOfPath("/committees/abc")).toBe("COMMITTEE");
     expect(areaOfPath("/committee-proceedings/abc")).toBe("COMMITTEE");
+    // A legal review assigned to the caller is their own work (P12-3a).
+    expect(areaOfPath("/legal-reviews/abc")).toBe("MY_WORK");
+    expect(areaOfPath("/legal-reviews/abc/packet")).toBe("MY_WORK");
     expect(areaHref(area("COMMITTEE", "committees"))).toBe("/committees");
     expect(areaOfPath("/settings/access")).toBeUndefined();
   });
@@ -94,8 +97,9 @@ describe("routes", () => {
       BCP_IMPORT: "/continuity/imports",
     } as const;
     const all = Object.values(roots);
-    // P12-2a (ADR-054): the meeting and minutes pages have shipped; the rest have not.
-    const shipped: readonly string[] = ["/meetings", "/minutes"];
+    // P12-2a (ADR-054): the meeting and minutes pages have shipped; P12-3a (ADR-057) the legal review page; the rest
+    // have not.
+    const shipped: readonly string[] = ["/meetings", "/minutes", "/legal-reviews"];
     for (const [targetType, root] of Object.entries(roots) as [keyof typeof roots, string][]) {
       const i = item({ area: "MY_WORK", targetType, targetId: "x", caseId: "c" });
       expect(itemHref(i), targetType).toBe(shipped.includes(root) ? `${root}/x` : null);
@@ -108,9 +112,25 @@ describe("routes", () => {
         targetType,
       ).toBeNull();
     }
-    // A restricted case's approval of a recommendation package has no page of its own yet (P12-3).
+    // A restricted case's approval of a legal review opens on the case (P12-3a, ADR-057), whatever roots are live;
+    // any other package item, or one without its case, opens nothing.
+    for (const live of [all, []])
+      expect(
+        itemHref(
+          item({ targetType: "RECOMMENDATION_PACKAGE", code: "LEGAL_REVIEW", targetId: "x", caseId: "c" }),
+          live,
+        ),
+      ).toBe("/cases/c/proceedings/legal-review-approval/x");
     expect(
-      itemHref(item({ targetType: "RECOMMENDATION_PACKAGE", targetId: "x", caseId: "c" }), all),
+      itemHref(
+        item({ targetType: "RECOMMENDATION_PACKAGE", code: "EXPORT", targetId: "x", caseId: "c" }),
+        all,
+      ),
+    ).toBeNull();
+    expect(
+      itemHref(
+        item({ targetType: "RECOMMENDATION_PACKAGE", code: "LEGAL_REVIEW", targetId: "x", caseId: null }),
+      ),
     ).toBeNull();
   });
 });
@@ -170,8 +190,12 @@ describe("age in a queue (ADR-016 D8)", () => {
 describe("notification links (UX redesign S4)", () => {
   const id = "0b1f6f2e-6c7a-4d39-9d5e-1f6c2f0d9a11";
   it("links nowhere while the page has not shipped", () => {
-    expect(notificationHref({ deepLink: `/legal-reviews/${id}` })).toBeNull();
     expect(notificationHref({ deepLink: `/grievances/${id}` })).toBeNull();
+    expect(notificationHref({ deepLink: `/my-defence/${id}` })).toBeNull();
+  });
+  it("links a legal review's notice to the reviewer's page (P12-3a)", () => {
+    expect(notificationHref({ deepLink: `/legal-reviews/${id}` })).toBe(`/legal-reviews/${id}`);
+    expect(notificationHref({ deepLink: `/legal-reviews/${id}/packet?x=1` })).toBeNull();
   });
   it("links a seat's notice to the committee's page (P12-2b)", () => {
     expect(notificationHref({ deepLink: `/committees/${id}` })).toBe(`/committees/${id}`);

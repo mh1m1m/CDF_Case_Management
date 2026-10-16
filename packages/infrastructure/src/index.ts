@@ -23,6 +23,7 @@ export { PostgresCaseStructureGateway } from "./db/case-structure-gateway";
 export { PostgresMeetingsGateway } from "./db/meetings-gateway";
 export { PostgresCommitteesGateway } from "./db/committees-gateway";
 export { PostgresCommitteeProceedingsGateway } from "./db/committee-proceedings-gateway";
+export { PostgresLegalReviewsGateway } from "./db/legal-reviews-gateway";
 export {
   REDACTED,
   isDeniedKey,

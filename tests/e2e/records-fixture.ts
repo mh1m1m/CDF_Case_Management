@@ -1037,3 +1037,106 @@ export async function findingVoteOpened(f: ProceedingFixture): Promise<string> {
   );
   return v!.id;
 }
+
+// ---- Legal review and the authority's decision (Phase 12 P12-3a; migration 2095, ADR-057) ----------------------------
+
+/** The secretary's reason when a fixture asks for a legal review: the reviewer reads it, My Work never shows it. */
+export const REVIEW_REASON = "Synthetic: please review the adopted package before it goes to the CEO.";
+
+/** The package the demo committee adopted with its one item (a written warning), ready for a legal review. */
+export async function packageForReview(label: string): Promise<ProceedingFixture & { packageId: string }> {
+  const f = await proceedingMeeting(label);
+  const packageId = await draftPackage(f);
+  await adoptedPackage(f, packageId);
+  return { ...f, packageId };
+}
+
+/** The secretary asks Legal Reviewer Pi to review the package with the case's finding; returns the request's id. */
+export async function legalReviewAsked(f: ProceedingFixture, packageId: string): Promise<string> {
+  const [r] = await as(
+    "icSecretary",
+    (tx) => tx<{ id: string }[]>`
+      select api.request_legal_review(${packageId}, ${USERS.legalB}, ${REVIEW_REASON}, ${[f.findingId]}::uuid[],
+        null) as id`,
+  );
+  return r!.id;
+}
+
+/** Legal Reviewer Pi concurs. */
+export async function opinionGiven(requestId: string): Promise<void> {
+  await as("legalB", (tx) => tx`select api.give_legal_opinion(${requestId}, 'CONCURS', null)`);
+}
+
+/** The package's latest legal review request and the packet sent with it, as the committee's page reads them (R2). */
+export async function latestRequest(
+  f: { committeeProceedingId: string },
+  packageId: string,
+): Promise<{ requestId: string; packetId: string }> {
+  const [row] = await as(
+    "icSecretary",
+    (tx) =>
+      tx<
+        {
+          v: {
+            packages: {
+              package_id: string;
+              legal_review?: { requests: { request_id: string; packet_id: string }[] };
+            }[];
+          };
+        }[]
+      >`select api.committee_items_view(${f.committeeProceedingId}) as v`,
+  );
+  const last = row!.v.packages.find((p) => p.package_id === packageId)?.legal_review?.requests.at(-1);
+  if (!last) throw new Error("latestRequest: the package has no request on the committee's page");
+  return { requestId: last.request_id, packetId: last.packet_id };
+}
+
+/**
+ * A restricted case (owned and restricted by the GRC Director, its Restricted Case Authority) referred to the demo
+ * Investigation Committee with that authority's approval (DEC-F20), and a package of one case-wide corrective action
+ * the committee adopted: a legal review of it waits for the authority's approval. Investigator Alpha is on the case's
+ * team; the GRC Director takes them off it again (endInvestigatorAssignment with "grcDirector").
+ */
+export async function restrictedPackageForReview(
+  label: string,
+): Promise<MeetingFixture & { committeeProceedingId: string; packageId: string }> {
+  await requireSeatedDemoCommittee();
+  const c = await restrictedStructureCase(label);
+  await preliminaryReferral(c.caseId);
+  const committeeProceedingId = await as("grcDirector", async (tx) => {
+    const [ic] = await tx<{ id: string }[]>`select id from committee.committee where code = 'IC'`;
+    await tx`select api.approve_restricted_committee_referral(${c.caseId}, ${ic!.id}, ${MEETING_REASON})`;
+    const [r] = await tx<{ id: string }[]>`
+      select api.refer_case_to_committee(${c.caseId}, ${ic!.id}, null, ${MEETING_REASON}) as id`;
+    return r!.id;
+  });
+  const m = await scheduledDeliberation(c, committeeProceedingId);
+  await openWithVoters(m);
+  const packageId = await as("icSecretary", async (tx) => {
+    const [p] = await tx<{ id: string }[]>`
+      select api.create_recommendation_package(${committeeProceedingId}, 'PACKAGE') as id`;
+    await tx`select api.add_recommendation_item(${p!.id}, 'CORRECTIVE_ACTION', null, null,
+      'Synthetic: tighten the approval controls.', null, null, false, '{}'::uuid[], null)`;
+    await tx`select api.submit_package_for_vote(${p!.id})`;
+    await tx`select api.open_package_vote(${m.meetingId}, ${p!.id})`;
+    return p!.id;
+  });
+  await openVotesApproved(m);
+  await adoptionRecorded(packageId);
+  return { ...m, committeeProceedingId, packageId };
+}
+
+/** The secretary submits the package, with its opinion, to the authority its rules name (the CEO, for a sanction). */
+export async function submittedToAuthority(packageId: string): Promise<void> {
+  await as("icSecretary", (tx) => tx`select api.submit_to_authority(${packageId})`);
+}
+
+/** The restricted case's authority approves a legal review of the package by Legal Reviewer Pi, with nothing besides. */
+export async function legalReviewApproved(packageId: string): Promise<void> {
+  await as(
+    "grcDirector",
+    (tx) => tx`
+      select api.approve_restricted_legal_review(${packageId}, ${USERS.legalB}, '{}'::uuid[], '{}'::uuid[],
+        'Synthetic: a legal review is needed on this restricted case.')`,
+  );
+}

@@ -7,6 +7,7 @@ import {
   FINDING_RESULTS,
   REPORT_CATEGORIES,
   SUBJECT_CATEGORIES,
+  isClosedAllegation,
   type AllegationView,
   type CaseStructure,
   type FindingView,
@@ -349,7 +350,8 @@ function Allegation({
   const subjectName = (subjectId: string | null) =>
     s.subjects.find((x) => x.id === subjectId)?.displayName ?? t("caseStructure.wholeAllegation");
   const open = s.proceedings.filter((p) => !TERMINAL_PROCEEDING_STATUSES.includes(p.status));
-  const withdrawn = a.status === "WITHDRAWN";
+  // Withdrawn, or superseded by a correction (2090): the database refuses a subject link or a finding on it.
+  const closed = isClosedAllegation(a.status);
 
   // One line per person and proceeding, in proceeding order: its current version, with earlier ones folded away.
   const lines = current
@@ -391,7 +393,7 @@ function Allegation({
         <p className="mt-1 text-sm text-cdf-text-secondary">{t("caseStructure.noSubject")}</p>
       ) : null}
 
-      {a.subjectId === null && canEdit && !withdrawn && s.subjects.length > 0 ? (
+      {a.subjectId === null && canEdit && !closed && s.subjects.length > 0 ? (
         <details className="mt-3 border-t border-cdf-border pt-3" data-testid={`allegation-${n}-link`}>
           <summary className="cursor-pointer font-semibold">{t("caseStructure.linkSubject")}</summary>
           <div className="mt-3">
@@ -521,7 +523,7 @@ function Allegation({
             </>
           )}
 
-          {canFind && !withdrawn ? (
+          {canFind && !closed ? (
             open.length === 0 ? (
               <p className="mt-3 text-sm" data-testid={`allegation-${n}-needs-proceeding`}>
                 {t("caseStructure.needsProceeding")}{" "}

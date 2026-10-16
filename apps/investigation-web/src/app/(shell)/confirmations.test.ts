@@ -1,7 +1,7 @@
 // Every confirmation has its whole copy in both languages (UX-031; Phase 12 consequence preview, ADR-030): a missing
 // message would show its key in the dialog. The meeting and minutes acts (P12-2a, ADR-054), the committee and
-// logistics acts (P12-2b, ADR-055) and the package and invite acts (P12-2c, ADR-056) are listed so that a rename in
-// the catalogue fails here, not on the screen.
+// logistics acts (P12-2b, ADR-055), the package and invite acts (P12-2c, ADR-056) and the legal review and authority
+// acts (P12-3a, ADR-057) are listed so that a rename in the catalogue fails here, not on the screen.
 import { describe, expect, it } from "vitest";
 import { createTranslator, messagesFor, type Locale } from "@cdf/i18n";
 import { confirmation, type ConfirmAct } from "./confirmations";
@@ -45,6 +45,14 @@ const MEETING_ACTS: ConfirmAct[] = [
   "returnPackageToCommittee",
   "resolveConflictTaint",
   "inviteToMeeting",
+  // Legal review and the authority's decision (P12-3a, ADR-057).
+  "requestLegalReview",
+  "cancelLegalReviewRequest",
+  "giveLegalOpinion",
+  "giveSupersedingLegalOpinion",
+  "submitToAuthority",
+  "recordAuthorityDecision",
+  "approveRestrictedLegalReview",
 ];
 
 describe("confirmations", () => {
@@ -81,6 +89,8 @@ describe("confirmations", () => {
       // P12-2c: a package's vote tells the members who may cast it; an invited account is told it is invited.
       "openPackageVote",
       "inviteToMeeting",
+      // P12-3a: the reviewer of a new request is told it is assigned to them (1920, legal_review_request_notify).
+      "requestLegalReview",
     ]) {
       expect(confirmation(t, act as ConfirmAct).notified, act).not.toMatch(/^No one/);
     }
@@ -92,6 +102,13 @@ describe("confirmations", () => {
       "recordPackageAdoption",
       "returnPackageToCommittee",
       "resolveConflictTaint",
+      // Nor do the legal review and authority commands but the request (1920 notifies only a new request).
+      "cancelLegalReviewRequest",
+      "giveLegalOpinion",
+      "giveSupersedingLegalOpinion",
+      "submitToAuthority",
+      "recordAuthorityDecision",
+      "approveRestrictedLegalReview",
     ] as ConfirmAct[]) {
       expect(confirmation(t, act).notified, act).toMatch(/^No one/);
     }
@@ -105,5 +122,17 @@ describe("confirmations", () => {
     expect(confirmation(t, "castVote").tone).toBe("primary");
     expect(confirmation(t, "cancelMeeting").tone).toBeUndefined();
     expect(confirmation(t, "cancelMeeting").cancelLabel).toBe("Keep meeting");
+    // Cancelling a request is not shown as moving work forward, and its dialog names what is kept.
+    expect(confirmation(t, "cancelLegalReviewRequest").tone).toBeUndefined();
+    expect(confirmation(t, "cancelLegalReviewRequest").cancelLabel).toBe("Keep the request");
+    for (const act of [
+      "requestLegalReview",
+      "giveLegalOpinion",
+      "giveSupersedingLegalOpinion",
+      "submitToAuthority",
+      "recordAuthorityDecision",
+      "approveRestrictedLegalReview",
+    ] as ConfirmAct[])
+      expect(confirmation(t, act).tone, act).toBe("primary");
   });
 });

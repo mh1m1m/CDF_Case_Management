@@ -50,3 +50,10 @@ export type {
   CommitteeProceedingsGateway,
   CommitteeProceedingsService,
 } from "./committee-proceedings";
+export { createLegalReviewsService } from "./legal-reviews";
+export type {
+  LegalReviewChoicesResult,
+  LegalReviewsDeps,
+  LegalReviewsGateway,
+  LegalReviewsService,
+} from "./legal-reviews";

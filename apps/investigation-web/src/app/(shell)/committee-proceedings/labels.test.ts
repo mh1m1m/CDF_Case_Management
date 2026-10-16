@@ -5,6 +5,7 @@
 // owner answers); an allegation is a position and a category, never its text.
 import { describe, expect, it } from "vitest";
 import {
+  ALLEGATION_STATUSES,
   CASE_PERSON_ROLES,
   COMMITTEE_ITEM_RESULTS,
   FINDING_PROCEEDING_ROLES,
@@ -15,6 +16,7 @@ import {
   RECOMMENDATION_PACKAGE_STATUSES,
   TAINT_RESOLUTIONS,
   VOTE_GRANULARITIES,
+  isClosedAllegation,
   type SanctionCatalogueChoice,
   type SubjectRef,
 } from "@cdf/contracts";
@@ -62,6 +64,24 @@ describe("the proceeding's codes", () => {
         for (const [code, text] of Object.entries(messages))
           expect(typeof text === "string" && text.trim().length > 0, `${name}.${code}`).toBe(true);
       }
+    });
+  }
+});
+
+describe("a closed allegation (CDF-238)", () => {
+  it("withdrawn and superseded by a correction are closed; every other status is open", () => {
+    expect(ALLEGATION_STATUSES.filter(isClosedAllegation)).toEqual(["WITHDRAWN", "SUPERSEDED"]);
+    expect(isClosedAllegation("OPEN")).toBe(false);
+    // A status a newer database adds is not closed until this version knows it: the database still refuses.
+    expect(isClosedAllegation("SOMETHING_NEW")).toBe(false);
+  });
+
+  for (const locale of LOCALES) {
+    it(`each allegation status has its label on the case's Allegations tab, and only those, in ${locale}`, () => {
+      const labels = messagesFor(locale).caseWorkspace.allegationStatus;
+      expect(sorted(Object.keys(labels))).toEqual(sorted(ALLEGATION_STATUSES));
+      for (const [code, text] of Object.entries(labels))
+        expect(typeof text === "string" && text.trim().length > 0, code).toBe(true);
     });
   }
 });

@@ -45,6 +45,9 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
     case "meetings":
     case "minutes":
       return "COMMITTEE";
+    // A legal review assigned to the caller is their own work (P12-3a): it comes to them from My Work.
+    case "legal-reviews":
+      return "MY_WORK";
     default:
       return undefined;
   }
@@ -55,14 +58,19 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
  * a My Work row's target (2045); the inbox and My Work link to them only once the page has shipped, so nobody lands
  * on a missing page. The purpose routes of Phase 12 join this list as each one ships, under the root
  * notify.deep_link writes, and that page re-checks access in the database: meetings and minutes since P12-2a
- * (ADR-054), committees since P12-2b (ADR-055); legal reviews, my defence, grievances, exports, actions, continuity
- * imports, referrals and preliminary reviews to come.
+ * (ADR-054), committees since P12-2b (ADR-055), legal reviews since P12-3a (ADR-057); my defence, grievances,
+ * exports, actions, continuity imports, referrals and preliminary reviews to come.
  */
-export const LIVE_PURPOSE_ROOTS: readonly string[] = ["/committees", "/meetings", "/minutes"];
+export const LIVE_PURPOSE_ROOTS: readonly string[] = [
+  "/committees",
+  "/meetings",
+  "/minutes",
+  "/legal-reviews",
+];
 
 /**
  * The purpose page of each Phase 12 target (plan §3 routes; P12-2 to P12-6), by the root `notify.deep_link` writes.
- * A restricted-case approval of a recommendation package has no root yet: its card comes with P12-3.
+ * A restricted case's approval of a legal review is given from the case (P12-3a, below), not from a purpose root.
  */
 const PURPOSE_ROOT: Partial<Record<WorkTargetType, string>> = {
   REFERRAL: "/referrals",
@@ -110,6 +118,12 @@ export function itemHref(i: WorkItem, live: readonly string[] = LIVE_PURPOSE_ROO
       return i.category === "RETENTION_TO_ROUTE"
         ? `/records/${i.targetId}#route-retention`
         : `/records/${i.targetId}#retention`;
+    case "RECOMMENDATION_PACKAGE":
+      // P12-3a (ADR-057): the case owner, as the restricted case's authority, approves a legal review of the package
+      // from the case's Proceedings tab, which re-checks the approval in the database (api.legal_review_choices).
+      return i.code === "LEGAL_REVIEW" && onCase
+        ? `${onCase}/proceedings/legal-review-approval/${i.targetId}`
+        : null;
     default: {
       const root = PURPOSE_ROOT[i.targetType];
       return root && live.includes(root) ? `${root}/${i.targetId}` : null;

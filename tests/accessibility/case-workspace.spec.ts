@@ -40,15 +40,18 @@ async function openOverflow(page: Page, width: number) {
 }
 
 for (const locale of ["ar", "en"] as const) {
-  test(`${locale}: every case tab passes axe and reflows down to 320 px`, async ({ browser }) => {
-    const page = await signIn(browser, "lead@example.test", locale);
-    await page.goto("/cases");
-    await page.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
-    await page.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
-    const caseUrl = page.url();
-    // An evidence item's own page (UX-075) is checked with the tabs.
-    const itemPath = (await openEvidenceItem(page, caseUrl)).slice(caseUrl.length);
-    for (const width of WIDTHS) {
+  // One test per width: the three widths in one test ran past the 60 s limit as the case's pages grew. Every check
+  // is kept.
+  for (const width of WIDTHS) {
+    const checks = width === 320 ? "reflows" : "passes axe and reflows";
+    test(`${locale}: every case tab ${checks} at ${width} px`, async ({ browser }) => {
+      const page = await signIn(browser, "lead@example.test", locale);
+      await page.goto("/cases");
+      await page.locator('[data-testid^="case-CDF-DEMO-"][data-testid$="-0001"]').click();
+      await page.waitForURL(/\/cases\/[0-9a-f-]{36}$/);
+      const caseUrl = page.url();
+      // An evidence item's own page (UX-075) is checked with the tabs.
+      const itemPath = (await openEvidenceItem(page, caseUrl)).slice(caseUrl.length);
       await page.setViewportSize({ width, height: 900 });
       for (const tab of [...TABS, itemPath]) {
         await page.goto(`${caseUrl}${tab}`);
@@ -73,9 +76,9 @@ for (const locale of ["ar", "en"] as const) {
         () => document.documentElement.scrollWidth > window.innerWidth,
       );
       expect(formsOverflow, `horizontal overflow on the open forms tab at ${width}px`).toBe(false);
-    }
-    await page.context().close();
-  });
+      await page.context().close();
+    });
+  }
 
   test(`${locale}: the overview answers where the case is, since when, by when and what next`, async ({
     browser,
