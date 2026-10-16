@@ -43,7 +43,8 @@ async function denials(s: OwnerScenario, requestId: string): Promise<string[]> {
   await s.asOwner();
   const rows = await s.tx<{ command: string; outcome: string }[]>`
     select metadata->>'command' as command, metadata->>'outcome' as outcome from audit.audit_event
-    where action = 'COMMAND_DENIED' and request_id = ${requestId}`;
+    where action = 'COMMAND_DENIED' and request_id = ${requestId}
+    order by seq`;
   return rows.map((r) => `${r.command}:${r.outcome}`);
 }
 
