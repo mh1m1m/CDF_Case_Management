@@ -5,7 +5,7 @@
 // kept. Every step runs through the api.* commands as `authenticated`; the owner connection is used only to read the
 // case's clock, the outbox and the audit ledger, and to probe the triggers.
 import { beforeAll, describe, expect, it } from "vitest";
-import { BCP_TEMPLATE } from "@cdf/contracts";
+import { BCP_TEMPLATE_VERSIONS, BCP_TEMPLATES, type BcpSheet } from "@cdf/contracts";
 import { bcpCellOk, bcpNormalize, bcpSheet } from "@cdf/validation";
 import {
   USERS,
@@ -1112,11 +1112,21 @@ describe("BCP import: the application applies the database's column rules (§45)
   it("normalizes and judges every kind of cell exactly as exchange.bcp_cell_ok does", async () => {
     const U = "6F9619FF-8B86-4011-B42D-00CF4FC964FF";
     const samples: [string, string, string][] = [
-      ...["BCP-1", "bcp-1", " BCP-2 ", "BCP-1000", "BCP-", "BCP-X", ""].map((v): [string, string, string] => [
-        "01_CONTROL",
-        "TEMPLATE_VERSION",
-        v,
-      ]),
+      // Since 2110 a VERSION cell may also name a committee template (BCP-C<n>).
+      ...[
+        "BCP-1",
+        "bcp-1",
+        " BCP-2 ",
+        "BCP-1000",
+        "BCP-",
+        "BCP-X",
+        "",
+        "BCP-C1",
+        "bcp-c1",
+        "BCP-C",
+        "BCP-CC1",
+        "BCP-C1000",
+      ].map((v): [string, string, string] => ["01_CONTROL", "TEMPLATE_VERSION", v]),
       ...[
         "BCP-S1",
         "bcp-s1",
@@ -1214,12 +1224,20 @@ describe("BCP import: the application applies the database's column rules (§45)
 });
 
 describe("BCP import: integrity", () => {
-  it("keeps the template equal to @cdf/contracts", async () => {
+  // BCP-1 (1960) and the committee workbook BCP-C1 (migration 2110, ADR-047), and no other template.
+  it("keeps the templates equal to @cdf/contracts", async () => {
+    const versions = await admin<{ v: string }[]>`
+      select distinct template_version as v from exchange.bcp_template_sheet order by 1`;
+    expect(versions.map((x) => x.v)).toEqual([...BCP_TEMPLATE_VERSIONS].sort());
+    for (const version of BCP_TEMPLATE_VERSIONS) await templateEqual(version, BCP_TEMPLATES[version]);
+  });
+
+  async function templateEqual(version: string, template: readonly BcpSheet[]) {
     const sheets = await admin<{ sheet_code: string; sheet_kind: string; command: string | null }[]>`
-      select sheet_code, sheet_kind, command from exchange.bcp_template_sheet where template_version = 'BCP-1'
+      select sheet_code, sheet_kind, command from exchange.bcp_template_sheet where template_version = ${version}
       order by position`;
     expect(sheets.map((x) => [x.sheet_code, x.sheet_kind, x.command])).toEqual(
-      BCP_TEMPLATE.map((x) => [x.code, x.kind, x.command ?? null]),
+      template.map((x) => [x.code, x.kind, x.command ?? null]),
     );
     const columns = await admin<
       {
@@ -1233,7 +1251,7 @@ describe("BCP import: integrity", () => {
       }[]
     >`
       select sheet_code, column_code, kind, required, min_length, max_length, allowed from exchange.bcp_template_column
-      where template_version = 'BCP-1' order by sheet_code, position`;
+      where template_version = ${version} order by sheet_code collate "C", position`;
     expect(
       columns.map((c) => [
         c.sheet_code,
@@ -1245,8 +1263,8 @@ describe("BCP import: integrity", () => {
         c.allowed,
       ]),
     ).toEqual(
-      [...BCP_TEMPLATE]
-        .sort((a, b) => a.code.localeCompare(b.code))
+      [...template]
+        .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))
         .flatMap((sh) =>
           sh.columns.map((c) => [
             sh.code,
@@ -1259,7 +1277,7 @@ describe("BCP import: integrity", () => {
           ]),
         ),
     );
-  });
+  }
 
   it("gives no application role a write path, and the owner cannot rewrite history", async () => {
     const grants = await admin<{ table_name: string; privilege_type: string }[]>`
@@ -1525,18 +1543,24 @@ describe("ambiguity register: what never happens offline (CDF-205, ADR-034)", ()
   });
 
   it("T-AMB-120: no template sheet maps to identity, legal hold, disposition, export or restricted-approval commands", async () => {
-    const sheets = await admin<{ sheet_code: string; command: string | null }[]>`
-      select sheet_code, command from exchange.bcp_template_sheet where command is not null order by position`;
-    expect(sheets.map((x) => [x.sheet_code, x.command])).toEqual([
-      ["05_SUBJECTS", "add_case_subject"],
-      ["06_ALLEGATIONS", "add_allegation"],
-      ["18_EMPLOYEE_NOTICE", "record_defence_response"],
-      ["21_CORRECTIVE_ACTIONS", "open_corrective_action"],
+    const sheets = await admin<{ template_version: string; sheet_code: string; command: string | null }[]>`
+      select template_version, sheet_code, command from exchange.bcp_template_sheet where command is not null
+      order by template_version collate "C", position`;
+    expect(sheets.map((x) => [x.template_version, x.sheet_code, x.command])).toEqual([
+      ["BCP-1", "05_SUBJECTS", "add_case_subject"],
+      ["BCP-1", "06_ALLEGATIONS", "add_allegation"],
+      ["BCP-1", "18_EMPLOYEE_NOTICE", "record_defence_response"],
+      ["BCP-1", "21_CORRECTIVE_ACTIONS", "open_corrective_action"],
+      // Migration 2110 (ADR-047): the committee workbook records a meeting already held and raises a paper-noted
+      // conflict; attendance, votes and documents stay recorded only (F3).
+      ["BCP-C1", "09_MEETINGS", "record_offline_meeting"],
+      ["BCP-C1", "11_CONFLICTS", "raise_meeting_conflict"],
     ]);
     const FORBIDDEN =
       /(identity|reveal|legal_hold|disposition|destroy|export|approve_restricted|restricted_.*approval|grant_case_access|break_glass)/i;
     expect(sheets.filter((x) => FORBIDDEN.test(x.command!))).toEqual([]);
-    // The executor calls exactly those four commands and refuses every other sheet.
+    // The executor calls exactly those commands (a held meeting through its own helper,
+    // exchange.bcp_record_offline_meeting, never api.schedule_meeting) and refuses every other sheet.
     const [body] = await admin<{ src: string }[]>`
       select pg_get_functiondef('exchange.bcp_execute_row'::regproc) as src`;
     const called = [...body!.src.matchAll(/api\.([a-z_]+)\(/g)]
@@ -1546,6 +1570,7 @@ describe("ambiguity register: what never happens offline (CDF-205, ADR-034)", ()
       "add_allegation",
       "add_case_subject",
       "open_corrective_action",
+      "raise_meeting_conflict",
       "record_defence_response",
     ]);
     expect(body!.src).toContain("SHEET_NOT_IMPORTABLE");
@@ -1751,6 +1776,186 @@ describe("a lost workbook is revoked (AMB-205, migration 2100)", () => {
       await s.expectError(
         "exchange.bcp_workbook_revocation is append-only",
         (tx) => tx`delete from exchange.bcp_workbook_revocation`,
+      );
+    });
+  });
+});
+
+describe("restore notices (AMB-210, migration 2110)", () => {
+  interface Sent {
+    recipient_id: string;
+    template_code: string;
+    channel: string;
+    restored_row_id: string | null;
+    original_event_at: Date | null;
+  }
+  const sent = (s: Scenario, object: string) =>
+    s.tx<
+      Sent[]
+    >`select recipient_id, template_code, channel, restored_row_id, original_event_at from notify.outbox
+                 where object_id = ${object} order by template_code, channel`;
+
+  it("T-AMB-210: an import's mandatory notices go out now and name the row and the original time; optional ones are skipped; the marker is believed only from the transaction applying the importer's own approved row (R3)", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      await s.as("platformAdmin");
+      await s.tx`select api.grant_role(${USERS.employeeB}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner')`;
+      const f = await draftPackage(s, ic, caseB);
+      await s.as("committeeSecretary");
+      await s.tx`select api.withdraw_recommendation_item(${f.sanction}, ${REASON})`;
+      await voteOnPackage(s, f);
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${f.pkg})`;
+      await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(),
+        'Chief Executive (synthetic)', 'MEMO-DEMO-0101', null, ${REASON})`;
+      const action = (n: number, key: string) =>
+        row("21_CORRECTIVE_ACTIONS", n, key, t.created, {
+          RECOMMENDATION_ITEM_ID: f.corrective,
+          TITLE: `Synthetic: second approver on payments (${key})`,
+          DESCRIPTION: "Synthetic: agreed with the owner during the outage.",
+          OWNER: EMAIL.employeeB!,
+          DUE_DATE: t.tomorrow.slice(0, 10),
+        });
+      const batch = await importAll(s, control(t, caseB), [action(3, "BCP-N1")]);
+      await s.asOwner();
+      const [imported] = await s.tx<{ row_id: string; object_id: string }[]>`
+        select row_id, object_id from exchange.bcp_provenance where batch_id = ${batch}`;
+      // CORRECTIVE_ACTION_ASSIGNED is mandatory: sent now, naming the row and the offline time.
+      const assigned = await sent(s, imported!.object_id);
+      expect(assigned.map((n) => [n.template_code, n.channel])).toEqual([
+        ["CORRECTIVE_ACTION_ASSIGNED", "EMAIL"],
+        ["CORRECTIVE_ACTION_ASSIGNED", "IN_APP"],
+      ]);
+      for (const n of assigned) {
+        expect(n.recipient_id).toBe(USERS.employeeB);
+        expect(n.restored_row_id).toBe(imported!.row_id);
+        expect(n.original_event_at!.toISOString()).toBe(new Date(t.created).toISOString());
+      }
+      const [a] = await s.tx<{ m: Record<string, unknown> }[]>`
+        select metadata as m from audit.audit_event where action = 'BCP_ROW_IMPORTED' and metadata ->> 'batch_id' = ${batch}`;
+      expect(a!.m.restore_notices).toBe(2);
+      // The batch's own notices are live ones.
+      const own = await s.tx<{ n: number }[]>`
+        select count(*)::int as n from notify.outbox where object_id = ${batch} and restored_row_id is not null`;
+      expect(own[0]!.n).toBe(0);
+      expect(await notified(s, "BCP_IMPORT_DECIDED", batch)).toEqual(["caseManager"]);
+      // The recipient reads the reference on their own in-app row.
+      await s.as("employeeB");
+      const [mine] = await s.tx<{ restored_row_id: string; original_event_at: Date }[]>`
+        select restored_row_id, original_event_at from notify.outbox where object_id = ${imported!.object_id}`;
+      expect(mine!.restored_row_id).toBe(imported!.row_id);
+      // Both are facts of the notice.
+      await s.asOwner();
+      await s.expectError(
+        "notify.outbox facts are immutable",
+        (tx) =>
+          tx`update notify.outbox set original_event_at = now() where object_id = ${imported!.object_id}`,
+      );
+
+      // R3 (AGENT-09): the real importer names their own APPROVED row of a second batch, not yet applied, and then
+      // runs ordinary commands. The row carries no stamp from this transaction, so the notices are live ones: the
+      // optional one is sent and neither names a row.
+      await s.as("platformAdmin");
+      await s.tx`select api.grant_role(${USERS.employee}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner')`;
+      const second = await stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: "BCP-DEMO-0002-WB9" }), [
+        action(3, "BCP-N2"),
+      ]);
+      expect(await submit(s, second)).toBe("SUBMITTED");
+      expect(await decide(s, "grcDirector", second)).toBe("APPROVED");
+      await s.asOwner();
+      const [r2] = await s.tx<{ id: string; applying_xact: string | null }[]>`
+        select id, applying_xact::text from exchange.bcp_import_row where batch_id = ${second}`;
+      expect(r2!.applying_xact).toBeNull();
+      const marked = async (actor: UserKey, marker: string, run: () => Promise<unknown>) => {
+        await s.as(actor);
+        await s.tx`select set_config('cdf.bcp_restore_row', ${marker}, true)`;
+        await run();
+        await s.tx`select set_config('cdf.bcp_restore_row', '', true)`;
+        await s.asOwner();
+      };
+      await marked(
+        "caseManager",
+        r2!.id,
+        () =>
+          s.tx`select api.change_corrective_action_due_date(${imported!.object_id}, ${t.tomorrow.slice(0, 10)}::date + 7, ${WHY})`,
+      );
+      await marked(
+        "caseManager",
+        r2!.id,
+        () =>
+          s.tx`select api.assign_corrective_action_owner(${imported!.object_id}, ${USERS.employee}, ${WHY})`,
+      );
+      const live = await s.tx<
+        { template_code: string; recipient_id: string; restored_row_id: string | null }[]
+      >`
+        select template_code, recipient_id, restored_row_id from notify.outbox
+        where object_id = ${imported!.object_id} and channel = 'IN_APP'
+          and template_code in ('CORRECTIVE_ACTION_CHANGED', 'CORRECTIVE_ACTION_ASSIGNED') and restored_row_id is null
+        order by template_code`;
+      expect(live).toEqual([
+        { template_code: "CORRECTIVE_ACTION_ASSIGNED", recipient_id: USERS.employee, restored_row_id: null },
+        { template_code: "CORRECTIVE_ACTION_CHANGED", recipient_id: USERS.employeeB, restored_row_id: null },
+      ]);
+
+      // Probe of notify.enqueue (owner connection with a caller's claims): only the stamp of this transaction makes
+      // the named row a restore context, and only for its importer while the batch is approved.
+      const probe = async (actor: UserKey, marker: string, template: string, key: string) => {
+        await s.tx`select set_config('request.jwt.claims', ${JSON.stringify({ sub: USERS[actor], role: "authenticated" })}, true),
+                          set_config('cdf.bcp_restore_row', ${marker}, true)`;
+        await s.tx`select notify.enqueue(${template}, ${USERS.employeeB}, ${imported!.object_id}, null, ${key})`;
+        await s.tx`select set_config('cdf.bcp_restore_row', '', true), set_config('request.jwt.claims', '', true)`;
+        return s.tx<{ restored_row_id: string | null }[]>`
+          select restored_row_id from notify.outbox where dedupe_key like ${key + ":%"} and channel = 'IN_APP'`;
+      };
+      // Unstamped, or stamped by another transaction: ignored.
+      expect(await probe("caseManager", r2!.id, "CORRECTIVE_ACTION_RETURNED", "probe-1")).toEqual([
+        { restored_row_id: null },
+      ]);
+      await s.tx`alter table exchange.bcp_import_row disable trigger bcp_import_row_protect`;
+      await s.tx`update exchange.bcp_import_row set applying_xact = '1'::xid8 where id = ${r2!.id}`;
+      await s.tx`alter table exchange.bcp_import_row enable trigger bcp_import_row_protect`;
+      expect(await probe("caseManager", r2!.id, "CORRECTIVE_ACTION_RETURNED", "probe-2")).toEqual([
+        { restored_row_id: null },
+      ]);
+      // The stamp is written once, only by the applying transaction while the batch is approved.
+      await s.expectError(
+        "staged continuity row",
+        (tx) =>
+          tx`update exchange.bcp_import_row set applying_xact = pg_current_xact_id() where id = ${r2!.id}`,
+      );
+      await s.expectError(
+        "staged continuity row",
+        (tx) =>
+          tx`update exchange.bcp_import_row set applying_xact = pg_current_xact_id() where id = ${imported!.row_id}`,
+      );
+      await s.tx`alter table exchange.bcp_import_row disable trigger bcp_import_row_protect`;
+      await s.tx`update exchange.bcp_import_row set applying_xact = null where id = ${r2!.id}`;
+      await s.tx`alter table exchange.bcp_import_row enable trigger bcp_import_row_protect`;
+      // Stamped by this transaction (as exchange.bcp_run does): the importer's optional notice is skipped and the
+      // mandatory one names the row.
+      await s.tx`update exchange.bcp_import_row set applying_xact = pg_current_xact_id() where id = ${r2!.id}`;
+      expect(await probe("caseManager", r2!.id, "CORRECTIVE_ACTION_CHANGED", "probe-3")).toEqual([]);
+      expect(await probe("caseManager", r2!.id, "CORRECTIVE_ACTION_RETURNED", "probe-4")).toEqual([
+        { restored_row_id: r2!.id },
+      ]);
+      // Anyone else, a row of an imported batch, or a name that is not a uuid: ignored.
+      expect(await probe("grcDirector", r2!.id, "CORRECTIVE_ACTION_CHANGED", "probe-5")).toEqual([
+        { restored_row_id: null },
+      ]);
+      expect(await probe("caseManager", imported!.row_id, "CORRECTIVE_ACTION_CHANGED", "probe-6")).toEqual([
+        { restored_row_id: null },
+      ]);
+      expect(await probe("caseManager", "not-a-row", "CORRECTIVE_ACTION_CHANGED", "probe-7")).toEqual([
+        { restored_row_id: null },
+      ]);
+      // The applied row keeps the stamp of the transaction that applied it.
+      const [stamp] = await s.tx<{ same: boolean }[]>`
+        select applying_xact = pg_current_xact_id() as same from exchange.bcp_import_row where id = ${imported!.row_id}`;
+      expect(stamp!.same).toBe(true);
+      // The setting has one value.
+      await s.expectError(
+        'new row for relation "setting" violates check constraint',
+        (tx) => tx`update config.setting set value = 'ALL' where key = 'BCP_RESTORE_NOTIFY'`,
       );
     });
   });

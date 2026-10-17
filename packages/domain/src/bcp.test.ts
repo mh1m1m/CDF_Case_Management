@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BCP_MAX_ROWS, BCP_TEMPLATE, type BcpWorkbook, type BcpWorkbookRow } from "@cdf/contracts";
+import {
+  BCP_COMMITTEE_TEMPLATE,
+  BCP_MAX_ROWS,
+  BCP_TEMPLATE,
+  type BcpWorkbook,
+  type BcpWorkbookRow,
+} from "@cdf/contracts";
 import { readBcpWorkbook } from "./bcp";
 
 const cells = (values: readonly string[], formula = false) =>
@@ -190,5 +196,73 @@ describe("continuity workbook template check (ADR-034 D1, D4)", () => {
       });
     expect(code(many(BCP_MAX_ROWS))).toBe("OK");
     expect(code(many(BCP_MAX_ROWS + 1))).toBe("TOO_MANY_ROWS");
+  });
+});
+
+describe("the committee workbook BCP-C1 (migration 2110, ADR-047)", () => {
+  const C_CONTROL = [
+    "BCP-C1",
+    "BCP-WB-C1",
+    "00000000-0000-4000-8000-0000000000c1",
+    "IC",
+    "2026-10-01T08:00:00Z",
+    "2026-10-02T08:00:00Z",
+    "secretary@example.test",
+  ];
+  const MEETING = [
+    "BCP-M1",
+    "",
+    "2026-10-01T10:00:00Z",
+    "secretary@example.test",
+    "DELIBERATION",
+    "IN_PERSON",
+    "Room 1 (synthetic)",
+    "",
+    "2026-10-01T10:00:00Z",
+    "2026-10-01T11:00:00Z",
+    "PAPER-MIN-1",
+    "Synthetic: held during the outage.",
+  ];
+
+  function committeeWorkbook(control = C_CONTROL, data: Record<string, BcpWorkbookRow[]> = {}): BcpWorkbook {
+    return {
+      sheets: BCP_COMMITTEE_TEMPLATE.map((sheet) => {
+        if (sheet.kind === "README")
+          return { name: sheet.code, rows: [{ row: 1, cells: cells(["BCP-C1"]) }] };
+        const codes = sheet.columns.map((c) => c.code);
+        const rows: BcpWorkbookRow[] = [
+          { row: 1, cells: cells(codes) },
+          { row: 2, cells: cells(codes.map((c) => `${c} label`)) },
+        ];
+        if (sheet.kind === "CONTROL") rows.push({ row: 3, cells: cells(control) });
+        return { name: sheet.code, rows: [...rows, ...(data[sheet.code] ?? [])] };
+      }),
+    };
+  }
+
+  it("reads only when the committee template is the one expected", () => {
+    const wb = committeeWorkbook(C_CONTROL, { "09_MEETINGS": [{ row: 3, cells: cells(MEETING) }] });
+    const r = readBcpWorkbook(wb, "BCP-C1");
+    expect(r.ok && r.control).toEqual({
+      TEMPLATE_VERSION: "BCP-C1",
+      WORKBOOK_ID: "BCP-WB-C1",
+      COMMITTEE_PROCEEDING_ID: "00000000-0000-4000-8000-0000000000c1",
+      COMMITTEE_CODE: "IC",
+      OFFLINE_FROM: "2026-10-01T08:00:00Z",
+      OFFLINE_TO: "2026-10-02T08:00:00Z",
+      PREPARED_BY: "secretary@example.test",
+    });
+    expect(r.ok && r.rows.map((x) => [x.sheet, x.row_number])).toEqual([["09_MEETINGS", 3]]);
+    // The case upload reads BCP-1 only: a committee workbook is refused there (its control row has other columns),
+    // and the reverse.
+    expect(code(wb)).toBe("HEADER:01_CONTROL");
+    expect(readBcpWorkbook(withSubject(), "BCP-C1")).toEqual({ ok: false, code: "UNEXPECTED_SHEET" });
+  });
+
+  it("refuses a committee workbook whose control row names another template", () => {
+    const wb = committeeWorkbook(["BCP-1", ...C_CONTROL.slice(1)], {
+      "09_MEETINGS": [{ row: 3, cells: cells(MEETING) }],
+    });
+    expect(readBcpWorkbook(wb, "BCP-C1")).toEqual({ ok: false, code: "TEMPLATE_VERSION" });
   });
 });

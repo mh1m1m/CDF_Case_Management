@@ -1,12 +1,14 @@
-// Continuity workbook (ADR-034 D1, D4): checks that a workbook the reader returned is the BCP-1 template, and turns
-// its control row and data rows into what api.stage_bcp_import takes. Pure: no I/O, no column rules (the database
-// stages a row that breaks one as INVALID, naming the column).
+// Continuity workbook (ADR-034 D1, D4): checks that a workbook the reader returned is the template the caller expects
+// (BCP-1 for a case; BCP-C1 for a committee proceeding, migration 2110, ADR-047), and turns its control row and data
+// rows into what api.stage_bcp_import takes. Pure: no I/O, no column rules (the database stages a row that breaks one
+// as INVALID, naming the column).
 import {
   BCP_FIRST_DATA_ROW,
   BCP_MAX_ROWS,
-  BCP_TEMPLATE,
   BCP_TEMPLATE_VERSION,
+  BCP_TEMPLATES,
   type BcpStagedRowInput,
+  type BcpTemplateVersion,
   type BcpWorkbook,
   type BcpWorkbookRow,
 } from "@cdf/contracts";
@@ -33,14 +35,19 @@ function cellsOf(row: BcpWorkbookRow, codes: readonly string[]): Record<string, 
   return cells;
 }
 
-export function readBcpWorkbook(workbook: BcpWorkbook): BcpWorkbookContent {
+/** Reads a workbook as the named template (BCP-1 unless another is named); any other template is refused. */
+export function readBcpWorkbook(
+  workbook: BcpWorkbook,
+  version: BcpTemplateVersion = BCP_TEMPLATE_VERSION,
+): BcpWorkbookContent {
+  const sheets = BCP_TEMPLATES[version];
   const byName = new Map(workbook.sheets.map((s) => [s.name, s]));
   for (const sheet of workbook.sheets) {
-    if (!BCP_TEMPLATE.some((t) => t.code === sheet.name)) return fail("UNEXPECTED_SHEET");
+    if (!sheets.some((t) => t.code === sheet.name)) return fail("UNEXPECTED_SHEET");
   }
   const control: Record<string, string> = {};
   const rows: BcpStagedRowInput[] = [];
-  for (const template of BCP_TEMPLATE) {
+  for (const template of sheets) {
     const sheet = byName.get(template.code);
     if (!sheet) return fail(`MISSING_SHEET:${template.code}`);
     if (template.kind === "README" || template.kind === "PLATFORM_LOG") continue;
@@ -68,8 +75,7 @@ export function readBcpWorkbook(workbook: BcpWorkbook): BcpWorkbookContent {
       if (rows.length > BCP_MAX_ROWS) return fail("TOO_MANY_ROWS");
     }
   }
-  if (control.TEMPLATE_VERSION?.trim().toUpperCase() !== BCP_TEMPLATE_VERSION)
-    return fail("TEMPLATE_VERSION");
+  if (control.TEMPLATE_VERSION?.trim().toUpperCase() !== version) return fail("TEMPLATE_VERSION");
   if (rows.length === 0) return fail("NO_ROWS");
   return { ok: true, control, rows };
 }
