@@ -951,12 +951,15 @@ describe("meeting notifications: ids only, to exactly who may act (ADR-025, DEC-
         "id",
         "object_id",
         "object_type",
+        // Migration 2110 (R3): set only on a notice restored from a continuity workbook row; null here.
+        "original_event_at",
         "read_at",
         "recipient_id",
+        "restored_row_id",
         "status",
         "template_code",
       ]);
-      expect(r.row).toMatchObject({ object_type: "MEETING" });
+      expect(r.row).toMatchObject({ object_type: "MEETING", original_event_at: null, restored_row_id: null });
       expect(r.row.deep_link).toBe(`/meetings/${r.row.object_id}`);
       expect(r.row.dedupe_key).toBe(`${dedupe}:${r.recipient_id}:${r.channel}`);
       const text = JSON.stringify(r.row);

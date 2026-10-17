@@ -211,12 +211,20 @@ async function told(
       "id",
       "object_id",
       "object_type",
+      // Migration 2110 (AMB-210): null on a live notice; a restore notice names its workbook row and the original time.
+      "original_event_at",
       "read_at",
       "recipient_id",
+      "restored_row_id",
       "status",
       "template_code",
     ]);
-    expect(r.row).toMatchObject({ object_type: objectType, deep_link: `${path}${objectId}` });
+    expect(r.row).toMatchObject({
+      object_type: objectType,
+      deep_link: `${path}${objectId}`,
+      restored_row_id: null,
+      original_event_at: null,
+    });
     expect(r.row.dedupe_key).toMatch(new RegExp(`^${prefix}:[0-9a-f-]{36}:${r.recipient_id}:${r.channel}$`));
     const text = JSON.stringify(r.row);
     for (const marker of [
@@ -1581,6 +1589,8 @@ const BATCH: Model = {
     "cancelled_at",
     "capabilities",
     "case",
+    // Migration 2110 (ADR-047): the proceeding of a committee workbook; null for a case workbook.
+    "committee_proceeding_id",
     "counts",
     "created_at",
     "current_hash",
@@ -1591,12 +1601,16 @@ const BATCH: Model = {
     "imported_by",
     "offline_from",
     "offline_to",
+    // Migration 2110 (ADR-047): a committee workbook waits for its official record (owner decision on AMB-201).
+    "official_record_required",
     "preview_clean",
     "preview_hash",
     "previewed_at",
     "prepared_by",
     "row_version",
     "rows",
+    // Migration 2110 (ADR-047): CASE or COMMITTEE_PROCEEDING.
+    "scope",
     "status",
     "submitted_at",
     "submitted_hash",

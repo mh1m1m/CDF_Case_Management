@@ -1,7 +1,8 @@
 /**
- * Business continuity workbook (ADR-027, ADR-034, migration 1960, owner Q&A Q100).
- * The template is reference data: exchange.bcp_template_sheet and exchange.bcp_template_column hold the same list,
- * and a database test keeps the two equal.
+ * Business continuity workbook (ADR-027, ADR-034, migration 1960, owner Q&A Q100; the committee workbook BCP-C1,
+ * migration 2110, ADR-047).
+ * The templates are reference data: exchange.bcp_template_sheet and exchange.bcp_template_column hold the same lists,
+ * and a database test keeps them equal.
  */
 
 export const BCP_TEMPLATE_VERSION = "BCP-1" as const;
@@ -29,6 +30,9 @@ export const BCP_IMPORT_COMMANDS = {
   add_allegation: "allegation",
   record_defence_response: "defence_response",
   open_corrective_action: "corrective_action",
+  // BCP-C1 (migration 2110, ADR-047): a meeting held offline, and a conflict noted on paper raised by the secretary.
+  record_offline_meeting: "meeting",
+  raise_meeting_conflict: "meeting_conflict_concern",
 } as const;
 export type BcpImportCommand = keyof typeof BCP_IMPORT_COMMANDS;
 
@@ -46,7 +50,7 @@ export interface BcpColumn {
 export interface BcpSheet {
   code: string;
   kind: BcpSheetKind;
-  /** Set on the sheets BCP-1 imports; every other DATA sheet is recorded only. */
+  /** Set on the sheets the template imports; every other DATA sheet is recorded only. */
   command?: BcpImportCommand;
   columns: readonly BcpColumn[];
 }
@@ -67,7 +71,7 @@ const ROW_IDENTITY: readonly BcpColumn[] = [
   { code: "RECORDED_OFFLINE_BY", kind: "EMAIL", required: true, maxLength: 254 },
 ];
 
-/** A sheet BCP-1 records but does not import: what happened, and the platform object it concerns. */
+/** A sheet a template records but does not import: what happened, and the platform object it concerns. */
 const recorded = (code: string): BcpSheet => ({
   code,
   kind: "DATA",
@@ -192,6 +196,90 @@ export const BCP_TEMPLATE: readonly BcpSheet[] = [
   },
 ];
 
+/**
+ * The committee-proceeding workbook (migration 2110, ADR-047; AMB-201 without votes). One committee proceeding,
+ * imported by its committee secretary with a registry entry for that proceeding (DEC-F30); the control row names the
+ * proceeding and its committee, and the offline window is closed. 09_MEETINGS records a meeting already held inside
+ * the window; 11_CONFLICTS raises a conflict noted on paper, as the secretary. 10_ATTENDANCE, 12_VOTES and
+ * 22_DOCUMENT_INDEX are recorded only. A committee workbook is not submitted until its official signed record exists
+ * (owner decision on AMB-201; CONFLICT:OFFICIAL_RECORD_REQUIRED).
+ */
+export const BCP_COMMITTEE_TEMPLATE_VERSION = "BCP-C1" as const;
+
+export const BCP_COMMITTEE_TEMPLATE: readonly BcpSheet[] = [
+  { code: "00_README", kind: "README", columns: [] },
+  {
+    code: "01_CONTROL",
+    kind: "CONTROL",
+    columns: [
+      { code: "TEMPLATE_VERSION", kind: "VERSION", required: true, maxLength: 10 },
+      { code: "WORKBOOK_ID", kind: "ROW_KEY", required: true, maxLength: 64 },
+      { code: "COMMITTEE_PROCEEDING_ID", kind: "UUID", required: true, maxLength: 36 },
+      text("COMMITTEE_CODE", 2, 20),
+      { code: "OFFLINE_FROM", kind: "DATETIME", required: true, maxLength: 40 },
+      { code: "OFFLINE_TO", kind: "DATETIME", required: true, maxLength: 40 },
+      { code: "PREPARED_BY", kind: "EMAIL", required: true, maxLength: 254 },
+    ],
+  },
+  {
+    code: "09_MEETINGS",
+    kind: "DATA",
+    command: "record_offline_meeting",
+    columns: [
+      ...ROW_IDENTITY,
+      { code: "PURPOSE", kind: "ENUM", required: true, maxLength: 40, allowed: ["DELIBERATION", "HEARING"] },
+      {
+        code: "MODE",
+        kind: "ENUM",
+        required: true,
+        maxLength: 40,
+        allowed: ["IN_PERSON", "TEAMS", "HYBRID"],
+      },
+      text("LOCATION", 2, 200, false),
+      text("ONLINE_URL", 12, 500, false),
+      { code: "HELD_START", kind: "DATETIME", required: true, maxLength: 40 },
+      { code: "HELD_END", kind: "DATETIME", required: true, maxLength: 40 },
+      text("PAPER_MINUTES_REFERENCE", 3, 300),
+      text("REASON", 5, 2000),
+    ],
+  },
+  recorded("10_ATTENDANCE"),
+  {
+    code: "11_CONFLICTS",
+    kind: "DATA",
+    command: "raise_meeting_conflict",
+    columns: [
+      ...ROW_IDENTITY,
+      { code: "MEETING_REF", kind: "REF", required: true, maxLength: 64 },
+      { code: "PARTICIPANT", kind: "EMAIL", required: true, maxLength: 254 },
+      text("REASON", 10, 2000),
+    ],
+  },
+  recorded("12_VOTES"),
+  recorded("22_DOCUMENT_INDEX"),
+  {
+    code: "26_IMPORT_AUDIT",
+    kind: "PLATFORM_LOG",
+    columns: [
+      { code: "BATCH_ID", kind: "UUID", required: false, maxLength: 36 },
+      { code: "IMPORTED_AT", kind: "DATETIME", required: false, maxLength: 40 },
+      { code: "IMPORTED_BY", kind: "EMAIL", required: false, maxLength: 254 },
+      text("RESULT", 0, 200, false),
+    ],
+  },
+];
+
+export const BCP_TEMPLATE_VERSIONS = [BCP_TEMPLATE_VERSION, BCP_COMMITTEE_TEMPLATE_VERSION] as const;
+export type BcpTemplateVersion = (typeof BCP_TEMPLATE_VERSIONS)[number];
+export const BCP_TEMPLATES: Readonly<Record<BcpTemplateVersion, readonly BcpSheet[]>> = {
+  [BCP_TEMPLATE_VERSION]: BCP_TEMPLATE,
+  [BCP_COMMITTEE_TEMPLATE_VERSION]: BCP_COMMITTEE_TEMPLATE,
+};
+
+/** What a batch covers (migration 2110): one case (BCP-1) or one committee proceeding (BCP-C1). */
+export const BCP_BATCH_SCOPES = ["CASE", "COMMITTEE_PROCEEDING"] as const;
+export type BcpBatchScope = (typeof BCP_BATCH_SCOPES)[number];
+
 /** Row 1 of a data sheet holds the column codes, row 2 their labels; data starts here. */
 export const BCP_FIRST_DATA_ROW = 3;
 /** Upper bounds the application and the database both enforce. */
@@ -284,7 +372,11 @@ export interface BcpWorkbook {
 /** A staged batch as its importer sees it, or an approver once it is submitted (authz.can_view_bcp_import). */
 export interface BcpImportBatch {
   id: string;
+  /** For a committee workbook, the proceeding's case: its importer sees the proceeding, never the case. */
   caseId: string;
+  scope: BcpBatchScope;
+  /** Set exactly when the scope is COMMITTEE_PROCEEDING. */
+  committeeProceedingId: string | null;
   workbookId: string;
   templateVersion: string;
   status: BcpBatchStatus;

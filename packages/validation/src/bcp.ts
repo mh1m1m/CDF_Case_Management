@@ -1,16 +1,19 @@
-// Continuity workbook import (ADR-034, migration 1960). The column rules mirror exchange.bcp_normalize and
-// exchange.bcp_cell_ok, so the application classifies a row as the database will (§45); the database re-checks
-// everything and decides. Error messages are i18n keys, never prose.
+// Continuity workbook import (ADR-034, migration 1960; the committee workbook BCP-C1, migration 2110, ADR-047). The
+// column rules mirror exchange.bcp_normalize and exchange.bcp_cell_ok, so the application classifies a row as the
+// database will (§45); the database re-checks everything and decides. The control row's TEMPLATE_VERSION names the
+// template every other check reads. Error messages are i18n keys, never prose.
 import { z } from "zod";
 import {
   BCP_IMPORT_DECISIONS,
   BCP_MAX_CELL_LENGTH,
   BCP_MAX_ROWS,
   BCP_RESOLUTIONS,
-  BCP_TEMPLATE,
+  BCP_TEMPLATE_VERSION,
+  BCP_TEMPLATES,
   type BcpColumn,
   type BcpColumnKind,
   type BcpSheet,
+  type BcpTemplateVersion,
 } from "@cdf/contracts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -57,7 +60,7 @@ export function bcpCellOk(column: BcpColumn, value: string | null): boolean {
   if (value.length > column.maxLength) return false;
   switch (column.kind) {
     case "VERSION":
-      return /^BCP-[0-9]{1,3}$/.test(value);
+      return /^BCP-C?[0-9]{1,3}$/.test(value);
     case "ROW_KEY":
     case "REF":
       return BCP_KEY.test(value) || UUID.test(value);
@@ -82,11 +85,30 @@ export function bcpCellOk(column: BcpColumn, value: string | null): boolean {
   }
 }
 
-const SHEETS = new Map(BCP_TEMPLATE.map((s) => [s.code, s]));
-const DATA_SHEETS = BCP_TEMPLATE.filter((s) => s.kind === "DATA").map((s) => s.code);
+const SHEETS = new Map(
+  Object.entries(BCP_TEMPLATES).map(([version, template]) => [
+    version,
+    new Map(template.map((s) => [s.code, s])),
+  ]),
+);
+const DATA_SHEETS = [
+  ...new Set(
+    Object.values(BCP_TEMPLATES).flatMap((t) => t.filter((s) => s.kind === "DATA").map((s) => s.code)),
+  ),
+];
 
-export function bcpSheet(code: string): BcpSheet | undefined {
-  return SHEETS.get(code);
+/** The template a control row's TEMPLATE_VERSION names, normalized as the database does; null for any other. */
+export function bcpTemplateVersion(value: string | null | undefined): BcpTemplateVersion | null {
+  const v = bcpNormalize("VERSION", value);
+  return v !== null && SHEETS.has(v) ? (v as BcpTemplateVersion) : null;
+}
+
+/** A sheet of a template (BCP-1 unless another is named). */
+export function bcpSheet(
+  code: string,
+  version: BcpTemplateVersion = BCP_TEMPLATE_VERSION,
+): BcpSheet | undefined {
+  return SHEETS.get(version)?.get(code);
 }
 
 /** The first column a row breaks, in template order (or FORMULA), as the database will record it; null if none. */
@@ -94,9 +116,10 @@ export function bcpRowProblem(
   sheetCode: string,
   cells: Record<string, string>,
   hasFormula: boolean,
+  version: BcpTemplateVersion = BCP_TEMPLATE_VERSION,
 ): string | null {
   if (hasFormula) return "FORMULA";
-  const sheet = SHEETS.get(sheetCode);
+  const sheet = bcpSheet(sheetCode, version);
   if (!sheet || sheet.kind !== "DATA") return "SHEET";
   for (const column of sheet.columns) {
     if (!bcpCellOk(column, bcpNormalize(column.kind, cells[column.code]))) return column.code;
@@ -109,12 +132,17 @@ const sha256 = z.string().regex(SHA256, { message: "validation.invalid" });
 const reason = (max: number) =>
   z.string().trim().min(5, { message: "validation.tooShort" }).max(max, { message: "validation.tooLong" });
 
-const CONTROL = SHEETS.get("01_CONTROL")!;
-
-/** The control sheet: every key a 01_CONTROL column, every value meeting its rule. */
+/** The control sheet: it names a known template, every key is a column of that template's 01_CONTROL, and every
+ *  value meets its rule. */
 export const bcpControlSchema = z
   .record(z.string(), z.string().max(BCP_MAX_CELL_LENGTH, { message: "validation.tooLong" }))
   .superRefine((control, ctx) => {
+    const version = bcpTemplateVersion(control.TEMPLATE_VERSION);
+    if (version === null) {
+      ctx.addIssue({ code: "custom", path: ["TEMPLATE_VERSION"], message: "validation.invalid" });
+      return;
+    }
+    const CONTROL = bcpSheet("01_CONTROL", version)!;
     for (const key of Object.keys(control)) {
       if (!CONTROL.columns.some((c) => c.code === key)) {
         ctx.addIssue({ code: "custom", path: [key], message: "validation.invalid" });
@@ -127,7 +155,8 @@ export const bcpControlSchema = z
     }
   });
 
-/** One staged row as the reader found it. Column rules are not enforced here: a broken row is staged as INVALID. */
+/** One staged row as the reader found it. Column rules are not enforced here: a broken row is staged as INVALID.
+ *  Its sheet and cell keys are checked against the control row's template by stageBcpImportSchema. */
 export const bcpStagedRowSchema = z
   .object({
     sheet: z.enum(DATA_SHEETS as [string, ...string[]], { message: "validation.invalid" }),
@@ -135,11 +164,7 @@ export const bcpStagedRowSchema = z
     cells: z.record(z.string(), z.string().max(BCP_MAX_CELL_LENGTH, { message: "validation.tooLong" })),
     has_formula: z.boolean(),
   })
-  .strict()
-  .refine((r) => Object.keys(r.cells).every((k) => SHEETS.get(r.sheet)!.columns.some((c) => c.code === k)), {
-    message: "validation.invalid",
-    path: ["cells"],
-  });
+  .strict();
 
 export const stageBcpImportSchema = z
   .object({
@@ -150,9 +175,20 @@ export const stageBcpImportSchema = z
       .min(1, { message: "validation.required" })
       .max(BCP_MAX_ROWS, { message: "validation.tooLong" }),
   })
-  .refine((i) => new Set(i.rows.map((r) => `${r.sheet}:${r.row_number}`)).size === i.rows.length, {
-    message: "validation.invalid",
-    path: ["rows"],
+  .superRefine((i, ctx) => {
+    if (new Set(i.rows.map((r) => `${r.sheet}:${r.row_number}`)).size !== i.rows.length) {
+      ctx.addIssue({ code: "custom", path: ["rows"], message: "validation.invalid" });
+    }
+    const version = bcpTemplateVersion(i.control.TEMPLATE_VERSION);
+    if (version === null) return;
+    i.rows.forEach((r, k) => {
+      const sheet = bcpSheet(r.sheet, version);
+      if (!sheet || sheet.kind !== "DATA") {
+        ctx.addIssue({ code: "custom", path: ["rows", k, "sheet"], message: "validation.invalid" });
+      } else if (!Object.keys(r.cells).every((key) => sheet.columns.some((c) => c.code === key))) {
+        ctx.addIssue({ code: "custom", path: ["rows", k, "cells"], message: "validation.invalid" });
+      }
+    });
   });
 
 export const resolveBcpRowSchema = z.object({
