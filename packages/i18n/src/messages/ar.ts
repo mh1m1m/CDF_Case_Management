@@ -2260,6 +2260,10 @@ export const ar: Messages = {
     DEFENCE_PACKET_RELEASED: "أدلة لدفاعك",
     SANCTION_EXTRACT_APPROVAL_REQUESTED: "جزاء سابق للموافقة",
     CASE_URGENT_FLAGGED: "قضية موسومة بأنها عاجلة",
+    COMMITTEE_RECORD_APPROVAL_REQUESTED: "محضر لجنة بانتظار اعتمادك",
+    COMMITTEE_RECORD_ATTESTATION_REQUESTED: "محضر لجنة يتطلب تأكيدك",
+    COMMITTEE_RECORD_RETURNED: "إعادة محضر لجنة",
+    COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED: "تفعيل رئيس مكلّف لمحضر لجنة",
   },
   oversight: {
     title: "الرقابة",
@@ -2345,6 +2349,12 @@ export const ar: Messages = {
     DEFENCE_PACKET_RELEASED: "أدلة مختارة لدفاعك جاهزة للاطلاع.",
     SANCTION_EXTRACT_APPROVAL_REQUESTED: "طلبت لجنة إدراج جزاء سابق من قضيتك المقيدة، وهو بانتظار قرارك.",
     CASE_URGENT_FLAGGED: "وُسمت قضية يمكنك الاطلاع عليها بأنها عاجلة، وقد تحتاج إلى اهتمامك.",
+    COMMITTEE_RECORD_APPROVAL_REQUESTED:
+      "قُدّم مصنف لجنة مع محضره الموقّع، وهو بانتظار اعتمادك بصفتك رئيس اللجنة.",
+    COMMITTEE_RECORD_ATTESTATION_REQUESTED: "اعتُمد محضر لجنة مدرج اسمك فيه، ويتطلب تأكيدك الشخصي.",
+    COMMITTEE_RECORD_RETURNED: "أُعيد محضر لجنة قدّمته لتصحيحه.",
+    COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED:
+      "فُعّل نائب الرئيس رئيسًا مكلّفًا لمحضر لجنة تابعة لك، ويمكنك إنهاء التفعيل قبل أن يعتمد المحضر.",
   },
   bcpTemplate: {
     readme: {

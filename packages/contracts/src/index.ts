@@ -1656,6 +1656,11 @@ export const NOTIFICATION_TEMPLATES = [
   "SANCTION_EXTRACT_APPROVAL_REQUESTED",
   // People and access (migration 2100, ADR-046)
   "CASE_URGENT_FLAGGED",
+  // Committee workbook official record (migration 2115, ADR-061)
+  "COMMITTEE_RECORD_APPROVAL_REQUESTED",
+  "COMMITTEE_RECORD_ATTESTATION_REQUESTED",
+  "COMMITTEE_RECORD_RETURNED",
+  "COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;

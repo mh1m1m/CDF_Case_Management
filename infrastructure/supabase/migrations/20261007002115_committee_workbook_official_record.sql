@@ -646,6 +646,16 @@ begin
 end;
 $$;
 
+-- The record's audit envelope: never under the case (2110 D4), with the proceeding and the batch.
+create function exchange.bcp_record_audit(p_rec exchange.bcp_committee_record)
+returns jsonb
+language sql stable
+set search_path = ''
+as $$
+  select jsonb_build_object('scope', 'COMMITTEE_PROCEEDING', 'committee_proceeding_id', p_rec.committee_proceeding_id,
+                            'batch_id', p_rec.batch_id, 'record_id', p_rec.id, 'revision', p_rec.revision);
+$$;
+
 -- =============================================================================
 -- 3. Who sees what (§10, R4, R5, R8)
 -- =============================================================================
@@ -1529,3 +1539,68 @@ begin
     b.id::text, v_reason, jsonb_build_object('previous_status', b.status) || exchange.bcp_audit_scope(b));
 end;
 $$;
+
+-- =============================================================================
+-- 7. Notices, grants and the catalogue
+-- =============================================================================
+-- Ids only (§39): the deep link is the workbook's page, which re-authorizes.
+insert into notify.template (code, object_type, is_mandatory, description) values
+  ('COMMITTEE_RECORD_APPROVAL_REQUESTED',     'BCP_IMPORT', true,
+   'A committee continuity record awaits the user''s approval as chair or acting chair (AMB-201)'),
+  ('COMMITTEE_RECORD_ATTESTATION_REQUESTED',  'BCP_IMPORT', true,
+   'A committee continuity record awaits the user''s own attestation (AMB-201)'),
+  ('COMMITTEE_RECORD_RETURNED',               'BCP_IMPORT', true,
+   'A committee continuity record the user imported was returned or declined and needs correction (AMB-201)'),
+  ('COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED', 'BCP_IMPORT', true,
+   'A deputy chair was activated as acting chair for a committee continuity record (AMB-201)');
+insert into notify.rule (layer, template_code, channel, enabled, effective_from, reason)
+select 'SYSTEM_MANDATORY', t.code, c.channel, true, '2026-01-01T00:00:00Z', 'Synthetic default: mandatory notice (ADR-025)'
+from notify.template t cross join (values ('IN_APP'), ('EMAIL')) c (channel)
+where t.code in ('COMMITTEE_RECORD_APPROVAL_REQUESTED', 'COMMITTEE_RECORD_ATTESTATION_REQUESTED',
+                 'COMMITTEE_RECORD_RETURNED', 'COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED');
+
+revoke all on function
+  exchange.protect_bcp_record(), exchange.protect_bcp_record_acting_chair(),
+  exchange.bcp_record_line_eligible(uuid), exchange.bcp_record_conflict_subject(uuid, uuid),
+  exchange.bcp_record_chair_line(uuid), exchange.bcp_record_chair_basis(uuid),
+  exchange.bcp_record_active_acting_chair(uuid), exchange.bcp_record_approver_capacity(uuid, uuid),
+  exchange.bcp_record_approval(uuid), exchange.bcp_record_line_state(uuid), exchange.bcp_record_meeting_row(uuid),
+  exchange.bcp_record_discrepancies(uuid, boolean), exchange.bcp_record_ready(uuid),
+  exchange.lock_bcp_record(uuid, boolean), exchange.bcp_record_audit(exchange.bcp_committee_record),
+  exchange.bcp_record_approver_user(uuid), exchange.bcp_record_settle(uuid)
+from public, anon, authenticated;
+
+revoke all on function
+  authz.can_view_committee_record(uuid), authz.committee_record_overseer(uuid),
+  authz.can_view_committee_record_document(uuid),
+  api.open_committee_record(uuid), api.declare_committee_record_roster(uuid, jsonb),
+  api.register_committee_record_document(uuid, text, text, bigint, text, date, text, core.classification_level),
+  api.complete_committee_record_document(uuid, text, text), api.mark_committee_minutes_signed(uuid),
+  api.open_committee_record_document(uuid), api.activate_record_acting_chair(uuid, text, text, timestamptz),
+  api.end_record_acting_chair(uuid, text), api.decide_committee_record(uuid, int, text, text),
+  api.return_committee_record(uuid, text), api.attest_committee_record(uuid, int, text, text, text)
+from public;
+grant execute on function
+  authz.can_view_committee_record(uuid), authz.committee_record_overseer(uuid),
+  authz.can_view_committee_record_document(uuid),
+  api.open_committee_record(uuid), api.declare_committee_record_roster(uuid, jsonb),
+  api.register_committee_record_document(uuid, text, text, bigint, text, date, text, core.classification_level),
+  api.complete_committee_record_document(uuid, text, text), api.mark_committee_minutes_signed(uuid),
+  api.open_committee_record_document(uuid), api.activate_record_acting_chair(uuid, text, text, timestamptz),
+  api.end_record_acting_chair(uuid, text), api.decide_committee_record(uuid, int, text, text),
+  api.return_committee_record(uuid, text), api.attest_committee_record(uuid, int, text, text, text)
+to authenticated;
+
+update config.target_module
+   set commands = commands || array['api.open_committee_record', 'api.declare_committee_record_roster',
+                                    'api.register_committee_record_document', 'api.complete_committee_record_document',
+                                    'api.mark_committee_minutes_signed', 'api.open_committee_record_document',
+                                    'api.activate_record_acting_chair', 'api.end_record_acting_chair',
+                                    'api.decide_committee_record', 'api.return_committee_record',
+                                    'api.attest_committee_record'],
+       delivered_in = delivered_in || '2115'::text,
+       notes = notes || ' Since 2115: a committee workbook commits only on its official record: the final signed minutes '
+                        '(versioned, immutable, stored through the storage port) and, in the platform, the chair''s or '
+                        'a formally activated acting chair''s approval and each attending eligible member''s own '
+                        'attestation, reconciled before commit (owner decision on AMB-201, ADR-061).'
+ where code = 'BCP_CONTINUITY';
