@@ -1274,6 +1274,7 @@ describe("BCP import: integrity", () => {
       "bcp_provenance",
       "bcp_template_column",
       "bcp_template_sheet",
+      "bcp_workbook_revocation", // migration 2100 (AMB-205): the revocations, read-only too
     ]);
     await ownerScenario(async (s) => {
       const t = await clock(s, caseB);
@@ -1607,6 +1608,150 @@ describe("ambiguity register: what never happens offline (CDF-205, ADR-034)", ()
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.preview_bcp_import(${batch})`);
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.apply_bcp_import(${batch}, ${SHA})`);
       await s.expectError("CDF_NOT_FOUND", (tx) => tx`select api.cancel_bcp_import(${batch}, ${REASON})`);
+    });
+  });
+});
+
+describe("a lost workbook is revoked (AMB-205, migration 2100)", () => {
+  const INCIDENT = "INC-DEMO-2100-0001";
+  const revoke = (s: Scenario, workbook: string, caseIdValue = caseB) =>
+    s.tx<
+      { id: string }[]
+    >`select api.revoke_bcp_workbook(${caseIdValue}, ${workbook}, ${INCIDENT}, ${REASON}) as id`;
+  const view = async (s: Scenario, batch: string) => {
+    const [r] = await s.tx<
+      { v: { workbook_revoked: boolean; capabilities: Record<string, boolean> } }[]
+    >`select api.bcp_import_batch_view(${batch}) as v`;
+    return r!.v;
+  };
+
+  it("T-AMB-122: a revoked workbook is never staged again, and a batch of it already staged, submitted or approved goes no further; it is only rejected or cancelled", async () => {
+    await ownerScenario(async (s) => {
+      const t = await clock(s, caseB);
+      const [wb1, wb2, wb3] = ["BCP-DEMO-0002-LOST1", "BCP-DEMO-0002-LOST2", "BCP-DEMO-0002-LOST3"];
+      // Before the loss is reported: one batch submitted, one approved, one staged.
+      const submitted = await stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: wb1 }), [
+        subjectRow(3, "BCP-L1", t.now),
+      ]);
+      expect(await submit(s, submitted)).toBe("SUBMITTED");
+      const approved = await stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: wb2 }), [
+        subjectRow(3, "BCP-L2", t.now, "Employee Tau (synthetic)"),
+      ]);
+      expect(await submit(s, approved)).toBe("SUBMITTED");
+      expect(await decide(s, "grcDirector", approved)).toBe("APPROVED");
+      const staged = await stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: wb3 }), [
+        subjectRow(3, "BCP-L3", t.now, "Employee Upsilon (synthetic)"),
+      ]);
+      const before = await subjectCount(s, caseB);
+
+      // Who revokes: the case team members who import or approve workbooks, citing the incident.
+      await s.as("employee");
+      await s.expectError("CDF_NOT_FOUND", () => revoke(s, wb1));
+      await s.as("investigatorB");
+      await s.expectError("CDF_FORBIDDEN", () => revoke(s, wb1));
+      await s.as("caseManager");
+      await s.expectError("CDF_INVALID:workbook_id", () => revoke(s, "lost workbook"));
+      await s.expectError(
+        "CDF_INVALID:incident_reference",
+        (tx) => tx`select api.revoke_bcp_workbook(${caseB}, ${wb1}, null, ${REASON})`,
+      );
+      const [r1] = await revoke(s, wb1);
+      await s.expectError("CDF_CONFLICT:WORKBOOK_REVOKED", () => revoke(s, wb1));
+      await s.as("grcDirector");
+      await revoke(s, wb2);
+      await revoke(s, wb3);
+      // A workbook never staged on the case can be revoked too.
+      await revoke(s, "BCP-DEMO-0002-NEVER");
+
+      // T-AMB-122: never staged again, through the command or at the table.
+      await s.expectError("CDF_CONFLICT:WORKBOOK_REVOKED", () =>
+        stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: "BCP-DEMO-0002-NEVER" }), [
+          subjectRow(3, "BCP-L4", t.now),
+        ]),
+      );
+      // A batch already staged is not submitted, even at the table; it is cancelled.
+      await s.as("caseManager");
+      expect(await view(s, staged)).toMatchObject({
+        workbook_revoked: true,
+        capabilities: { may_submit: false },
+      });
+      await s.expectError("CDF_CONFLICT:WORKBOOK_REVOKED", () => submit(s, staged));
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:WORKBOOK_REVOKED",
+        (tx) =>
+          tx`update exchange.bcp_import_batch set status = 'SUBMITTED', submitted_hash = ${"b".repeat(64)}
+             where id = ${staged}`,
+      );
+      await s.as("caseManager");
+      await s.tx`select api.cancel_bcp_import(${staged}, ${REASON})`;
+      await s.expectError("CDF_CONFLICT:WORKBOOK_REVOKED", () =>
+        stage(s, "caseManager", control(t, caseB, { WORKBOOK_ID: wb3 }), [subjectRow(3, "BCP-L3", t.now)]),
+      );
+      await s.asOwner();
+      await s.expectError(
+        "CDF_CONFLICT:WORKBOOK_REVOKED",
+        (tx) =>
+          tx`insert into exchange.bcp_import_batch (case_id, template_version, workbook_id, file_sha256, control,
+               offline_from, prepared_by, imported_by)
+             select case_id, template_version, workbook_id, file_sha256, control, offline_from, prepared_by, imported_by
+             from exchange.bcp_import_batch where id = ${staged}`,
+      );
+
+      // The submitted batch is not approved (rejecting stays open); the approved one is not applied (cancelling
+      // stays open). The view says so, and its capabilities follow the commands.
+      await s.as("grcDirector");
+      expect(await view(s, submitted)).toMatchObject({
+        workbook_revoked: true,
+        capabilities: { may_decide: true, may_approve: false },
+      });
+      await s.expectError("CDF_CONFLICT:WORKBOOK_REVOKED", () => decide(s, "grcDirector", submitted));
+      expect(await decide(s, "grcDirector", submitted, "REJECT")).toBe("REJECTED");
+      await s.as("caseManager");
+      expect(await view(s, approved)).toMatchObject({
+        workbook_revoked: true,
+        capabilities: { may_apply: false, may_cancel: true },
+      });
+      await s.expectError("CDF_CONFLICT:WORKBOOK_REVOKED", () => apply(s, "caseManager", approved));
+      await s.tx`select api.cancel_bcp_import(${approved}, ${REASON})`;
+      expect(await subjectCount(s, caseB)).toBe(before);
+
+      // A business event for the case trail and a security event for the incident, ids and counts only; the
+      // revocation is read by the case team members who import or approve.
+      expect(
+        await s.tx`select action, category, case_id, reason, metadata from audit.audit_event
+                   where object_id = ${r1!.id} order by seq`,
+      ).toEqual([
+        {
+          action: "BCP_WORKBOOK_REVOCATION_RECORDED",
+          category: "BUSINESS",
+          case_id: caseB,
+          reason: null,
+          metadata: { open_batches: 1 },
+        },
+        {
+          action: "BCP_WORKBOOK_REVOKED",
+          category: "SECURITY",
+          case_id: caseB,
+          reason: null,
+          metadata: { open_batches: 1 },
+        },
+      ]);
+      await s.as("investigatorB");
+      expect(await s.tx`select id from exchange.bcp_workbook_revocation`).toEqual([]);
+      await s.as("caseManager");
+      expect(
+        (
+          await s.tx<
+            { workbook_id: string }[]
+          >`select workbook_id from exchange.bcp_workbook_revocation order by workbook_id`
+        ).map((x) => x.workbook_id),
+      ).toEqual([wb1, wb2, wb3, "BCP-DEMO-0002-NEVER"].sort());
+      await s.asOwner();
+      await s.expectError(
+        "exchange.bcp_workbook_revocation is append-only",
+        (tx) => tx`delete from exchange.bcp_workbook_revocation`,
+      );
     });
   });
 });

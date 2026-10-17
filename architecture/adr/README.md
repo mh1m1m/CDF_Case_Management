@@ -47,6 +47,7 @@
 | [ADR-043](ADR-043-preliminary-corrective-action.md)                 | Preliminary corrective action; closure fails closed with no authority in force  | Proposed |
 | [ADR-044](ADR-044-case-conflict-purpose-suspension.md)              | A conflict raised on the case; prior investigators do not judge it              | Proposed |
 | [ADR-045](ADR-045-case-structure-corrections.md)                    | Case structure and corrections without rewriting a record                       | Proposed |
+| [ADR-046](ADR-046-people-and-access.md)                             | People and access without widening anyone's reach                               | Proposed |
 | [ADR-051](ADR-051-areas-and-my-work-phase-12.md)                    | Areas and My Work for Phase 12                                                  | Proposed |
 | [ADR-054](ADR-054-meeting-screen-capabilities.md)                   | The meeting screen's capabilities                                               | Proposed |
 | [ADR-055](ADR-055-my-committees-and-meeting-logistics.md)           | My Committees and the meeting's logistics                                       | Proposed |

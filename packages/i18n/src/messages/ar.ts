@@ -1810,6 +1810,7 @@ export const ar: Messages = {
       DISPOSITION_APPROVAL: "اعتماد الإتلاف",
       DISPOSITION_EXECUTION: "تنفيذ الإتلاف",
       DISPOSITION_REVIEW: "مراجعة الإتلاف",
+      EXTERNAL_EXPERT: "دعم خبير خارجي أو فني",
       LEGAL_HOLD_APPLICATION: "تطبيق الحجز القانوني",
       LEGAL_HOLD_ASSESSMENT: "تقييم الحجز القانوني",
       LEGAL_HOLD_RELEASE: "رفع الحجز القانوني",
@@ -2026,6 +2027,7 @@ export const ar: Messages = {
     SECTOR_HEAD: "رئيس القطاع",
     COMPLIANCE_SECTION_MANAGER: "مدير قسم الامتثال",
     GRC_SECTOR_HEAD: "رئيس قطاع الحوكمة والمخاطر والامتثال",
+    EXTERNAL_EXPERT: "خبير خارجي أو فني",
     PLATFORM_ADMIN: "مدير المنصة",
     DB_ADMIN: "مدير قاعدة البيانات",
     DECISION_AUTHORITY: "صاحب صلاحية القرار",
@@ -2257,6 +2259,7 @@ export const ar: Messages = {
     DEFENCE_PACKET_APPROVAL_REQUESTED: "ملف دفاع للموافقة",
     DEFENCE_PACKET_RELEASED: "أدلة لدفاعك",
     SANCTION_EXTRACT_APPROVAL_REQUESTED: "جزاء سابق للموافقة",
+    CASE_URGENT_FLAGGED: "قضية موسومة بأنها عاجلة",
   },
   oversight: {
     title: "الرقابة",
@@ -2341,6 +2344,7 @@ export const ar: Messages = {
     DEFENCE_PACKET_APPROVAL_REQUESTED: "ملف دفاع في قضيتك المقيدة بانتظار موافقتك.",
     DEFENCE_PACKET_RELEASED: "أدلة مختارة لدفاعك جاهزة للاطلاع.",
     SANCTION_EXTRACT_APPROVAL_REQUESTED: "طلبت لجنة إدراج جزاء سابق من قضيتك المقيدة، وهو بانتظار قرارك.",
+    CASE_URGENT_FLAGGED: "وُسمت قضية يمكنك الاطلاع عليها بأنها عاجلة، وقد تحتاج إلى اهتمامك.",
   },
   bcpTemplate: {
     readme: {
