@@ -617,6 +617,42 @@ export const en = {
         notified:
           "The new action's owner is told it is assigned to them, and this action's owner is told it changed if it was still open. The messages carry no reason and no case content.",
       },
+      // The owner's completion, its verification and a reopening (Phase 12 P12-6a, ADR-058).
+      submitActionCompletion: {
+        action: "Submit as complete",
+        title: "Submit this action as complete?",
+        body: "The action waits for a corrective-action manager other than you to verify it. Until they verify it or return it to you, no progress can be recorded on it.",
+        undo: "Not by you. A verifier who returns it sends it back to you to complete again.",
+        affected: "The case's corrective-action managers, one of whom verifies it.",
+        notified:
+          "The case's corrective-action managers are told a completion waits for verification. The message carries no case content.",
+      },
+      verifyActionCompletion: {
+        action: "Verify as complete",
+        title: "Verify this action as complete?",
+        body: "The action is recorded as completed and no longer holds the case open.",
+        undo: "A corrective-action manager can reopen it while the case is active, if it did not achieve its effect.",
+        affected: "The action's owner, and the case team.",
+        notified: "No one is sent a message.",
+      },
+      returnActionCompletion: {
+        action: "Return to the owner",
+        title: "Return this completion to the owner?",
+        body: "The action goes back to in progress, with your note in its history saying what is missing. The owner completes it again for someone other than them to verify.",
+        undo: "No. The owner submits it again when it is done.",
+        affected: "The action's owner.",
+        notified:
+          "The owner is told their action was returned to them. The message carries no note and no case content.",
+      },
+      reopenAction: {
+        action: "Reopen",
+        title: "Reopen this completed action?",
+        body: "The action goes back to in progress, with your reason in its history. Its owner completes it again for someone other than them to verify, and the case cannot close until then.",
+        undo: "No. The action is completed again only by a new verification.",
+        affected: "The action's owner, and the case team.",
+        notified:
+          "The owner is told their action was returned to them. The message carries no reason and no case content.",
+      },
     },
   },
   /** Idle-session warning (CDF-57, WCAG 2.2.1). */
@@ -4063,11 +4099,12 @@ export const en = {
     breadcrumb: "Corrective action",
     purposeTitle: "A corrective action of the case",
     purposeBody:
-      "Where the action stands, where it comes from and why it may not move. When a later decision supersedes the one it carries out, the replacement decision's disposition of it is recorded here.",
+      "Where the action stands, where it comes from and why it may not move. Its owner reports its progress and completion here, and a corrective-action manager verifies the completion. When a later decision supersedes the one it carries out, the replacement decision's disposition of it is recorded here.",
     purposeNotShown:
       "Not shown here: the case's narrative and evidence, and the reason given for each disposition.",
     cardPurposeTitle: "A corrective action",
-    cardPurposeBody: "The action's wording, status and due date.",
+    cardPurposeBody:
+      "The action's wording, status, due date and history, and where you record its progress and submit it as complete.",
     cardPurposeNotShown: "Not shown here: the case, where the action comes from, and why it may not move.",
     cardTitle: "The action",
     descriptionLabel: "What it requires",
@@ -4135,6 +4172,93 @@ export const en = {
       "A case manager records what the replacement decision decides of this action while the case is active.",
     disposed: "Disposition recorded.",
     frozenListLabel: "Frozen actions:",
+    // When the action was submitted, verified or waived (P12-6a).
+    submittedLabel: "Submitted as complete on",
+    completedLabel: "Verified complete on",
+    waivedLabel: "Waived on",
+    // The action's history (A2's events; P12-6a).
+    historyTitle: "History",
+    event: {
+      OPENED: "Opened",
+      OPENED_DUE: "Opened, due {date}",
+      OWNER_CHANGED: "Owner changed",
+      OWNER_KIND_CHANGED: "Kind of owner changed",
+      DUE_DATE_CHANGED: "Due date changed",
+      DUE_DATE_CHANGED_TO: "Due date changed to {date}",
+      PROGRESS: "Progress recorded",
+      PROGRESS_AT: "Progress recorded: {percent}%",
+      COMPLETION_SUBMITTED: "Submitted as complete",
+      VERIFIED: "Verified as complete",
+      RETURNED: "Returned to its owner",
+      REOPENED: "Reopened",
+      WAIVED: "Waived",
+    },
+    eventAt: "{date}",
+    eventAtByYou: "{date} · by you",
+    eventAtBy: "{date} · by {name}",
+    evidence: "Evidence: {reference}",
+    evidenceTyped: "Evidence: {reference} ({type})",
+    evidenceType: {
+      DOCUMENT: "Document",
+      REVISED_PROCEDURE: "Revised procedure",
+      SCREENSHOT_OR_SYSTEM_EVIDENCE: "Screenshot or system evidence",
+      TRAINING_EVIDENCE: "Training evidence",
+      CONTROL_EVIDENCE: "Control evidence",
+      OTHER_AUTHORIZED_ARTIFACT: "Other authorized artifact",
+    },
+    // The owner's report (P12-6a).
+    reportTitle: "Report on the action",
+    reportIntro:
+      "Record how far the action has got, and submit it as complete when it is done. A corrective-action manager other than you then verifies it.",
+    progressTitle: "Record progress",
+    percentLabel: "Progress (%)",
+    percentHint: "A whole number from 0 to 100. It is {percent}% now.",
+    progressNoteLabel: "What has been done",
+    noteHistoryHint:
+      "5 to 4,000 characters. It goes in the action's history, which the case team and whoever acts for the action read.",
+    recordProgress: "Record progress",
+    progressRecorded: "Progress recorded.",
+    completeTitle: "Submit as complete",
+    completeIntro: "When the action is done, say what was done and name the evidence the verifier can check.",
+    completionNoteLabel: "What was done",
+    referenceLabel: "Evidence reference",
+    referenceRequiredHint:
+      "Needed: a document number, file location or system reference the verifier can check. 3 to 300 characters.",
+    referenceOptionalHint: "Optional: the policy accepts a note alone. 3 to 300 characters.",
+    evidenceTypeLabel: "Kind of evidence",
+    evidenceTypeRequiredHint: "Needed with a reference: the policy accepts only these kinds.",
+    evidenceTypeOptionalHint: "Optional, and only with a reference.",
+    evidenceTypeNone: "Not given",
+    completionSubmitted: "Submitted for verification.",
+    reportPaused: "Reporting on this action is paused for now: progress and completion can't be recorded.",
+    awaitingVerification:
+      "A corrective-action manager other than you verifies this completion: the action's owner and anyone who submitted a completion never verify it.",
+    // The verifier (P12-6a).
+    verifyTitle: "Verify the completion",
+    verifyIntro:
+      "Check what the owner submitted. Verify it if the action is done, or return it to the owner with what is missing.",
+    submissionTitle: "What was submitted",
+    submissionAt: "Submitted on {date}",
+    submissionNoteLabel: "What was done",
+    submissionEvidenceLabel: "Evidence",
+    noEvidence: "None named: the policy accepts a note alone.",
+    verifyNoteLabel: "Note",
+    verifyNoteHint:
+      "Optional, 5 to 4,000 characters. It goes in the action's history, which the owner and the case team read.",
+    verified: "Verified as complete.",
+    returnTitle: "Return it to the owner",
+    returnNoteLabel: "What is missing",
+    returnNoteHint:
+      "5 to 4,000 characters. It goes in the action's history, which the owner and the case team read.",
+    returned: "Returned to the owner.",
+    // Reopening a completed action (P12-6a).
+    reopenTitle: "Reopen the action",
+    reopenIntro:
+      "If the completed action did not achieve its effect, reopen it. It goes back to its owner, who completes it again for someone other than them to verify.",
+    reopenReasonLabel: "Why it is reopened",
+    reopenReasonHint:
+      "5 to 2,000 characters. It goes in the action's history, which the owner and the case team read.",
+    reopened: "Reopened.",
     codes: {
       NOT_SUPERSEDED:
         "The decision this action carries out is not superseded, so there is nothing to decide.",
@@ -4155,6 +4279,26 @@ export const en = {
       owner_id: "Choose the new action's owner from the list: someone cleared for this case.",
       due_date:
         "Give a due date of today or later, only to modify or replace the action. A replacement needs one where the policy sets no default.",
+      // The owner's report, the verification and a reopening (P12-6a).
+      ACTION_NOT_ACTIVE:
+        "The action is not open any more: it was submitted as complete, completed or waived, so nothing was recorded.",
+      NOT_PENDING_VERIFICATION:
+        "The action is not waiting for verification any more, so nothing was recorded.",
+      NOT_COMPLETED: "Only a completed action can be reopened.",
+      // Why an action may not move (decision.action_block): the same words for each, which never say why. The case
+      // team reads why on the page; whoever else acts for the action does not. The page's answers carry none of these
+      // codes, only ACTION_BLOCKED; the five keep the same words in case one ever reaches a form.
+      ACTION_BLOCKED: "The action can't move for now, so nothing was recorded.",
+      TAINTED_BY_CONFLICT: "The action can't move for now, so nothing was recorded.",
+      CONFLICT_REMEDIATION_OPEN: "The action can't move for now, so nothing was recorded.",
+      FROZEN_BY_SUPERSEDED_DECISION: "The action can't move for now, so nothing was recorded.",
+      WAIVED_BY_SUPERSEDING_DECISION: "The action can't move for now, so nothing was recorded.",
+      REPLACED_BY_NEW_ACTION: "The action can't move for now, so nothing was recorded.",
+      percent_complete: "Give the progress as a whole number from 0 to 100.",
+      note: "Give a note of 5 to 4,000 characters.",
+      evidence_reference: "Name the evidence in 3 to 300 characters: the policy asks for a reference.",
+      evidence_type: "Choose a kind of evidence the policy accepts, and only with a reference.",
+      decision: "Choose to verify the completion or return it.",
     },
   },
 };

@@ -1,7 +1,8 @@
 // The corrective-action read models' mapping (Phase 12 P12-3b; ADR-058, migration 2096). The gateway renames keys and
 // decides nothing, so these pin what the pages rely on: a capability the database left out or null reads as false
 // (fail closed), a list it left out or null is empty, timestamps are ISO instants and calendar dates stay as written,
-// the case team's origin is null for anyone else, and the replacement is null unless the action is frozen.
+// the case team's origin is null for anyone else, and the replacement is null unless the action is frozen. P12-6a:
+// the history stays oldest first, and the policy asks for a reference unless the one in force says NOTE_ONLY.
 import { describe, expect, it } from "vitest";
 import { toCaseCorrectiveAction, toCorrectiveActionView } from "./corrective-action-gateway";
 
@@ -143,6 +144,8 @@ describe("A2: one corrective action", () => {
     ],
     owner,
     case: { case_id: null, case_number: null },
+    policy: { completion_evidence: "REFERENCE_REQUIRED" as const, allowed_evidence_types: null },
+    events: [],
   };
   const none = {
     may_record_progress: false,
@@ -267,5 +270,85 @@ describe("A2: one corrective action", () => {
         recordedAt: "2026-10-15T10:00:00.000Z",
       },
     ]);
+  });
+  it("keeps the history oldest first, as ISO instants, with calendar due dates and nulls where nothing was given", () => {
+    const v = toCorrectiveActionView({
+      ...card,
+      origin: null,
+      capabilities: none,
+      events: [
+        {
+          event_id: FIRST,
+          event_type: "OPENED",
+          actor_id: MANAGER,
+          note: null,
+          evidence_reference: null,
+          evidence_type: null,
+          percent_complete: null,
+          due_date: "2026-12-31",
+          created_at: "2026-10-01 10:00:00.123456+03",
+        },
+        {
+          event_id: SECOND,
+          event_type: "COMPLETION_SUBMITTED",
+          actor_id: OWNER,
+          note: "Synthetic: the second approver is in place.",
+          evidence_reference: "DOC-DEMO-2026-0007",
+          evidence_type: "REVISED_PROCEDURE",
+          percent_complete: undefined as unknown as null,
+          due_date: undefined as unknown as null,
+          created_at: "2026-10-03 09:30:00+03",
+        },
+      ],
+    });
+    expect(v.events).toEqual([
+      {
+        eventId: FIRST,
+        eventType: "OPENED",
+        actorId: MANAGER,
+        note: null,
+        evidenceReference: null,
+        evidenceType: null,
+        percentComplete: null,
+        dueDate: "2026-12-31",
+        createdAt: "2026-10-01T07:00:00.123Z",
+      },
+      {
+        eventId: SECOND,
+        eventType: "COMPLETION_SUBMITTED",
+        actorId: OWNER,
+        note: "Synthetic: the second approver is in place.",
+        evidenceReference: "DOC-DEMO-2026-0007",
+        evidenceType: "REVISED_PROCEDURE",
+        percentComplete: null,
+        dueDate: null,
+        createdAt: "2026-10-03T06:30:00.000Z",
+      },
+    ]);
+  });
+
+  it("reads a missing history as empty, and asks for a reference unless the policy in force says NOTE_ONLY", () => {
+    const base = { ...card, origin: null, capabilities: none };
+    const missing = toCorrectiveActionView({ ...base, events: null });
+    expect(missing.events).toEqual([]);
+    expect(missing.policy).toEqual({ completionEvidence: "REFERENCE_REQUIRED", allowedEvidenceTypes: null });
+    // No policy in force: api.submit_corrective_action_completion asks for a reference, so the page does too.
+    expect(toCorrectiveActionView({ ...base, policy: null }).policy).toEqual({
+      completionEvidence: "REFERENCE_REQUIRED",
+      allowedEvidenceTypes: null,
+    });
+    expect(
+      toCorrectiveActionView({ ...base, policy: { completion_evidence: null, allowed_evidence_types: null } })
+        .policy.completionEvidence,
+    ).toBe("REFERENCE_REQUIRED");
+    expect(
+      toCorrectiveActionView({
+        ...base,
+        policy: {
+          completion_evidence: "NOTE_ONLY",
+          allowed_evidence_types: ["DOCUMENT", "CONTROL_EVIDENCE"],
+        },
+      }).policy,
+    ).toEqual({ completionEvidence: "NOTE_ONLY", allowedEvidenceTypes: ["DOCUMENT", "CONTROL_EVIDENCE"] });
   });
 });
