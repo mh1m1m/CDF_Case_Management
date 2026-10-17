@@ -503,6 +503,126 @@ as $$
                       and x.cells ->> 'MEETING_REF' is distinct from m.row_key);
 $$;
 
+-- Reconciliation (owner decision §8), derived now. p_attestations adds MISSING_PLATFORM_ATTESTATION for lines still
+-- PENDING (meaningful once the chair has approved).
+create function exchange.bcp_record_discrepancies(p_record_id uuid, p_attestations boolean)
+returns table (code text, roster_id uuid)
+language plpgsql stable
+set search_path = ''
+as $$
+declare
+  v_rec exchange.bcp_committee_record;
+  v_doc exchange.bcp_record_document;
+  v_chair exchange.bcp_record_roster;
+  v_signatory exchange.bcp_record_roster;
+  v_held date;
+  v_meeting uuid;
+  v_basis text;
+begin
+  select * into v_rec from exchange.bcp_committee_record r where r.id = p_record_id;
+  select * into v_doc from exchange.bcp_record_document d where d.id = v_rec.signed_document_id;
+  v_chair := exchange.bcp_record_chair_line(p_record_id);
+  v_basis := exchange.bcp_record_chair_basis(p_record_id);
+  select * into v_signatory from exchange.bcp_record_roster l where l.record_id = p_record_id and l.signed_as_chair;
+  v_meeting := coalesce(v_rec.meeting_row_id, exchange.bcp_record_meeting_row(p_record_id));
+
+  -- Layer 1 missing, or an expected signatory without a visible signature.
+  if v_doc.id is null or v_doc.status <> 'SIGNED_OFFICIAL_RECORD' then
+    code := 'MISSING_OFFICIAL_SIGNATURE'; roster_id := null; return next;
+  end if;
+  for roster_id in select l.id from exchange.bcp_record_roster l
+                   where l.record_id = p_record_id and l.attendance in ('ATTENDED', 'ATTENDED_PART')
+                     and l.seat not in ('SECRETARY', 'ALTERNATE_SECRETARY') and not l.signature_visible
+                   order by l.id loop
+    code := 'MISSING_OFFICIAL_SIGNATURE'; return next;
+  end loop;
+
+  -- The version: the signed one must be the newest stored, and dated the meeting's held day (Riyadh).
+  if v_doc.id is not null and exists (select 1 from exchange.bcp_record_document d
+                                      where d.record_id = p_record_id and d.version_no > v_doc.version_no
+                                        and d.status <> 'QUARANTINED') then
+    code := 'DOCUMENT_VERSION_MISMATCH'; roster_id := null; return next;
+  end if;
+  select (x.original_event_at at time zone 'Asia/Riyadh')::date into v_held
+  from exchange.bcp_import_row x where x.id = v_meeting;
+  if v_doc.id is not null and v_held is distinct from v_doc.meeting_date then
+    code := 'DOCUMENT_VERSION_MISMATCH'; roster_id := null; return next;
+  end if;
+  if v_rec.submitted_at is not null and exists (
+       select 1 from exchange.bcp_import_batch b
+       where b.id = v_rec.batch_id and b.submitted_hash is distinct from exchange.bcp_batch_hash(b.id)) then
+    code := 'DOCUMENT_VERSION_MISMATCH'; roster_id := null; return next;
+  end if;
+
+  -- Who signed as chair: someone must, the chair when the chair can act, else the deputy chair; a signatory attended.
+  if v_signatory.id is null or v_signatory.seat not in ('CHAIR', 'DEPUTY_CHAIR')
+     or (v_signatory.seat = 'DEPUTY_CHAIR' and v_basis is null)
+     or (v_signatory.seat = 'CHAIR' and v_basis is not null and v_basis <> 'INELIGIBLE') then
+    code := 'SIGNATURE_MISMATCH'; roster_id := v_signatory.id; return next;
+  end if;
+  for roster_id in select l.id from exchange.bcp_record_roster l
+                   where l.record_id = p_record_id and l.signature_visible and l.attendance in ('ABSENT', 'NOT_DECLARED')
+                   order by l.id loop
+    code := 'SIGNATURE_MISMATCH'; return next;
+  end loop;
+
+  -- Conflict scope: a recused member shown as a signatory.
+  for roster_id in select l.id from exchange.bcp_record_roster l
+                   where l.record_id = p_record_id and l.signature_visible and l.attendance = 'RECUSED' order by l.id loop
+    code := 'CONFLICT_SCOPE_MISMATCH'; return next;
+  end loop;
+
+  -- Attendance not declared.
+  for roster_id in select l.id from exchange.bcp_record_roster l
+                   where l.record_id = p_record_id and l.attendance = 'NOT_DECLARED' order by l.id loop
+    code := 'ATTENDANCE_MISMATCH'; return next;
+  end loop;
+
+  -- Members' declines on this revision carry their own code.
+  for code, roster_id in select a.discrepancy_code, a.roster_id from exchange.bcp_record_attestation a
+                         where a.record_id = p_record_id and a.revision = v_rec.revision and a.action = 'DECLINE'
+                         order by a.roster_id loop
+    return next;
+  end loop;
+
+  if p_attestations then
+    for roster_id in select l.id from exchange.bcp_record_roster l
+                     where l.record_id = p_record_id and exchange.bcp_record_line_state(l.id) = 'PENDING'
+                     order by l.id loop
+      code := 'MISSING_PLATFORM_ATTESTATION'; return next;
+    end loop;
+  end if;
+end;
+$$;
+
+-- Everything §12 asks before commit, checked now: the signed record stored, an approval on this revision by someone
+-- who may still give it, every required line attested on this revision, no discrepancy, the workbook not revoked.
+create function exchange.bcp_record_ready(p_record_id uuid)
+returns boolean
+language plpgsql stable
+set search_path = ''
+as $$
+declare
+  v_rec exchange.bcp_committee_record;
+  v_approval exchange.bcp_record_decision;
+begin
+  select * into v_rec from exchange.bcp_committee_record r where r.id = p_record_id;
+  if v_rec.id is null or v_rec.status not in ('PLATFORM_ATTESTATION_IN_PROGRESS', 'FULLY_ATTESTED', 'READY_TO_COMMIT')
+     or v_rec.meeting_row_id is distinct from exchange.bcp_record_meeting_row(p_record_id) then
+    return false;
+  end if;
+  v_approval := exchange.bcp_record_approval(p_record_id);
+  if v_approval.id is null or not exchange.bcp_record_line_eligible(v_approval.roster_id)
+     or exchange.bcp_approver_excluded(v_rec.batch_id, v_approval.decided_by) then
+    return false;
+  end if;
+  if exists (select 1 from exchange.bcp_record_discrepancies(p_record_id, true)) then return false; end if;
+  return not exists (select 1 from exchange.bcp_import_batch b
+                     where b.id = v_rec.batch_id
+                       and exchange.committee_workbook_revoked(b.committee_proceeding_id, b.workbook_id));
+end;
+$$;
+
 -- Every record command locks the batch, then the record, before reading its revision or state (E7). p_own: the
 -- importer's own step (exchange.lock_bcp_batch's checks); otherwise the caller must see the record.
 create function exchange.lock_bcp_record(p_record_id uuid, p_own boolean)
@@ -1163,6 +1283,60 @@ begin
     from exchange.bcp_import_batch b where b.id = v_rec.batch_id;
   end if;
   return v_status;
+end;
+$$;
+
+-- After an approval, an attestation or a decline, once no required line is pending: a decline means the record is not
+-- fully attested, so reconciliation has failed (audited, codes only) and it waits for a return; otherwise the record
+-- is fully attested, and clean reconciliation makes it READY_TO_COMMIT (the batch APPROVED by the chair or acting chair
+-- who approved), else the failure is audited and it waits for a return.
+create function exchange.bcp_record_settle(p_record_id uuid)
+returns void
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_rec exchange.bcp_committee_record;
+  v_approval exchange.bcp_record_decision;
+  v_codes jsonb;
+begin
+  select * into v_rec from exchange.bcp_committee_record r where r.id = p_record_id;
+  if v_rec.status <> 'PLATFORM_ATTESTATION_IN_PROGRESS' then return; end if;
+  if exists (select 1 from exchange.bcp_record_roster l
+             where l.record_id = v_rec.id and exchange.bcp_record_line_state(l.id) = 'PENDING') then
+    return;
+  end if;
+  if exists (select 1 from exchange.bcp_record_roster l
+             where l.record_id = v_rec.id and exchange.bcp_record_line_state(l.id) = 'DECLINED_WITH_REASON') then
+    select coalesce(jsonb_agg(distinct d.code order by d.code), '[]'::jsonb) into v_codes
+    from exchange.bcp_record_discrepancies(v_rec.id, true) d;
+    perform audit.record_event('SIGNATURE_RECONCILIATION_FAILED', 'BUSINESS', 'FAILURE', null, 'bcp_committee_record',
+      v_rec.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('at', 'ATTESTATION', 'codes', v_codes));
+    return;
+  end if;
+  update exchange.bcp_committee_record set status = 'FULLY_ATTESTED', updated_at = now() where id = v_rec.id
+  returning * into v_rec;
+  if exchange.bcp_record_ready(v_rec.id) then
+    v_approval := exchange.bcp_record_approval(v_rec.id);
+    update exchange.bcp_committee_record set status = 'READY_TO_COMMIT', ready_at = now(), updated_at = now()
+     where id = v_rec.id;
+    update exchange.bcp_import_batch
+       set status = 'APPROVED', decided_by = v_approval.decided_by, decided_at = now(), updated_at = now(),
+           row_version = row_version + 1
+     where id = v_rec.batch_id;
+    perform audit.record_event('WORKBOOK_READY_TO_COMMIT', 'BUSINESS', 'SUCCESS', null, 'bcp_committee_record',
+      v_rec.id::text, null,
+      exchange.bcp_record_audit(v_rec) || jsonb_build_object('approved_by', v_approval.decided_by,
+                                                            'capacity', v_approval.capacity,
+                                                            'attested', (select count(*) from exchange.bcp_record_attestation a
+                                                                         where a.record_id = v_rec.id
+                                                                           and a.revision = v_rec.revision)));
+  else
+    select coalesce(jsonb_agg(distinct d.code order by d.code), '[]'::jsonb) into v_codes
+    from exchange.bcp_record_discrepancies(v_rec.id, true) d;
+    perform audit.record_event('SIGNATURE_RECONCILIATION_FAILED', 'BUSINESS', 'FAILURE', null, 'bcp_committee_record',
+      v_rec.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('at', 'ATTESTATION', 'codes', v_codes));
+  end if;
 end;
 $$;
 
