@@ -6,6 +6,7 @@
 import type { RelationshipToFund, ReporterMode } from "./intake";
 export * from "./intake";
 export * from "./bcp";
+export * from "./committee-record";
 
 export const CLASSIFICATION_LEVELS = ["INTERNAL", "RESTRICTED", "CONFIDENTIAL", "SECRET"] as const;
 export type Classification = (typeof CLASSIFICATION_LEVELS)[number];
