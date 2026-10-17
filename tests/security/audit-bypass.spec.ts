@@ -17,6 +17,7 @@ import {
 } from "../support/db";
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 import { preliminaryReferral, unseatDemoSeats } from "../support/committee";
+import { stageOneMeetingWorkbook } from "../support/committee-record";
 import { setClosureAuthority } from "../support/closure";
 import { setPreliminaryCorrectiveTypes } from "../support/preliminary";
 import {
@@ -2957,6 +2958,131 @@ describe("every state-changing command writes its audit event in the same transa
         run: (s) =>
           s.tx`select api.flag_external_counsel_account(${ids.counsel!}, 'ENG-DEMO-WALK', ${REASON})`,
       },
+      // The official record of a committee workbook (migration 2115, ADR-061; the owner's decision on AMB-201), last, on
+      // the walk's committee proceeding: the secretary stages a workbook of one meeting held on paper (fixture: the
+      // owner backdates the referral), opens its record, declares the roster, uploads, marks and opens the signed
+      // minutes, and activates the deputy chair (the chair attended but is unavailable), which the chair ends; the
+      // secretary submits and returns it once and submits again; the chair approves and a member attests.
+      {
+        fn: "open_committee_record",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const w = await apart(
+            s,
+            async () => {
+              // The walk suspended its deputy chair (set_user_status); reactivated, they sit on the record's roster.
+              await s.as("platformAdmin");
+              await s.tx`select api.set_user_status(${USERS.investigatorB}, 'ACTIVE'::core.record_status, ${REASON})`;
+              return stageOneMeetingWorkbook(s as OwnerScenario, ids.committeeProceeding!, "BCP-WALK-2115");
+            },
+            "committeeSecretary",
+          );
+          ids.recordBatch = w.batch;
+          ids.recordHash = w.hash;
+          return (ids.record = await one(s, s.tx`select api.open_committee_record(${w.batch}) as id`));
+        },
+      },
+      {
+        fn: "declare_committee_record_roster",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const lines = await s.tx<{ id: string; seat: string }[]>`
+            select id, seat from exchange.bcp_record_roster where record_id = ${ids.record!}`;
+          const declared = lines.map((l) => {
+            const attended = l.seat !== "ALTERNATE_MEMBER";
+            return {
+              roster_id: l.id,
+              attendance: attended ? "ATTENDED" : "ABSENT",
+              joined_late: false,
+              left_early: false,
+              signature_visible: attended,
+              signed_as_chair: l.seat === "CHAIR",
+            };
+          });
+          return s.tx`select api.declare_committee_record_roster(${ids.record!}, ${s.tx.json(declared as never)}::jsonb)`;
+        },
+      },
+      {
+        fn: "register_committee_record_document",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          const date = await one(
+            s,
+            s.tx`select ((x.original_event_at at time zone 'Asia/Riyadh')::date)::text as d
+                 from exchange.bcp_import_row x
+                 where x.batch_id = ${ids.recordBatch!} and x.sheet_code = '09_MEETINGS' and x.resolution = 'IMPORT'`,
+          );
+          return (ids.recordDocument = await one(
+            s,
+            s.tx`select o_document_id from api.register_committee_record_document(${ids.record!},
+              'signed-minutes-walk.pdf', 'application/pdf', 2048, ${"8".repeat(64)}, ${date}::date,
+              'CDF-MINUTES-TEMPLATE-DEMO', 'CONFIDENTIAL'::core.classification_level)`,
+          ));
+        },
+      },
+      {
+        fn: "complete_committee_record_document",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.complete_committee_record_document(${ids.recordDocument!}, 'CLEAN', 'walk-scanner')`,
+      },
+      {
+        fn: "mark_committee_minutes_signed",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select api.mark_committee_minutes_signed(${ids.recordDocument!})`,
+      },
+      {
+        fn: "open_committee_record_document",
+        actor: "committeeSecretary",
+        run: (s) => s.tx`select * from api.open_committee_record_document(${ids.recordDocument!})`,
+      },
+      {
+        fn: "activate_record_acting_chair",
+        actor: "committeeSecretary",
+        run: async (s) =>
+          (ids.actingChair = await one(
+            s,
+            s.tx`select api.activate_record_acting_chair(${ids.record!}, 'UNAVAILABLE',
+              'Synthetic: the chair cannot review the record this week.', now() + interval '2 days') as id`,
+          )),
+      },
+      {
+        fn: "end_record_acting_chair",
+        actor: "committeeChair",
+        run: (s) => s.tx`select api.end_record_acting_chair(${ids.actingChair!}, ${REASON})`,
+      },
+      {
+        fn: "return_committee_record",
+        actor: "committeeSecretary",
+        run: async (s) => {
+          await apart(
+            s,
+            () => s.tx`select api.submit_bcp_import(${ids.recordBatch!}, ${ids.recordHash!})`,
+            "committeeSecretary",
+          );
+          return s.tx`select api.return_committee_record(${ids.record!}, ${REASON})`;
+        },
+      },
+      {
+        fn: "decide_committee_record",
+        actor: "committeeChair",
+        run: async (s) => {
+          await apart(
+            s,
+            async () => {
+              await s.as("committeeSecretary");
+              await s.tx`select api.submit_bcp_import(${ids.recordBatch!}, ${ids.recordHash!})`;
+            },
+            "committeeChair",
+          );
+          return s.tx`select api.decide_committee_record(${ids.record!}, 2, 'APPROVE', null)`;
+        },
+      },
+      {
+        fn: "attest_committee_record",
+        actor: "committee",
+        run: (s) => s.tx`select api.attest_committee_record(${ids.record!}, 2, 'ATTEST', null, null)`,
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
@@ -3151,6 +3277,9 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_case_content",
       "authz.can_view_case_metadata",
       "authz.can_view_committee_proceeding",
+      // Migration 2115 (ADR-061): the committee record's policies (who sees the record, its file, the whole roster).
+      "authz.can_view_committee_record",
+      "authz.can_view_committee_record_document",
       "authz.can_view_committee_registry",
       "authz.can_view_corrective_action",
       "authz.can_view_evidence",
@@ -3173,6 +3302,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_report",
       "authz.can_view_report_files",
       "authz.can_view_sector_roster",
+      "authz.committee_record_overseer",
       "authz.corrective_event_withheld",
       "authz.current_clearance",
       "authz.current_roles",

@@ -1,11 +1,12 @@
 // Business architecture rebase, migration 2110 (ADR-047; CDF-252): the committee-proceeding continuity workbook
 // (BCP-C1). The coordinator's rulings of 2026-10-17 (F1: the secretary imports by seat, no role permission added, plus
 // the DEC-F30 registry entry; F3: 09_MEETINGS and 11_CONFLICTS import, 10_ATTENDANCE stays recorded only), the owner's
-// decision on AMB-201 (F2: a committee workbook commits only through its official record, migration 2115; until then
-// submit and decide refuse it, OFFICIAL_RECORD_REQUIRED) and AGENT-09's items R1 to R5 are each pinned here. Every step
-// runs through the api.* commands as `authenticated`; the owner connection only backdates the referral (the outage came
-// after the case reached the committee), records the approval only the official record will give, adds registry
-// fixtures 2040 shaped, reads the ledger and the outbox, and probes the internal helpers.
+// decision on AMB-201 (F2: a committee workbook commits only through its official record, migration 2115) and AGENT-09's
+// items R1 to R5 are each pinned here. Every step runs through the api.* commands as `authenticated`; the owner
+// connection only backdates the referral (the outage came after the case reached the committee), forces an approval on
+// a revoked workbook to probe the table's guard, adds registry fixtures 2040 shaped, reads the ledger and the outbox,
+// and probes the internal helpers. Since 2115 a committee workbook commits through its official record
+// (tests/support/committee-record.ts).
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -18,6 +19,7 @@ import {
   type UserKey,
 } from "../support/db";
 import { IC_SEATS, REASON, committeeIds, refer, seat } from "../support/committee";
+import { commitThroughRecord } from "../support/committee-record";
 
 type Tx = Scenario["tx"];
 
@@ -204,25 +206,14 @@ async function sees(s: Scenario, user: UserKey, batch: string): Promise<boolean>
   return (await s.tx`select id from exchange.bcp_import_batch where id = ${batch}`).length === 1;
 }
 
-/** No committee workbook is approved through the commands until its official record exists (the owner's AMB-201
- *  decision, built next); to exercise the import itself the owner records the approval (never the importer, ADR-034 §7). */
+/** Owner fixture: an approval forced onto a workbook, to show the table refuses it once the workbook is revoked. A
+ *  committee workbook is approved only through its official record (2115). */
 const simulateApproval = (tx: Tx, batch: string) =>
   tx`update exchange.bcp_import_batch
      set status = 'APPROVED', submitted_hash = exchange.bcp_batch_hash(id), submitted_at = now(),
          decided_by = ${USERS.committeeChair}, decided_at = now(),
          decision_reason = 'Synthetic: approval simulated for the test (official record not built).'
      where id = ${batch}`;
-
-async function apply(s: Scenario, batch: string): Promise<Record<string, number>> {
-  await s.as("committeeSecretary");
-  const [h] = await s.tx<
-    { h: string }[]
-  >`select submitted_hash as h from exchange.bcp_import_batch where id = ${batch}`;
-  const [r] = await s.tx<
-    { c: Record<string, number> }[]
-  >`select api.apply_bcp_import(${batch}, ${h!.h}) as c`;
-  return r!.c;
-}
 
 const revokeCall =
   (cp: string, workbook = WB) =>
@@ -608,21 +599,12 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
     });
   });
 
-  it("F3, R4, AMB-210: an approved committee workbook records the meeting held offline and raises the paper-noted conflict as the secretary; it records no attendance, confirms no conflict, and sends only restore notices", async () => {
+  it("F3, R4, AMB-210: a committed committee workbook records the meeting held offline and raises the paper-noted conflict as the secretary; it records no attendance, confirms no conflict, and sends only restore notices", async () => {
     await ownerScenario(async (s) => {
       const t = await times(s);
       const cp = await proceeding(s);
-      // A meeting already scheduled online in the same proceeding, where the chair has declared no conflict: a
-      // paper-noted conflict about it reaches the chair as the decider (DEC-F04), so its decision request is sent.
-      await s.as("committeeSecretary");
-      const [online] = await s.tx<{ id: string }[]>`
-        select api.schedule_meeting(${cp}, 'DELIBERATION', 'IN_PERSON', 'Meeting room (synthetic)', null,
-          now() + interval '1 day', now() + interval '1 day 2 hours', ${REASON}) as id`;
-      await s.as("committeeChair");
-      await s.tx`select api.declare_meeting_conflict(mp.id, 'NO_CONFLICT', null)
-                 from committee.meeting_participant mp
-                 where mp.meeting_id = ${online!.id} and mp.user_id = ${USERS.committeeChair}`;
-      const batch = await stage(s, control(t, cp), [
+      // Prepared by a member (the chair approves the official record, so the chair did not prepare it).
+      const batch = await stage(s, control(t, cp, { PREPARED_BY: EMAIL.lead }), [
         meetingRow(t, 3, "BCP-M1"),
         row("10_ATTENDANCE", 3, "BCP-T1", t.heldStart, {
           DETAILS: "Synthetic: all members present on paper.",
@@ -630,7 +612,6 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
         conflictRow(t, 3, "BCP-K1", "BCP-M1", "legal"),
         conflictRow(t, 4, "BCP-K2", "BCP-M1", "committeeSecretary"),
         conflictRow(t, 5, "BCP-K3", "BCP-M1", "employee"),
-        conflictRow(t, 6, "BCP-K4", online!.id, "legal"),
         row("12_VOTES", 3, "BCP-V1", t.heldStart, { DETAILS: "Synthetic: a vote taken on paper." }),
       ]);
       const r = await staged(s, batch);
@@ -642,7 +623,6 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
         "BCP-K1": ["NEW", null],
         "BCP-K2": ["INVALID", "OWN_CONFLICT"],
         "BCP-K3": ["INVALID", "PARTICIPANT"],
-        "BCP-K4": ["NEW", null],
         "BCP-V1": ["UNSUPPORTED", null],
       });
       await s.expectError(
@@ -661,21 +641,19 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
         { row_key: "BCP-K1", subject_user_id: USERS.legal },
         { row_key: "BCP-K2", subject_user_id: null },
         { row_key: "BCP-K3", subject_user_id: null },
-        { row_key: "BCP-K4", subject_user_id: USERS.legal },
       ]);
       expect(
         await s.tx`select exchange.bcp_approver_excluded(${batch}, ${USERS.legal}) as subject,
-                          exchange.bcp_approver_excluded(${batch}, ${USERS.committeeChair}) as preparer,
+                          exchange.bcp_approver_excluded(${batch}, ${USERS.lead}) as preparer,
                           exchange.bcp_approver_excluded(${batch}, ${USERS.committeeSecretary}) as importer,
-                          exchange.bcp_approver_excluded(${batch}, ${USERS.lead}) as member`,
+                          exchange.bcp_approver_excluded(${batch}, ${USERS.committeeChair}) as member`,
       ).toEqual([{ subject: true, preparer: true, importer: true, member: false }]);
       const [policy] = await s.tx<{ qual: string }[]>`
         select qual from pg_policies where schemaname = 'exchange' and policyname = 'bcp_import_row_read'`;
       expect(policy!.qual).toContain("subject_user_id IS DISTINCT FROM authz.current_user_id()");
 
-      await s.asOwner();
-      await simulateApproval(s.tx, batch);
-      expect(await apply(s, batch)).toMatchObject({ imported: 3, skipped: 4 });
+      // Committed through its official record (2115): signed minutes, the chair's approval, each member's attestation.
+      expect((await commitThroughRecord(s, batch)).counts).toMatchObject({ imported: 2, skipped: 4 });
 
       await s.asOwner();
       const prov = await s.tx<{ sheet_code: string; object_id: string; committee_proceeding_id: string }[]>`
@@ -683,7 +661,6 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
         order by sheet_code, row_key`;
       expect(prov.map((p) => [p.sheet_code, p.committee_proceeding_id])).toEqual([
         ["09_MEETINGS", cp],
-        ["11_CONFLICTS", cp],
         ["11_CONFLICTS", cp],
       ]);
       const meeting = prov[0]!.object_id;
@@ -732,31 +709,9 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
           restored_row_id: r["BCP-M1"]!.id,
           dated: true,
         });
-      // BCP-K4's decision request reaches the chair as a restore notice naming its row; the online meeting's own
-      // invitations stay live notices.
-      const onlineNotes = await s.tx<
-        {
-          template_code: string;
-          recipient_id: string;
-          channel: string;
-          restored_row_id: string | null;
-          dated: boolean;
-        }[]
-      >`
-        select template_code, recipient_id, channel, restored_row_id, original_event_at is not null as dated
-        from notify.outbox where object_id = ${online!.id} order by template_code, recipient_id, channel`;
-      const request = {
-        template_code: "MEETING_CONFLICT_DECISION_REQUESTED",
-        recipient_id: USERS.committeeChair,
-        restored_row_id: r["BCP-K4"]!.id,
-        dated: true,
-      };
-      expect(onlineNotes.filter((n) => n.template_code === "MEETING_CONFLICT_DECISION_REQUESTED")).toEqual([
-        { ...request, channel: "EMAIL" },
-        { ...request, channel: "IN_APP" },
-      ]);
-      for (const n of onlineNotes.filter((x) => x.template_code === "MEETING_INVITATION"))
-        expect(n).toMatchObject({ restored_row_id: null, dated: false });
+      // (A paper-noted conflict about a meeting held online is no longer part of a committee workbook: one record
+      // covers one meeting, 2115 E1. The restore marker on a mandatory decision request is pinned on the case path in
+      // bcp-import.spec.ts.)
       // No sweep reminds anyone of a past meeting that is still SCHEDULED.
       await s.tx`select notify.emit_due_reminders()`;
       expect(
@@ -777,12 +732,24 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
         "BCP_IMPORT_ROW_RESOLVED",
         "BCP_IMPORT_ROW_RESOLVED",
         "BCP_IMPORT_PREVIEWED",
+        "COMMITTEE_RECORD_OPENED",
+        "COMMITTEE_RECORD_ROSTER_DECLARED",
+        "OFFICIAL_MINUTES_REGISTERED",
+        "OFFICIAL_MINUTES_UPLOADED",
+        "OFFICIAL_MINUTES_MARKED_SIGNED",
+        "BCP_IMPORT_SUBMITTED",
+        "COMMITTEE_RECORD_SUBMITTED",
+        "CHAIR_APPROVED_IMPORTED_RECORD",
+        "MEMBER_ATTESTED_IMPORTED_RECORD",
+        "MEMBER_ATTESTED_IMPORTED_RECORD",
+        "MEMBER_ATTESTED_IMPORTED_RECORD",
+        "WORKBOOK_READY_TO_COMMIT",
         "MEETING_RECORDED_OFFLINE",
         "BCP_ROW_IMPORTED",
         "MEETING_CONFLICT_RAISED",
         "BCP_ROW_IMPORTED",
-        "BCP_ROW_IMPORTED",
         "BCP_IMPORT_COMPLETED",
+        "COMMITTEE_WORKBOOK_COMMITTED",
       ]);
       for (const e of events.filter((x) => x.action.startsWith("BCP_")))
         expect(e, e.action).toMatchObject({
@@ -805,7 +772,7 @@ describe("committee workbook: what it imports (AMB-201, F3, R2, R4, AMB-210)", (
           select sheet_code from exchange.bcp_provenance where batch_id = ${batch} order by sheet_code`;
         return list.map((x) => x.sheet_code);
       };
-      expect(await provSeen("committeeSecretary")).toEqual(["09_MEETINGS", "11_CONFLICTS", "11_CONFLICTS"]);
+      expect(await provSeen("committeeSecretary")).toEqual(["09_MEETINGS", "11_CONFLICTS"]);
       expect(await provSeen("legal")).toEqual(["09_MEETINGS"]);
       expect(await provSeen("caseManager")).toEqual(["09_MEETINGS"]);
 
