@@ -239,6 +239,21 @@ describe("every state-changing command writes its audit event in the same transa
       return vi;
     };
     const steps: Step[] = [
+      // Committee deactivation (migration 2100, AMB-044) runs first, while the Grievance Committee has no open work; it
+      // is reactivated at once for the grievance steps.
+      {
+        fn: "deactivate_committee",
+        actor: "platformAdmin",
+        run: async (s) => {
+          ids.gc = await one(s, s.tx`select id from committee.committee where code = 'GC'`);
+          return s.tx`select api.deactivate_committee(${ids.gc}, 'BOARD-DEMO-WALK', ${REASON})`;
+        },
+      },
+      {
+        fn: "reactivate_committee",
+        actor: "platformAdmin",
+        run: (s) => s.tx`select api.reactivate_committee(${ids.gc!}, 'BOARD-DEMO-WALK', ${REASON})`,
+      },
       {
         fn: "triage_report",
         actor: "triage",
@@ -2885,6 +2900,47 @@ describe("every state-changing command writes its audit event in the same transa
           return s.tx`select api.annotate_committee_membership(${m}, 'WRONG_REFERENCE', ${REASON})`;
         },
       },
+      // People and access (migration 2100, ADR-046): a lost workbook revoked on case 0004, an urgent flag raised and
+      // cleared there, a delegation of preliminary approval recorded and revoked, and a legal reviewer account that
+      // holds nothing else flagged as external counsel.
+      {
+        fn: "revoke_bcp_workbook",
+        actor: "caseManager",
+        run: (s) =>
+          s.tx`select api.revoke_bcp_workbook(${ids.case4!}, 'BCP-WALK-2100', 'INC-DEMO-WALK', ${REASON})`,
+      },
+      {
+        fn: "flag_case_urgent",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.flag_case_urgent(${ids.case4!}, ${REASON})`,
+      },
+      {
+        fn: "clear_case_urgent",
+        actor: "caseManager",
+        run: (s) => s.tx`select api.clear_case_urgent(${ids.case4!}, ${REASON})`,
+      },
+      {
+        fn: "delegate_preliminary_approval",
+        actor: "grcSectorHead",
+        run: async (s) =>
+          (ids.preliminaryDelegation = await one(
+            s,
+            s.tx`select api.delegate_preliminary_approval(${USERS.grcDeputy}, null, now() + interval '7 days',
+              'DEMO-DEL-WALK', ${REASON}) as id`,
+          )),
+      },
+      {
+        fn: "revoke_preliminary_approval_delegation",
+        actor: "grcSectorHead",
+        run: (s) =>
+          s.tx`select api.revoke_preliminary_approval_delegation(${ids.preliminaryDelegation!}, ${REASON})`,
+      },
+      {
+        fn: "flag_external_counsel_account",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.flag_external_counsel_account(${ids.counsel!}, 'ENG-DEMO-WALK', ${REASON})`,
+      },
     ];
 
     expect(mustCover.filter((fn) => !steps.some((st) => st.fn === fn)).sort()).toEqual([]);
@@ -2913,6 +2969,14 @@ describe("every state-changing command writes its audit event in the same transa
       // review referred them.
       await preliminaryReferral(s, caseA);
       await preliminaryReferral(s, await caseId("0003"));
+      // AMB-121 (migration 2100): a legal reviewer account holding nothing else, for the external counsel flag.
+      await s.asOwner();
+      ids.counsel = randomUUID();
+      await s.tx`insert into iam.user_profile (id, email, display_name, display_name_ar, clearance)
+                 values (${ids.counsel}, 'counsel.walk@example.test', 'External Counsel Walk (synthetic)',
+                         'مستشار خارجي للجولة (تجريبي)', 'CONFIDENTIAL')`;
+      await s.tx`insert into iam.user_role_assignment (user_id, role_code, justification, granted_by)
+                 values (${ids.counsel}, 'LEGAL_REVIEWER', 'Synthetic: external counsel for the walk', ${USERS.platformAdmin})`;
       const missing: string[] = [];
       for (const step of steps) {
         const { events } = await audited(s, step);
@@ -3098,6 +3162,8 @@ describe("audit internals are not reachable", () => {
       "authz.current_roles",
       "authz.current_subject",
       "authz.current_user_id",
+      // Migration 2100 (AMB-121): whether the caller's account is flagged as external counsel (the directory policy).
+      "authz.current_user_is_external",
       "authz.form_entitled",
       "authz.has_case_file_basis",
       "authz.has_permission",

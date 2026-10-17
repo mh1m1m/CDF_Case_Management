@@ -1815,6 +1815,7 @@ export const en = {
       DISPOSITION_APPROVAL: "Disposition approval",
       DISPOSITION_EXECUTION: "Disposition execution",
       DISPOSITION_REVIEW: "Disposition review",
+      EXTERNAL_EXPERT: "External or technical expert support",
       LEGAL_HOLD_APPLICATION: "Legal hold application",
       LEGAL_HOLD_ASSESSMENT: "Legal hold assessment",
       LEGAL_HOLD_RELEASE: "Legal hold release",
@@ -2037,6 +2038,7 @@ export const en = {
     SECTOR_HEAD: "Sector Head",
     COMPLIANCE_SECTION_MANAGER: "Compliance Section Manager",
     GRC_SECTOR_HEAD: "GRC Sector Head",
+    EXTERNAL_EXPERT: "External or Technical Expert",
     PLATFORM_ADMIN: "Platform Administrator",
     DB_ADMIN: "Database Administrator",
     DECISION_AUTHORITY: "Decision Authority",
@@ -2270,6 +2272,7 @@ export const en = {
     DEFENCE_PACKET_APPROVAL_REQUESTED: "Defence packet to approve",
     DEFENCE_PACKET_RELEASED: "Evidence for your defence",
     SANCTION_EXTRACT_APPROVAL_REQUESTED: "Prior sanction to approve",
+    CASE_URGENT_FLAGGED: "Case flagged as urgent",
   },
   oversight: {
     title: "Oversight",
@@ -2352,6 +2355,7 @@ export const en = {
     DEFENCE_PACKET_RELEASED: "Selected evidence for your defence is ready to view.",
     SANCTION_EXTRACT_APPROVAL_REQUESTED:
       "A committee asked to include a prior sanction from your restricted case. It awaits your decision.",
+    CASE_URGENT_FLAGGED: "A case you can open was flagged as urgent and may need your attention.",
   },
   bcpTemplate: {
     readme: {
