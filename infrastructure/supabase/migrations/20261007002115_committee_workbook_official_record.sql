@@ -527,6 +527,101 @@ end;
 $$;
 
 -- =============================================================================
+-- 3. Who sees what (§10, R4, R5, R8)
+-- =============================================================================
+-- The importer while still the proceeding's committee importer, and roster members who count now. Nobody else: not
+-- the case team, not BCP_IMPORT_APPROVE holders, not platform or database administrators by their role.
+create function authz.can_view_committee_record(p_record_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and exists (
+    select 1 from exchange.bcp_committee_record r
+    join exchange.bcp_import_batch b on b.id = r.batch_id
+    where r.id = p_record_id
+      and ((b.imported_by = authz.current_user_id()
+            and exchange.bcp_committee_importer(authz.current_user_id(), r.committee_proceeding_id))
+           or exists (select 1 from exchange.bcp_record_roster l
+                      where l.record_id = r.id and l.user_id = authz.current_user_id()
+                        and exchange.bcp_record_line_eligible(l.id))));
+$$;
+
+-- The importer and the lines that may chair (the chair and the deputy chair) see the whole roster, the decisions,
+-- every line's attestation state and the activations; a member sees their own line and their own attestations.
+create function authz.committee_record_overseer(p_record_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.can_view_committee_record(p_record_id) and exists (
+    select 1 from exchange.bcp_committee_record r
+    join exchange.bcp_import_batch b on b.id = r.batch_id
+    where r.id = p_record_id
+      and (b.imported_by = authz.current_user_id()
+           or exists (select 1 from exchange.bcp_record_roster l
+                      where l.record_id = r.id and l.user_id = authz.current_user_id()
+                        and l.seat in ('CHAIR', 'DEPUTY_CHAIR'))));
+$$;
+
+-- The signed file and its metadata: everyone who sees the record, except the subject of a paper-noted conflict (E6;
+-- they are not told why).
+create function authz.can_view_committee_record_document(p_record_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.can_view_committee_record(p_record_id)
+         and not exchange.bcp_record_conflict_subject(p_record_id, authz.current_user_id());
+$$;
+
+create policy bcp_committee_record_read on exchange.bcp_committee_record for select to authenticated
+  using (authz.can_view_committee_record(id));
+create policy bcp_record_roster_read on exchange.bcp_record_roster for select to authenticated
+  using (authz.committee_record_overseer(record_id)
+         or (user_id = authz.current_user_id() and authz.can_view_committee_record(record_id)));
+create policy bcp_record_document_read on exchange.bcp_record_document for select to authenticated
+  using (authz.can_view_committee_record_document(record_id));
+create policy bcp_record_decision_read on exchange.bcp_record_decision for select to authenticated
+  using (authz.committee_record_overseer(record_id));
+create policy bcp_record_attestation_read on exchange.bcp_record_attestation for select to authenticated
+  using (authz.committee_record_overseer(record_id)
+         or (user_id = authz.current_user_id() and authz.can_view_committee_record(record_id)));
+create policy bcp_record_acting_chair_read on exchange.bcp_record_acting_chair for select to authenticated
+  using (authz.committee_record_overseer(record_id));
+grant select on exchange.bcp_committee_record, exchange.bcp_record_roster, exchange.bcp_record_decision,
+  exchange.bcp_record_attestation, exchange.bcp_record_acting_chair to authenticated;
+-- Every column but the object key (as evidence.evidence_version).
+grant select (id, record_id, version_no, supersedes_id, document_type, source, meeting_date, template_reference,
+              classification, original_file_name, content_type, size_bytes, sha256, status, scanner, uploaded_by,
+              uploaded_at, stored_at, signed_marked_by, signed_marked_at)
+  on exchange.bcp_record_document to authenticated;
+
+-- Replaces 2110: a submitted committee batch is also seen (rows other than about themselves, R4) by whoever may approve
+-- its record now, so the chair compares the workbook with the signed minutes (§13). Nobody else changes.
+create or replace function authz.can_view_bcp_import(p_batch_id uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select authz.current_user_id() is not null and exists (
+    select 1 from exchange.bcp_import_batch b
+    where b.id = p_batch_id
+      and case b.scope
+            when 'CASE' then authz.can_view_case(b.case_id)
+                             and (b.imported_by = authz.current_user_id()
+                                  or (b.submitted_at is not null and authz.has_permission('BCP_IMPORT_APPROVE')))
+            else (b.imported_by = authz.current_user_id()
+                  and exchange.bcp_committee_importer(authz.current_user_id(), b.committee_proceeding_id))
+                 or (b.submitted_at is not null
+                     and exists (select 1 from exchange.bcp_committee_record r
+                                 where r.batch_id = b.id
+                                   and exchange.bcp_record_approver_capacity(r.id, authz.current_user_id()) is not null))
+          end
+  );
+$$;
+
+-- =============================================================================
 -- 4. Layer 1: the record, the roster and the signed minutes
 -- =============================================================================
 
