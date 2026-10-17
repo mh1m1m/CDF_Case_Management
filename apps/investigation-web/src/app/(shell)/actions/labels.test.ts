@@ -1,29 +1,47 @@
-// How the corrective-action pages name what the read models give them, in both languages (UX redesign Phase 12 P12-3b;
-// ADR-058). Every code the contracts declare for an action, its owner, its block and a disposition has its message,
-// and so does every refusal the disposition command and the closure step give these pages and every message the
-// disposition's schema gives, so that a new code fails here rather than showing its key, or only the generic conflict,
-// on the screen. A calendar date is that day; an owner is their kind and the accountable person's name where the page
-// has it.
+// How the corrective-action pages name what the read models give them, in both languages (UX redesign Phase 12 P12-3b
+// and P12-6a; ADR-058). Every code the contracts declare for an action, its owner, its block, a disposition, an entry
+// of its history and a kind of evidence has its message, and so does every refusal the disposition, report,
+// verification and reopening commands and the closure step give these pages and every message their schemas give, so
+// that a new code fails here rather than showing its key, or only the generic conflict, on the screen. A calendar date
+// is that day; an owner is their kind and the accountable person's name where the page has it; an entry of the history
+// names who recorded it only where that is the reader or the owner the page can name.
 import { describe, expect, it } from "vitest";
 import {
   ACTION_BLOCKS,
   ACTION_DISPOSITIONS,
+  ACTION_EVENT_TYPES,
   ACTION_OWNER_KINDS,
   ACTION_SOURCES,
   CORRECTIVE_ACTION_STATUSES,
   CORRECTIVE_ACTION_TYPES,
+  CORRECTIVE_EVIDENCE_TYPES,
+  type ActionEvent,
   type ActionOrigin,
   type ActionOwner,
 } from "@cdf/contracts";
 import { createTranslator, messagesFor, type Locale, type MessageKey } from "@cdf/i18n";
-import { disposeSupersededCorrectiveActionSchema } from "@cdf/validation";
+import {
+  disposeSupersededCorrectiveActionSchema,
+  recordCorrectiveActionProgressSchema,
+  reopenCorrectiveActionSchema,
+  submitCorrectiveActionCompletionSchema,
+  verifyCorrectiveActionSchema,
+} from "@cdf/validation";
 import { codeText } from "../legal-reviews/labels";
 import {
   ACTION_CODES,
   DISPOSE_ACT,
   calendarDate,
+  completionNeeds,
+  withoutBlock,
   earlierVersions,
+  eventText,
+  eventWhen,
+  evidenceText,
   governingKind,
+  hasSubmitted,
+  latestFirst,
+  latestSubmission,
   nameOf,
   ownerText,
 } from "./labels";
@@ -49,6 +67,9 @@ describe("the corrective-action codes", () => {
         ["disposition", ca.disposition, ACTION_DISPOSITIONS],
         ["dispositionHint", ca.dispositionHint, ACTION_DISPOSITIONS],
         ["governing", ca.governing, ["ORIGINAL", "REPLACEMENT", "NONE"]],
+        // Each entry of the history, and an opening or a due date change that names its date (P12-6a).
+        ["event", ca.event, [...ACTION_EVENT_TYPES, "OPENED_DUE", "DUE_DATE_CHANGED_TO", "PROGRESS_AT"]],
+        ["evidenceType", ca.evidenceType, CORRECTIVE_EVIDENCE_TYPES],
       ];
       for (const [name, messages, codes] of sections) {
         expect(sorted(Object.keys(messages)), name).toEqual(sorted(codes));
@@ -76,6 +97,26 @@ describe("the refusals the pages explain", () => {
     "owner_id",
     "due_date",
   ];
+  /**
+   * What the owner's report, the verification and a reopening answer (api.record_corrective_action_progress,
+   * the four-argument api.submit_corrective_action_completion, api.verify_corrective_action and
+   * api.reopen_corrective_action, 1940 and 2040; the freeze trigger's block codes, 2030), and the fields they name.
+   * The block codes share one sentence, which never says why: the case team reads why on the page; no one else does.
+   */
+  const report = [
+    "ACTION_NOT_ACTIVE",
+    "NOT_PENDING_VERIFICATION",
+    "NOT_COMPLETED",
+    "CASE_NOT_ACTIVE",
+    "ACTION_BLOCKED",
+    ...ACTION_BLOCKS,
+    "percent_complete",
+    "note",
+    "evidence_reference",
+    "evidence_type",
+    "decision",
+    "reason",
+  ];
   /** Why a step out of ACTIVE is refused (case_mgmt.closure_blocks, 2070; the closure rule, 2060), on the overview. */
   const closure = [
     "CONFLICT_REMEDIATION_OPEN",
@@ -100,6 +141,19 @@ describe("the refusals the pages explain", () => {
           t(`correctiveActions.codes.${code}` as MessageKey),
         );
       }
+    });
+
+    it(`each refusal the report, verify and reopen forms show has its own words, in ${locale}`, () => {
+      for (const code of report) {
+        expect(codeText(t, ACTION_CODES, code), code).not.toBe(generic);
+        expect(codeText(t, ACTION_CODES, code), code).toBe(
+          t(`correctiveActions.codes.${code}` as MessageKey),
+        );
+      }
+      // One sentence for every block code: the words never say which one held the action.
+      expect(
+        new Set(["ACTION_BLOCKED", ...ACTION_BLOCKS].map((b) => codeText(t, ACTION_CODES, b))).size,
+      ).toBe(1);
     });
 
     it(`each reason the closure step is refused for has its words, in ${locale}`, () => {
@@ -173,6 +227,52 @@ describe("the disposition schema's messages", () => {
       expect(disposeSupersededCorrectiveActionSchema.safeParse(parsed).success, parsed.disposition).toBe(
         true,
       );
+  });
+
+  for (const locale of LOCALES) {
+    it(`each message has its words in ${locale}`, () => {
+      const t = createTranslator(locale);
+      for (const key of keys) expect(t(key as MessageKey), key).not.toBe(key);
+    });
+  }
+});
+
+describe("the report, verify and reopen schemas' messages", () => {
+  const keys = [
+    ...new Set(
+      [
+        recordCorrectiveActionProgressSchema.safeParse({ actionId: "1", percentComplete: "", note: "" }),
+        recordCorrectiveActionProgressSchema.safeParse({
+          actionId: ID,
+          percentComplete: "101",
+          note: "x".repeat(4001),
+        }),
+        submitCorrectiveActionCompletionSchema.safeParse({
+          actionId: ID,
+          note: "abc",
+          evidenceType: "DOCUMENT",
+        }),
+        submitCorrectiveActionCompletionSchema.safeParse({
+          actionId: ID,
+          note: "Synthetic.",
+          evidenceReference: "ab",
+        }),
+        verifyCorrectiveActionSchema.safeParse({ actionId: ID, decision: "RETURNED" }),
+        verifyCorrectiveActionSchema.safeParse({ actionId: ID }),
+        reopenCorrectiveActionSchema.safeParse({ actionId: ID, reason: "abc" }),
+      ].flatMap((r) => r.error?.issues.map((i) => i.message) ?? []),
+    ),
+  ];
+
+  it("gives the form a message for each problem", () => {
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "validation.invalid",
+        "validation.required",
+        "validation.tooShort",
+        "validation.tooLong",
+      ]),
+    );
   });
 
   for (const locale of LOCALES) {
@@ -265,5 +365,115 @@ describe("labels", () => {
       expect(en(key as MessageKey), d).not.toBe(key);
       expect(ar(key as MessageKey), d).not.toBe(key);
     }
+  });
+  const event = (over: Partial<ActionEvent>): ActionEvent => ({
+    eventId: OTHER,
+    eventType: "PROGRESS",
+    actorId: ID,
+    note: null,
+    evidenceReference: null,
+    evidenceType: null,
+    percentComplete: null,
+    dueDate: null,
+    createdAt: "2026-10-15T10:00:00.000Z",
+    ...over,
+  });
+
+  it("an entry of the history says what happened: the percentage, the due date it set, or what was decided", () => {
+    expect(eventText(en, event({ percentComplete: 40 }))).toBe(
+      en("correctiveActions.event.PROGRESS_AT", { percent: 40 }),
+    );
+    expect(eventText(en, event({}))).toBe(en("correctiveActions.event.PROGRESS"));
+    expect(eventText(en, event({ eventType: "OPENED", dueDate: "2026-12-31" }))).toContain("2026");
+    expect(eventText(en, event({ eventType: "OPENED" }))).toBe(en("correctiveActions.event.OPENED"));
+    expect(eventText(ar, event({ eventType: "DUE_DATE_CHANGED", dueDate: "2026-12-31" }))).toBe(
+      ar("correctiveActions.event.DUE_DATE_CHANGED_TO", { date: calendarDate(ar, "2026-12-31") }),
+    );
+    expect(eventText(en, event({ eventType: "DUE_DATE_CHANGED" }))).toBe(
+      en("correctiveActions.event.DUE_DATE_CHANGED"),
+    );
+    for (const type of ACTION_EVENT_TYPES)
+      for (const t of [en, ar]) {
+        const text = eventText(t, event({ eventType: type }));
+        expect(text, type).not.toContain("correctiveActions.");
+        expect(text.trim().length, type).toBeGreaterThan(0);
+      }
+  });
+
+  it("an entry names who recorded it only where that is the reader or the owner the page can name", () => {
+    const owner = { userId: OTHER, name: "Employee Chi" };
+    expect(eventWhen(en, event({ actorId: ID }), ID, owner)).toContain("by you");
+    expect(eventWhen(en, event({ actorId: OTHER }), ID, owner)).toContain("Employee Chi");
+    // Anyone else, or an owner the page cannot name, stays unnamed: A2 gives an id, never a name.
+    const third = "5e1f8a20-3c4d-4b6e-9f70-1a2b3c4d5e6f";
+    for (const when of [
+      eventWhen(en, event({ actorId: third }), ID, owner),
+      eventWhen(en, event({ actorId: OTHER }), ID, { userId: OTHER, name: null }),
+      eventWhen(en, event({ actorId: OTHER }), ID, { userId: null, name: "Employee Chi" }),
+    ]) {
+      expect(when).not.toContain("Employee Chi");
+      expect(when).not.toContain(third);
+      expect(when).not.toContain(OTHER);
+    }
+  });
+
+  it("a completion's evidence is its reference and, where given, its kind; none without a reference", () => {
+    expect(evidenceText(en, event({}))).toBeNull();
+    expect(evidenceText(en, event({ evidenceReference: "DOC-DEMO-2026-0007" }))).toContain(
+      "DOC-DEMO-2026-0007",
+    );
+    const typed = evidenceText(
+      ar,
+      event({ evidenceReference: "DOC-DEMO-2026-0007", evidenceType: "DOCUMENT" }),
+    );
+    expect(typed).toContain("DOC-DEMO-2026-0007");
+    expect(typed).toContain(ar("correctiveActions.evidenceType.DOCUMENT"));
+  });
+
+  it("the history is listed latest first, and the verifier decides on the latest completion submitted", () => {
+    const opened = event({ eventId: "e1", eventType: "OPENED" });
+    const first = event({ eventId: "e2", eventType: "COMPLETION_SUBMITTED", actorId: OTHER });
+    const returned = event({ eventId: "e3", eventType: "RETURNED", actorId: ID });
+    const second = event({ eventId: "e4", eventType: "COMPLETION_SUBMITTED", actorId: OTHER });
+    const events = [opened, first, returned, second];
+    expect(latestFirst(events).map((e) => e.eventId)).toEqual(["e4", "e3", "e2", "e1"]);
+    expect(events.map((e) => e.eventId)).toEqual(["e1", "e2", "e3", "e4"]);
+    expect(latestSubmission(events)?.eventId).toBe("e4");
+    expect(latestSubmission([opened, returned])).toBeNull();
+    expect(hasSubmitted(events, OTHER)).toBe(true);
+    expect(hasSubmitted(events, ID)).toBe(false);
+  });
+
+  it("a completion needs what the policy in force asks: a reference unless a note alone will do, and a listed kind", () => {
+    expect(completionNeeds({ completionEvidence: "REFERENCE_REQUIRED", allowedEvidenceTypes: null })).toEqual(
+      {
+        reference: true,
+        type: false,
+        types: CORRECTIVE_EVIDENCE_TYPES,
+      },
+    );
+    expect(
+      completionNeeds({
+        completionEvidence: "NOTE_ONLY",
+        allowedEvidenceTypes: ["DOCUMENT", "CONTROL_EVIDENCE"],
+      }),
+    ).toEqual({ reference: false, type: true, types: ["DOCUMENT", "CONTROL_EVIDENCE"] });
+  });
+  it("no answer names the block that held the action: each of the five leaves as ACTION_BLOCKED", () => {
+    for (const block of ACTION_BLOCKS)
+      expect(withoutBlock({ status: "error", kind: "CONFLICT", detail: block, ref: "r" }), block).toEqual({
+        status: "error",
+        kind: "CONFLICT",
+        detail: "ACTION_BLOCKED",
+        ref: "r",
+      });
+    // Every other answer is left as it is.
+    for (const state of [
+      { status: "ok" },
+      { status: "error", kind: "CONFLICT", detail: "NOT_PENDING_VERIFICATION", ref: "r" },
+      { status: "error", kind: "FORBIDDEN", ref: "r" },
+      { status: "invalid", fieldErrors: { note: "validation.tooShort" } },
+    ])
+      expect(withoutBlock(state)).toEqual(state);
   });
 });

@@ -5,8 +5,11 @@
  * what a disposition is checked against). DEC-AMB-014: the replacement authority decision disposes of each action the
  * superseded decision governed, which is FROZEN_BY_SUPERSEDED_DECISION until then. Every capability is its command's
  * own answer for the caller now (UX-116), and the command checks again. Types and literal lists only.
+ *
+ * Phase 12 P12-6a (no migration): the same view's policy (the evidence a completion needs) and history (`events`),
+ * which the owner's and the verifier's forms on the action's page use.
  */
-import type { CorrectiveActionStatus, CorrectiveActionType } from "./index";
+import type { CompletionEvidenceRule, CorrectiveActionStatus, CorrectiveActionType } from "./index";
 import type { AccountName } from "./legal-reviews";
 
 /** Why an action may not move (`decision.action_block`): DEC-AMB-013's two while a conflict is open, DEC-AMB-014's three. */
@@ -122,6 +125,58 @@ export interface ActionOrigin {
   replacement: ActionReplacement | null;
 }
 
+/** The evidence types a completion's reference may name (DEC-F27, migration 2040: decision.corrective_evidence_type). */
+export const CORRECTIVE_EVIDENCE_TYPES = [
+  "DOCUMENT",
+  "REVISED_PROCEDURE",
+  "SCREENSHOT_OR_SYSTEM_EVIDENCE",
+  "TRAINING_EVIDENCE",
+  "CONTROL_EVIDENCE",
+  "OTHER_AUTHORIZED_ARTIFACT",
+] as const;
+export type CorrectiveEvidenceType = (typeof CORRECTIVE_EVIDENCE_TYPES)[number];
+
+/** What the policy in force asks of a completion (corrective_action_policy_read). */
+export interface ActionPolicy {
+  /** REFERENCE_REQUIRED (the seeded placeholder, SOURCE_REQUIRED) or NOTE_ONLY. */
+  completionEvidence: CompletionEvidenceRule;
+  /** The types a reference must name one of; null where the policy lists none (the type is then optional). */
+  allowedEvidenceTypes: CorrectiveEvidenceType[] | null;
+}
+
+/** An entry of the action's history (decision.corrective_action_event), as the view gives it. */
+export const ACTION_EVENT_TYPES = [
+  "OPENED",
+  "OWNER_CHANGED",
+  "OWNER_KIND_CHANGED",
+  "DUE_DATE_CHANGED",
+  "PROGRESS",
+  "COMPLETION_SUBMITTED",
+  "VERIFIED",
+  "RETURNED",
+  "REOPENED",
+  "WAIVED",
+] as const;
+export type ActionEventType = (typeof ACTION_EVENT_TYPES)[number];
+
+/**
+ * One entry of the action's history: who recorded it (an id only), when, and what it carries. The view leaves out the
+ * note of an entry a disposition wrote before 2090 for a viewer outside the case team (CDF-227). The person OPENED and
+ * OWNER_CHANGED name and a waiver's document are not carried here.
+ */
+export interface ActionEvent {
+  eventId: string;
+  eventType: ActionEventType;
+  actorId: string;
+  note: string | null;
+  evidenceReference: string | null;
+  evidenceType: CorrectiveEvidenceType | null;
+  percentComplete: number | null;
+  /** The due date OPENED and DUE_DATE_CHANGED set, YYYY-MM-DD. */
+  dueDate: string | null;
+  createdAt: string;
+}
+
 export interface CorrectiveActionCapabilities {
   mayRecordProgress: boolean;
   maySubmitCompletion: boolean;
@@ -156,5 +211,9 @@ export interface CorrectiveActionView {
   origin: ActionOrigin | null;
   /** The case, under case-metadata visibility only. */
   case: { caseId: string | null; caseNumber: string | null };
+  /** The evidence a completion needs under the policy in force (P12-6a). */
+  policy: ActionPolicy;
+  /** The action's history, oldest first (P12-6a). */
+  events: ActionEvent[];
   capabilities: CorrectiveActionCapabilities;
 }

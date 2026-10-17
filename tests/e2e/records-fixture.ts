@@ -1143,10 +1143,10 @@ export async function legalReviewApproved(packageId: string): Promise<void> {
   );
 }
 
-// ---- Corrective actions under a superseded decision (Phase 12 P12-3b; migration 2096, ADR-058) ----------------------
+// ---- Corrective actions (Phase 12 P12-3b and P12-6a; migration 2096, ADR-058) ---------------------------------------
 
 /** The action the case manager opens under the first decision: the wording its owner reads on its card. */
-export const FROZEN_ACTION = {
+export const OPENED_ACTION = {
   title: "Synthetic: strengthen the approval controls",
   description: "Synthetic: add a second approver to payments above the threshold.",
 } as const;
@@ -1159,7 +1159,7 @@ export const REPLACEMENT_SOURCES = ["MEMO-DEMO-2096-E2E-02", "MEMO-DEMO-2096-E2E
 
 const DECISION_REASON = "Synthetic: the CEO's decision on the package, for the e2e check.";
 
-export interface FrozenActionFixture extends ProceedingFixture {
+export interface CorrectiveActionFixture extends ProceedingFixture {
   packageId: string;
   /** The package's one item, a case-wide corrective action. */
   itemId: string;
@@ -1225,15 +1225,11 @@ async function ceoApproves(packageId: string, sources: readonly string[]): Promi
 }
 
 /**
- * A corrective action frozen by a superseded decision (DEC-AMB-014), and the replacement decision that must say what
- * becomes of it. The demo committee adopts a package of one case-wide corrective action, Member B's vote deciding it
- * (without that vote it ties); after a legal review the CEO approves it and the case manager opens the action for
- * Employee Chi. Member A's concern about Member B is then upheld, the committee votes again without Member B and adopts
- * the package again, and after a second review the CEO approves it again from REPLACEMENT_SOURCES: the first decision is
- * superseded and the action frozen until a corrective-action manager of the case records its disposition. Fails unless
- * the demo committee holds its seats.
+ * A corrective action open under the CEO's decision. The demo committee adopts a package of one case-wide corrective
+ * action, Member B's vote deciding it (without that vote it ties); after a legal review the CEO approves it and the case
+ * manager opens the action for Employee Chi, due in 30 days. Fails unless the demo committee holds its seats.
  */
-export async function frozenAction(label: string): Promise<FrozenActionFixture> {
+export async function openedAction(label: string): Promise<CorrectiveActionFixture> {
   await correctiveActionPrerequisites();
   const f = await proceedingMeeting(label);
   const { packageId, itemId } = await as("icSecretary", async (tx) => {
@@ -1259,15 +1255,24 @@ export async function frozenAction(label: string): Promise<FrozenActionFixture> 
   const [action] = await as(
     "caseManager",
     (tx) => tx<{ id: string }[]>`
-      select api.open_corrective_action(${itemId}, ${FROZEN_ACTION.title}, ${FROZEN_ACTION.description},
+      select api.open_corrective_action(${itemId}, ${OPENED_ACTION.title}, ${OPENED_ACTION.description},
         ${USERS.financeEmployee}, (now() at time zone 'Asia/Riyadh')::date + 30) as id`,
   );
-  // Member B's vote decided the package: their upheld conflict sends it back to the committee without them.
+  return { ...f, packageId, itemId, actionId: action!.id };
+}
+
+/**
+ * The decision the action carries out is superseded (DEC-AMB-014): Member A's concern about Member B, whose vote
+ * decided the package, is upheld; the committee votes again without Member B and adopts the package again, and after a
+ * second review the CEO approves it again from REPLACEMENT_SOURCES. The action is frozen until a corrective-action
+ * manager of the case records what the replacement decision decides of it.
+ */
+export async function supersededDecision(f: CorrectiveActionFixture): Promise<void> {
   await decidedConcern(f, "icMemberA", "icMemberB", "UPHELD");
   await as("icSecretary", async (tx) => {
-    await tx`select api.resolve_conflict_taint(${itemId}, 'RE_VOTE',
+    await tx`select api.resolve_conflict_taint(${f.itemId}, 'RE_VOTE',
       'Synthetic: the committee votes again without the conflicted member.')`;
-    await tx`select api.open_package_vote(${f.meetingId}, ${packageId})`;
+    await tx`select api.open_package_vote(${f.meetingId}, ${f.packageId})`;
   });
   const again = await openVoteId(f);
   await castVotes(again, [
@@ -1276,10 +1281,37 @@ export async function frozenAction(label: string): Promise<FrozenActionFixture> 
     ["icMemberA", "APPROVE"],
   ]);
   await closeVote(again);
-  await adoptionRecorded(packageId);
-  await reviewedAndSubmitted(f, packageId);
-  await ceoApproves(packageId, REPLACEMENT_SOURCES);
-  return { ...f, packageId, itemId, actionId: action!.id };
+  await adoptionRecorded(f.packageId);
+  await reviewedAndSubmitted(f, f.packageId);
+  await ceoApproves(f.packageId, REPLACEMENT_SOURCES);
+}
+
+/** A corrective action frozen by a superseded decision, and the replacement decision that must say what becomes of it. */
+export async function frozenAction(label: string): Promise<CorrectiveActionFixture> {
+  const f = await openedAction(label);
+  await supersededDecision(f);
+  return f;
+}
+
+/** The completion Employee Chi submits for verification in submittedAsComplete. */
+export const SUBMITTED_COMPLETION = {
+  note: "Synthetic: the second approver is in place for payments above the threshold.",
+  reference: "DOC-DEMO-2026-E2E-01",
+} as const;
+
+/** Employee Chi submits the action as complete, naming SUBMITTED_COMPLETION's reference and no kind of evidence. */
+export async function submittedAsComplete(actionId: string): Promise<void> {
+  await as(
+    "financeEmployee",
+    (tx) => tx`
+      select api.submit_corrective_action_completion(${actionId}, ${SUBMITTED_COMPLETION.note},
+        ${SUBMITTED_COMPLETION.reference}, null::text)`,
+  );
+}
+
+/** A corrective-action manager of the case other than the owner verifies the completion, without a note. */
+export async function verifiedAs(user: "caseManager" | "grcDirector", actionId: string): Promise<void> {
+  await as(user, (tx) => tx`select api.verify_corrective_action(${actionId}, 'VERIFIED', null::text)`);
 }
 
 /** The wording a modification gives the action. */

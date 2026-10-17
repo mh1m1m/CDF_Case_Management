@@ -1,12 +1,19 @@
-// A corrective action «إجراء تصحيحي» (UX redesign Phase 12 P12-3b; ADR-058; DEC-AMB-014): a purpose route that reads
-// api.corrective_action_view (A2). Whoever may see the action reads its card: the wording it carries now and every
-// earlier one, its status, owner and due date, and nothing of the case. The case team also reads where it comes from
-// and why it may not move, and their own list of the case's actions (A1) names its owner. While the decision it
-// carries out is superseded, a corrective-action manager of the case records here what the replacement decision
-// decides of it: one form for each disposition the command would accept now (A2's disposition_options and
-// may_dispose, UX-116), each citing one of the replacement decision's own source documents; the command checks
-// again. Anyone else, and an id that names nothing, gets the same 404, and the refusal is recorded (ACCESS_DENIED). A
-// disposition's reason is never shown back (R3). The owner's own controls on their card come with P12-6.
+// A corrective action «إجراء تصحيحي» (UX redesign Phase 12 P12-3b and P12-6a; ADR-058; DEC-AMB-014): a purpose route
+// that reads api.corrective_action_view (A2). Whoever may see the action reads its card (the wording it carries now and
+// every earlier one, its status, owner and due date) and its history, and nothing of the case. The case team also
+// reads where it comes from and why it may not move, and their own list of the case's actions (A1) names its owner.
+// Each form shows only where A2 says its command would accept the caller now (UX-116), and the command checks again:
+// - whoever acts for the action records its progress and submits it as complete, naming the evidence the policy in
+//   force asks for (P12-6a);
+// - a corrective-action manager of the case, never its owner or anyone who submitted a completion, verifies the
+//   completion or returns it to the owner with what is missing, and reopens a completed action while the case is
+//   active (P12-6a);
+// - while the decision it carries out is superseded, a manager records what the replacement decision decides of it:
+//   one form for each disposition the command would accept now (A2's disposition_options and may_dispose), each
+//   citing one of the replacement decision's own source documents (P12-3b).
+// Anyone else, and an id that names nothing, gets the same 404, and the refusal is recorded (ACCESS_DENIED). A
+// disposition's reason is never shown back (R3). The history shows each entry's note as A2 gives it: A2 leaves out the
+// note a disposition wrote before 2090 for anyone outside the case team (CDF-227).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -42,12 +49,25 @@ import {
   ACTION_CODES,
   DISPOSE_ACT,
   calendarDate,
+  completionNeeds,
   earlierVersions,
+  eventText,
+  eventWhen,
+  evidenceText,
   governingKind,
+  hasSubmitted,
+  latestFirst,
+  latestSubmission,
   nameOf,
   ownerText,
 } from "../labels";
-import { disposeAction } from "./actions";
+import {
+  disposeAction,
+  recordProgressAction,
+  reopenAction,
+  submitCompletionAction,
+  verifyAction,
+} from "./actions";
 
 /** Unique translated title (WCAG 2.4.2, UX-082); never the action's wording or a case number. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -133,10 +153,23 @@ export default async function CorrectiveActionPage({ params }: { params: Promise
           <ActionCard t={t} v={v} ownerName={ownerName} />
           {o ? <Origin t={t} o={o} row={row} /> : null}
           {o && o.dispositions.length > 0 ? <Dispositions t={t} o={o} /> : null}
+          <History t={t} v={v} me={actor.userId} ownerName={ownerName} />
         </div>
-        {/* The case's action list links here (#dispose) for a manager who may record the disposition. */}
-        <div id="dispose" className="min-w-0 scroll-mt-4">
-          {o ? <Dispose t={t} v={v} o={o} caseId={caseId} /> : null}
+        {/* My Work and the case's action list link to the step the reader takes here: #report for whoever acts for the
+            action, #verify for its verifier and #dispose for a manager who may record the disposition. */}
+        <div className="min-w-0">
+          <div id="report" className="scroll-mt-4">
+            <Report t={t} v={v} caseId={caseId} me={actor.userId} />
+          </div>
+          <div id="verify" className="scroll-mt-4">
+            {v.capabilities.mayVerify ? <Verify t={t} v={v} caseId={caseId} /> : null}
+          </div>
+          <div id="reopen" className="scroll-mt-4">
+            {v.capabilities.mayReopen ? <Reopen t={t} v={v} caseId={caseId} /> : null}
+          </div>
+          <div id="dispose" className="scroll-mt-4">
+            {o ? <Dispose t={t} v={v} o={o} caseId={caseId} /> : null}
+          </div>
         </div>
       </div>
     </>
@@ -208,6 +241,20 @@ function ActionCard({
     },
     { term: t("correctiveActions.createdLabel"), value: isolate(formatDate(t.locale, v.createdAt)) },
   ];
+  // The day it reached where it stands now, where that is a submission, a verification or a waiver.
+  const reached =
+    v.status === "PENDING_VERIFICATION"
+      ? { at: v.completionSubmittedAt, key: "correctiveActions.submittedLabel" as const }
+      : v.status === "COMPLETED"
+        ? { at: v.completedAt, key: "correctiveActions.completedLabel" as const }
+        : v.status === "WAIVED"
+          ? { at: v.waivedAt, key: "correctiveActions.waivedLabel" as const }
+          : null;
+  if (reached?.at)
+    terms.push({
+      term: t(reached.key),
+      value: <span data-testid="action-reached">{isolate(formatDate(t.locale, reached.at))}</span>,
+    });
   if (v.versionNo > 1)
     terms.push({
       term: t("correctiveActions.versionLabel"),
@@ -348,6 +395,433 @@ function Dispositions({ t, o }: { t: Translator; o: ActionOrigin }) {
           );
         })}
       </ol>
+    </CDFCard>
+  );
+}
+
+/**
+ * What happened to the action, latest first, as A2 gives it: each entry in words, when, and who only where that is the
+ * reader or the owner the page can name. A note is shown as written, and a completion with the evidence it named.
+ */
+function History({
+  t,
+  v,
+  me,
+  ownerName,
+}: {
+  t: Translator;
+  v: CorrectiveActionView;
+  me: string;
+  ownerName: string | null;
+}) {
+  if (v.events.length === 0) return null;
+  const owner = { userId: v.owner.accountableUserId, name: ownerName };
+  return (
+    <CDFCard title={t("correctiveActions.historyTitle")} testId="action-history">
+      <ol className="grid gap-4">
+        {latestFirst(v.events).map((e, k) => {
+          const evidence = evidenceText(t, e);
+          return (
+            <li
+              key={e.eventId}
+              className="border-b border-cdf-border pb-4 last:border-0 last:pb-0"
+              data-testid={`action-event-${k + 1}`}
+              data-event={e.eventType}
+            >
+              <h3 className="font-semibold">{eventText(t, e)}</h3>
+              <p className="text-sm text-cdf-text-secondary">{eventWhen(t, e, me, owner)}</p>
+              {e.note ? (
+                <p
+                  className="mt-1 whitespace-pre-wrap break-words"
+                  data-testid={`action-event-${k + 1}-note`}
+                >
+                  <bdi dir="auto">{e.note}</bdi>
+                </p>
+              ) : null}
+              {evidence ? (
+                <p className="mt-1 break-words" data-testid={`action-event-${k + 1}-evidence`}>
+                  {evidence}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </CDFCard>
+  );
+}
+
+/**
+ * The owner's report, for whoever acts for the action while it is open and may move (A2's may_record_progress and
+ * may_submit_completion). Otherwise a line for the one who reports: a completion waits for someone else to verify it
+ * (api.verify_corrective_action leaves the owner and anyone who submitted a completion out), or, outside the case
+ * team, reporting is paused. Only the case team reads why an action may not move.
+ */
+function Report({
+  t,
+  v,
+  caseId,
+  me,
+}: {
+  t: Translator;
+  v: CorrectiveActionView;
+  caseId: string | null;
+  me: string;
+}) {
+  const c = v.capabilities;
+  if (c.mayRecordProgress || c.maySubmitCompletion)
+    return (
+      <CDFCard title={t("correctiveActions.reportTitle")} testId="action-report">
+        <p className="mb-3 text-sm text-cdf-text-secondary">{t("correctiveActions.reportIntro")}</p>
+        {c.mayRecordProgress ? <ProgressForm t={t} v={v} caseId={caseId} /> : null}
+        {c.maySubmitCompletion ? <CompleteForm t={t} v={v} caseId={caseId} /> : null}
+      </CDFCard>
+    );
+  if (
+    v.status === "PENDING_VERIFICATION" &&
+    !c.mayVerify &&
+    (v.owner.accountableUserId === me || hasSubmitted(v.events, me))
+  )
+    return (
+      <CDFAlert tone="info" testId="action-awaiting-verification">
+        <p>{t("correctiveActions.awaitingVerification")}</p>
+      </CDFAlert>
+    );
+  // Outside the case team, only whoever acts for the action reads it (authz.can_view_corrective_action), so an open
+  // action they may not report on is one that may not move.
+  if (!v.origin && (v.status === "OPEN" || v.status === "IN_PROGRESS"))
+    return (
+      <CDFAlert tone="info" testId="action-report-paused">
+        <p>{t("correctiveActions.reportPaused")}</p>
+      </CDFAlert>
+    );
+  return null;
+}
+
+function ProgressForm({ t, v, caseId }: { t: Translator; v: CorrectiveActionView; caseId: string | null }) {
+  return (
+    <section aria-labelledby="action-progress-title" className="border-t border-cdf-border pt-3 pb-3">
+      <h3 id="action-progress-title" className="mb-2 font-semibold">
+        {t("correctiveActions.progressTitle")}
+      </h3>
+      <CDFCommandForm
+        action={recordProgressAction.bind(null, v.actionId, caseId)}
+        locale={t.locale}
+        submitLabel={t("correctiveActions.recordProgress")}
+        variant="secondary"
+        testId="action-progress-form"
+        successMessage={t("correctiveActions.progressRecorded")}
+        codeSections={ACTION_CODES}
+        fieldLabels={{
+          percentComplete: t("correctiveActions.percentLabel"),
+          note: t("correctiveActions.progressNoteLabel"),
+        }}
+      >
+        <CDFField
+          id="action-progress-percent"
+          label={t("correctiveActions.percentLabel")}
+          hint={t("correctiveActions.percentHint", { percent: v.percentComplete })}
+          requiredLabel={t("common.required")}
+        >
+          <input
+            id="action-progress-percent"
+            name="percentComplete"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={100}
+            step={1}
+            dir="ltr"
+            className={inputClass}
+            required
+            defaultValue={v.percentComplete}
+            aria-describedby="action-progress-percent-hint"
+            data-testid="action-progress-percent"
+          />
+        </CDFField>
+        <CDFField
+          id="action-progress-note"
+          label={t("correctiveActions.progressNoteLabel")}
+          hint={t("correctiveActions.noteHistoryHint")}
+          requiredLabel={t("common.required")}
+        >
+          <textarea
+            id="action-progress-note"
+            name="note"
+            className={textareaClass}
+            required
+            minLength={5}
+            maxLength={4000}
+            aria-describedby="action-progress-note-hint"
+            data-testid="action-progress-note"
+          />
+        </CDFField>
+      </CDFCommandForm>
+    </section>
+  );
+}
+
+/**
+ * The completion, with the evidence the policy in force asks for (DEC-F27): a reference unless it accepts a note alone,
+ * and with a reference a kind of evidence, needed and limited to the kinds it lists where it lists any.
+ */
+function CompleteForm({ t, v, caseId }: { t: Translator; v: CorrectiveActionView; caseId: string | null }) {
+  const needs = completionNeeds(v.policy);
+  const typeRequired = needs.type && needs.reference;
+  return (
+    <section aria-labelledby="action-complete-title" className="border-t border-cdf-border pt-3">
+      <h3 id="action-complete-title" className="mb-2 font-semibold">
+        {t("correctiveActions.completeTitle")}
+      </h3>
+      <p className="mb-3 text-sm text-cdf-text-secondary">{t("correctiveActions.completeIntro")}</p>
+      <CDFCommandForm
+        action={submitCompletionAction.bind(null, v.actionId, caseId)}
+        locale={t.locale}
+        submitLabel={actLabel(t, "submitActionCompletion")}
+        testId="action-complete-form"
+        successMessage={t("correctiveActions.completionSubmitted")}
+        codeSections={ACTION_CODES}
+        fieldLabels={{
+          note: t("correctiveActions.completionNoteLabel"),
+          evidenceReference: t("correctiveActions.referenceLabel"),
+          evidenceType: t("correctiveActions.evidenceTypeLabel"),
+        }}
+        confirm={confirmation(t, "submitActionCompletion")}
+      >
+        <CDFField
+          id="action-complete-note"
+          label={t("correctiveActions.completionNoteLabel")}
+          hint={t("correctiveActions.noteHistoryHint")}
+          requiredLabel={t("common.required")}
+        >
+          <textarea
+            id="action-complete-note"
+            name="note"
+            className={textareaClass}
+            required
+            minLength={5}
+            maxLength={4000}
+            aria-describedby="action-complete-note-hint"
+            data-testid="action-complete-note"
+          />
+        </CDFField>
+        <CDFField
+          id="action-complete-reference"
+          label={t("correctiveActions.referenceLabel")}
+          hint={t(
+            needs.reference
+              ? "correctiveActions.referenceRequiredHint"
+              : "correctiveActions.referenceOptionalHint",
+          )}
+          {...(needs.reference
+            ? { requiredLabel: t("common.required") }
+            : { optionalLabel: t("common.optional") })}
+        >
+          <input
+            id="action-complete-reference"
+            name="evidenceReference"
+            dir="auto"
+            className={inputClass}
+            required={needs.reference}
+            minLength={3}
+            maxLength={300}
+            aria-describedby="action-complete-reference-hint"
+            data-testid="action-complete-reference"
+          />
+        </CDFField>
+        <CDFField
+          id="action-complete-type"
+          label={t("correctiveActions.evidenceTypeLabel")}
+          hint={t(
+            needs.type
+              ? "correctiveActions.evidenceTypeRequiredHint"
+              : "correctiveActions.evidenceTypeOptionalHint",
+          )}
+          {...(typeRequired
+            ? { requiredLabel: t("common.required") }
+            : { optionalLabel: t("common.optional") })}
+        >
+          <select
+            id="action-complete-type"
+            name="evidenceType"
+            className={inputClass}
+            required={typeRequired}
+            defaultValue=""
+            aria-describedby="action-complete-type-hint"
+            data-testid="action-complete-type"
+          >
+            {typeRequired ? (
+              <option value="" disabled>
+                {t("common.choose")}
+              </option>
+            ) : (
+              <option value="">{t("correctiveActions.evidenceTypeNone")}</option>
+            )}
+            {needs.types.map((x) => (
+              <option key={x} value={x}>
+                {t(`correctiveActions.evidenceType.${x}` as MessageKey)}
+              </option>
+            ))}
+          </select>
+        </CDFField>
+      </CDFCommandForm>
+    </section>
+  );
+}
+
+/**
+ * The verifier's decision, for a corrective-action manager of the case who is neither the owner nor anyone who
+ * submitted a completion (A2's may_verify): the latest completion as submitted, then verify it, or return it to the
+ * owner saying what is missing.
+ */
+function Verify({ t, v, caseId }: { t: Translator; v: CorrectiveActionView; caseId: string | null }) {
+  const s = latestSubmission(v.events);
+  const evidence = s ? evidenceText(t, s) : null;
+  return (
+    <CDFCard title={t("correctiveActions.verifyTitle")} testId="action-verify">
+      <p className="mb-3 text-sm text-cdf-text-secondary">{t("correctiveActions.verifyIntro")}</p>
+      {s ? (
+        <section
+          aria-labelledby="action-submission-title"
+          className="mb-4 border-t border-cdf-border pt-3"
+          data-testid="action-submission"
+        >
+          <h3 id="action-submission-title" className="font-semibold">
+            {t("correctiveActions.submissionTitle")}
+          </h3>
+          <p className="mb-2 text-sm text-cdf-text-secondary">
+            {t("correctiveActions.submissionAt", { date: isolate(formatDateTime(t.locale, s.createdAt)) })}
+          </p>
+          <CDFDescriptionList
+            stacked
+            items={[
+              {
+                term: t("correctiveActions.submissionNoteLabel"),
+                value: (
+                  <bdi dir="auto" data-testid="action-submission-note">
+                    {s.note ?? "—"}
+                  </bdi>
+                ),
+              },
+              {
+                term: t("correctiveActions.submissionEvidenceLabel"),
+                value: (
+                  <span data-testid="action-submission-evidence">
+                    {evidence ?? t("correctiveActions.noEvidence")}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </section>
+      ) : null}
+      <CDFCommandForm
+        action={verifyAction.bind(null, v.actionId, caseId)}
+        locale={t.locale}
+        submitLabel={actLabel(t, "verifyActionCompletion")}
+        testId="action-verify-form"
+        successMessage={t("correctiveActions.verified")}
+        codeSections={ACTION_CODES}
+        fieldLabels={{
+          decision: t("correctiveActions.verifyTitle"),
+          note: t("correctiveActions.verifyNoteLabel"),
+        }}
+        confirm={confirmation(t, "verifyActionCompletion")}
+      >
+        <input type="hidden" name="decision" value="VERIFIED" />
+        <CDFField
+          id="action-verify-note"
+          label={t("correctiveActions.verifyNoteLabel")}
+          hint={t("correctiveActions.verifyNoteHint")}
+          optionalLabel={t("common.optional")}
+        >
+          <textarea
+            id="action-verify-note"
+            name="note"
+            className={textareaClass}
+            minLength={5}
+            maxLength={4000}
+            aria-describedby="action-verify-note-hint"
+            data-testid="action-verify-note"
+          />
+        </CDFField>
+      </CDFCommandForm>
+      <section aria-labelledby="action-return-title" className="mt-4 border-t border-cdf-border pt-3">
+        <h3 id="action-return-title" className="mb-2 font-semibold">
+          {t("correctiveActions.returnTitle")}
+        </h3>
+        <CDFCommandForm
+          action={verifyAction.bind(null, v.actionId, caseId)}
+          locale={t.locale}
+          submitLabel={actLabel(t, "returnActionCompletion")}
+          variant="danger"
+          testId="action-return-form"
+          successMessage={t("correctiveActions.returned")}
+          codeSections={ACTION_CODES}
+          fieldLabels={{
+            decision: t("correctiveActions.returnTitle"),
+            note: t("correctiveActions.returnNoteLabel"),
+          }}
+          confirm={confirmation(t, "returnActionCompletion")}
+        >
+          <input type="hidden" name="decision" value="RETURNED" />
+          <CDFField
+            id="action-return-note"
+            label={t("correctiveActions.returnNoteLabel")}
+            hint={t("correctiveActions.returnNoteHint")}
+            requiredLabel={t("common.required")}
+          >
+            <textarea
+              id="action-return-note"
+              name="note"
+              className={textareaClass}
+              required
+              minLength={5}
+              maxLength={4000}
+              aria-describedby="action-return-note-hint"
+              data-testid="action-return-note"
+            />
+          </CDFField>
+        </CDFCommandForm>
+      </section>
+    </CDFCard>
+  );
+}
+
+/** Reopening a completed action that did not achieve its effect, for a manager while the case is active (may_reopen). */
+function Reopen({ t, v, caseId }: { t: Translator; v: CorrectiveActionView; caseId: string | null }) {
+  return (
+    <CDFCard title={t("correctiveActions.reopenTitle")} testId="action-reopen">
+      <p className="mb-3 text-sm text-cdf-text-secondary">{t("correctiveActions.reopenIntro")}</p>
+      <CDFCommandForm
+        action={reopenAction.bind(null, v.actionId, caseId)}
+        locale={t.locale}
+        submitLabel={actLabel(t, "reopenAction")}
+        variant="danger"
+        testId="action-reopen-form"
+        successMessage={t("correctiveActions.reopened")}
+        codeSections={ACTION_CODES}
+        fieldLabels={{ reason: t("correctiveActions.reopenReasonLabel") }}
+        confirm={confirmation(t, "reopenAction")}
+      >
+        <CDFField
+          id="action-reopen-reason"
+          label={t("correctiveActions.reopenReasonLabel")}
+          hint={t("correctiveActions.reopenReasonHint")}
+          requiredLabel={t("common.required")}
+        >
+          <textarea
+            id="action-reopen-reason"
+            name="reason"
+            className={textareaClass}
+            required
+            minLength={5}
+            maxLength={2000}
+            aria-describedby="action-reopen-reason-hint"
+            data-testid="action-reopen-reason"
+          />
+        </CDFField>
+      </CDFCommandForm>
     </CDFCard>
   );
 }

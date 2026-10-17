@@ -1,10 +1,11 @@
-// Phase 12 P12-3b, corrective actions under a superseded decision (ADR-058, migration 2096) through the real service,
-// gateway, database, RLS and audit, the way the pages call them. Each test runs in one owner-connection transaction
-// that is rolled back: the gateway runs its security context inside a savepoint of that transaction, exactly as it does
-// on its own pool, so no action, decision or disposition reaches the seed. Who may act, and what each answer is, is
-// pinned by tests/security/superseded-decision-corrective-actions.spec.ts; these pin that the pages' path carries it:
-// the case's list and the action's page as the service maps them, the disposition as its form sends it, and the
-// uniform not-found and denial events.
+// Phase 12 P12-3b and P12-6a, corrective actions (ADR-058, migration 2096) through the real service, gateway,
+// database, RLS and audit, the way the pages call them. Each test runs in one owner-connection transaction that is
+// rolled back: the gateway runs its security context inside a savepoint of that transaction, exactly as it does on its
+// own pool, so no action, decision or disposition reaches the seed. Who may act, and what each answer is, is pinned by
+// tests/security/superseded-decision-corrective-actions.spec.ts and tests/security/corrective-actions.spec.ts; these
+// pin that the pages' path carries it: the case's list and the action's page as the service maps them, the
+// disposition, the owner's report and the verifier's decision as their forms send them, the history and the policy
+// read back, and the uniform not-found and denial events.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -109,12 +110,11 @@ async function decided(s: OwnerScenario, f: PackageFixture, sources: string[]): 
 }
 
 /**
- * A corrective action frozen by a superseded decision, as the security spec builds it: the lead's vote decides the
- * package (the legal member rejects), the CEO approves it and the case manager opens the action for financeEmployee;
- * the lead's conflict is then upheld, the committee votes again without the lead, and the CEO approves again from
- * REPLACEMENT_SOURCES. Returns the action's id.
+ * A corrective action nothing holds, as the security spec builds it: the lead's vote decides the package (the legal
+ * member rejects), the CEO approves it and the case manager opens the action for financeEmployee, due in five days.
+ * Returns the action's id and its package.
  */
-async function frozenAction(s: OwnerScenario): Promise<string> {
+async function openedAction(s: OwnerScenario): Promise<{ action: string; f: PackageFixture }> {
   await s.as("platformAdmin");
   await s.tx`select api.grant_role(${USERS.financeEmployee}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner for the test')`;
   const f = await draftPackage(s, ic, caseB);
@@ -127,6 +127,15 @@ async function frozenAction(s: OwnerScenario): Promise<string> {
   const [a] = await s.tx<{ id: string }[]>`
     select api.open_corrective_action(${f.corrective}, ${ACTION.title}, ${ACTION.description},
       ${USERS.financeEmployee}, (now() at time zone 'Asia/Riyadh')::date + 5) as id`;
+  return { action: a!.id, f };
+}
+
+/**
+ * The opened action frozen by a superseded decision: the lead's conflict is upheld, the committee votes again without
+ * the lead, and the CEO approves again from REPLACEMENT_SOURCES. Returns the action's id.
+ */
+async function frozenAction(s: OwnerScenario): Promise<string> {
+  const { action, f } = await openedAction(s);
   await s.as("legal");
   const [c] = await s.tx<{ id: string }[]>`
     select api.raise_meeting_conflict(${f.meeting.participant.lead!}, 'Synthetic: the lead is related to the subject.') as id`;
@@ -148,7 +157,7 @@ async function frozenAction(s: OwnerScenario): Promise<string> {
   await s.tx`select api.record_package_adoption(${f.pkg})`;
   await toAuthority(s, f);
   await decided(s, f, REPLACEMENT_SOURCES);
-  return a!.id;
+  return action;
 }
 
 describe("corrective actions under a superseded decision through the service (Phase 12 P12-3b)", () => {
@@ -325,6 +334,233 @@ describe("corrective actions under a superseded decision through the service (Ph
       expect((await actions.view(ctxFor("caseManager"), action))?.origin?.decisionBlock).toBe(
         "FROZEN_BY_SUPERSEDED_DECISION",
       );
+    });
+  });
+});
+
+describe("the owner's report and the verifier's decision through the service (Phase 12 P12-6a)", () => {
+  /** What each step says: it goes in the action's history, never in the ledger's metadata. */
+  const NOTES = {
+    progress: "Synthetic: half of the approvers are trained.",
+    first: "Synthetic: the second approver is in place.",
+    returned: "Synthetic: the revised procedure is not yet signed.",
+    second: "Synthetic: the signed procedure is filed.",
+    reopened: "Synthetic: the control failed again at the next review.",
+  };
+
+  it("the owner records progress and submits it as complete with its kind of evidence; a manager returns it, verifies the second and reopens it; the history reads back and the ledger's metadata carries no note", async () => {
+    await ownerScenario(async (s) => {
+      const { actions, actor } = servicesIn(s);
+      const { action } = await openedAction(s);
+      const owner = await actor("financeEmployee");
+      const manager = await actor("caseManager");
+      const asOwner = () => ctxFor("financeEmployee");
+      const asManager = () => ctxFor("caseManager");
+
+      // The owner's card: the report, the seeded policy (a reference; any kind of evidence, or none) and the opening.
+      const v0 = await actions.view(asOwner(), action);
+      expect([
+        v0?.capabilities.mayRecordProgress,
+        v0?.capabilities.maySubmitCompletion,
+        v0?.capabilities.mayVerify,
+        v0?.capabilities.mayReopen,
+      ]).toEqual([true, true, false, false]);
+      expect(v0?.policy).toEqual({ completionEvidence: "REFERENCE_REQUIRED", allowedEvidenceTypes: null });
+      expect(v0?.events.map((e) => [e.eventType, e.actorId, e.note])).toEqual([
+        ["OPENED", USERS.caseManager, null],
+      ]);
+      expect(v0?.events[0]?.dueDate).toBe(v0?.dueDate);
+
+      // Progress as its form sends it: the percentage as text.
+      expect(
+        outcome(
+          await actions.recordProgress(asOwner(), owner, {
+            actionId: action,
+            percentComplete: "40",
+            note: NOTES.progress,
+          }),
+        ),
+      ).toBe("ok");
+
+      // The policy asks for a reference, so the database refuses a completion without one; a kind of evidence
+      // without a reference never reaches it.
+      expect(
+        outcome(await actions.submitCompletion(asOwner(), owner, { actionId: action, note: NOTES.first })),
+      ).toBe("INVALID:evidence_reference");
+      expect(
+        outcome(
+          await actions.submitCompletion(asOwner(), owner, {
+            actionId: action,
+            note: NOTES.first,
+            evidenceType: "DOCUMENT",
+          }),
+        ),
+      ).toBe("fieldErrors");
+      expect(
+        outcome(
+          await actions.submitCompletion(asOwner(), owner, {
+            actionId: action,
+            note: NOTES.first,
+            evidenceReference: "DOC-DEMO-2026-INT-01",
+            evidenceType: "REVISED_PROCEDURE",
+          }),
+        ),
+      ).toBe("ok");
+      const v1 = await actions.view(asOwner(), action);
+      expect([
+        v1?.status,
+        v1?.percentComplete,
+        v1?.capabilities.mayRecordProgress,
+        v1?.capabilities.maySubmitCompletion,
+      ]).toEqual(["PENDING_VERIFICATION", 100, false, false]);
+      expect(v1?.completionSubmittedAt).toEqual(expect.any(String));
+      expect(
+        v1?.events
+          .slice(1)
+          .map((e) => [
+            e.eventType,
+            e.actorId,
+            e.note,
+            e.percentComplete,
+            e.evidenceReference,
+            e.evidenceType,
+          ]),
+      ).toEqual([
+        ["PROGRESS", USERS.financeEmployee, NOTES.progress, 40, null, null],
+        [
+          "COMPLETION_SUBMITTED",
+          USERS.financeEmployee,
+          NOTES.first,
+          null,
+          "DOC-DEMO-2026-INT-01",
+          "REVISED_PROCEDURE",
+        ],
+      ]);
+
+      // The owner never verifies: refused before the database and recorded by its outcome only. A manager may.
+      const self = asOwner();
+      expect(outcome(await actions.verify(self, owner, { actionId: action, decision: "VERIFIED" }))).toBe(
+        "FORBIDDEN",
+      );
+      expect(await eventsOf(s, self.requestId)).toEqual([
+        {
+          action: "COMMAND_DENIED",
+          object_type: "command",
+          object_id: action,
+          metadata: { command: "verify_corrective_action", outcome: "FORBIDDEN" },
+        },
+      ]);
+      expect((await actions.view(asManager(), action))?.capabilities.mayVerify).toBe(true);
+
+      // A return says what is missing; the owner reads it in the history and submits again.
+      expect(
+        outcome(await actions.verify(asManager(), manager, { actionId: action, decision: "RETURNED" })),
+      ).toBe("fieldErrors");
+      expect(
+        outcome(
+          await actions.verify(asManager(), manager, {
+            actionId: action,
+            decision: "RETURNED",
+            note: NOTES.returned,
+          }),
+        ),
+      ).toBe("ok");
+      const v2 = await actions.view(asOwner(), action);
+      expect([v2?.status, v2?.capabilities.maySubmitCompletion]).toEqual(["IN_PROGRESS", true]);
+      expect(v2?.events.at(-1)).toMatchObject({
+        eventType: "RETURNED",
+        actorId: USERS.caseManager,
+        note: NOTES.returned,
+      });
+      expect(
+        outcome(
+          await actions.submitCompletion(asOwner(), owner, {
+            actionId: action,
+            note: NOTES.second,
+            evidenceReference: "DOC-DEMO-2026-INT-02",
+          }),
+        ),
+      ).toBe("ok");
+
+      // Verified, the action is completed; a manager reopens it while the case is active, saying why, once.
+      expect(
+        outcome(await actions.verify(asManager(), manager, { actionId: action, decision: "VERIFIED" })),
+      ).toBe("ok");
+      const v3 = await actions.view(asManager(), action);
+      expect([v3?.status, v3?.capabilities.mayVerify, v3?.capabilities.mayReopen]).toEqual([
+        "COMPLETED",
+        false,
+        true,
+      ]);
+      expect([v3?.completedAt, v3?.completionSubmittedAt]).toEqual([expect.any(String), null]);
+      expect(
+        outcome(await actions.reopen(asManager(), manager, { actionId: action, reason: NOTES.reopened })),
+      ).toBe("ok");
+      expect(
+        outcome(await actions.reopen(asManager(), manager, { actionId: action, reason: NOTES.reopened })),
+      ).toBe("CONFLICT:NOT_COMPLETED");
+      const v4 = await actions.view(asOwner(), action);
+      expect([v4?.status, v4?.capabilities.mayRecordProgress]).toEqual(["IN_PROGRESS", true]);
+      expect(v4?.events.map((e) => e.eventType)).toEqual([
+        "OPENED",
+        "PROGRESS",
+        "COMPLETION_SUBMITTED",
+        "RETURNED",
+        "COMPLETION_SUBMITTED",
+        "VERIFIED",
+        "REOPENED",
+      ]);
+      expect(v4?.events.at(-1)).toMatchObject({ actorId: USERS.caseManager, note: NOTES.reopened });
+
+      // Each step was recorded, and no note is in the ledger's metadata.
+      await s.asOwner();
+      const ledger = await s.tx<{ action: string; metadata: unknown }[]>`
+        select action, metadata from audit.audit_event
+        where object_type = 'corrective_action' and object_id = ${action} order by seq`;
+      expect(ledger.map((e) => e.action)).toEqual(
+        expect.arrayContaining([
+          "CORRECTIVE_ACTION_PROGRESS_RECORDED",
+          "CORRECTIVE_ACTION_COMPLETION_SUBMITTED",
+          "CORRECTIVE_ACTION_RETURNED",
+          "CORRECTIVE_ACTION_VERIFIED",
+          "CORRECTIVE_ACTION_REOPENED",
+        ]),
+      );
+      const metadata = JSON.stringify(ledger.map((e) => e.metadata));
+      for (const note of Object.values(NOTES)) expect(metadata).not.toContain(note);
+    });
+  });
+
+  it("an action that may not move offers no report, and the command refuses it with the block's code, which the page never shows", async () => {
+    await ownerScenario(async (s) => {
+      const { actions, actor } = servicesIn(s);
+      const action = await frozenAction(s);
+      const owner = await actor("financeEmployee");
+
+      // The owner outside the case team: no report, no origin and so no block.
+      const card = await actions.view(ctxFor("financeEmployee"), action);
+      expect([
+        card?.status,
+        card?.origin,
+        card?.capabilities.mayRecordProgress,
+        card?.capabilities.maySubmitCompletion,
+      ]).toEqual(["OPEN", null, false, false]);
+
+      // A submit sent anyway meets the freeze: the database names the block, which the page's answer replaces with
+      // ACTION_BLOCKED (withoutBlock, pinned in the labels test). Nothing is recorded, and no denial is logged.
+      const ctx = ctxFor("financeEmployee");
+      expect(
+        outcome(
+          await actions.recordProgress(ctx, owner, {
+            actionId: action,
+            percentComplete: "10",
+            note: NOTES.progress,
+          }),
+        ),
+      ).toBe("CONFLICT:FROZEN_BY_SUPERSEDED_DECISION");
+      expect(await eventsOf(s, ctx.requestId)).toEqual([]);
+      const after = await actions.view(ctxFor("financeEmployee"), action);
+      expect([after?.percentComplete, after?.events.map((e) => e.eventType)]).toEqual([0, ["OPENED"]]);
     });
   });
 });

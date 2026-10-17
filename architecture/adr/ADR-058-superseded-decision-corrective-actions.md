@@ -1,6 +1,6 @@
 # ADR-058: Corrective actions under a superseded decision: read models
 
-- **Status:** Proposed (2026-10-15). Linear CDF-230. Migration
+- **Status:** Proposed (2026-10-15). Linear CDF-230; the P12-6a amendment CDF-250 (2026-10-17). Migration
   `20261007002096_superseded_decision_corrective_actions.sql`, number and ADR allocated by the project coordinator
   (2026-10-15, 06:50) with the rulings below. UX redesign Phase 12, step P12-3 (slice P12-3b). It merges after 2095
   (ADR-057) and its pages, and after 2090 (ADR-045), whose `api.corrective_action_view` it replaces.
@@ -170,6 +170,70 @@ The corrective-action screens come on these read models, with no migration. The 
   a confirmation, in both languages. The browser fixture sets a `SOURCE_REQUIRED` corrective-action rule and grants
   `IMPLEMENTATION_OWNER` to a synthetic user, in test databases only.
 
+## P12-6a amendment: the owner's report, the verification and a reopening (2026-10-17)
+
+The owner's and the verifier's controls come on A2 as 2096 left it, with no migration (Linear CDF-250). Who may read
+the page and A2 is unchanged. Each new form shows only where A2's capability says its command would accept the caller
+now (UX-116), and runs its `api.*` command in the caller's security context through the corrective-action service,
+which validates with the shared schema and pre-checks the role permission first (`CORRECTIVE_ACTION_OWN` to report,
+`CORRECTIVE_ACTION_MANAGE` to verify or reopen); the database decides again on submit.
+
+- **The owner's report** (`/actions/{id}#report`). Whoever acts for the action (its owner, or a member of its unit or
+  pool) while it is open and may move (`may_record_progress`, `may_submit_completion`) records its progress, a whole
+  percentage from 0 to 100 with a note (`api.record_corrective_action_progress`), and submits it as complete
+  (`api.submit_corrective_action_completion`, 2040's four-argument form) with a note and the evidence the policy in
+  force asks for (DEC-F27, A2's `policy`): a reference unless the policy accepts a note alone, and with a reference a
+  kind of evidence, needed and limited to the kinds the policy lists where it lists any. With no policy in force the
+  page asks for a reference, as the command does. The completion asks first.
+- **Waiting for verification.** A corrective-action manager of the case other than the action's owner and anyone who
+  submitted a completion verifies it (`api.verify_corrective_action`). The owner, or whoever submitted it, reads a line
+  saying so and no form.
+- **The verifier's card** (`#verify`). Where `may_verify` holds: the latest completion as submitted, its note and the
+  evidence it names, then verify it (with an optional note) or return it to the owner saying what is missing (a note is
+  required). Both ask first; returning is red.
+- **Reopening** (`#reopen`). Where `may_reopen` holds (a manager, a completed action, an active case): reopen it with a
+  reason, after a red confirmation. The action goes back to its owner.
+- **The history.** Whoever may see the action reads its history from A2's `events`, latest first: what happened in
+  words (opened and its due date, owner or due date changed, progress and its percentage, submitted, verified, returned,
+  reopened, waived), when, and who only where the page can say it: "by you" on the reader's own entries, or the
+  owner by the name the case team's list gives. Anyone else stays unnamed: A2 gives an id, never a name. Each note is
+  shown as A2 gives it, and a completion with the evidence it named; A2 leaves out the note a disposition wrote before
+  2090 for anyone outside the case team (CDF-227).
+- **An action that may not move.** Outside the case team, whoever acts for an open action they may not report on reads
+  that reporting is paused for now, never why; the case team reads why on the page (P12-3b). The freeze trigger
+  answers any command on a held action with the block's code, whoever calls it, so the page's server actions answer
+  the browser with `ACTION_BLOCKED` in place of each of the five block codes. Its words say only that nothing was
+  recorded, and the five keep the same words in `packages/i18n` in case one ever reaches a form.
+- **My Work.** ACTION_ASSIGNED and ACTION_RETURNED open the owner's report (`/actions/{id}#report`), ACTION_TO_VERIFY
+  the verifier's card (`#verify`); `/actions` joins the live purpose roots.
+- **A form whose action moved on** (CDF-232, in the same change). Every command form hands its answer to a page-level
+  notice. A form that leaves the page with its refusal (another user's action moved its subject on, and the page read
+  again no longer offers the form) has the refusal shown at the top of the page's content: the class of refusal, the
+  command's own words for its code and the reference, from `packages/i18n`, and nothing about the subject or the other
+  user. The notice is in memory only, takes focus when the form had it, and clears on navigation and on the next
+  command's answer. A form still on the page shows its refusal itself, so only one ever shows. The form's
+  server-rendered markup still names its command, as before (the positive controls of
+  `tests/e2e/security-csrf.spec.ts` replay it).
+- **Audit.** The commands record `CORRECTIVE_ACTION_PROGRESS_RECORDED`, `CORRECTIVE_ACTION_COMPLETION_SUBMITTED`,
+  `CORRECTIVE_ACTION_VERIFIED`, `CORRECTIVE_ACTION_RETURNED` and `CORRECTIVE_ACTION_REOPENED` as before, with no note in
+  their metadata. A refused command is recorded as `COMMAND_DENIED` with the command and the outcome only.
+- **Not in this change** (P12-6b): reassigning the owner, changing the kind of owner or the due date, and the waiver.
+- **Tests.** Unit: 21 new (the history's words for each event, evidence kind and refusal in both languages, who an
+  entry names, the latest submission, what a completion needs under each policy and the block codes leaving as
+  `ACTION_BLOCKED`; the four schemas; the service handing the report on as the form sent it; the gateway's history and
+  policy), and the confirmation and route tests cover the four new acts and the step links.
+  `tests/integration/corrective-actions.spec.ts` (+2): through the service, the owner records progress, is refused a
+  completion without the reference the policy asks for, submits one, and is refused verifying it (`COMMAND_DENIED` with
+  the command and outcome); the manager returns it, verifies the second completion and reopens the action, and a second
+  reopening is refused; the ledger holds the five events and no note. On a frozen action the owner's progress is
+  refused with the block's code and nothing is written. `tests/e2e/corrective-actions.spec.ts` (+4): the journey above
+  from My Work, in Arabic at 390 px and English at 1280 px; a return left open while another manager verifies (CDF-232);
+  and an owner's report left open while the decision is superseded, refused with `ACTION_BLOCKED`, where nothing the
+  browser is sent carries the block's code. The owner's card test also checks that reporting is paused on a frozen
+  action. `tests/accessibility/corrective-actions.spec.ts` (+2): the owner's report with a refused percentage and the
+  completion's confirmation, the line the owner reads while someone else verifies, the verifier's card with the
+  return's confirmation, and the reopening with its confirmation, at 1280, 390 and 320 px in both languages.
+
 ## Known limitations
 
 - **Two authorities in a replacement round** (CDF-228). The replacement decision is the one
@@ -179,11 +243,15 @@ The corrective-action screens come on these read models, with no migration. The 
   without the reason and the document (2090); the case team reads them whole.
 - **Answers are for now.** A flag can turn false between reading and submitting (another manager disposes of the
   action first, a role ends, the policy changes); the command checks again and the page shows its refusal.
-- **A form whose action moved on** (P12-3b). When another manager records a disposition while a form is open, the
-  command refuses the second one and nothing is recorded; the page then shows the disposition recorded first, without
-  the form, so the refusal's own words are not shown. The same holds for every form whose subject changes under it.
-  CDF-232 (coordinator, 2026-10-15): a page-level notice with only the refusal words the command returned, cleared
-  on navigation, in the first pages-only slice after P12-3b.
+- **A form whose action moved on** (P12-3b; fixed with P12-6a). When another manager records a disposition while a
+  form is open, the command refuses the second one and nothing is recorded; the page then shows the disposition
+  recorded first, without the form. Since P12-6a the refusal's own words show in a page-level notice (CDF-232; the
+  P12-6a amendment), for every form whose subject changes under it.
+- **A note on a held action** (CDF-253, LOW). The freeze trigger refuses a change of status or percentage, so a
+  progress note that leaves an action in progress at the same percentage is recorded while the action is held. The page
+  never offers the form then (A2's flags are false), so only a direct call reaches it. The coordinator placed the fix in
+  2170's LOW batch (2026-10-17, 18:41): `api.record_corrective_action_progress` refuses while `decision.action_block`
+  is set, with a negative test for the unchanged percentage.
 
 ## Consequences
 
@@ -252,5 +320,6 @@ CDF-35).
 
 ## Requirements
 
-Phase 12 plan §2 (rules 1, 5 and 6) and §4 (P12-3); DEC-AMB-013; DEC-AMB-014; DEC-F19; DEC-F28; DEC-F41; ADR-016 D0
-and D2; ADR-033; ADR-043; ADR-045; ADR-057; UX-116; CDF-227; CDF-228; the coordinator's rulings of 2026-10-15 (06:50).
+Phase 12 plan §2 (rules 1, 5 and 6) and §4 (P12-3, P12-6); DEC-AMB-013; DEC-AMB-014; DEC-F19; DEC-F27; DEC-F28;
+DEC-F41; ADR-016 D0 and D2; ADR-033; ADR-043; ADR-045; ADR-057; UX-116; CDF-227; CDF-228; CDF-232; CDF-250; CDF-253;
+the coordinator's rulings of 2026-10-15 (06:50, and 15:20 on CDF-232) and 2026-10-17 (18:41, CDF-253).
