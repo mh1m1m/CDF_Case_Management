@@ -9,6 +9,7 @@ import type {
   BcpImportCounts,
   BcpPreview,
   BcpPreviewRow,
+  BcpSubmitOutcome,
 } from "@cdf/contracts";
 import { withUserContext, type Sql, type Tx } from "./security-context";
 
@@ -57,9 +58,9 @@ export class PostgresBcpImportGateway implements BcpImportGateway {
     });
   }
 
-  submit(ctx: UserRequestContext, i: P<"submit">): Promise<BcpBatchStatus> {
+  submit(ctx: UserRequestContext, i: P<"submit">): Promise<BcpSubmitOutcome> {
     return this.run(ctx, async (tx) => {
-      const [r] = await tx<{ status: BcpBatchStatus }[]>`
+      const [r] = await tx<{ status: BcpSubmitOutcome }[]>`
         select api.submit_bcp_import(${i.batchId}, ${i.previewHash}) as status`;
       return r!.status;
     });

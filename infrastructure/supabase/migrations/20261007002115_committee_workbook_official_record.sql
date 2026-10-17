@@ -502,3 +502,761 @@ as $$
                     where r.id = p_record_id and x.sheet_code = '11_CONFLICTS' and x.resolution = 'IMPORT'
                       and x.cells ->> 'MEETING_REF' is distinct from m.row_key);
 $$;
+
+-- Every record command locks the batch, then the record, before reading its revision or state (E7). p_own: the
+-- importer's own step (exchange.lock_bcp_batch's checks); otherwise the caller must see the record.
+create function exchange.lock_bcp_record(p_record_id uuid, p_own boolean)
+returns exchange.bcp_committee_record
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_rec exchange.bcp_committee_record;
+  v_batch uuid;
+begin
+  if p_record_id is null or not authz.can_view_committee_record(p_record_id) then perform api._fail('NOT_FOUND'); end if;
+  select r.batch_id into v_batch from exchange.bcp_committee_record r where r.id = p_record_id;
+  if p_own then
+    perform exchange.lock_bcp_batch(v_batch, true);
+  else
+    perform 1 from exchange.bcp_import_batch b where b.id = v_batch for update;
+  end if;
+  select * into v_rec from exchange.bcp_committee_record r where r.id = p_record_id for update;
+  return v_rec;
+end;
+$$;
+
+-- =============================================================================
+-- 4. Layer 1: the record, the roster and the signed minutes
+-- =============================================================================
+
+-- The importer opens the record of a staged committee workbook; the roster is the proceeding's members who would sit
+-- in a meeting scheduled now (committee.insert_meeting's filter). One meeting per record (E1), checked here and again
+-- at submission (a row's resolution can still change while the workbook is STAGED).
+create function api.open_committee_record(p_batch_id uuid)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_b exchange.bcp_import_batch;
+  v_rec exchange.bcp_committee_record;
+  v_cp committee.committee_proceeding;
+  v_lines int;
+begin
+  v_b := exchange.lock_bcp_batch(p_batch_id, true);
+  if v_b.scope <> 'COMMITTEE_PROCEEDING' then perform api._fail('CONFLICT', 'NOT_COMMITTEE_WORKBOOK'); end if;
+  if v_b.status <> 'STAGED' then perform api._fail('CONFLICT', 'NOT_STAGED'); end if;
+  if exists (select 1 from exchange.bcp_committee_record r where r.batch_id = v_b.id) then
+    perform api._fail('CONFLICT', 'ALREADY_OPEN');
+  end if;
+  select * into v_cp from committee.committee_proceeding cp where cp.id = v_b.committee_proceeding_id;
+  insert into exchange.bcp_committee_record (batch_id, committee_proceeding_id, case_id, opened_by)
+  values (v_b.id, v_cp.id, v_cp.case_id, v_actor)
+  returning * into v_rec;
+  if exchange.bcp_record_meeting_row(v_rec.id) is null then perform api._fail('CONFLICT', 'ONE_MEETING_PER_RECORD'); end if;
+  insert into exchange.bcp_record_roster (record_id, proceeding_member_id, user_id, seat)
+  select v_rec.id, pm.id, pm.user_id, pm.seat
+  from committee.proceeding_member pm
+  join iam.user_profile u on u.id = pm.user_id and u.status = 'ACTIVE'
+  where pm.committee_proceeding_id = v_cp.id and not pm.firewall_restricted and not pm.case_gate_excluded
+    and authz.user_committee_seat(pm.user_id, v_cp.committee_id, now()) is not null
+    and authz.user_case_gate(pm.user_id, v_cp.case_id);
+  get diagnostics v_lines = row_count;
+  perform audit.record_event('COMMITTEE_RECORD_OPENED', 'BUSINESS', 'SUCCESS', null, 'bcp_committee_record',
+    v_rec.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('roster_lines', v_lines));
+  return v_rec.id;
+end;
+$$;
+
+-- The secretary's declaration from the signed minutes, every line at once: attendance, joined late / left early, a
+-- visible signature, and who signed as chair. DRAFT or RETURNED only.
+create function api.declare_committee_record_roster(p_record_id uuid, p_lines jsonb)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_rec exchange.bcp_committee_record;
+  v_line jsonb;
+  v_id uuid;
+  v_attendance text;
+  v_n int := 0;
+begin
+  v_rec := exchange.lock_bcp_record(p_record_id, true);
+  if v_rec.status not in ('DRAFT', 'RETURNED') then perform api._fail('CONFLICT', 'RECORD_NOT_EDITABLE'); end if;
+  if p_lines is null or jsonb_typeof(p_lines) <> 'array' then perform api._fail('INVALID', 'lines'); end if;
+  if jsonb_array_length(p_lines) <> (select count(*) from exchange.bcp_record_roster l where l.record_id = v_rec.id)
+     or (select count(distinct x ->> 'roster_id') from jsonb_array_elements(p_lines) x) <> jsonb_array_length(p_lines) then
+    perform api._fail('INVALID', 'lines');
+  end if;
+  if (select count(*) from jsonb_array_elements(p_lines) x where (x ->> 'signed_as_chair')::boolean) > 1 then
+    perform api._fail('INVALID', 'signed_as_chair');
+  end if;
+  -- Cleared first, so the one-signatory index never sees two at once.
+  update exchange.bcp_record_roster set signed_as_chair = false where record_id = v_rec.id and signed_as_chair;
+  for v_line in select * from jsonb_array_elements(p_lines) loop
+    if not exchange.bcp_is_uuid(v_line ->> 'roster_id') then perform api._fail('INVALID', 'roster_id'); end if;
+    v_id := (v_line ->> 'roster_id')::uuid;
+    -- Only the chair's or the deputy chair's seat line signs as chair: never a secretary or a member seat.
+    if jsonb_typeof(v_line -> 'signed_as_chair') = 'boolean' and (v_line ->> 'signed_as_chair')::boolean
+       and not exists (select 1 from exchange.bcp_record_roster l
+                       where l.id = v_id and l.record_id = v_rec.id and l.seat in ('CHAIR', 'DEPUTY_CHAIR')) then
+      perform api._fail('INVALID', 'signed_as_chair');
+    end if;
+    v_attendance := v_line ->> 'attendance';
+    if v_attendance is null or v_attendance not in ('ATTENDED', 'ATTENDED_PART', 'ABSENT', 'RECUSED') then
+      perform api._fail('INVALID', 'attendance');
+    end if;
+    if jsonb_typeof(v_line -> 'joined_late') is distinct from 'boolean'
+       or jsonb_typeof(v_line -> 'left_early') is distinct from 'boolean'
+       or jsonb_typeof(v_line -> 'signature_visible') is distinct from 'boolean'
+       or jsonb_typeof(v_line -> 'signed_as_chair') is distinct from 'boolean' then
+      perform api._fail('INVALID', 'line');
+    end if;
+    if (v_attendance = 'ATTENDED_PART') <> ((v_line ->> 'joined_late')::boolean or (v_line ->> 'left_early')::boolean)
+       or ((v_line ->> 'signed_as_chair')::boolean and not (v_line ->> 'signature_visible')::boolean) then
+      perform api._fail('INVALID', 'line');
+    end if;
+    update exchange.bcp_record_roster
+       set attendance = v_attendance, joined_late = (v_line ->> 'joined_late')::boolean,
+           left_early = (v_line ->> 'left_early')::boolean,
+           signature_visible = (v_line ->> 'signature_visible')::boolean,
+           signed_as_chair = (v_line ->> 'signed_as_chair')::boolean,
+           declared_by = v_actor, declared_at = now()
+     where id = v_id and record_id = v_rec.id;
+    if not found then perform api._fail('INVALID', 'roster_id'); end if;
+    v_n := v_n + 1;
+  end loop;
+  update exchange.bcp_committee_record set updated_at = now() where id = v_rec.id;
+  perform audit.record_event('COMMITTEE_RECORD_ROSTER_DECLARED', 'BUSINESS', 'SUCCESS', null, 'bcp_committee_record',
+    v_rec.id::text, null,
+    exchange.bcp_record_audit(v_rec)
+    || jsonb_build_object('lines', v_n,
+                          'attended', (select count(*) from exchange.bcp_record_roster l
+                                       where l.record_id = v_rec.id and l.attendance in ('ATTENDED', 'ATTENDED_PART')),
+                          'signatures_visible', (select count(*) from exchange.bcp_record_roster l
+                                                 where l.record_id = v_rec.id and l.signature_visible)));
+end;
+$$;
+
+-- Layer 1, step 1: the importer registers a version of the signed minutes with its declared facts. The object key is
+-- produced here, never by input; the binary follows through the BFF (R7).
+create function api.register_committee_record_document(
+  p_record_id uuid, p_original_file_name text, p_content_type text, p_size_bytes bigint, p_sha256 text,
+  p_meeting_date date, p_template_reference text, p_classification core.classification_level
+)
+returns table (o_document_id uuid, o_version_no int, o_object_key text)
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_rec exchange.bcp_committee_record;
+  v_file text;
+  v_id uuid := gen_random_uuid();
+  v_version int;
+  v_prior uuid;
+  v_key text;
+begin
+  v_rec := exchange.lock_bcp_record(p_record_id, true);
+  if v_rec.status not in ('DRAFT', 'RETURNED') then perform api._fail('CONFLICT', 'RECORD_NOT_EDITABLE'); end if;
+  v_file := api._require_text(p_original_file_name, 'file_name', 1, 255);
+  if v_file ~ '[/\\]' or v_file ~ '[[:cntrl:]]' or v_file ~ '^\.+$' then perform api._fail('INVALID', 'file_name'); end if;
+  -- Wet-ink signed and scanned (ruled default, SOURCE_REQUIRED): PDF or image; never an editable document.
+  if p_content_type is null or p_content_type not in ('application/pdf', 'image/png', 'image/jpeg', 'image/tiff') then
+    perform api._fail('INVALID', 'content_type');
+  end if;
+  if p_size_bytes is null or p_size_bytes < 1 or p_size_bytes > 26214400 then perform api._fail('INVALID', 'size_bytes'); end if;
+  if p_sha256 is null or p_sha256 !~ '^[0-9a-f]{64}$' then perform api._fail('INVALID', 'sha256'); end if;
+  if p_meeting_date is null or p_meeting_date > (now() at time zone 'Asia/Riyadh')::date then
+    perform api._fail('INVALID', 'meeting_date');
+  end if;
+  if p_classification is null then perform api._fail('INVALID', 'classification'); end if;
+  select coalesce(max(d.version_no), 0) + 1, (array_agg(d.id order by d.version_no desc))[1]
+    into v_version, v_prior
+  from exchange.bcp_record_document d where d.record_id = v_rec.id;
+  v_key := 'committee-records/' || v_rec.committee_proceeding_id || '/' || v_rec.id || '/' || v_id;
+  insert into exchange.bcp_record_document (id, record_id, version_no, supersedes_id, meeting_date, template_reference,
+                                            classification, original_file_name, content_type, size_bytes, sha256,
+                                            object_key, uploaded_by)
+  values (v_id, v_rec.id, v_version, v_prior, p_meeting_date,
+          api._require_text(p_template_reference, 'template_reference', 2, 100), p_classification, v_file,
+          p_content_type, p_size_bytes, p_sha256, v_key, v_actor);
+  perform audit.record_event('OFFICIAL_MINUTES_REGISTERED', 'BUSINESS', 'SUCCESS', null, 'bcp_record_document',
+    v_id::text, null,
+    exchange.bcp_record_audit(v_rec) || jsonb_build_object('version_no', v_version, 'sha256', p_sha256,
+                                                          'size_bytes', p_size_bytes, 'content_type', p_content_type));
+  o_document_id := v_id; o_version_no := v_version; o_object_key := v_key;
+  return next;
+end;
+$$;
+
+-- Layer 1, step 2: the uploader, once the BFF stored the binary and the scan came back clean (R7,
+-- PRODUCTION_SUBSTITUTION_REQUIRED). Only while the record is DRAFT or RETURNED, and only that version's storage
+-- changes: no revision moves (R6). A version registered before submission stays QUARANTINED until a return.
+create function api.complete_committee_record_document(p_document_id uuid, p_scan_status text, p_scanner text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_doc exchange.bcp_record_document;
+  v_rec exchange.bcp_committee_record;
+begin
+  select d.* into v_doc from exchange.bcp_record_document d where d.id = p_document_id;
+  if v_doc.id is null then perform api._fail('NOT_FOUND'); end if;
+  v_rec := exchange.lock_bcp_record(v_doc.record_id, true);
+  select d.* into v_doc from exchange.bcp_record_document d where d.id = p_document_id for update;
+  if v_doc.uploaded_by <> v_actor then perform api._fail('FORBIDDEN'); end if;
+  if v_rec.status not in ('DRAFT', 'RETURNED') then perform api._fail('CONFLICT', 'RECORD_NOT_EDITABLE'); end if;
+  if v_doc.status <> 'QUARANTINED' then perform api._fail('CONFLICT', 'VERSION_NOT_QUARANTINED'); end if;
+  if p_scan_status is distinct from 'CLEAN' then perform api._fail('INVALID', 'scan_status'); end if;
+  update exchange.bcp_record_document
+     set status = 'STORED', scanner = api._require_text(p_scanner, 'scanner', 1, 80), stored_at = now()
+   where id = v_doc.id;
+  perform audit.record_event(case when v_doc.version_no = 1 then 'OFFICIAL_MINUTES_UPLOADED'
+                                  else 'OFFICIAL_MINUTES_VERSIONED' end,
+    'BUSINESS', 'SUCCESS', null, 'bcp_record_document', v_doc.id::text, null,
+    exchange.bcp_record_audit(v_rec)
+    || jsonb_build_object('version_no', v_doc.version_no, 'supersedes_id', v_doc.supersedes_id, 'sha256', v_doc.sha256,
+                          'meeting_date', v_doc.meeting_date, 'classification', v_doc.classification,
+                          'source', v_doc.source, 'scanner', left(p_scanner, 80)));
+end;
+$$;
+
+-- Layer 1, step 3: the importer marks the newest stored version as the final signed official record. Refused unless it
+-- is stored, the roster is declared, one line signed as chair and every expected signatory is shown (test 12). Not a
+-- check of ink: the declaration is confirmed by the chair and each member (ADR-061 limitation).
+create function api.mark_committee_minutes_signed(p_document_id uuid)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_doc exchange.bcp_record_document;
+  v_rec exchange.bcp_committee_record;
+begin
+  select d.* into v_doc from exchange.bcp_record_document d where d.id = p_document_id;
+  if v_doc.id is null then perform api._fail('NOT_FOUND'); end if;
+  v_rec := exchange.lock_bcp_record(v_doc.record_id, true);
+  if v_rec.status not in ('DRAFT', 'RETURNED') then perform api._fail('CONFLICT', 'RECORD_NOT_EDITABLE'); end if;
+  select d.* into v_doc from exchange.bcp_record_document d where d.id = p_document_id for update;
+  if v_doc.status = 'QUARANTINED' then perform api._fail('CONFLICT', 'DOCUMENT_NOT_STORED'); end if;
+  if v_doc.status = 'SIGNED_OFFICIAL_RECORD' then perform api._fail('CONFLICT', 'ALREADY_SIGNED'); end if;
+  if exists (select 1 from exchange.bcp_record_document d
+             where d.record_id = v_rec.id and d.version_no > v_doc.version_no) then
+    perform api._fail('CONFLICT', 'NOT_LATEST_VERSION');
+  end if;
+  if exists (select 1 from exchange.bcp_record_roster l where l.record_id = v_rec.id and l.attendance = 'NOT_DECLARED') then
+    perform api._fail('CONFLICT', 'ROSTER_NOT_DECLARED');
+  end if;
+  if not exists (select 1 from exchange.bcp_record_roster l where l.record_id = v_rec.id and l.signed_as_chair)
+     or exists (select 1 from exchange.bcp_record_roster l
+                where l.record_id = v_rec.id and l.attendance in ('ATTENDED', 'ATTENDED_PART')
+                  and l.seat not in ('SECRETARY', 'ALTERNATE_SECRETARY') and not l.signature_visible) then
+    perform api._fail('CONFLICT', 'MISSING_OFFICIAL_SIGNATURE');
+  end if;
+  update exchange.bcp_record_document set status = 'SIGNED_OFFICIAL_RECORD', signed_marked_by = v_actor,
+                                          signed_marked_at = now()
+   where id = v_doc.id;
+  update exchange.bcp_committee_record set signed_document_id = v_doc.id, updated_at = now() where id = v_rec.id;
+  perform audit.record_event('OFFICIAL_MINUTES_MARKED_SIGNED', 'BUSINESS', 'SUCCESS', null, 'bcp_record_document',
+    v_doc.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('version_no', v_doc.version_no,
+                                                                                'sha256', v_doc.sha256));
+end;
+$$;
+
+-- The BFF streams a stored version only after this check, which is audited (§10, §15; R8). Never the conflict-row
+-- subject (E6), never a quarantined object.
+create function api.open_committee_record_document(p_document_id uuid)
+returns table (o_object_key text, o_content_type text, o_original_file_name text, o_size_bytes bigint, o_sha256 text)
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_doc exchange.bcp_record_document;
+  v_rec exchange.bcp_committee_record;
+begin
+  select d.* into v_doc from exchange.bcp_record_document d where d.id = p_document_id;
+  if v_doc.id is null or not authz.can_view_committee_record_document(v_doc.record_id) then
+    perform api._fail('NOT_FOUND');
+  end if;
+  if v_doc.status = 'QUARANTINED' then perform api._fail('CONFLICT', 'DOCUMENT_NOT_STORED'); end if;
+  select * into v_rec from exchange.bcp_committee_record r where r.id = v_doc.record_id;
+  perform audit.record_event('OFFICIAL_MINUTES_OPENED', 'BUSINESS', 'SUCCESS', null, 'bcp_record_document',
+    v_doc.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('version_no', v_doc.version_no));
+  o_object_key := v_doc.object_key; o_content_type := v_doc.content_type;
+  o_original_file_name := v_doc.original_file_name; o_size_bytes := v_doc.size_bytes; o_sha256 := v_doc.sha256;
+  return next;
+end;
+$$;
+
+-- =============================================================================
+-- 5. Layer 2: submission, acting chair, the chair's decision, return, attestation
+-- =============================================================================
+
+-- Whoever may approve now, for notices: the chair when the chair can act, else the deputy under an activation in force.
+create function exchange.bcp_record_approver_user(p_record_id uuid)
+returns uuid
+language sql stable
+set search_path = ''
+as $$
+  select l.user_id from exchange.bcp_record_roster l
+  where l.record_id = p_record_id
+    and exchange.bcp_record_approver_capacity(p_record_id, l.user_id) is not null
+  order by case l.seat when 'CHAIR' then 0 else 1 end
+  limit 1;
+$$;
+
+-- Replaces 2110. A case workbook as built. A committee workbook goes to its chair only with its official record: the
+-- record open, one meeting reconstructed, the roster declared and the signed minutes marked, with no discrepancy
+-- (§11). A discrepancy is audited (SIGNATURE_RECONCILIATION_FAILED, codes only) and returned, nothing else changes.
+create or replace function api.submit_bcp_import(p_batch_id uuid, p_preview_hash text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  b exchange.bcp_import_batch;
+  v_rec exchange.bcp_committee_record;
+  v_hash text;
+  v_meeting uuid;
+  v_codes jsonb;
+begin
+  b := exchange.lock_bcp_batch(p_batch_id, true);
+  if b.scope <> 'CASE' then
+    select * into v_rec from exchange.bcp_committee_record r where r.batch_id = b.id for update;
+    if v_rec.id is null then perform api._fail('CONFLICT', 'OFFICIAL_RECORD_REQUIRED'); end if;
+    if v_rec.status not in ('DRAFT', 'RETURNED') then perform api._fail('CONFLICT', 'RECORD_NOT_EDITABLE'); end if;
+    if b.status not in ('STAGED', 'SUBMITTED') then perform api._fail('CONFLICT', 'NOT_STAGED'); end if;
+  elsif b.status <> 'STAGED' then
+    perform api._fail('CONFLICT', 'NOT_STAGED');
+  end if;
+  if b.status = 'STAGED' then
+    if exists (select 1 from exchange.bcp_import_row r
+               where r.batch_id = b.id and r.resolution is null and r.state <> 'ALREADY_IMPORTED') then
+      perform api._fail('CONFLICT', 'ROWS_UNRESOLVED');
+    end if;
+    v_hash := exchange.bcp_batch_hash(b.id);
+    if b.preview_hash is null or b.preview_hash <> v_hash or p_preview_hash is distinct from v_hash then
+      perform api._fail('CONFLICT', 'PREVIEW_CHANGED');
+    end if;
+    if not exchange.bcp_dry_run(b.id) then perform api._fail('CONFLICT', 'DRY_RUN_FAILED'); end if;
+  else
+    -- A returned record goes back on the workbook as submitted.
+    if p_preview_hash is distinct from b.submitted_hash or exchange.bcp_batch_hash(b.id) <> b.submitted_hash then
+      perform api._fail('CONFLICT', 'PREVIEW_CHANGED');
+    end if;
+  end if;
+
+  if b.scope <> 'CASE' then
+    v_meeting := exchange.bcp_record_meeting_row(v_rec.id);
+    if v_meeting is null then perform api._fail('CONFLICT', 'ONE_MEETING_PER_RECORD'); end if;
+    if v_rec.signed_document_id is null then perform api._fail('CONFLICT', 'OFFICIAL_RECORD_REQUIRED'); end if;
+    update exchange.bcp_committee_record set meeting_row_id = v_meeting where id = v_rec.id;
+    select coalesce(jsonb_agg(distinct d.code order by d.code), '[]'::jsonb) into v_codes
+    from exchange.bcp_record_discrepancies(v_rec.id, false) d;
+    if jsonb_array_length(v_codes) > 0 then
+      update exchange.bcp_committee_record set meeting_row_id = v_rec.meeting_row_id where id = v_rec.id;
+      perform audit.record_event('SIGNATURE_RECONCILIATION_FAILED', 'BUSINESS', 'FAILURE', null, 'bcp_committee_record',
+        v_rec.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('at', 'SUBMISSION', 'codes', v_codes));
+      return 'RECONCILIATION_FAILED';
+    end if;
+  end if;
+
+  if b.status = 'STAGED' then
+    update exchange.bcp_import_batch
+       set status = 'SUBMITTED', submitted_hash = v_hash, submitted_at = now(), preview_clean = true, updated_at = now(),
+           row_version = row_version + 1
+     where id = b.id;
+    perform audit.record_event('BCP_IMPORT_SUBMITTED', 'BUSINESS', 'SUCCESS', exchange.bcp_audit_case(b),
+      'bcp_import_batch', b.id::text, null,
+      jsonb_build_object('preview_hash', v_hash,
+                         'to_import', (select count(*) from exchange.bcp_import_row r
+                                       where r.batch_id = b.id and r.resolution = 'IMPORT'),
+                         'skipped', (select count(*) from exchange.bcp_import_row r
+                                     where r.batch_id = b.id and r.resolution = 'SKIP'),
+                         'kept', (select count(*) from exchange.bcp_import_row r
+                                  where r.batch_id = b.id and r.resolution = 'KEEP_PLATFORM'))
+      || exchange.bcp_audit_scope(b));
+  end if;
+  if b.scope <> 'CASE' then
+    update exchange.bcp_committee_record
+       set status = 'PENDING_CHAIR_APPROVAL', submitted_at = coalesce(submitted_at, now()), updated_at = now()
+     where id = v_rec.id
+    returning * into v_rec;
+    perform audit.record_event('COMMITTEE_RECORD_SUBMITTED', 'BUSINESS', 'SUCCESS', null, 'bcp_committee_record',
+      v_rec.id::text, null, exchange.bcp_record_audit(v_rec)
+                            || jsonb_build_object('signed_document_id', v_rec.signed_document_id));
+    perform notify.enqueue('COMMITTEE_RECORD_APPROVAL_REQUESTED', exchange.bcp_record_approver_user(v_rec.id), b.id,
+                           null, 'bcp-record-approval:' || v_rec.id || ':' || v_rec.revision);
+  end if;
+  return 'SUBMITTED';
+end;
+$$;
+
+-- An acting chair for this record (owner decision §4), activated by the importer under the DEC-F03 rule as built
+-- (Fady's card on who activates is open; this is the ruled default). The basis is derived when the record shows one;
+-- UNAVAILABLE is stated, and only for a chair who attended (E5). The deputy chair's line, attended, eligible, never
+-- excluded; never the activator. One in force at a time; before any approval on this revision.
+create function api.activate_record_acting_chair(p_record_id uuid, p_basis text, p_reason text,
+                                                 p_effective_to timestamptz)
+returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_rec exchange.bcp_committee_record;
+  v_chair exchange.bcp_record_roster;
+  v_deputy exchange.bcp_record_roster;
+  v_derived text;
+  v_reason text;
+  v_id uuid;
+begin
+  v_rec := exchange.lock_bcp_record(p_record_id, true);
+  if v_rec.status not in ('DRAFT', 'RETURNED', 'PENDING_CHAIR_APPROVAL') then
+    perform api._fail('CONFLICT', 'RECORD_NOT_EDITABLE');
+  end if;
+  if (exchange.bcp_record_approval(v_rec.id)).id is not null then perform api._fail('CONFLICT', 'ALREADY_APPROVED'); end if;
+  if (exchange.bcp_record_active_acting_chair(v_rec.id)).id is not null then
+    perform api._fail('CONFLICT', 'ALREADY_ACTIVATED');
+  end if;
+  if p_basis is null or p_basis not in ('ABSENT', 'UNAVAILABLE', 'CONFLICTED', 'INELIGIBLE', 'VACANT') then
+    perform api._fail('INVALID', 'basis');
+  end if;
+  v_chair := exchange.bcp_record_chair_line(v_rec.id);
+  v_derived := exchange.bcp_record_chair_basis(v_rec.id);
+  if v_derived is not null and p_basis <> v_derived then perform api._fail('CONFLICT', 'BASIS_NOT_SHOWN'); end if;
+  if v_derived is null and (p_basis <> 'UNAVAILABLE' or v_chair.attendance not in ('ATTENDED', 'ATTENDED_PART')) then
+    perform api._fail('CONFLICT', 'CHAIR_AVAILABLE');
+  end if;
+  select * into v_deputy from exchange.bcp_record_roster l
+  where l.record_id = v_rec.id and l.seat = 'DEPUTY_CHAIR' and l.attendance in ('ATTENDED', 'ATTENDED_PART')
+    and exchange.bcp_record_line_eligible(l.id) and not exchange.bcp_approver_excluded(v_rec.batch_id, l.user_id)
+  order by l.id limit 1;
+  if v_deputy.id is null then perform api._fail('CONFLICT', 'NO_ELIGIBLE_DEPUTY'); end if;
+  if v_deputy.user_id = v_actor then perform api._fail('FORBIDDEN'); end if;
+  if p_effective_to is null or p_effective_to <= now() then perform api._fail('INVALID', 'effective_to'); end if;
+  v_reason := api._require_text(p_reason, 'reason', 10, 2000);
+  insert into exchange.bcp_record_acting_chair (record_id, deputy_roster_id, deputy_user_id, chair_roster_id, basis,
+                                                reason, effective_to, activated_by)
+  values (v_rec.id, v_deputy.id, v_deputy.user_id, v_chair.id, p_basis, v_reason, p_effective_to, v_actor)
+  returning id into v_id;
+  -- The reason stays in the activation row; the ledger gets ids, the basis code and the period.
+  perform audit.record_event('RECORD_ACTING_CHAIR_ACTIVATED', 'BUSINESS', 'SUCCESS', null, 'bcp_record_acting_chair',
+    v_id::text, null,
+    exchange.bcp_record_audit(v_rec) || jsonb_build_object('basis', p_basis, 'deputy_roster_id', v_deputy.id,
+                                                          'chair_roster_id', v_chair.id, 'effective_to', p_effective_to));
+  perform notify.enqueue('COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED', v_chair.user_id, v_rec.batch_id, null,
+                         'bcp-record-acting:' || v_id);
+  if v_rec.status = 'PENDING_CHAIR_APPROVAL' then
+    perform notify.enqueue('COMMITTEE_RECORD_APPROVAL_REQUESTED', v_deputy.user_id, v_rec.batch_id, null,
+                           'bcp-record-approval:' || v_rec.id || ':' || v_rec.revision || ':' || v_id);
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Ended early by the chair it replaces or by the importer, while no approval exists on this revision.
+create function api.end_record_acting_chair(p_activation_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_a exchange.bcp_record_acting_chair;
+  v_rec exchange.bcp_committee_record;
+  v_importer boolean;
+begin
+  select a.* into v_a from exchange.bcp_record_acting_chair a where a.id = p_activation_id;
+  if v_a.id is null or not authz.committee_record_overseer(v_a.record_id) then perform api._fail('NOT_FOUND'); end if;
+  v_rec := exchange.lock_bcp_record(v_a.record_id, false);
+  select a.* into v_a from exchange.bcp_record_acting_chair a where a.id = p_activation_id for update;
+  select b.imported_by = v_actor and exchange.bcp_committee_importer(v_actor, v_rec.committee_proceeding_id)
+    into v_importer from exchange.bcp_import_batch b where b.id = v_rec.batch_id;
+  if not v_importer and not exists (select 1 from exchange.bcp_record_roster l
+                                    where l.id = v_a.chair_roster_id and l.user_id = v_actor
+                                      and exchange.bcp_record_line_eligible(l.id)) then
+    perform api._fail('FORBIDDEN');
+  end if;
+  if v_a.ended_at is not null or now() >= v_a.effective_to then perform api._fail('CONFLICT', 'NOT_ACTIVE'); end if;
+  if (exchange.bcp_record_approval(v_rec.id)).id is not null then perform api._fail('CONFLICT', 'ALREADY_APPROVED'); end if;
+  update exchange.bcp_record_acting_chair
+     set ended_by = v_actor, ended_at = now(), end_reason = api._require_text(p_reason, 'reason', 5, 2000)
+   where id = v_a.id;
+  perform audit.record_event('RECORD_ACTING_CHAIR_ENDED', 'BUSINESS', 'SUCCESS', null, 'bcp_record_acting_chair',
+    v_a.id::text, null,
+    exchange.bcp_record_audit(v_rec) || jsonb_build_object('ended_as', case when v_importer then 'SECRETARY'
+                                                                            else 'CHAIR' end));
+end;
+$$;
+
+-- The chair's (or acting chair's) decision on the current revision (owner decision §3, §4): APPROVE opens the
+-- members' attestation; RETURN sends it back for correction (a new revision); REJECT ends the record and the workbook.
+create function api.decide_committee_record(p_record_id uuid, p_revision int, p_decision text, p_reason text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_rec exchange.bcp_committee_record;
+  v_capacity text;
+  v_line exchange.bcp_record_roster;
+  v_acting exchange.bcp_record_acting_chair;
+  v_reason text;
+  v_status text;
+  v_event text;
+begin
+  v_rec := exchange.lock_bcp_record(p_record_id, false);
+  v_capacity := exchange.bcp_record_approver_capacity(v_rec.id, v_actor);
+  if v_capacity is null then perform api._fail('FORBIDDEN'); end if;
+  if v_rec.status <> 'PENDING_CHAIR_APPROVAL' then perform api._fail('CONFLICT', 'NOT_PENDING_APPROVAL'); end if;
+  if p_revision is distinct from v_rec.revision then perform api._fail('CONFLICT', 'REVISION_CHANGED'); end if;
+  if p_decision is null or p_decision not in ('APPROVE', 'RETURN', 'REJECT') then
+    perform api._fail('INVALID', 'decision');
+  end if;
+  if p_decision <> 'APPROVE' or p_reason is not null then
+    v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  end if;
+  select * into v_line from exchange.bcp_record_roster l where l.record_id = v_rec.id and l.user_id = v_actor;
+  if v_capacity = 'ACTING_CHAIR' then v_acting := exchange.bcp_record_active_acting_chair(v_rec.id); end if;
+  if p_decision = 'APPROVE' then
+    -- Nothing may stand between the chair's approval and the members' attestation but the attestations themselves.
+    if exists (select 1 from exchange.bcp_record_discrepancies(v_rec.id, false)) then
+      perform api._fail('CONFLICT', 'RECONCILIATION_FAILED');
+    end if;
+  end if;
+  insert into exchange.bcp_record_decision (record_id, revision, decision, capacity, decided_by, roster_id,
+                                            acting_chair_id, reason)
+  values (v_rec.id, v_rec.revision, p_decision, v_capacity, v_actor, v_line.id, v_acting.id, v_reason);
+  v_status := case p_decision when 'APPROVE' then 'PLATFORM_ATTESTATION_IN_PROGRESS'
+                              when 'RETURN' then 'RETURNED' else 'REJECTED' end;
+  v_event := case p_decision when 'APPROVE' then 'CHAIR_APPROVED_IMPORTED_RECORD'
+                             when 'RETURN' then 'CHAIR_RETURNED_IMPORTED_RECORD' else 'CHAIR_REJECTED_IMPORTED_RECORD' end;
+  update exchange.bcp_committee_record
+     set status = v_status,
+         revision = revision + case when p_decision = 'RETURN' then 1 else 0 end,
+         closed_at = case when p_decision = 'REJECT' then now() end,
+         updated_at = now()
+   where id = v_rec.id;
+  if p_decision = 'REJECT' then
+    update exchange.bcp_import_batch
+       set status = 'REJECTED', decided_by = v_actor, decided_at = now(), decision_reason = v_reason, updated_at = now(),
+           row_version = row_version + 1
+     where id = v_rec.batch_id;
+  end if;
+  perform audit.record_event(v_event, 'BUSINESS', 'SUCCESS', null, 'bcp_committee_record', v_rec.id::text, null,
+    exchange.bcp_record_audit(v_rec) || jsonb_build_object('capacity', v_capacity, 'acting_chair_id', v_acting.id));
+  if p_decision = 'APPROVE' then
+    perform notify.enqueue('COMMITTEE_RECORD_ATTESTATION_REQUESTED', l.user_id, v_rec.batch_id, null,
+                           'bcp-record-attest:' || v_rec.id || ':' || v_rec.revision)
+    from exchange.bcp_record_roster l
+    where l.record_id = v_rec.id and exchange.bcp_record_line_state(l.id) = 'PENDING';
+    perform exchange.bcp_record_settle(v_rec.id);
+  else
+    perform notify.enqueue('COMMITTEE_RECORD_RETURNED', b.imported_by, v_rec.batch_id, null,
+                           'bcp-record-returned:' || v_rec.id || ':' || v_rec.revision)
+    from exchange.bcp_import_batch b where b.id = v_rec.batch_id;
+  end if;
+  return v_status;
+end;
+$$;
+
+-- The importer returns the record for correction (owner decision §7) at any point before commit: a new revision; the
+-- chair's approval and every attestation then count no more. A ready batch goes back to SUBMITTED.
+create function api.return_committee_record(p_record_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_rec exchange.bcp_committee_record;
+  v_reason text;
+begin
+  v_rec := exchange.lock_bcp_record(p_record_id, true);
+  if v_rec.status not in ('PENDING_CHAIR_APPROVAL', 'PLATFORM_ATTESTATION_IN_PROGRESS', 'FULLY_ATTESTED',
+                          'READY_TO_COMMIT') then
+    perform api._fail('CONFLICT', 'NOT_RETURNABLE');
+  end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  insert into exchange.bcp_record_decision (record_id, revision, decision, capacity, decided_by, reason)
+  values (v_rec.id, v_rec.revision, 'RETURN', 'SECRETARY', v_actor, v_reason);
+  update exchange.bcp_committee_record
+     set status = 'RETURNED', revision = revision + 1, ready_at = null, updated_at = now()
+   where id = v_rec.id;
+  update exchange.bcp_import_batch
+     set status = 'SUBMITTED', decided_by = null, decided_at = null, decision_reason = null, updated_at = now(),
+         row_version = row_version + 1
+   where id = v_rec.batch_id and status = 'APPROVED';
+  perform audit.record_event('COMMITTEE_RECORD_RETURNED', 'BUSINESS', 'SUCCESS', null, 'bcp_committee_record',
+    v_rec.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('previous_status', v_rec.status));
+end;
+$$;
+
+-- A member's own attestation or decline on the current revision (owner decision §5, §7, §9). There is no user
+-- parameter: nobody attests for anyone else. A conflict-row subject attests their own participation only and may
+-- decline for ATTENDANCE_MISMATCH only (E6). The chair's own attestation or decline shows the chair is available: an
+-- acting-chair activation that replaced them ends with it (E5), so a later revision goes back to the chair.
+create function api.attest_committee_record(p_record_id uuid, p_revision int, p_action text, p_discrepancy_code text,
+                                            p_reason text)
+returns text
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  v_rec exchange.bcp_committee_record;
+  v_line exchange.bcp_record_roster;
+  v_subject boolean;
+  v_scope text;
+  v_reason text;
+  v_a exchange.bcp_record_acting_chair;
+begin
+  v_rec := exchange.lock_bcp_record(p_record_id, false);
+  select * into v_line from exchange.bcp_record_roster l where l.record_id = v_rec.id and l.user_id = v_actor;
+  if v_line.id is null then perform api._fail('FORBIDDEN'); end if;
+  if v_rec.status <> 'PLATFORM_ATTESTATION_IN_PROGRESS' then perform api._fail('CONFLICT', 'ATTESTATION_NOT_OPEN'); end if;
+  if p_revision is distinct from v_rec.revision then perform api._fail('CONFLICT', 'REVISION_CHANGED'); end if;
+  if exchange.bcp_record_line_state(v_line.id) <> 'PENDING' then perform api._fail('CONFLICT', 'NOT_REQUIRED'); end if;
+  if p_action is null or p_action not in ('ATTEST', 'DECLINE') then perform api._fail('INVALID', 'action'); end if;
+  v_subject := exchange.bcp_record_conflict_subject(v_rec.id, v_actor);
+  if p_action = 'ATTEST' then
+    if p_discrepancy_code is not null or p_reason is not null then perform api._fail('INVALID', 'discrepancy_code'); end if;
+  else
+    if p_discrepancy_code is null
+       or p_discrepancy_code not in ('ATTENDANCE_MISMATCH', 'SIGNATURE_MISMATCH', 'MISSING_OFFICIAL_SIGNATURE',
+                                     'CONFLICT_SCOPE_MISMATCH', 'DOCUMENT_VERSION_MISMATCH')
+       or (v_subject and p_discrepancy_code <> 'ATTENDANCE_MISMATCH') then
+      perform api._fail('INVALID', 'discrepancy_code');
+    end if;
+    v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  end if;
+  v_scope := case when v_subject then 'OWN_PARTICIPATION' when v_line.attendance = 'ATTENDED_PART' then 'PARTIAL'
+                  else 'FULL' end;
+  insert into exchange.bcp_record_attestation (record_id, revision, roster_id, user_id, action, scope, discrepancy_code,
+                                               reason)
+  values (v_rec.id, v_rec.revision, v_line.id, v_actor, p_action, v_scope, p_discrepancy_code, v_reason);
+  perform audit.record_event(case p_action when 'ATTEST' then 'MEMBER_ATTESTED_IMPORTED_RECORD'
+                                          else 'MEMBER_DECLINED_IMPORTED_RECORD' end,
+    'BUSINESS', 'SUCCESS', null, 'bcp_committee_record', v_rec.id::text, null,
+    exchange.bcp_record_audit(v_rec) || jsonb_build_object('roster_id', v_line.id, 'scope', v_scope,
+                                                          'discrepancy_code', p_discrepancy_code));
+  if p_action = 'DECLINE' then
+    perform notify.enqueue('COMMITTEE_RECORD_RETURNED', b.imported_by, v_rec.batch_id, null,
+                           'bcp-record-declined:' || v_rec.id || ':' || v_rec.revision || ':' || v_line.id)
+    from exchange.bcp_import_batch b where b.id = v_rec.batch_id;
+  end if;
+  if v_line.seat = 'CHAIR' then
+    for v_a in select a.* from exchange.bcp_record_acting_chair a
+               where a.record_id = v_rec.id and a.chair_roster_id = v_line.id and a.ended_at is null
+                 and now() < a.effective_to
+               order by a.id for update loop
+      update exchange.bcp_record_acting_chair
+         set ended_by = v_actor, ended_at = now(), end_reason = 'Ended by the chair''s own act on the record (E5).'
+       where id = v_a.id;
+      perform audit.record_event('RECORD_ACTING_CHAIR_ENDED', 'BUSINESS', 'SUCCESS', null, 'bcp_record_acting_chair',
+        v_a.id::text, null, exchange.bcp_record_audit(v_rec) || jsonb_build_object('ended_as', 'CHAIR', 'by_act', p_action));
+    end loop;
+  end if;
+  perform exchange.bcp_record_settle(v_rec.id);
+  return case p_action when 'ATTEST' then 'ATTESTED' else 'DECLINED_WITH_REASON' end;
+end;
+$$;
+
+-- =============================================================================
+-- 6. Commit and cancellation
+-- =============================================================================
+
+-- Replaces 2110. A case workbook as built. A committee workbook commits only READY_TO_COMMIT, with every condition
+-- checked again inside this transaction (§11, §12); it runs 2110's apply path (R2, R3 unchanged) and links the record
+-- to the meeting it created.
+create or replace function api.apply_bcp_import(p_batch_id uuid, p_hash text)
+returns jsonb
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  b exchange.bcp_import_batch;
+  v_rec exchange.bcp_committee_record;
+  v_out jsonb;
+  v_counts jsonb;
+  v_meeting uuid;
+begin
+  b := exchange.lock_bcp_batch(p_batch_id, true);
+  if b.scope <> 'CASE' then
+    select * into v_rec from exchange.bcp_committee_record r where r.batch_id = b.id for update;
+    if v_rec.id is null or v_rec.status <> 'READY_TO_COMMIT' or not exchange.bcp_record_ready(v_rec.id) then
+      perform api._fail('CONFLICT', 'RECORD_NOT_READY');
+    end if;
+  end if;
+  if b.status <> 'APPROVED' then perform api._fail('CONFLICT', 'NOT_APPROVED'); end if;
+  if p_hash is distinct from b.submitted_hash or exchange.bcp_batch_hash(b.id) <> b.submitted_hash then
+    perform api._fail('CONFLICT', 'PREVIEW_CHANGED');
+  end if;
+  v_out := exchange.bcp_run(b.id, true);
+  update exchange.bcp_import_batch
+     set status = 'IMPORTED', applied_at = now(), updated_at = now(), row_version = row_version + 1
+   where id = b.id;
+  select jsonb_build_object(
+           'imported', (select count(*) from jsonb_object_keys(v_out)),
+           'skipped', count(*) filter (where r.resolution = 'SKIP'),
+           'kept', count(*) filter (where r.resolution = 'KEEP_PLATFORM'),
+           'already_imported', count(*) filter (where r.state = 'ALREADY_IMPORTED'))
+    into v_counts
+    from exchange.bcp_import_row r where r.batch_id = b.id;
+  perform audit.record_event('BCP_IMPORT_COMPLETED', 'BUSINESS', 'SUCCESS', exchange.bcp_audit_case(b), 'bcp_import_batch',
+    b.id::text, null,
+    v_counts || jsonb_build_object('workbook_id', b.workbook_id, 'submitted_hash', b.submitted_hash,
+                                   'approved_by', b.decided_by) || exchange.bcp_audit_scope(b));
+  if b.scope <> 'CASE' then
+    select p.object_id into v_meeting from exchange.bcp_provenance p where p.row_id = v_rec.meeting_row_id;
+    update exchange.bcp_committee_record
+       set status = 'COMMITTED', meeting_id = v_meeting, committed_at = now(), updated_at = now()
+     where id = v_rec.id;
+    perform audit.record_event('COMMITTEE_WORKBOOK_COMMITTED', 'BUSINESS', 'SUCCESS', null, 'bcp_committee_record',
+      v_rec.id::text, null,
+      exchange.bcp_record_audit(v_rec)
+      || jsonb_build_object('meeting_id', v_meeting, 'signed_document_id', v_rec.signed_document_id,
+                            'approval_id', (exchange.bcp_record_approval(v_rec.id)).id,
+                            'attestations', (select count(*) from exchange.bcp_record_attestation a
+                                             where a.record_id = v_rec.id and a.revision = v_rec.revision)));
+  end if;
+  return v_counts;
+end;
+$$;
+
+-- Replaces 2110: as built; a committee workbook's record is cancelled with it.
+create or replace function api.cancel_bcp_import(p_batch_id uuid, p_reason text)
+returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_actor uuid := api._actor();
+  b exchange.bcp_import_batch;
+  v_reason text;
+begin
+  b := exchange.lock_bcp_batch(p_batch_id, true);
+  if b.status not in ('STAGED', 'SUBMITTED', 'APPROVED') then perform api._fail('CONFLICT', 'NOT_OPEN'); end if;
+  v_reason := api._require_text(p_reason, 'reason', 5, 2000);
+  update exchange.bcp_import_batch
+     set status = 'CANCELLED', cancelled_at = now(), updated_at = now(), row_version = row_version + 1
+   where id = b.id;
+  update exchange.bcp_committee_record
+     set status = 'CANCELLED', closed_at = now(), updated_at = now()
+   where batch_id = b.id and status not in ('COMMITTED', 'REJECTED', 'CANCELLED');
+  perform audit.record_event('BCP_IMPORT_CANCELLED', 'BUSINESS', 'SUCCESS', exchange.bcp_audit_case(b), 'bcp_import_batch',
+    b.id::text, v_reason, jsonb_build_object('previous_status', b.status) || exchange.bcp_audit_scope(b));
+end;
+$$;
