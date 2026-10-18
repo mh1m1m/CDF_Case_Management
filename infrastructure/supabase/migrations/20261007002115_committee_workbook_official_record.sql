@@ -822,7 +822,9 @@ begin
      or (select count(distinct x ->> 'roster_id') from jsonb_array_elements(p_lines) x) <> jsonb_array_length(p_lines) then
     perform api._fail('INVALID', 'lines');
   end if;
-  if (select count(*) from jsonb_array_elements(p_lines) x where (x ->> 'signed_as_chair')::boolean) > 1 then
+  if exists (select 1 from jsonb_array_elements(p_lines) x
+             where jsonb_typeof(x -> 'signed_as_chair') is distinct from 'boolean')
+     or (select count(*) from jsonb_array_elements(p_lines) x where x -> 'signed_as_chair' = 'true'::jsonb) > 1 then
     perform api._fail('INVALID', 'signed_as_chair');
   end if;
   -- Cleared first, so the one-signatory index never sees two at once.

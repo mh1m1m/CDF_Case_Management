@@ -618,6 +618,15 @@ describe("nobody acts for anyone else (§3, §7, §11)", () => {
           "CDF_INVALID:signed_as_chair",
           declareCall(opened.record, declaration(opened, {}, signer)),
         );
+      // A value that is not a JSON boolean is refused as such, never as a cast error.
+      for (const value of ["maybe", "true", 1, null])
+        await s.expectError(
+          "CDF_INVALID:signed_as_chair",
+          declareCall(
+            opened.record,
+            declaration(opened).map((l, i) => (i === 0 ? { ...l, signed_as_chair: value } : l)),
+          ),
+        );
       await declareCall(opened.record, declaration(opened, {}, "investigatorA"))(s.tx);
       // No parameter names the appointee: the activation takes the deputy chair's seat line.
       await s.asOwner();
