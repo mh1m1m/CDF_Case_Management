@@ -29,7 +29,7 @@ import {
   type MeetingFixture,
 } from "../support/committee";
 import { concludeProceedings } from "../support/closure";
-import { answers, without2085, without2120 } from "../support/capabilities";
+import { answers, without2085, without2120, without2125 } from "../support/capabilities";
 
 const CONCERN = "Synthetic: a concern raised by the capability test.";
 const NOTE = "Synthetic: a note on the vote, for the capability test.";
@@ -203,7 +203,7 @@ async function view(s: OwnerScenario, user: UserKey, meeting: string): Promise<V
     if ((error as Error).message === "CDF_NOT_FOUND") return null;
     throw error;
   }
-  const seen = without2085(without2120(v as View | null));
+  const seen = without2085(without2120(without2125(v as View | null)));
   for (const r of seen?.roster ?? []) {
     expect(Object.keys(r.capabilities).sort(), `${user} roster row`).toEqual([...ROSTER_FLAGS]);
     for (const f of ROSTER_FLAGS) expect(typeof r.capabilities[f], `${user} ${f}`).toBe("boolean");

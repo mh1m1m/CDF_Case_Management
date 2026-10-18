@@ -6,6 +6,9 @@
 // F2 narrow, F3 importer only, F4 no notice). T-AMB-118 is pinned below. Every step runs through the api.* commands as
 // `authenticated`; the owner connection only backdates the fixtures (the referral, the finding, the packages), reads
 // the ballots, the votes and the ledger, and probes the table's integrity. Synthetic data only.
+// Migration 2125 (ADR-062; the coordinator's ruling of 2026-10-18 19:08 UTC on AGENT-09's O1) adds the release before
+// supersession: the secretary's N6 record never supersedes a ballot its member or the meeting's chair has not released.
+// Its tests are the last describe.
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   USERS,
@@ -325,9 +328,17 @@ async function ballotsOf(s: OwnerScenario, meeting: string): Promise<BallotRow[]
 interface ItemView {
   vote_item_id: string;
   status: string;
-  my_ballot: { ballot_id: string; status: string; choice: string; ballot_reference: string } | null;
+  my_ballot: {
+    ballot_id: string;
+    status: string;
+    choice: string;
+    ballot_reference: string;
+    release?: string | null;
+  } | null;
   offline_ballots: Record<string, number>;
   ballots_unconfirmed_for: string[];
+  record_vote_for: string[];
+  ballots_releasable_for: string[];
   capabilities: Record<string, boolean>;
 }
 interface View {
@@ -656,6 +667,11 @@ describe("every bound ballot is settled by an act with a record before the vote 
       expect(await outcomes(s, "lead", { confirm: CONFIRM(item, "REJECT") })).toEqual({
         confirm: "CDF_NOT_FOUND",
       });
+      // 2125 (ADR-062): the secretary's N6 record supersedes a ballot only once a second actor has released it; here
+      // the chair, with a reason (the release-first tests are at the end of this file).
+      await s.as("committeeChair");
+      await s.tx`select api.release_offline_ballot(${item}, ${h.participant.lead!},
+                   'Synthetic: did not join the online completion.')`;
       await s.as("committeeSecretary");
       await s.tx`select api.record_vote_for_member(${item}, ${h.participant.lead!}, 'ABSENT',
                    'Synthetic: did not join the online completion.', null)`;
@@ -1083,6 +1099,299 @@ describe("staging and commit check each ballot (fail closed)", () => {
       await s.expectError(
         "CDF_CONFLICT:BCP_ROW_FAILED:BCP-V1:CDF_INVALID:TARGET_ID",
         (tx: Tx) => tx`select api.apply_bcp_import(${batch}, ${h!.h})`,
+      );
+    });
+  });
+});
+
+describe("ADR-062 (migration 2125): a bound ballot is superseded only after its member or the meeting's chair releases it", () => {
+  const LATE = "Synthetic: did not join the online completion.";
+  const RELEASE = (item: string, participant: string, reason = LATE) =>
+    `select api.release_offline_ballot('${item}', '${participant}', '${reason}')`;
+  const DECLINE = (item: string) => `select api.decline_offline_ballot('${item}')`;
+  const N6 = (item: string, participant: string) =>
+    `select api.record_vote_for_member('${item}', '${participant}', 'ABSENT', '${REASON}', null)`;
+
+  /** Ballots on the whole package from the four voters; the chair, legal and legalB present; lead recorded ABSENT
+   *  (with `leadDeclares`, lead first declares no conflict, and so reaches the item without attending); the package's
+   *  vote open. */
+  async function opened(
+    s: OwnerScenario,
+    f: Fixture,
+    choice: Record<string, string>,
+    leadDeclares: boolean,
+  ): Promise<{ h: MeetingFixture; batch: string; item: string }> {
+    const { h, batch } = await committed(
+      s,
+      f,
+      VOTERS.map((v) => ({ voter: v, kind: "PACKAGE", target: f.pkg, choice: choice[v]! })),
+    );
+    if (leadDeclares) {
+      await s.as("lead");
+      await s.tx`select api.declare_meeting_conflict(${h.participant.lead!}, 'NO_CONFLICT', null)`;
+    }
+    await openWithPresent(s, h, ["committeeChair", "legal", "legalB"]);
+    await s.as("committeeSecretary");
+    await s.tx`select api.record_attendance(${h.participant.lead!}, 'ABSENT')`;
+    await s.tx`select api.open_package_vote(${h.meeting}, ${f.pkg})`;
+    const [vi] = await s.tx<
+      { id: string }[]
+    >`select id from committee.vote_item where meeting_id = ${h.meeting}`;
+    return { h, batch, item: vi!.id };
+  }
+
+  const itemOf = async (s: OwnerScenario, user: UserKey, meeting: string) =>
+    (await view(s, user, meeting)).deliberation!.vote_items[0]!;
+
+  it("the secretary alone never supersedes a held ballot (BALLOT_HELD); the chair releases a ballot of a member not present, with a reason kept off the ledger; then N6 records the absence; the flags follow the commands", async () => {
+    await ownerScenario(async (s) => {
+      const f = await fixture(s);
+      const choice: Record<string, string> = {
+        committeeChair: "APPROVE",
+        legal: "APPROVE",
+        legalB: "REJECT",
+        lead: "REJECT",
+      };
+      const { h, item } = await opened(s, f, choice, false);
+      const lead = h.participant.lead!;
+      // A present member acts for themself, and the chair's own ballot is the chair's to decline, not to release.
+      expect(
+        await outcomes(s, "committeeChair", {
+          present: RELEASE(item, h.participant.legal!),
+          own: RELEASE(item, h.participant.committeeChair!),
+        }),
+      ).toEqual({ present: "CDF_CONFLICT:MEMBER_PRESENT", own: "CDF_FORBIDDEN" });
+      for (const v of ["committeeChair", "legal", "legalB"] as const) {
+        await s.as(v);
+        await s.tx`select api.confirm_offline_ballot(${item}, ${choice[v]!})`;
+      }
+
+      // Lead's ballot holds: the secretary records the absence, never the supersession, and the flags say so.
+      expect(
+        await outcomes(s, "committeeSecretary", {
+          n6: N6(item, lead),
+          release: RELEASE(item, lead),
+          decline: DECLINE(item),
+        }),
+      ).toEqual({
+        n6: "CDF_CONFLICT:BALLOT_HELD",
+        release: "CDF_FORBIDDEN",
+        decline: "CDF_FORBIDDEN",
+      });
+      let runner = await itemOf(s, "committeeSecretary", h.meeting);
+      expect(runner).toMatchObject({
+        record_vote_for: [],
+        ballots_unconfirmed_for: [lead],
+        ballots_releasable_for: [],
+      });
+      expect(runner.capabilities.may_close).toBe(false);
+      // Only the meeting's chair releases, with a reason.
+      expect(await outcomes(s, "legal", { release: RELEASE(item, lead) })).toEqual({
+        release: "CDF_FORBIDDEN",
+      });
+      expect((await itemOf(s, "legal", h.meeting)).ballots_releasable_for).toEqual([]);
+      expect(await outcomes(s, "committeeChair", { short: RELEASE(item, lead, "no") })).toEqual({
+        short: "CDF_INVALID:reason",
+      });
+      expect((await itemOf(s, "committeeChair", h.meeting)).ballots_releasable_for).toEqual([lead]);
+
+      await s.as("committeeChair");
+      await s.tx.unsafe(RELEASE(item, lead));
+      expect(await outcomes(s, "committeeChair", { again: RELEASE(item, lead) })).toEqual({
+        again: "CDF_CONFLICT:BALLOT_RELEASED",
+      });
+      expect((await itemOf(s, "committeeChair", h.meeting)).ballots_releasable_for).toEqual([]);
+      // Released, the ballot stays provisional and still holds the vote until a vote settles it.
+      await s.asOwner();
+      expect(
+        await s.tx`select status, release_kind, released_by, release_reason
+                   from committee.offline_ballot where participant_id = ${lead}`,
+      ).toEqual([
+        {
+          status: "PROVISIONAL",
+          release_kind: "CHAIR",
+          released_by: USERS.committeeChair,
+          release_reason: LATE,
+        },
+      ]);
+      runner = await itemOf(s, "committeeSecretary", h.meeting);
+      expect(runner).toMatchObject({ record_vote_for: [lead], ballots_unconfirmed_for: [lead] });
+      expect(runner.capabilities.may_close).toBe(false);
+
+      await s.as("committeeSecretary");
+      await s.tx.unsafe(N6(item, lead));
+      expect(await s.tx`select api.close_vote_item(${item}, null) as r`).toEqual([{ r: "APPROVED" }]);
+      expect((await ballotsOf(s, h.meeting)).map((b) => [b.who, b.status])).toEqual([
+        ["committeeChair", "CONFIRMED"],
+        ["legal", "CONFIRMED"],
+        ["legalB", "CONFIRMED"],
+        ["lead", "SUPERSEDED"],
+      ]);
+      // The ledger carries ids only: never the chair's reason, never a choice.
+      const events = await ledger(s, ["OFFLINE_BALLOT_RELEASED", "OFFLINE_BALLOT_SUPERSEDED"]);
+      expect(events.map((e) => [e.action, e.actor_id, Object.keys(e.metadata).sort()])).toEqual([
+        ["OFFLINE_BALLOT_RELEASED", USERS.committeeChair, ["ballot_id", "meeting_id"]],
+        ["OFFLINE_BALLOT_SUPERSEDED", USERS.committeeSecretary, ["ballot_id", "meeting_id", "source"]],
+      ]);
+    });
+  });
+
+  it("the member's own decline releases their ballot, attending or not; a released ballot stays theirs to confirm until a vote settles it", async () => {
+    await ownerScenario(async (s) => {
+      const f = await fixture(s);
+      const choice: Record<string, string> = {
+        committeeChair: "APPROVE",
+        legal: "APPROVE",
+        legalB: "APPROVE",
+        lead: "REJECT",
+      };
+      const { h, item } = await opened(s, f, choice, true);
+      const lead = h.participant.lead!;
+      // Lead reaches the item without attending: no confirmation (NOT_PRESENT), but their own ballot to let go; the
+      // chair's release is never theirs.
+      let mine = await itemOf(s, "lead", h.meeting);
+      expect(mine.capabilities).toMatchObject({ may_confirm_ballot: false, may_decline_ballot: true });
+      expect(mine.my_ballot).toMatchObject({ status: "PROVISIONAL", choice: "REJECT", release: null });
+      expect(mine.ballots_releasable_for).toEqual([]);
+      expect(
+        await outcomes(s, "lead", { confirm: CONFIRM(item, "REJECT"), release: RELEASE(item, lead) }),
+      ).toEqual({
+        confirm: "CDF_CONFLICT:NOT_PRESENT",
+        release: "CDF_FORBIDDEN",
+      });
+      await s.as("lead");
+      await s.tx.unsafe(DECLINE(item));
+      expect(await outcomes(s, "lead", { again: DECLINE(item) })).toEqual({
+        again: "CDF_CONFLICT:BALLOT_RELEASED",
+      });
+      mine = await itemOf(s, "lead", h.meeting);
+      expect(mine.capabilities.may_decline_ballot).toBe(false);
+      expect(mine.my_ballot).toMatchObject({ status: "PROVISIONAL", release: "MEMBER" });
+      // The chair has nothing left to release; the secretary's N6 record may follow, and the vote still waits for it.
+      expect((await itemOf(s, "committeeChair", h.meeting)).ballots_releasable_for).toEqual([]);
+      const runner = await itemOf(s, "committeeSecretary", h.meeting);
+      expect(runner.record_vote_for).toEqual([lead]);
+      expect(runner.ballots_unconfirmed_for).toContain(lead);
+
+      // A present member who declines still confirms their own ballot: the release lets N6 follow, never replaces
+      // the member's act.
+      await s.as("legal");
+      await s.tx.unsafe(DECLINE(item));
+      expect((await itemOf(s, "legal", h.meeting)).capabilities).toMatchObject({
+        may_decline_ballot: false,
+        may_confirm_ballot: true,
+      });
+      for (const v of ["committeeChair", "legal", "legalB"] as const) {
+        await s.as(v);
+        await s.tx`select api.confirm_offline_ballot(${item}, ${choice[v]!})`;
+      }
+      await s.as("committeeSecretary");
+      await s.tx.unsafe(N6(item, lead));
+      expect(await s.tx`select api.close_vote_item(${item}, null) as r`).toEqual([{ r: "APPROVED" }]);
+
+      await s.asOwner();
+      expect(
+        await s.tx`select b.status, b.release_kind, b.released_by = b.user_id as by_member, b.release_reason
+                   from committee.offline_ballot b where b.meeting_id = ${h.meeting} order by b.ballot_reference`,
+      ).toEqual([
+        { status: "CONFIRMED", release_kind: null, by_member: null, release_reason: null },
+        { status: "CONFIRMED", release_kind: "MEMBER", by_member: true, release_reason: null },
+        { status: "CONFIRMED", release_kind: null, by_member: null, release_reason: null },
+        { status: "SUPERSEDED", release_kind: "MEMBER", by_member: true, release_reason: null },
+      ]);
+      const declined = await ledger(s, ["OFFLINE_BALLOT_DECLINED"]);
+      expect(declined.map((e) => [e.actor_id, Object.keys(e.metadata).sort()])).toEqual([
+        [USERS.lead, ["ballot_id", "meeting_id"]],
+        [USERS.legal, ["ballot_id", "meeting_id"]],
+      ]);
+    });
+  });
+
+  it("the chair never releases a ballot of a workbook that excludes them, as a conflict's subject or a row's offline recorder (A-36); a vote that is not the member's own never settles a held ballot; a release is made once and never changed", async () => {
+    await ownerScenario(async (s) => {
+      const f = await fixture(s);
+      const choice = Object.fromEntries(VOTERS.map((v) => [v, "APPROVE"]));
+      const { h, batch, item } = await opened(s, f, choice, false);
+      const lead = h.participant.lead!;
+      // Owner fixtures on the workbook's rows (exchange.bcp_approver_excluded, 2110). Without them, the chair may
+      // release lead's ballot.
+      const onRows = async (change: () => Promise<unknown>) => {
+        await s.asOwner();
+        await s.tx`alter table exchange.bcp_import_row disable trigger bcp_import_row_protect`;
+        await change();
+        await s.tx`alter table exchange.bcp_import_row enable trigger bcp_import_row_protect`;
+      };
+      const releasable = async () => (await itemOf(s, "committeeChair", h.meeting)).ballots_releasable_for;
+      expect(await releasable()).toEqual([lead]);
+      // A conflict row of the workbook names the chair as its subject: excluded.
+      await onRows(
+        () => s.tx`insert into exchange.bcp_import_row (batch_id, case_id, template_version, sheet_code, row_number,
+                                                        row_key, cells, payload_hash, original_event_at,
+                                                        recorded_offline_by, state, resolution, subject_user_id)
+                   select batch_id, case_id, template_version, '11_CONFLICTS', 99, 'BCP-K9', '{}'::jsonb,
+                          payload_hash, original_event_at, recorded_offline_by, 'NEW', 'SKIP', ${USERS.committeeChair}
+                   from exchange.bcp_import_row where batch_id = ${batch} and sheet_code = '09_MEETINGS'`,
+      );
+      expect(await outcomes(s, "committeeChair", { release: RELEASE(item, lead) })).toEqual({
+        release: "CDF_FORBIDDEN",
+      });
+      expect(await releasable()).toEqual([]);
+      await onRows(
+        () => s.tx`update exchange.bcp_import_row set subject_user_id = null
+                   where batch_id = ${batch} and row_key = 'BCP-K9'`,
+      );
+      expect(await releasable()).toEqual([lead]);
+      // The chair recorded a row of the workbook offline: excluded too.
+      await onRows(
+        () => s.tx`update exchange.bcp_import_row set recorded_offline_by = ${USERS.committeeChair}
+                   where batch_id = ${batch} and sheet_code = '09_MEETINGS'`,
+      );
+      expect(await outcomes(s, "committeeChair", { release: RELEASE(item, lead) })).toEqual({
+        release: "CDF_FORBIDDEN",
+      });
+      expect(await releasable()).toEqual([]);
+
+      // The backstop: a SECRETARY vote written past api.record_vote_for_member never settles the held ballot.
+      await s.asOwner();
+      const [b] = await s.tx<
+        { id: string }[]
+      >`select id from committee.offline_ballot where participant_id = ${lead}`;
+      await s.expectError(
+        `offline ballot ${b!.id} is held`,
+        (
+          tx,
+        ) => tx`insert into committee.vote (vote_item_id, participant_id, recorded_for, recorded_by, source, choice,
+                                               reason, original_event_at)
+                   values (${item}, ${lead}, ${USERS.lead}, ${USERS.committeeSecretary}, 'SECRETARY', 'ABSENT',
+                           ${REASON}, now())`,
+      );
+      // Integrity: a member's release is their own; nothing else changes with a release; a release stands.
+      await s.expectError(
+        'new row for relation "offline_ballot" violates check constraint "offline_ballot_release"',
+        (tx) => tx`update committee.offline_ballot
+                      set released_at = now(), released_by = ${USERS.committeeChair}, release_kind = 'MEMBER'
+                    where id = ${b!.id}`,
+      );
+      await s.expectError(
+        `offline ballot ${b!.id} is settled or immutable`,
+        (tx) => tx`update committee.offline_ballot
+                      set released_at = now(), released_by = ${USERS.lead}, release_kind = 'MEMBER', choice = 'REJECT'
+                    where id = ${b!.id}`,
+      );
+      await s.tx`update committee.offline_ballot set released_at = now(), released_by = ${USERS.lead},
+                   release_kind = 'MEMBER' where id = ${b!.id}`;
+      await s.expectError(
+        `offline ballot ${b!.id} is settled or immutable`,
+        (
+          tx,
+        ) => tx`update committee.offline_ballot set released_at = null, released_by = null, release_kind = null
+                    where id = ${b!.id}`,
+      );
+      await s.expectError(
+        `offline ballot ${b!.id} is settled or immutable`,
+        (tx) => tx`update committee.offline_ballot
+                      set released_by = ${USERS.committeeChair}, release_kind = 'CHAIR', release_reason = ${LATE}
+                    where id = ${b!.id}`,
       );
     });
   });
