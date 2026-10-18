@@ -1,7 +1,8 @@
 // The authenticated app shell (UX redesign S1; audit §20.1–§20.2, RC-06). One header with the environment
 // marker, the product mark, the language switch and the user menu; one sidebar of at most five areas, which the
-// server derives from permission AND a live relationship; one main region. Everything works without JavaScript:
-// the user menu is a disclosure, and on a phone the sidebar becomes a single row of links under the header.
+// server derives from permission AND a live relationship; one main region. Reading and moving around work without
+// JavaScript: the user menu is a disclosure, and on a phone the sidebar becomes a single row of links under the
+// header. Sending a form needs it (CDF-255); with it off, CDFNoScriptNotice says so under the environment marker.
 // Text comes from the caller (@cdf/i18n); layout uses logical properties, so Arabic mirrors.
 import type { ReactNode } from "react";
 
@@ -234,6 +235,25 @@ export function CDFEnvironmentStrip({ label, detail }: { label: string; detail: 
       <strong className="font-semibold">{label}</strong>
       <span className="ms-2 max-sm:sr-only">{detail}</span>
     </div>
+  );
+}
+
+/**
+ * Shown only when JavaScript is off (CDF-255). Every submit button of the investigation app stays disabled until the
+ * page is interactive, so this line says why: pages can still be read, but signing in, signing out and sending a
+ * form need JavaScript. Not used by the public portal, whose forms work without it (UX-002).
+ */
+export function CDFNoScriptNotice({ text }: { text: string }) {
+  return (
+    <noscript>
+      <p
+        role="note"
+        data-testid="no-script-notice"
+        className="border-b border-cdf-border bg-cdf-info-bg px-4 py-1.5 text-center text-sm text-cdf-info"
+      >
+        {text}
+      </p>
+    </noscript>
   );
 }
 

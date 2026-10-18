@@ -34,6 +34,8 @@ export const ar: Messages = {
     saved: "تم الحفظ.",
     working: "جارٍ التنفيذ…",
     mainNavigation: "التنقل الرئيسي",
+    noScript:
+      "جافا سكريبت معطلة في هذا المتصفح. يمكنك قراءة الصفحات، لكن تسجيل الدخول أو الخروج أو إرسال أي نموذج يتطلب تفعيلها.",
   },
   recordDate: {
     hijri: "{day} {month} {year}هـ",

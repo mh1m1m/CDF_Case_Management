@@ -6,6 +6,7 @@ export * from "./confirm-dialog";
 export * from "./decision-panel";
 export * from "./field-errors";
 export * from "./guided";
+export * from "./hydration";
 export * from "./identifier";
 export * from "./refusal-notice";
 export * from "./refusal-notice-state";
