@@ -452,3 +452,5 @@ export * from "./meetings";
 export * from "./committee-proceedings";
 // ---- Legal review and the authority's decision (migrations 1900 and 2030; UX redesign Phase 12 P12-3a, ADR-057) ----
 export * from "./legal-reviews";
+// ---- The business calendar's forms (DEC-F02, migration 2030; UX redesign Phase 12 P12-8a, ADR-051) -------------
+export * from "./administration";

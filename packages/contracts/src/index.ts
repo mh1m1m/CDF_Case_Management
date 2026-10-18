@@ -1510,6 +1510,8 @@ export * from "./legal-reviews";
 export * from "./corrective-actions";
 /** One export request's page (UX redesign P12-6b-1; ADR-026). */
 export * from "./export-requests";
+/** The Administration registers and the business calendar's forms (UX redesign P12-8a; ADR-051). */
+export * from "./administration";
 
 // ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
 export const RECOMMENDATION_ITEM_TYPES = [

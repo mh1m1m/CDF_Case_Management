@@ -5,8 +5,8 @@
  * They are NOT the security boundary: every command is re-checked by the database (authz.* and RLS).
  * ROLE_PERMISSIONS mirrors iam.role_permission; tests/integration/mirrors.spec.ts asserts equality.
  */
-import type { Actor, Classification, MyArea, Permission, Role, WorkArea } from "@cdf/contracts";
-import { CLASSIFICATION_LEVELS, WORK_AREAS } from "@cdf/contracts";
+import type { Actor, AdminView, Classification, MyArea, Permission, Role, WorkArea } from "@cdf/contracts";
+import { ADMIN_VIEWS, CLASSIFICATION_LEVELS, WORK_AREAS } from "@cdf/contracts";
 
 export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   INTAKE_OFFICER: ["INTAKE_VIEW", "REPORT_MESSAGE_REPLY", "FORM_VIEW", "FORM_PREPARE"],
@@ -196,6 +196,25 @@ export function canAdministerExportPolicy(actor: Pick<Actor, "permissions"> | nu
   );
 }
 
+/**
+ * The Administration pages an actor's permissions open, in the order `api.my_areas` picks the area's default view
+ * (2045; UX redesign P12-8a). Each page is the register of one administrator: export policy opens only where
+ * `authz.is_export_policy_admin()` would (DEC-F24). Hidden is not forbidden: each page asks the database again.
+ */
+export function adminViews(actor: Pick<Actor, "permissions"> | null | undefined): AdminView[] {
+  if (!actor) return [];
+  const opens: Readonly<Record<AdminView, boolean>> = {
+    users: can(actor, "USER_ADMIN") || can(actor, "ROLE_ADMIN"),
+    committees: can(actor, "COMMITTEE_ADMIN"),
+    sectors: can(actor, "SECTOR_ADMIN"),
+    "notification-rules": can(actor, "NOTIFICATION_ADMIN"),
+    "export-policy": canAdministerExportPolicy(actor),
+    "corrective-action-policy": can(actor, "CORRECTIVE_ACTION_POLICY_ADMIN"),
+    calendar: can(actor, "BUSINESS_CALENDAR_ADMIN"),
+  };
+  return ADMIN_VIEWS.filter((v) => opens[v]);
+}
+
 export function withinClearance(actor: Pick<Actor, "clearance">, classification: Classification): boolean {
   return CLASSIFICATION_LEVELS.indexOf(actor.clearance) >= CLASSIFICATION_LEVELS.indexOf(classification);
 }
@@ -215,7 +234,7 @@ export function navigationFor(actor: Pick<Actor, "permissions">) {
       ["RETENTION_TASK_VIEW", "DISPOSITION_TASK_VIEW", "LEGAL_HOLD_REVIEW", "LEGAL_HOLD_REQUEST"].includes(p),
     ),
     recordsCatalogue: can(actor, "ARCHIVE_RECORD_VIEW"),
-    administration: can(actor, "ROLE_ADMIN") || can(actor, "USER_ADMIN"),
+    administration: adminViews(actor).length > 0,
   };
 }
 
@@ -223,10 +242,11 @@ export function navigationFor(actor: Pick<Actor, "permissions">) {
  * The permission floor of each shell area (audit §20.4). This is the application pre-check that the sidebar
  * intersects with `api.my_areas()`, which adds the live relationship (assignment, grant, task or item). Cases and
  * My Work have no floor because an assignment alone opens them, and My Committees none because a current seat alone
- * does (AMB-047: work follows the seat, never a role; Phase 12 P12-2b, ADR-055). Reporting (S6) does not exist yet.
- * Every route still re-checks in the database: hiding an area is not enforcement.
+ * does (AMB-047: work follows the seat, never a role; Phase 12 P12-2b, ADR-055). Administration opens wherever one of
+ * its pages does (`adminViews`, the same gate as `api.my_areas` since 2045; P12-8a). Reporting (S6) does not exist
+ * yet. Every route still re-checks in the database: hiding an area is not enforcement.
  */
-const AREA_FLOOR: Readonly<Record<WorkArea, readonly Permission[] | "ANY" | "NONE">> = {
+const AREA_FLOOR: Readonly<Record<WorkArea, readonly Permission[] | "ANY" | "NONE" | "ADMIN_VIEWS">> = {
   MY_WORK: "ANY",
   INTAKE: ["INTAKE_VIEW"],
   CASES: "ANY",
@@ -242,7 +262,7 @@ const AREA_FLOOR: Readonly<Record<WorkArea, readonly Permission[] | "ANY" | "NON
     "CASE_TASK_ASSIGN", // routing a hold request is a Records item
   ],
   OVERSIGHT: ["AUDIT_VIEW", "SECURITY_EVENT_VIEW"],
-  ADMINISTRATION: ["USER_ADMIN", "ROLE_ADMIN"],
+  ADMINISTRATION: "ADMIN_VIEWS",
   REPORTING: "NONE",
 };
 
@@ -250,6 +270,7 @@ export function areaPermitted(actor: Pick<Actor, "permissions">, area: WorkArea)
   const floor = AREA_FLOOR[area];
   if (floor === "ANY") return true;
   if (floor === "NONE") return false;
+  if (floor === "ADMIN_VIEWS") return adminViews(actor).length > 0;
   return floor.some((p) => can(actor, p));
 }
 

@@ -238,7 +238,7 @@ security context, so the database checks again on submit.
   commands after creation do not check the proceeding's status, and `api.close_proceeding` leaves its meetings as they
   are. The page offers less than the commands accept there, never more: the tests assert that no command accepts where
   R2 is NOT_FOUND, except on a closed proceeding, where only creating a package is refused. The commands' gap is
-  CDF-226 (Security, LOW), fixed in 2120 (ADR-048): `api.close_proceeding` closes the proceeding's meetings and the
+  CDF-226 (Security, LOW), fixed in 2117: `api.close_proceeding` closes the proceeding's meetings and the
   package commands refuse with `PROCEEDING_CLOSED`.
 - **Answers are for now.** A flag can turn false between reading and submitting (a vote opened, a concern raised, a
   member leaving); the command checks again and the page shows its refusal.
@@ -249,7 +249,7 @@ security context, so the database checks again on submit.
 - The invite form can list exactly the candidates the coordinator ruled, each with the roles the command would accept,
   without a directory.
 - A capability and its command can drift apart only if one of them changes without the other. The tests run the real
-  command for every caller and every state they build, and fail when an answer differs. When 2120 narrows the package
+  command for every caller and every state they build, and fail when an answer differs. When 2117 narrows the package
   commands (CDF-226), the closed-proceeding exception in the tests becomes a plain "nothing accepted".
 
 ## Where access is enforced, audit and tests

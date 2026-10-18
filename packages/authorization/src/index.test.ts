@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ROLES, type MyArea, type Role } from "@cdf/contracts";
+import { ADMIN_VIEWS, ROLES, type MyArea, type Permission, type Role } from "@cdf/contracts";
 import {
   ROLE_PERMISSIONS,
+  adminViews,
   areaPermitted,
   canAdministerExportPolicy,
   navigationFor,
@@ -150,5 +151,62 @@ describe("export policy administration (DEC-F24, migration 2040)", () => {
     expect(canAdministerExportPolicy(actorOf("PLATFORM_ADMIN", "CASE_MANAGER"))).toBe(false);
     expect(canAdministerExportPolicy(actorOf("CASE_MANAGER"))).toBe(false);
     expect(canAdministerExportPolicy(null)).toBe(false);
+  });
+});
+
+describe("Administration pages (UX redesign P12-8a; ADR-051's P12-8a amendment)", () => {
+  const holding = (...permissions: Permission[]) => ({ permissions });
+  const roles = (...r: Role[]) => ({ permissions: permissionsForRoles(r) });
+  /** Each page and the permission that opens it, as 2045's api.my_areas gates the area. */
+  const OPENS: [Permission, (typeof ADMIN_VIEWS)[number]][] = [
+    ["USER_ADMIN", "users"],
+    ["ROLE_ADMIN", "users"],
+    ["COMMITTEE_ADMIN", "committees"],
+    ["SECTOR_ADMIN", "sectors"],
+    ["NOTIFICATION_ADMIN", "notification-rules"],
+    ["EXPORT_POLICY_ADMIN", "export-policy"],
+    ["CORRECTIVE_ACTION_POLICY_ADMIN", "corrective-action-policy"],
+    ["BUSINESS_CALENDAR_ADMIN", "calendar"],
+  ];
+
+  it("opens each page to the holder of its own permission, and the area with it", () => {
+    for (const [permission, view] of OPENS) {
+      expect(adminViews(holding(permission)), permission).toEqual([view]);
+      expect(areaPermitted(holding(permission), "ADMINISTRATION"), permission).toBe(true);
+      expect(navigationFor(holding(permission)).administration, permission).toBe(true);
+    }
+  });
+
+  it("lists the pages in the order api.my_areas picks the area's default view from", () => {
+    const all = OPENS.map(([p]) => p).reverse();
+    expect(adminViews(holding(...all))).toEqual([...ADMIN_VIEWS]);
+    expect(
+      adminViews(holding("BUSINESS_CALENDAR_ADMIN", "USER_ADMIN", "CORRECTIVE_ACTION_POLICY_ADMIN")),
+    ).toEqual(["users", "corrective-action-policy", "calendar"]);
+  });
+
+  it("never opens export policy to an export approver (DEC-F24), as authz.is_export_policy_admin()", () => {
+    for (const approval of ["EXPORT_APPROVE", "EXPORT_SECOND_APPROVE"] as const) {
+      expect(adminViews(holding("EXPORT_POLICY_ADMIN", approval))).toEqual([]);
+      expect(areaPermitted(holding("EXPORT_POLICY_ADMIN", approval), "ADMINISTRATION")).toBe(false);
+    }
+  });
+
+  it("opens nothing, and no area, without an administrator's permission", () => {
+    expect(adminViews(null)).toEqual([]);
+    expect(adminViews(undefined)).toEqual([]);
+    expect(adminViews(holding("CASE_VIEW_ALL", "EXPORT_APPROVE", "AUDIT_VIEW"))).toEqual([]);
+    expect(areaPermitted(holding(), "ADMINISTRATION")).toBe(false);
+    expect(navigationFor(holding()).administration).toBe(false);
+  });
+
+  it("gives each seeded role the pages its permissions open, and every other role none", () => {
+    const expected: Partial<Record<Role, string[]>> = {
+      PLATFORM_ADMIN: ["users", "committees", "sectors", "notification-rules", "export-policy", "calendar"],
+      // GRC_DIRECTOR holds EXPORT_POLICY_ADMIN from 1930, inert beside its export approval (DEC-F24).
+      GRC_DIRECTOR: ["committees", "corrective-action-policy"],
+      COMPLIANCE_SECTION_MANAGER: ["committees"],
+    };
+    for (const role of ROLES) expect(adminViews(roles(role)), role).toEqual(expected[role] ?? []);
   });
 });

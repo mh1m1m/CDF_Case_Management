@@ -1531,3 +1531,34 @@ export async function cancelOpenImport(batchId: string): Promise<void> {
       await tx`select api.cancel_bcp_import(${batchId}, ${EXCHANGE_REASON})`;
   });
 }
+
+// ---- The business calendar (Phase 12 P12-8a; DEC-F02) --------------------------------------------------------------
+
+/**
+ * Dates the calendar journey can use however often it runs on one database, read as Platform Admin Eta, the calendar
+ * administrator, in their own context: the first date `fromDays` or more days ahead in Riyadh with no entry in force,
+ * and a start for a new working week 30 days after the last version starts (or after today).
+ */
+export async function calendarDates(fromDays: number): Promise<{ day: string; weekFrom: string }> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ day: string; week_from: string }[]>`
+      with today as (select (now() at time zone 'Asia/Riyadh')::date as d)
+      select (select min(today.d + i)
+                from today, generate_series(${fromDays}::int, ${fromDays}::int + 3650) i
+               where not exists (select 1 from config.business_calendar_day x
+                                  where x.calendar_date = today.d + i and x.withdrawn_at is null))::text as day,
+             ((greatest((select max(w.effective_from) from config.business_week_pattern w), now())
+                at time zone 'Asia/Riyadh')::date + 30)::text as week_from`;
+    return { day: r!.day, weekFrom: r!.week_from };
+  });
+}
+
+/** The calendar administrator withdraws the entry the journey added for a date, if it is still in force. */
+export async function withdrawCalendarDay(date: string): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    const [d] = await tx<{ id: string }[]>`
+      select id from config.business_calendar_day where calendar_date = ${date}::date and withdrawn_at is null`;
+    if (d)
+      await tx`select api.withdraw_business_calendar_day(${d.id}, ${"Synthetic: withdrawn after the e2e journey."})`;
+  });
+}

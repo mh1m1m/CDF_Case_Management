@@ -5,16 +5,13 @@
 // metadata, and otherwise the page names the proceeding by a short reference that is never a key. Scheduling and
 // adding a member show only where the command's own answer says the caller may (UX-116); each command checks again.
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   MEETING_MODES,
   MEETING_PURPOSES,
   type CommitteeProceedingSummary,
-  type CommitteeRules,
   type CommitteeView,
-  type RuleSourceStatus,
 } from "@cdf/contracts";
 import { formatDate, formatDateTime, formatDays, isolate, type MessageKey, type Translator } from "@cdf/i18n";
 import {
@@ -22,7 +19,6 @@ import {
   CDFBreadcrumbs,
   CDFCard,
   CDFCommandForm,
-  CDFConfiguredValue,
   CDFDescriptionList,
   CDFField,
   CDFPageHeader,
@@ -30,13 +26,13 @@ import {
   CDFStatusBadge,
   inputClass,
   textareaClass,
-  type CDFValueSource,
 } from "@cdf/ui";
 import { committeesService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { confirmation } from "../../confirmations";
 import { participantName } from "../../meetings/meeting-labels";
 import { proceedingLabel } from "../proceeding-label";
+import { RulesList } from "../rules-list";
 import { amendProceedingSnapshotAction, scheduleMeetingAction } from "./actions";
 
 /** Unique translated title (WCAG 2.4.2, UX-082); never a case number or committee content. */
@@ -46,12 +42,6 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 const UUID = /^[0-9a-f-]{36}$/i;
-
-const RULE_SOURCE: Record<RuleSourceStatus, CDFValueSource> = {
-  OWNER_DEFAULT: "OWNER_DEFAULT",
-  SOURCE_REQUIRED: "SOURCE_REQUIRED",
-  APPROVED: "CONFIGURED",
-};
 
 export default async function CommitteePage({ params }: { params: Promise<{ committeeId: string }> }) {
   const { committeeId } = await params;
@@ -539,80 +529,5 @@ function MembersCard({ t, v }: { t: Translator; v: CommitteeView }) {
         ))}
       </ul>
     </CDFCard>
-  );
-}
-
-/**
- * A rule set as the committee holds it now, or as a proceeding copied it at referral (rule 7: a configured rule, never
- * presented as CDF policy, so its source is said). A copy taken before a rule existed lacks it: `missing` says so.
- */
-function RulesList({
-  t,
-  rules: r,
-  missing,
-  testId,
-}: {
-  t: Translator;
-  rules: CommitteeRules;
-  missing: string;
-  testId: string;
-}) {
-  const yesNo = (v: boolean | null) => (v === null ? missing : v ? t("common.yes") : t("common.no"));
-  const items: { term: string; value: ReactNode }[] = [
-    {
-      term: t("caseStructure.quorum"),
-      value: t(`quorumType.${r.quorumType}` as MessageKey, { value: r.quorumValue ?? "—" }),
-    },
-    {
-      term: t("committees.minimumNotice"),
-      value:
-        r.minimumNoticeDays === null ? t("committees.noNotice") : formatDays(t.locale, r.minimumNoticeDays),
-    },
-    { term: t("caseStructure.castingVote"), value: yesNo(r.castingVoteEnabled) },
-    { term: t("committees.actingChairCastingVote"), value: yesNo(r.actingChairCastingVote) },
-    {
-      term: t("committees.ballot"),
-      value: r.ballotSecrecy ? t(`committees.ballotValue.${r.ballotSecrecy}` as MessageKey) : missing,
-    },
-    { term: t("committees.voteRevision"), value: yesNo(r.voteRevisionAllowed) },
-    { term: t("committees.dissentNote"), value: yesNo(r.dissentNoteAllowed) },
-    {
-      term: t("caseStructure.minutesReview"),
-      value:
-        r.minutesReviewBusinessDays === null
-          ? missing
-          : t("caseStructure.minutesDays", { days: r.minutesReviewBusinessDays }),
-    },
-    { term: t("caseStructure.deemedApproval"), value: yesNo(r.deemedApprovalEnabled) },
-    { term: t("committees.objectionBlocksDeemed"), value: yesNo(r.minutesObjectionBlocksDeemed) },
-    {
-      term: t("committees.conflictDecider"),
-      value: r.conflictDecider
-        ? t(`committees.conflictDeciderValue.${r.conflictDecider}` as MessageKey)
-        : missing,
-    },
-  ];
-  return (
-    <div data-testid={testId}>
-      {r.sourceStatus || r.effectiveFrom ? (
-        <p className="mb-2 text-sm">
-          {r.sourceStatus ? (
-            <CDFConfiguredValue
-              value={
-                r.effectiveFrom
-                  ? t("committees.inForceSince", { date: isolate(formatDate(t.locale, r.effectiveFrom)) })
-                  : ""
-              }
-              source={RULE_SOURCE[r.sourceStatus]}
-              sourceLabel={t(`caseStructure.ruleSource.${r.sourceStatus}` as MessageKey)}
-              testId={`${testId}-source`}
-            />
-          ) : (
-            t("committees.inForceSince", { date: isolate(formatDate(t.locale, r.effectiveFrom!)) })
-          )}
-        </p>
-      ) : null}
-      <CDFDescriptionList stacked items={items} />
-    </div>
   );
 }

@@ -1,7 +1,14 @@
 // Where each shell area and each My Work item leads (UX redesign S1; audit §20.5–§20.6, RC-07, RC-08). Pure
 // functions: the database decides which areas and items exist; this only maps them to routes. Every route
 // re-checks access in the database and answers the uniform not-found when the caller may not see it.
-import type { InboxNotification, MyArea, WorkArea, WorkItem, WorkTargetType } from "@cdf/contracts";
+import {
+  ADMIN_VIEWS,
+  type InboxNotification,
+  type MyArea,
+  type WorkArea,
+  type WorkItem,
+  type WorkTargetType,
+} from "@cdf/contracts";
 
 const AREA_HOME: Record<WorkArea, string> = {
   MY_WORK: "/my-work",
@@ -10,7 +17,7 @@ const AREA_HOME: Record<WorkArea, string> = {
   COMMITTEE: "/committees", // My Committees (Phase 12 P12-2b, ADR-055)
   RECORDS: "/records",
   OVERSIGHT: "/oversight",
-  ADMINISTRATION: "/admin/users",
+  ADMINISTRATION: "/admin", // opens the caller's first Administration page (P12-8a)
   REPORTING: "/my-work", // S6
 };
 
@@ -19,6 +26,9 @@ export function areaHref(a: Pick<MyArea, "area" | "defaultView">): string {
   if (a.area === "RECORDS" && a.defaultView === "legal-holds") return "/records/legal-holds";
   if (a.area === "OVERSIGHT")
     return `/oversight?view=${a.defaultView === "security-events" ? "security-events" : "ledger"}`;
+  // Administration opens on the first page the caller's permissions open (2045's default view; P12-8a).
+  if (a.area === "ADMINISTRATION" && (ADMIN_VIEWS as readonly string[]).includes(a.defaultView))
+    return `/admin/${a.defaultView}`;
   return AREA_HOME[a.area];
 }
 
