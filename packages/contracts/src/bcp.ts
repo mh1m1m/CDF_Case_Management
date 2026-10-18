@@ -5,6 +5,9 @@
  * and a database test keeps them equal.
  */
 
+import type { SettingStatus } from "./export-requests";
+import type { AccountName } from "./legal-reviews";
+
 export const BCP_TEMPLATE_VERSION = "BCP-1" as const;
 
 export const BCP_SHEET_KINDS = ["README", "CONTROL", "DATA", "PLATFORM_LOG"] as const;
@@ -388,4 +391,90 @@ export interface BcpImportBatch {
   createdAt: string;
   submittedAt: string | null;
   decidedAt: string | null;
+}
+
+/**
+ * One row of a batch as `api.bcp_import_batch_view` returns it (UX redesign P12-6b-1): metadata only, never the cells,
+ * and never a row about the reader (R4, 2110). `detail` names the problem of an INVALID row (a column code, or FORMULA,
+ * DUPLICATE_ROW_ID and the like) or of a CONFLICT row (CHANGED_SINCE_IMPORT, EXISTING_OBJECT); `outcome` is the last
+ * dry run's: OK, or the refusal code its command gave.
+ */
+export interface BcpImportRowView {
+  rowId: string;
+  sheetCode: string;
+  rowNumber: number;
+  rowKey: string | null;
+  state: BcpRowState;
+  detail: string | null;
+  resolution: BcpResolution | null;
+  resolutionReason: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  outcome: string | null;
+  originalEventAt: string | null;
+  recordedOfflineBy: string | null;
+  purgedAt: string | null;
+  /** `api.resolve_bcp_row` with SKIP, for this row and this caller now (2110:1615); other resolutions wait (F4). */
+  maySkip: boolean;
+}
+
+/** Each flag is its command's own answer for the caller now (2110:1625-1646). */
+export interface BcpImportBatchCapabilities {
+  mayResolveRows: boolean;
+  /** The importer's dry run (audited; while STAGED it stores the preview the submission is bound to). */
+  mayPreview: boolean;
+  maySubmit: boolean;
+  /** APPROVE or REJECT. */
+  mayDecide: boolean;
+  /** APPROVE only: closed once the workbook is revoked as lost (AMB-205); REJECT stays open. */
+  mayApprove: boolean;
+  mayApply: boolean;
+  mayCancel: boolean;
+}
+
+/** `api.bcp_import_batch_view` (2040, 2100, final 2110): NOT_FOUND unless `authz.can_view_bcp_import`. */
+export interface BcpImportBatchView {
+  batchId: string;
+  templateVersion: string;
+  workbookId: string;
+  scope: BcpBatchScope;
+  committeeProceedingId: string | null;
+  fileSha256: string;
+  offlineFrom: string;
+  offlineTo: string | null;
+  preparedBy: string;
+  status: BcpBatchStatus;
+  previewHash: string | null;
+  previewedAt: string | null;
+  previewClean: boolean;
+  submittedHash: string | null;
+  importedBy: string;
+  decidedBy: string | null;
+  decisionReason: string | null;
+  createdAt: string;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  appliedAt: string | null;
+  cancelledAt: string | null;
+  updatedAt: string;
+  rowVersion: number;
+  currentHash: string;
+  /** AMB-205: the workbook was reported lost; only a rejection or a cancellation remains. */
+  workbookRevoked: boolean;
+  /** A committee workbook (2110): it is submitted and imported only through its official record (ADR-061). */
+  officialRecordRequired: boolean;
+  counts: { rows: number; unresolved: number; byState: Partial<Record<BcpRowState, number>> };
+  rows: BcpImportRowView[];
+  /** Under case metadata only. */
+  caseId: string | null;
+  caseNumber: string | null;
+  capabilities: BcpImportBatchCapabilities;
+}
+
+/** What the batch's page reads, in one transaction: the view, the names of the accounts it names, and the setting
+ *  that says how long staged cells are kept once the import ends (DEC-F31: SOURCE_REQUIRED, nothing is cleared). */
+export interface BcpImportBatchPage {
+  view: BcpImportBatchView;
+  people: AccountName[];
+  stagingRetention: SettingStatus;
 }

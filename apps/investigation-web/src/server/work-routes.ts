@@ -47,9 +47,13 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
       return "COMMITTEE";
     // A legal review assigned to the caller is their own work (P12-3a): it comes to them from My Work. So does a
     // corrective action, to the manager who disposes of it (P12-3b) and to its owner and verifier (P12-6); the case
-    // team also reaches it from the case's Proceedings tab, and its breadcrumbs lead back there.
+    // team also reaches it from the case's Proceedings tab, and its breadcrumbs lead back there. An export and a
+    // continuity import come to their approvers from My Work too (P12-6b-1); their requester and importer reach them
+    // from the case, and the breadcrumbs lead back there.
     case "legal-reviews":
     case "actions":
+    case "exports":
+    case "continuity":
       return "MY_WORK";
     default:
       return undefined;
@@ -61,10 +65,10 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
  * a My Work row's target (2045); the inbox and My Work link to them only once the page has shipped, so nobody lands
  * on a missing page. The purpose routes of Phase 12 join this list as each one ships, under the root
  * notify.deep_link writes, and that page re-checks access in the database: meetings and minutes since P12-2a
- * (ADR-054), committees since P12-2b (ADR-055), legal reviews since P12-3a (ADR-057), and a corrective action
- * since P12-6a (ADR-058), when its page came to serve its owner and verifier as well as the case team's disposition
- * of a frozen action (P12-3b); my defence, grievances, exports, continuity imports, referrals and preliminary reviews
- * to come.
+ * (ADR-054), committees since P12-2b (ADR-055), legal reviews since P12-3a (ADR-057), a corrective action since
+ * P12-6a (ADR-058), when its page came to serve its owner and verifier as well as the case team's disposition of a
+ * frozen action (P12-3b), and an export request (ADR-026) and a continuity import (ADR-034) since P12-6b-1; my
+ * defence, grievances, referrals and preliminary reviews to come.
  */
 export const LIVE_PURPOSE_ROOTS: readonly string[] = [
   "/committees",
@@ -72,6 +76,8 @@ export const LIVE_PURPOSE_ROOTS: readonly string[] = [
   "/minutes",
   "/legal-reviews",
   "/actions",
+  "/exports",
+  "/continuity/imports",
 ];
 
 /**

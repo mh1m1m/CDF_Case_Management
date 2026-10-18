@@ -62,6 +62,16 @@ export const createExportRequestSchema = z
     }
   });
 
+/**
+ * The case page's request form (P12-6b-1): the command's schema, narrowed while internal recipients wait for their
+ * candidate read (P12-6b map F9). An email export goes to external recipients only, so no draft is made that could
+ * never be sent. The database accepts both; this narrows, it widens nothing.
+ */
+export const requestExportFormSchema = createExportRequestSchema.superRefine((v, ctx) => {
+  if (v.format === "EMAIL" && v.audience === "INTERNAL")
+    ctx.addIssue({ code: "custom", path: ["format"], message: "validation.emailExternalOnly" });
+});
+
 export const addExportItemSchema = z.object({
   requestId: uuid,
   objectType: z.enum(EXPORT_OBJECT_TYPES, { message: "validation.required" }),
@@ -71,18 +81,37 @@ export const addExportItemSchema = z.object({
 /** PRODUCTION_SUBSTITUTION_REQUIRED: synthetic @example.test addresses only; production checks a CDF domain list. */
 export const EXTERNAL_EXPORT_EMAIL = /^[a-z0-9._%+-]{1,64}@example\.test$/;
 
+const externalEmail = z
+  .string({ message: "validation.required" })
+  .trim()
+  .toLowerCase()
+  .max(254, { message: "validation.tooLong" })
+  .regex(EXTERNAL_EXPORT_EMAIL, { message: "validation.email" });
+
+/**
+ * AMB-187 (P12-6b-1): an external address is typed twice, and both must be the same address, so one wrong character
+ * cannot disclose a case. The two are compared as the database keeps the address (trimmed, lower case); only the
+ * first is sent, and the preview hash binds it, so every approver sees exactly the address that is used.
+ */
 export const addExportRecipientSchema = z.discriminatedUnion("kind", [
   z.object({ requestId: uuid, kind: z.literal("INTERNAL"), userId: uuid }),
-  z.object({
-    requestId: uuid,
-    kind: z.literal("EXTERNAL"),
-    email: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .max(254, { message: "validation.tooLong" })
-      .regex(EXTERNAL_EXPORT_EMAIL, { message: "validation.email" }),
-  }),
+  z
+    .object({
+      requestId: uuid,
+      kind: z.literal("EXTERNAL"),
+      email: externalEmail,
+      emailConfirmation: z
+        .string({ message: "validation.required" })
+        .trim()
+        .toLowerCase()
+        .max(254, { message: "validation.tooLong" }),
+    })
+    .superRefine((v, ctx) => {
+      if (v.emailConfirmation === "")
+        ctx.addIssue({ code: "custom", path: ["emailConfirmation"], message: "validation.required" });
+      else if (v.emailConfirmation !== v.email)
+        ctx.addIssue({ code: "custom", path: ["emailConfirmation"], message: "validation.emailMismatch" });
+    }),
 ]);
 
 export const exportRequestRefSchema = z.object({ requestId: uuid });
@@ -92,6 +121,14 @@ export const submitExportSchema = z.object({
   requestId: uuid,
   previewHash,
   classification: z.enum(CLASSIFICATION_LEVELS, { message: "validation.required" }),
+});
+
+/**
+ * The submit form (P12-6b map F11): the classification is the one the requester's own preview shows, echoed back,
+ * and the requester confirms it. The database compares it with the case's classification at submission.
+ */
+export const submitExportFormSchema = submitExportSchema.extend({
+  classificationConfirmed: z.literal(true, { message: "validation.acknowledgementRequired" }),
 });
 
 export const EXPORT_DECISIONS = ["APPROVE", "REJECT"] as const;

@@ -266,6 +266,16 @@ export async function CaseWorkspace({
     ...(nav.recordsCatalogue || nav.myWork
       ? [{ key: "openRecord", href: `/records/${c.id}`, label: t("caseWorkspace.overflow.openRecord") }]
       : []),
+    // P12-6b-1 (F1): whoever may see the case and holds EXPORT_REQUEST, as api.create_export_request checks them.
+    ...(can(actor, "EXPORT_REQUEST")
+      ? [
+          {
+            key: "requestExport",
+            href: `/cases/${c.id}/export`,
+            label: t("caseWorkspace.overflow.requestExport"),
+          },
+        ]
+      : []),
   ];
 
   // One banner at a time, by priority (audit §22.9.1): a conflict to decide, then read-only.

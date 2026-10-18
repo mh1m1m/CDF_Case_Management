@@ -94,6 +94,55 @@ function harness(
     if (opts.refusal) throw new Error(opts.refusal);
   };
   const gateway: BcpImportGateway = {
+    view: async () => {
+      await step("view");
+      return {
+        view: {
+          batchId: BATCH,
+          templateVersion: "BCP-1",
+          workbookId: "BCP-WB-1",
+          scope: "CASE",
+          committeeProceedingId: null,
+          fileSha256: HASH,
+          offlineFrom: "2026-10-01T08:00:00.000Z",
+          offlineTo: null,
+          preparedBy: ctx.userId,
+          status: "STAGED",
+          previewHash: null,
+          previewedAt: null,
+          previewClean: false,
+          submittedHash: null,
+          importedBy: ctx.userId,
+          decidedBy: null,
+          decisionReason: null,
+          createdAt: "2026-10-18T09:00:00.000Z",
+          submittedAt: null,
+          decidedAt: null,
+          appliedAt: null,
+          cancelledAt: null,
+          updatedAt: "2026-10-18T09:00:00.000Z",
+          rowVersion: 1,
+          currentHash: HASH,
+          workbookRevoked: false,
+          officialRecordRequired: false,
+          counts: { rows: 0, unresolved: 0, byState: {} },
+          rows: [],
+          caseId: CASE,
+          caseNumber: "CDF-DEMO-2026-0001",
+          capabilities: {
+            mayResolveRows: false,
+            mayPreview: true,
+            maySubmit: false,
+            mayDecide: false,
+            mayApprove: false,
+            mayApply: false,
+            mayCancel: true,
+          },
+        },
+        people: [],
+        stagingRetention: "SOURCE_REQUIRED",
+      };
+    },
     stage: async (_ctx, input) => (await step("stage"), staged.push(input), BATCH),
     resolve: () => step("resolve"),
     preview: async () => (await step("preview"), { hash: HASH, clean: true, status: "STAGED", rows: [] }),
@@ -275,6 +324,29 @@ describe("continuity workbook service: staging an upload", () => {
   });
 });
 
+describe("continuity workbook service: the batch's page (P12-6b-1)", () => {
+  it("reads the batch, and a refused read is the uniform not-found recorded as ACCESS_DENIED", async () => {
+    const ok = harness();
+    expect((await ok.service.view(ctx, BATCH))?.view.batchId).toBe(BATCH);
+    expect(ok.events).toEqual([]);
+    for (const refusal of ["CDF_NOT_FOUND", "CDF_FORBIDDEN"]) {
+      const { service, events } = harness({ refusal });
+      expect(await service.view(ctx, BATCH)).toBeNull();
+      expect(events).toEqual([
+        {
+          action: "ACCESS_DENIED",
+          objectType: "bcp_import_batch",
+          objectId: BATCH,
+          metadata: { read: "bcp_import_batch_view" },
+        },
+      ]);
+    }
+    const down = harness({ refusal: "connection reset" });
+    await expect(down.service.view(ctx, BATCH)).rejects.toMatchObject({ kind: "UNAVAILABLE" });
+    expect(down.events).toEqual([]);
+  });
+});
+
 describe("continuity workbook service: the batch commands", () => {
   it("validates before the gateway: reasons, resolutions and hashes", async () => {
     const { service, calls } = harness();
@@ -373,5 +445,25 @@ describe("continuity workbook service: the batch commands", () => {
         await broken.service.cancel(ctx, importer, { batchId: BATCH, reason: "Synthetic: wrong file." }),
       ),
     ).toBe("UNAVAILABLE:undefined");
+  });
+
+  it("says a row stopped the import with one code, however long its key and its command's code (P12-6b-1)", async () => {
+    for (const message of [
+      "CDF_CONFLICT:BCP_ROW_FAILED:BCP-D1:CDF_CONFLICT:NOTICE_NOT_OPEN",
+      // Longer than an error's detail may be: it would otherwise read as the service being unavailable.
+      `CDF_CONFLICT:BCP_ROW_FAILED:BCP-${"A".repeat(60)}:CDF_INVALID:${"x".repeat(90)}`,
+    ]) {
+      const failed = harness({ refusal: message });
+      const result = await failed.service.apply(ctx, importer, { batchId: BATCH, previewHash: HASH });
+      expect(refusal(result)).toBe("CONFLICT:BCP_ROW_FAILED");
+      // Neither the row's key nor its command's code reaches the page; a conflict is not recorded as a denial.
+      expect(JSON.stringify(result)).not.toContain("BCP-D1");
+      expect(failed.events).toEqual([]);
+    }
+    // Only the import's own row failure is renamed; every other refusal keeps its code.
+    const other = harness({ refusal: "CDF_CONFLICT:NOT_APPROVED" });
+    expect(refusal(await other.service.apply(ctx, importer, { batchId: BATCH, previewHash: HASH }))).toBe(
+      "CONFLICT:NOT_APPROVED",
+    );
   });
 });

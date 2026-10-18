@@ -1508,6 +1508,8 @@ export * from "./committee-proceedings";
 export * from "./legal-reviews";
 /** Corrective actions under a superseded decision, for the case team (UX redesign P12-3b; ADR-058). */
 export * from "./corrective-actions";
+/** One export request's page (UX redesign P12-6b-1; ADR-026). */
+export * from "./export-requests";
 
 // ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
 export const RECOMMENDATION_ITEM_TYPES = [

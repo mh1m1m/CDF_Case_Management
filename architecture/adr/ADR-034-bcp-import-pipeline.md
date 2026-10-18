@@ -1,6 +1,6 @@
 # ADR-034: Continuity workbook template BCP-1 and the governed import pipeline
 
-- **Status:** Proposed (2026-10-12). Linear CDF-197. Implemented in migration 1960 (local, pending security review). Security-sensitive.
+- **Status:** Proposed (2026-10-12). Linear CDF-197; the P12-6b-1 amendment CDF-258 (2026-10-18). Implemented in migration 1960 (local, pending security review). Security-sensitive.
 - **Protocol:** §12, §19, §29, §45, §68, §82–§83, §87; ADR-027, ADR-021, ADR-023, ADR-024, ADR-033; owner Q&A Q100.
 
 ## Context
@@ -40,3 +40,55 @@ ADR-027 decides that a full outage is run from a governed Excel workbook and tha
 ## Requirements
 
 Q100; negative test N17. Tests: `tests/security/bcp-import.spec.ts`, `tests/integration/bcp-import-upload.spec.ts` (a template-written file through the real reader, service, gateway and database), BCP IDOR probes, the audit walk, `packages/infrastructure/src/bcp/*.test.ts`, `packages/domain/src/bcp.test.ts`, `packages/application/src/bcp-import.test.ts`, `packages/validation/src/bcp.test.ts`, `apps/investigation-web/src/server/bcp-template.test.ts`.
+
+## P12-6b-1 amendment: the continuity import's page (2026-10-18)
+
+UX redesign Phase 12, slice P12-6b-1 (Linear CDF-258), with no migration: the page reads `api.bcp_import_batch_view`
+as 2110 left it (ADR-047) and runs the batch commands. The coordinator's ruling of 2026-10-18 (12:18) settles the forks
+of the P12-6b domain map. Who may read a batch and what each command accepts are unchanged. Each form shows only where
+the view says its command would accept the caller now (UX-116), and runs its `api.*` command in the caller's security
+context through the continuity import service, which validates with the shared schema and pre-checks the role
+permission first (`BCP_IMPORT` to prepare, submit, import or cancel; `BCP_IMPORT_APPROVE` to decide); the database
+decides again on submit, including that the importer is an authorized continuity operator (DEC-F30).
+
+- **The page** (`/continuity/imports/{id}`). A staged batch is its importer's alone; once submitted, the approvers who
+  see its case read it too. Anyone else, and an id that names nothing or a malformed one, get the same 404, with
+  ACCESS_DENIED recorded. The page shows the workbook (its id, template, case, offline window, preparer and importer,
+  the file's fingerprint) and its rows sheet by sheet as the view gives them: row metadata only, never a cell, the
+  control sheet or a row about the reader. The row counts are counted over the rows the page lists, so they never tell
+  the reader about a row the view leaves out. How long staged rows are kept is SOURCE_REQUIRED and says so (DEC-F31).
+  A guide says where the import stands, who acts next and what the reader can do; a person is "you", the directory's
+  name in the reader's language, or "a user". A workbook reported lost (AMB-205) and a batch changed since it was
+  submitted are said in words; neither is ever approved or imported.
+- **Preparing.** While the batch is staged, its importer skips a row with a reason (the only resolution this page
+  offers, F4), runs the dry run, which undoes everything and shows each row's outcome in words (never the command's
+  code), and submits the batch as the last clean dry run left it. Until then the page lists what holds the submission:
+  rows that need a decision, a dry run of the batch as it stands, and rows the last dry run refused.
+- **Deciding** (F13). An approver decides on what each row is and what will happen to it, exactly as submitted: the
+  row metadata the view gives, never the cells. That is what 2110 built, and it satisfies §7 above: the approver sees
+  the case, where the rows land, and showing the cells would widen access before 2160 (coordinator ruling). The
+  workbook's preparer and anyone who recorded a row offline never decide, and find nothing of it in My Work.
+- **Importing and cancelling.** Once approved, the importer imports every approved row at once, after a confirmation;
+  if one row is refused, nothing is imported and the batch stays approved. The service answers that with one code,
+  BCP_ROW_FAILED, and the row and its code stay on the server. The importer cancels an open batch with a reason.
+- **A committee workbook** (ADR-047) is shown read-only: it goes on only through its official record (ADR-061), whose pages come later. Until it is imported or ends, the page names no one who acts next, and tells its importer that what comes next is on the record. The submission says it was submitted only when the command answers `SUBMITTED`: a committee record that does not reconcile answers otherwise (2115), and the page, read again, shows the batch as it stands.
+- **My Work.** IMPORT_TO_APPROVE opens the batch's page, and `/continuity/imports` joins the live purpose roots.
+- **Audit.** The commands record BCP_IMPORT_ROW_RESOLVED, BCP_IMPORT_PREVIEWED, BCP_IMPORT_SUBMITTED,
+  BCP_IMPORT_APPROVED or BCP_IMPORT_REJECTED, one BCP_ROW_IMPORTED per row, BCP_IMPORT_COMPLETED and
+  BCP_IMPORT_CANCELLED as before, with ids, codes and counts only. A refused command is recorded as COMMAND_DENIED with
+  the command and outcome only.
+- **Not in this change** (the P12-6b read-model migration, numbered at its turn): reporting a workbook lost (F2),
+  uploading a workbook from the page (F3) and the template download it gates (F12), row resolutions other than skipping
+  (F4) and lists of imports (F8). The continuity-operator registry's administration (DEC-12) goes to P12-10, with 2160
+  (coordinator, 2026-10-18 12:27).
+- **Tests.** Unit: the page's words for every status, row state, resolution, sheet, column, row detail, dry-run outcome
+  and refusal in both languages, where the import stands and who a line names (`continuity/imports/labels.test.ts`); the
+  gateway's view; the service's uniform not-found with ACCESS_DENIED and its one code for a failed row.
+  `tests/e2e/continuity-imports.spec.ts` (+3): the importer skips the row that cannot be imported, runs the dry run and
+  submits, the GRC Director approves from My Work and the importer imports the rows, which reach the case, in Arabic at
+  390 px and English at 1280 px; a staged batch that its approvers may not read, a submitted one its preparer reads
+  without deciding, an investigator, and the same 404 for an id that names nothing and a malformed one.
+  `tests/accessibility/continuity-imports.spec.ts` (+4): the staged batch with its rows and the skip form, its error
+  summary, the submission's confirmation after a clean dry run, and an approver's page with the approval's
+  confirmation, at 1280, 390 and 320 px in both languages. The fixture's workbook id is the longest the template allows
+  (64 characters): a workbook id and a row id wrap anywhere, so a phone never scrolls sideways.

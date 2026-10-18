@@ -9,8 +9,19 @@
  * Generation renders and stores the file inside the database transaction that marks the export GENERATED, so a
  * failed render or write leaves it APPROVED. An EMAIL export is then handed to the mailer; only an accepted delivery
  * is recorded as SENT. Nothing here logs content, addresses or the rendered file (§83).
+ *
+ * UX redesign P12-6b-1: the export's page reads `api.export_request_view` (2040) with the reference rows that name it;
+ * an export the caller may not see is the uniform not-found, recorded as ACCESS_DENIED.
  */
-import type { Actor, ExportPreview, ExportStatus, GeneratedExport, Permission } from "@cdf/contracts";
+import type {
+  Actor,
+  ExportPreview,
+  ExportPurposeEntry,
+  ExportRequestPage,
+  ExportStatus,
+  GeneratedExport,
+  Permission,
+} from "@cdf/contracts";
 import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
 import {
@@ -31,6 +42,14 @@ type In<S extends z.ZodType> = z.output<S>;
 
 /** Port over the api.* export commands (implemented in @cdf/infrastructure). */
 export interface ExportGateway {
+  /**
+   * `api.export_request_view` (2040) and, in the same transaction, the accounts it names, its purpose, the source of
+   * each export rule and the approved-domain setting. Never the storage key or the document. NOT_FOUND unless the
+   * caller may see the export.
+   */
+  view(ctx: UserRequestContext, requestId: string): Promise<ExportRequestPage>;
+  /** The active purposes of the governed catalogue (DEC-F21), in its order. */
+  purposes(ctx: UserRequestContext): Promise<ExportPurposeEntry[]>;
   create(ctx: UserRequestContext, input: In<typeof createExportRequestSchema>): Promise<string>;
   addItem(ctx: UserRequestContext, input: In<typeof addExportItemSchema>): Promise<string>;
   addRecipient(ctx: UserRequestContext, input: In<typeof addExportRecipientSchema>): Promise<string>;
@@ -90,6 +109,31 @@ export function createExportService(deps: ExportDeps) {
     }
   }
 
+  /** A read the caller may not make is the uniform not-found (null), recorded as ACCESS_DENIED. */
+  async function read<T>(
+    ctx: UserRequestContext,
+    objectType: string,
+    name: string,
+    objectId: string,
+    run: () => Promise<T>,
+  ): Promise<T | null> {
+    try {
+      return await run();
+    } catch (cause) {
+      const error = toAppError(cause, ctx.requestId);
+      if (error.kind !== "NOT_FOUND" && error.kind !== "FORBIDDEN") throw error;
+      try {
+        await securityEvents.record(
+          { action: "ACCESS_DENIED", objectType, objectId, metadata: { read: name } },
+          ctx,
+        );
+      } catch {
+        // Recording must never mask the original denial.
+      }
+      return null;
+    }
+  }
+
   /** `permissions`: the caller needs at least one of them. */
   async function command<S extends z.ZodType, T>(
     ctx: UserRequestContext,
@@ -145,6 +189,19 @@ export function createExportService(deps: ExportDeps) {
   }
 
   return {
+    /** The export's page: null when the caller may not see it, whatever the reason (a forged id included). */
+    view: (ctx: UserRequestContext, requestId: string) =>
+      read(ctx, "export_request", "export_request_view", requestId, () => gateway.view(ctx, requestId)),
+
+    /** The purposes a new request may name, as the catalogue lists them now. */
+    purposes: async (ctx: UserRequestContext) => {
+      try {
+        return await gateway.purposes(ctx);
+      } catch (cause) {
+        throw toAppError(cause, ctx.requestId);
+      }
+    },
+
     createRequest: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(
         ctx,

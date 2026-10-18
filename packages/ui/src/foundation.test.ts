@@ -4,9 +4,11 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   ALLEGATION_STATUSES,
+  BCP_BATCH_STATUSES,
   CORRECTIVE_ACTION_STATUSES,
   EVIDENCE_STATUSES,
   EVIDENCE_VERSION_STATUSES,
+  EXPORT_STATUSES,
   FORM_STATUSES,
   INTERVIEW_STATUSES,
   LEGAL_HOLD_REQUEST_STATUSES,
@@ -46,6 +48,8 @@ describe("status registry", () => {
       ["concern", MEETING_CONFLICT_CONCERN_STATUSES],
       ["allegation", ALLEGATION_STATUSES],
       ["correctiveAction", CORRECTIVE_ACTION_STATUSES],
+      ["exportRequest", EXPORT_STATUSES],
+      ["bcpImport", BCP_BATCH_STATUSES],
     ];
     for (const [domain, codes] of domains)
       expect(Object.keys(STATUS_TONES[domain]).sort(), domain).toEqual([...codes].sort());
