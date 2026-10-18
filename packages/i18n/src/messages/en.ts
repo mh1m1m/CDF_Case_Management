@@ -2444,6 +2444,40 @@ export const en = {
       IMPORTED_AT: "Imported at",
       IMPORTED_BY: "Imported by (email)",
       RESULT: "Result",
+      // BCP-C1, the committee workbook (migration 2110, ADR-047).
+      COMMITTEE_PROCEEDING_ID: "Committee proceeding ID (platform)",
+      COMMITTEE_CODE: "Committee code",
+      PURPOSE: "Meeting purpose",
+      MODE: "Meeting mode",
+      LOCATION: "Location",
+      ONLINE_URL: "Online meeting link",
+      HELD_START: "Held from",
+      HELD_END: "Held until",
+      PAPER_MINUTES_REFERENCE: "Paper minutes reference",
+      REASON: "Reason",
+      MEETING_REF: "Meeting (ROW_ID or platform ID)",
+      PARTICIPANT: "Participant (email)",
+    },
+  },
+  bcpCommitteeTemplate: {
+    readme: {
+      line1:
+        "Committee continuity workbook BCP-C1. Synthetic reference implementation: never enter real CDF data.",
+      line2:
+        "Use this workbook only while the platform is unavailable, for one committee proceeding. The committee secretary fills 01_CONTROL first.",
+      line3:
+        "Row 1 of every sheet holds the column codes and row 2 their labels. Do not change either; enter data from row 3.",
+      line4:
+        "Give every row a ROW_ID that never changes (BCP- followed by letters, digits or hyphens, or a UUID).",
+      line5: "Type dates as text: YYYY-MM-DD, or YYYY-MM-DDTHH:MM:SSZ for times. Do not use formulas.",
+      line6:
+        "RECORDED_OFFLINE_BY is the platform email of the committee member who recorded the row; ORIGINAL_EVENT_AT is when it happened.",
+      line7:
+        "09_MEETINGS records a meeting already held, with its paper minutes reference; 11_CONFLICTS records a conflict noted on paper about a participant.",
+      line8:
+        "Attendance, votes and the document index are recorded only, and are entered online after restoration.",
+      line9:
+        "Nothing becomes official until the signed minutes are uploaded, the chair approves and each attending member attests in the platform.",
     },
   },
   committeeName: { IC: "Investigation Committee", GC: "Grievance Committee" },

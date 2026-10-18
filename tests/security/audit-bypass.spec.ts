@@ -702,6 +702,22 @@ describe("every state-changing command writes its audit event in the same transa
             s.tx`select api.refer_case_to_committee(${caseA}, ${ids.committee!}, ${ids.proceeding!}, ${REASON}) as id`,
           )),
       },
+      // Continuity committee workbook (migration 2110, ADR-047): the continuity administrator authorizes the committee
+      // secretary for this proceeding only, and the secretary revokes a lost committee workbook in its namespace.
+      {
+        fn: "authorize_committee_continuity_operator",
+        actor: "platformAdmin",
+        run: (s) =>
+          s.tx`select api.authorize_committee_continuity_operator(${USERS.committeeSecretary},
+            ${ids.committeeProceeding!}, 'BCP-AUTH-WALK-C', ${REASON})`,
+      },
+      {
+        fn: "revoke_committee_bcp_workbook",
+        actor: "committeeSecretary",
+        run: (s) =>
+          s.tx`select api.revoke_committee_bcp_workbook(${ids.committeeProceeding!}, 'BCP-WALK-2110',
+            'INC-DEMO-WALK-C', ${REASON})`,
+      },
       {
         fn: "end_committee_membership",
         actor: "platformAdmin",
@@ -3168,6 +3184,8 @@ describe("audit internals are not reachable", () => {
       "authz.has_case_file_basis",
       "authz.has_permission",
       "authz.in_records_catalogue_scope",
+      // Migration 2110 (ADR-047): the committee workbook's policies (revocations) ask whether the caller imports it.
+      "authz.is_bcp_committee_importer",
       "authz.is_committee_secretary",
       "authz.is_evidence_lead",
       "authz.is_evidence_team",
