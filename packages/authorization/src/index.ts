@@ -175,6 +175,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   SECTOR_HEAD: ["REFERRAL_PREPARE", "REFERRAL_SECTOR_APPROVE"],
   COMPLIANCE_SECTION_MANAGER: ["PRELIMINARY_PREPARE", "COMMITTEE_ADMIN"],
   GRC_SECTOR_HEAD: ["PRELIMINARY_APPROVE"],
+  // AMB-022 (migration 2100): an expert acts through an EXTERNAL_EXPERT task only.
+  EXTERNAL_EXPERT: [],
   DB_ADMIN: [],
 };
 

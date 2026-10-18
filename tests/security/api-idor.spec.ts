@@ -1655,6 +1655,37 @@ const CASE_STRUCTURE_2090_PROBES: Probe<CaseStructureTargets>[] = [
   },
 ];
 
+// Migration 2100 (ADR-046): people and access take a case (a lost workbook, an urgent flag) or a delegation of
+// preliminary approval.
+interface PeopleAccessTargets {
+  case: string;
+  delegation: string;
+}
+
+const PEOPLE_ACCESS_2100_PROBES: Probe<PeopleAccessTargets>[] = [
+  {
+    fn: "revoke_bcp_workbook",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.revoke_bcp_workbook(${t.case}, 'BCP-PROBE-2100', 'INC-DEMO-2100', ${REASON})`,
+  },
+  {
+    fn: "flag_case_urgent",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.flag_case_urgent(${t.case}, ${REASON})`,
+  },
+  {
+    fn: "clear_case_urgent",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.clear_case_urgent(${t.case}, ${REASON})`,
+  },
+  {
+    fn: "revoke_preliminary_approval_delegation",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.revoke_preliminary_approval_delegation(${t.delegation}, ${REASON})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1709,6 +1740,13 @@ const ADMIN_COMMANDS = [
   "end_conflict_authority",
   // A correction to a committee seat (migration 2090, AMB-045): COMMITTEE_ADMIN only, an annotation with no case.
   "annotate_committee_membership",
+  // Migration 2100 (ADR-046): deactivating or reactivating a committee (COMMITTEE_ADMIN), flagging an external counsel
+  // account (ROLE_ADMIN) and delegating preliminary approval (PRELIMINARY_APPROVE) take a committee or a person, never
+  // a case (people-access-2100.spec.ts, referral-preliminary.spec.ts).
+  "deactivate_committee",
+  "reactivate_committee",
+  "flag_external_counsel_account",
+  "delegate_preliminary_approval",
 ];
 // Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
 // Covered in referral-preliminary.spec.ts.
@@ -1968,6 +2006,7 @@ describe("catalog guard", () => {
       ...PRELIMINARY_2070_PROBES.map((p) => p.fn),
       ...CASE_CONFLICT_2080_PROBES.map((p) => p.fn),
       ...CASE_STRUCTURE_2090_PROBES.map((p) => p.fn),
+      ...PEOPLE_ACCESS_2100_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -3107,6 +3146,60 @@ describe("IDOR: case structure and corrections (migration 2090)", () => {
           reviews: 0,
           annotations: 0,
         },
+      ]);
+    });
+  });
+});
+
+describe("IDOR: people and access (migration 2100)", () => {
+  // Case B flagged urgent by its investigator, and the GRC Sector Head's delegation to the GRC Deputy. None of these
+  // sees case B or is party to the delegation (a role administrator is, so the platform admin is not an outsider).
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "committee",
+    "employeeB",
+    "intake",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await scenario(async (s) => {
+      await s.as("investigatorB");
+      await s.tx`select api.flag_case_urgent(${caseB}, ${REASON})`;
+      await s.as("grcSectorHead");
+      const [d] = await s.tx<{ id: string }[]>`
+        select api.delegate_preliminary_approval(${USERS.grcDeputy}, null, now() + interval '7 days', 'DEMO-DEL-2100',
+          ${REASON}) as id`;
+
+      await s.as(actor);
+      const real: PeopleAccessTargets = { case: caseB, delegation: d!.id };
+      const random: PeopleAccessTargets = { case: randomUUID(), delegation: randomUUID() };
+      const mismatches: string[] = [];
+      for (const probe of PEOPLE_ACCESS_2100_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "case_mgmt.case_urgent_flag",
+        "iam.preliminary_approval_delegation",
+        "exchange.bcp_workbook_revocation",
+      ]) {
+        expect(await s.tx`select id from ${s.tx(table)}`, table).toEqual([]);
+      }
+      // Nothing moved: the flag is still raised, the delegation unrevoked, no workbook revoked.
+      await s.as("investigatorB");
+      expect(
+        await s.tx`select (select count(*)::int from case_mgmt.case_urgent_flag where cleared_at is null) as flags,
+                          (select count(*)::int from exchange.bcp_workbook_revocation) as revocations`,
+      ).toEqual([{ flags: 1, revocations: 0 }]);
+      await s.as("grcSectorHead");
+      expect(await s.tx`select revoked_at from iam.preliminary_approval_delegation`).toEqual([
+        { revoked_at: null },
       ]);
     });
   });
