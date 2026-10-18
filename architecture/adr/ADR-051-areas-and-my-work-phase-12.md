@@ -176,7 +176,8 @@ accepts are unchanged.
     CDF source, or approved. A value nobody has set says "not configured yet", never a guess.
   - **Committees** (`COMMITTEE_ADMIN`):
     - each committee's seats (in office, starting later and ended), with who appointed and who ended them;
-    - seat corrections (AMB-045) beside the seat, with how many proceeding snapshots named it;
+    - seat corrections (AMB-045) beside the seat, with their kind, reason and who recorded them; never the number of
+      proceeding snapshots 2090 records with a correction, which is a count derived from cases;
     - every rule-set version, with its source;
     - the independent conflict authorities (DEC-F04) and the status changes;
     - which recommendation kinds have an authority rule in force (`api.authority_rule_coverage`, 2030). A package

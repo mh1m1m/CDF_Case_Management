@@ -110,8 +110,6 @@ export interface AdminSeatCorrection {
   committeeId: string;
   kind: SeatCorrectionKind;
   reason: string;
-  /** Proceeding snapshots that named the seat when the correction was recorded; they stand as taken. */
-  affectedProceedings: number;
   correctedBy: string;
   correctedAt: string;
 }

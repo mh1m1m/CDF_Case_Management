@@ -2,9 +2,12 @@
 // amendment). Whether a row is in force is read against the database's clock with `effective_to` exclusive, as every
 // register stores it; and a working week starts at the beginning of its date in Riyadh, the instant
 // api.set_business_week_pattern compares with now(). The registers themselves, against the database, are in
-// tests/integration/administration.spec.ts.
+// tests/integration/administration.spec.ts. What the registers may read is pinned at the end.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { periodState, riyadhMidnight } from "./administration-gateway";
+
+const SOURCE = readFileSync(new URL("./administration-gateway.ts", import.meta.url), "utf8");
 
 const NOW = "2026-10-18T12:00:00.000Z";
 
@@ -39,5 +42,45 @@ describe("the start of a date in Riyadh", () => {
       expect(start.toISOString(), date).toBe(before.toISOString());
     }
     expect(new Date(riyadhMidnight("2027-01-03")).toISOString()).toBe("2027-01-02T21:00:00.000Z");
+  });
+});
+
+// Static guard (§21; the P12-8 domain map: no case content and no count derived from cases). The registers read
+// configuration and registry tables only; reading any other table has to change this list on purpose.
+describe("what the registers read", () => {
+  it("reads only the registers' own tables and reads, never a case table", () => {
+    const read = new Set([...SOURCE.matchAll(/\b(?:from|join)\s+([a-z_]+\.[a-z_]+)\b/g)].map((m) => m[1]));
+    expect([...read].sort()).toEqual([
+      "api.authority_rule_coverage",
+      "committee.committee",
+      "committee.committee_status_change",
+      "committee.conflict_authority",
+      "committee.membership",
+      "committee.membership_correction",
+      "committee.rule_set",
+      "config.business_calendar_day",
+      "config.business_week_pattern",
+      "config.setting",
+      "decision.corrective_action_escalation_step",
+      "decision.corrective_action_policy",
+      "decision.corrective_action_pool",
+      "decision.corrective_action_pool_member",
+      "decision.corrective_evidence_type",
+      "exchange.approval_rule",
+      "exchange.approved_external_domain",
+      "exchange.export_approver_pool",
+      "exchange.export_purpose",
+      "iam.sector",
+      "iam.sector_delegation",
+      "iam.sector_membership",
+      "notify.rule",
+      "notify.template",
+    ]);
+  });
+
+  it("never reads the number of proceedings a seat correction recorded, a count derived from cases (2090)", () => {
+    expect(SOURCE).not.toMatch(/affected_proceedings/);
+    // Every register is read column by column, never as a whole row.
+    expect(SOURCE).not.toMatch(/select\s+\*|\b[a-z]\.\*/);
   });
 });

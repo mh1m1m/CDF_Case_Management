@@ -176,11 +176,6 @@ function CommitteeCard({
                   <p className="whitespace-pre-wrap break-words">
                     <bdi>{x.reason}</bdi>
                   </p>
-                  {x.affectedProceedings > 0 ? (
-                    <p className="text-sm">
-                      {t("admin.committees.affectedProceedings", { count: x.affectedProceedings })}
-                    </p>
-                  ) : null}
                 </li>
               );
             })}

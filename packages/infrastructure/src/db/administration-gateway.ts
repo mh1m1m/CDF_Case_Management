@@ -143,13 +143,11 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           committee_id: string;
           kind: SeatCorrectionKind;
           reason: string;
-          affected_proceedings: number;
           corrected_by: string;
           corrected_at: string;
         }[]
       >`
-        select x.id, x.membership_id, x.committee_id, x.kind, x.reason, x.affected_proceedings, x.corrected_by,
-               x.corrected_at::text as corrected_at
+        select x.id, x.membership_id, x.committee_id, x.kind, x.reason, x.corrected_by, x.corrected_at::text as corrected_at
           from committee.membership_correction x
          order by x.corrected_at, x.id`;
       const ruleSets = await tx<
@@ -273,7 +271,6 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           committeeId: c.committee_id,
           kind: c.kind,
           reason: c.reason,
-          affectedProceedings: c.affected_proceedings,
           correctedBy: c.corrected_by,
           correctedAt: iso(c.corrected_at),
         })),

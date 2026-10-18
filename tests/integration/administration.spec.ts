@@ -3,8 +3,9 @@
 // gateway runs its security context inside a savepoint of that transaction, so no calendar day or week reaches the
 // seed. These pin that each page opens exactly where its own permission does, in the application pre-check and again
 // in the database; that a refused page is the uniform not-found recorded as ACCESS_DENIED with the page's name only;
-// that each register is the seed as recorded, with ids, codes and dates and nothing from a case; and that the
-// calendar's two forms run their commands, whose refusals are COMMAND_DENIED with the command and outcome only.
+// that each register is the seed as recorded, with ids, codes and dates and nothing from a case, not even the count of
+// proceedings a seat correction recorded; and that the calendar's two forms run their commands, whose refusals are
+// COMMAND_DENIED with the command and outcome only.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -20,7 +21,8 @@ import {
   PostgresSecurityEventSink,
   type Sql,
 } from "@cdf/infrastructure";
-import { USERS, bff, ownerScenario, type OwnerScenario, type UserKey } from "../support/db";
+import { IC_SEATS, committeeIds, refer, seat } from "../support/committee";
+import { USERS, bff, caseId, ownerScenario, type OwnerScenario, type UserKey } from "../support/db";
 
 const ctxFor = (user: UserKey) => ({ userId: USERS[user], requestId: randomUUID() });
 const REASON = "Synthetic administration test (P12-8a).";
@@ -253,6 +255,43 @@ describe("Administration through the service (Phase 12 P12-8a)", () => {
       const named = new Set(page.people.map((p) => p.userId));
       for (const x of page.seats) expect(named.has(x.userId) && named.has(x.appointedBy)).toBe(true);
       expect(JSON.stringify(page)).not.toContain("CDF-DEMO-");
+    });
+  });
+
+  it("a seat correction is read beside its seat, never with the number of proceedings that named the seat (§21)", async () => {
+    const [{ ic }, caseB] = await Promise.all([committeeIds(), caseId("0002")]);
+    await ownerScenario(async (s) => {
+      // A proceeding snapshots the committee's members, so the correction records a count derived from a case (2090).
+      await seat(s, ic, IC_SEATS);
+      await refer(s, ic, caseB);
+      await s.asOwner();
+      const [m] = await s.tx<{ id: string }[]>`
+        select id from committee.membership where committee_id = ${ic} and user_id = ${USERS.legal} and ended_at is null`;
+      await s.as("platformAdmin");
+      const [c] = await s.tx<{ id: string }[]>`
+        select api.annotate_committee_membership(${m!.id}, 'WRONG_REFERENCE', ${REASON}) as id`;
+      await s.asOwner();
+      expect(
+        await s.tx`select affected_proceedings from committee.membership_correction where id = ${c!.id}`,
+      ).toEqual([{ affected_proceedings: 1 }]);
+
+      const page = await adminIn(s).committees(ctxFor("complianceManager"), actors.complianceManager);
+      if (!page) throw new Error("expected the committees register");
+      expect(page.corrections).toEqual([
+        {
+          correctionId: c!.id,
+          membershipId: m!.id,
+          committeeId: ic,
+          kind: "WRONG_REFERENCE",
+          reason: REASON,
+          correctedBy: USERS.platformAdmin,
+          correctedAt: expect.any(String),
+        },
+      ]);
+      expect(page.seats.some((x) => x.membershipId === m!.id)).toBe(true);
+      // Nothing of the proceeding or its case reaches the register.
+      const json = JSON.stringify(page);
+      for (const fromCase of [caseB, "CDF-DEMO-", "affected"]) expect(json).not.toContain(fromCase);
     });
   });
 

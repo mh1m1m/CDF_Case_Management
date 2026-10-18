@@ -2548,8 +2548,6 @@ export const en = {
         WRONG_REFERENCE: "Wrong appointment reference",
         OTHER: "Other correction",
       },
-      affectedProceedings:
-        "Proceedings that named this seat when the correction was recorded: {count}. They stand as they were taken.",
       rulesTitle: "Rules",
       rulesIntro:
         "Each version of the committee's rules, from the day it takes effect. A proceeding keeps the rules it was referred with.",
