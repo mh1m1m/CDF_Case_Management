@@ -36,6 +36,9 @@ export const BCP_IMPORT_COMMANDS = {
   // BCP-C1 (migration 2110, ADR-047): a meeting held offline, and a conflict noted on paper raised by the secretary.
   record_offline_meeting: "meeting",
   raise_meeting_conflict: "meeting_conflict_concern",
+  // BCP-C2 (migration 2120, ADR-048; DEC-AMB-008): a signed paper ballot, imported provisional; it becomes a vote
+  // only by its member's own confirmation (api.confirm_offline_ballot).
+  record_offline_ballot: "offline_ballot",
 } as const;
 export type BcpImportCommand = keyof typeof BCP_IMPORT_COMMANDS;
 
@@ -272,14 +275,59 @@ export const BCP_COMMITTEE_TEMPLATE: readonly BcpSheet[] = [
   },
 ];
 
-export const BCP_TEMPLATE_VERSIONS = [BCP_TEMPLATE_VERSION, BCP_COMMITTEE_TEMPLATE_VERSION] as const;
+/** The choices a signed paper ballot may carry: a member's own choices (never ABSENT or UNABLE_TO_VOTE, which only
+ *  the secretary records, N6). */
+export const BCP_BALLOT_CHOICES = ["APPROVE", "REJECT", "ABSTAIN", "RECUSED"] as const;
+/** What a paper ballot was cast on: a finding, a package voted as a whole, or an item of a package voted item by item. */
+export const BCP_BALLOT_TARGET_KINDS = ["FINDING", "PACKAGE", "RECOMMENDATION_ITEM"] as const;
+
+/**
+ * The committee workbook with paper ballots (migration 2120, ADR-048; DEC-AMB-008, the owner's decision on AMB-200).
+ * BCP-C1's sheets, except that 12_VOTES imports one signed paper ballot per row: the meeting row of the workbook, the
+ * member, the target and the choice, with the paper ballot's own reference. The ballot is provisional: the commit
+ * writes no vote, and it becomes one only when its member confirms it in the platform after restoration. Every ballot
+ * comes from a member the signed minutes show attending (BALLOT_WITHOUT_ATTENDANCE). BCP-C1 is unchanged (DEC-35).
+ */
+export const BCP_COMMITTEE_BALLOT_TEMPLATE_VERSION = "BCP-C2" as const;
+
+export const BCP_COMMITTEE_BALLOT_TEMPLATE: readonly BcpSheet[] = BCP_COMMITTEE_TEMPLATE.map((sheet) =>
+  sheet.code === "12_VOTES"
+    ? {
+        code: "12_VOTES",
+        kind: "DATA",
+        command: "record_offline_ballot",
+        columns: [
+          ...ROW_IDENTITY,
+          { code: "MEETING_REF", kind: "REF", required: true, maxLength: 64 },
+          { code: "PARTICIPANT", kind: "EMAIL", required: true, maxLength: 254 },
+          {
+            code: "TARGET_KIND",
+            kind: "ENUM",
+            required: true,
+            maxLength: 40,
+            allowed: BCP_BALLOT_TARGET_KINDS,
+          },
+          { code: "TARGET_ID", kind: "UUID", required: true, maxLength: 36 },
+          { code: "CHOICE", kind: "ENUM", required: true, maxLength: 40, allowed: BCP_BALLOT_CHOICES },
+          text("BALLOT_REFERENCE", 3, 300),
+        ],
+      }
+    : sheet,
+);
+
+export const BCP_TEMPLATE_VERSIONS = [
+  BCP_TEMPLATE_VERSION,
+  BCP_COMMITTEE_TEMPLATE_VERSION,
+  BCP_COMMITTEE_BALLOT_TEMPLATE_VERSION,
+] as const;
 export type BcpTemplateVersion = (typeof BCP_TEMPLATE_VERSIONS)[number];
 export const BCP_TEMPLATES: Readonly<Record<BcpTemplateVersion, readonly BcpSheet[]>> = {
   [BCP_TEMPLATE_VERSION]: BCP_TEMPLATE,
   [BCP_COMMITTEE_TEMPLATE_VERSION]: BCP_COMMITTEE_TEMPLATE,
+  [BCP_COMMITTEE_BALLOT_TEMPLATE_VERSION]: BCP_COMMITTEE_BALLOT_TEMPLATE,
 };
 
-/** What a batch covers (migration 2110): one case (BCP-1) or one committee proceeding (BCP-C1). */
+/** What a batch covers (migration 2110): one case (BCP-1) or one committee proceeding (BCP-C1, BCP-C2). */
 export const BCP_BATCH_SCOPES = ["CASE", "COMMITTEE_PROCEEDING"] as const;
 export type BcpBatchScope = (typeof BCP_BATCH_SCOPES)[number];
 
@@ -463,7 +511,16 @@ export interface BcpImportBatchView {
   workbookRevoked: boolean;
   /** A committee workbook (2110): it is submitted and imported only through its official record (ADR-061). */
   officialRecordRequired: boolean;
-  counts: { rows: number; unresolved: number; byState: Partial<Record<BcpRowState, number>> };
+  /**
+   * `ballots` (2120, F3): the paper ballots the import would bring in, the only form in which its approver reads them;
+   * their rows are the importer's alone.
+   */
+  counts: {
+    rows: number;
+    unresolved: number;
+    ballots: number;
+    byState: Partial<Record<BcpRowState, number>>;
+  };
   rows: BcpImportRowView[];
   /** Under case metadata only. */
   caseId: string | null;

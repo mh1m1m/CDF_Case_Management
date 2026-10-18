@@ -42,6 +42,8 @@ export const COMMITTEE_RECORD_DISCREPANCIES = [
   "ATTENDANCE_MISMATCH",
   "CONFLICT_SCOPE_MISMATCH",
   "DOCUMENT_VERSION_MISMATCH",
+  // 2120 (ADR-048): a paper ballot whose holder's roster line is not attending; the platform's own, never declined.
+  "BALLOT_WITHOUT_ATTENDANCE",
 ] as const;
 export type CommitteeRecordDiscrepancy = (typeof COMMITTEE_RECORD_DISCREPANCIES)[number];
 /** The codes a member may raise when declining; MISSING_PLATFORM_ATTESTATION is the platform's own. */

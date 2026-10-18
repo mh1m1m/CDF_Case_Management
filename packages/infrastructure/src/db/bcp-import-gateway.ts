@@ -68,7 +68,12 @@ export interface RawBcpBatchView {
   current_hash: string;
   workbook_revoked: boolean | null;
   official_record_required: boolean | null;
-  counts: { rows: number; unresolved: number; by_state: Partial<Record<BcpRowState, number>> | null } | null;
+  counts: {
+    rows: number;
+    unresolved: number;
+    ballots?: number | null;
+    by_state: Partial<Record<BcpRowState, number>> | null;
+  } | null;
   rows:
     | {
         row_id: string;
@@ -140,6 +145,7 @@ export function toBcpImportBatchView(v: RawBcpBatchView): BcpImportBatchView {
     counts: {
       rows: Number(v.counts?.rows ?? 0),
       unresolved: Number(v.counts?.unresolved ?? 0),
+      ballots: Number(v.counts?.ballots ?? 0),
       byState: { ...(v.counts?.by_state ?? {}) },
     },
     rows: each(v.rows, (r) => ({

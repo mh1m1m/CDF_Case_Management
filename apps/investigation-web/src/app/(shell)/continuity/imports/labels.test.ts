@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   BCP_BATCH_SCOPES,
   BCP_BATCH_STATUSES,
+  BCP_COMMITTEE_BALLOT_TEMPLATE,
   BCP_COMMITTEE_TEMPLATE,
   BCP_RESOLUTIONS,
   BCP_ROW_STATES,
@@ -36,13 +37,12 @@ const ME = "8f8c2a52-4f0e-4b5a-9a43-0f7f2c1d9e10";
 const OTHER = "1d3c6f0a-2b7e-4c51-8e9a-5f2d0c4b7a13";
 const sorted = (values: readonly string[]) => [...values].sort();
 
-/** The data sheets of both templates: the ones whose rows are staged and listed. */
+/** Every template the importer can stage (the case's, the committee's, and the committee's with paper ballots). */
+const TEMPLATES = [...BCP_TEMPLATE, ...BCP_COMMITTEE_TEMPLATE, ...BCP_COMMITTEE_BALLOT_TEMPLATE];
+
+/** The data sheets of every template: the ones whose rows are staged and listed. */
 const DATA_SHEETS = [
-  ...new Set(
-    [...BCP_TEMPLATE, ...BCP_COMMITTEE_TEMPLATE]
-      .filter((s) => s.kind !== "README" && s.kind !== "CONTROL")
-      .map((s) => s.code),
-  ),
+  ...new Set(TEMPLATES.filter((s) => s.kind !== "README" && s.kind !== "CONTROL").map((s) => s.code)),
 ];
 
 describe("the continuity import codes", () => {
@@ -91,6 +91,8 @@ describe("what is wrong with a row", () => {
     "OWN_CONFLICT",
     "CHANGED_SINCE_IMPORT",
     "EXISTING_OBJECT",
+    // A paper ballot's row (2120): the same member twice on the same vote.
+    "DUPLICATE_BALLOT",
   ];
 
   for (const locale of LOCALES) {
@@ -104,9 +106,7 @@ describe("what is wrong with a row", () => {
     });
 
     it(`a column that breaks its rule is named by its label, in ${locale}`, () => {
-      const columns = [...BCP_TEMPLATE, ...BCP_COMMITTEE_TEMPLATE].flatMap((s) =>
-        s.columns.map((c) => c.code),
-      );
+      const columns = TEMPLATES.flatMap((s) => s.columns.map((c) => c.code));
       for (const c of columns) {
         if (reasons.includes(c)) continue;
         expect(columnName(t, c), c).not.toBe(c);
@@ -161,6 +161,10 @@ describe("the refusals the continuity import page explains", () => {
     "WORKBOOK_REVOKED",
     // The import service's one code for a row that failed while applying (the row and its code stay on the server).
     "BCP_ROW_FAILED",
+    // A paper ballot's row in the dry run (2120): what it was cast on is no longer what the meeting voted on.
+    "TARGET_CHANGED",
+    "PACKAGE_NOT_VOTING",
+    "VOTE_ALREADY_OPENED",
   ];
   const fields = ["resolution", "decision", "reason", "rowId"];
 

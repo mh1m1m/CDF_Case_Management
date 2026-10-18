@@ -911,6 +911,16 @@ export const en = {
     NOT_A_TIE: "This vote is not waiting for a deciding vote.",
     NO_QUORUM: "Not enough members are present for a quorum.",
     EXCLUDED_BY_CONFLICT: "A conflict excludes this member from this vote.",
+    // Paper ballots of a meeting held offline (migration 2120; ADR-048).
+    OFFLINE_BALLOT_ONLY:
+      "This meeting was held while the platform was unavailable: its votes come only from the members' signed paper ballots, which each member confirms.",
+    OFFLINE_ROSTER_MISMATCH:
+      "The meeting's signed record does not show this member attending, so they cannot be recorded as present.",
+    NO_PROVISIONAL_BALLOT: "You have no paper ballot on this item waiting for your confirmation.",
+    BALLOT_CHOICE_MISMATCH:
+      "That is not the choice the record shows on your paper ballot, so nothing was recorded. If the record is wrong, do not confirm it: tell the committee's secretary.",
+    BALLOTS_UNCONFIRMED:
+      "A paper ballot on this item still waits for its member's confirmation. If the member cannot confirm it, record them as absent or unable to vote, with a reason.",
     MINUTES_EXIST:
       "Minutes already exist for this meeting. A new version follows only a request for changes.",
     MINUTES_NOT_IN_REVIEW: "These minutes are not in review.",
@@ -2602,6 +2612,11 @@ export const en = {
       REASON: "Reason",
       MEETING_REF: "Meeting (ROW_ID or platform ID)",
       PARTICIPANT: "Participant (email)",
+      // BCP-C2, the committee workbook with paper ballots (migration 2120, ADR-048).
+      TARGET_KIND: "Voted on (FINDING, PACKAGE or RECOMMENDATION_ITEM)",
+      TARGET_ID: "Finding, package or item ID (platform)",
+      CHOICE: "Choice on the signed ballot",
+      BALLOT_REFERENCE: "Paper ballot reference",
     },
   },
   bcpCommitteeTemplate: {
@@ -2622,6 +2637,29 @@ export const en = {
       line8:
         "Attendance, votes and the document index are recorded only, and are entered online after restoration.",
       line9:
+        "Nothing becomes official until the signed minutes are uploaded, the chair approves and each attending member attests in the platform.",
+    },
+  },
+  bcpCommitteeBallotTemplate: {
+    readme: {
+      line1:
+        "Committee continuity workbook BCP-C2, with paper ballots. Synthetic reference implementation: never enter real CDF data.",
+      line2:
+        "Use this workbook only while the platform is unavailable, for one committee proceeding. The committee secretary fills 01_CONTROL first.",
+      line3:
+        "Row 1 of every sheet holds the column codes and row 2 their labels. Do not change either; enter data from row 3.",
+      line4:
+        "Give every row a ROW_ID that never changes (BCP- followed by letters, digits or hyphens, or a UUID).",
+      line5: "Type dates as text: YYYY-MM-DD, or YYYY-MM-DDTHH:MM:SSZ for times. Do not use formulas.",
+      line6:
+        "RECORDED_OFFLINE_BY is the platform email of the committee member who recorded the row; ORIGINAL_EVENT_AT is when it happened.",
+      line7:
+        "09_MEETINGS records a meeting already held, with its paper minutes reference; 11_CONFLICTS records a conflict noted on paper about a participant.",
+      line8:
+        "12_VOTES transcribes each member's signed paper ballot: the meeting row, the member, what they voted on and their choice, with the ballot's reference.",
+      line9:
+        "A paper ballot is provisional. It becomes a vote only when the member confirms it in the platform after restoration; the secretary never confirms or casts it.",
+      line10:
         "Nothing becomes official until the signed minutes are uploaded, the chair approves and each attending member attests in the platform.",
     },
   },
@@ -5002,7 +5040,9 @@ export const en = {
         "the meeting's start is missing, not a date, or before the time the platform was unavailable",
       HELD_END:
         "the meeting's end is missing, not after its start, or after the time the platform was unavailable",
-      PARTICIPANT: "the participant is not a member of this committee proceeding",
+      PARTICIPANT:
+        "the participant is not a member of this committee proceeding, or, on a ballot, not a voting member",
+      DUPLICATE_BALLOT: "the same member has another ballot on the same vote in this workbook",
       OWN_CONFLICT: "it is about you, and your own conflict is declared on the platform, never imported",
       CHANGED_SINCE_IMPORT: "it was imported from this workbook before and has changed since",
       EXISTING_OBJECT: "it names a platform record that already exists",
@@ -5112,6 +5152,12 @@ export const en = {
       RESOLUTION_NOT_SUPPORTED: "That choice is not available for this row.",
       RESOLUTION_NOT_ALLOWED: "That choice is not allowed for this row.",
       WORKBOOK_REVOKED: "Its workbook was reported lost, so it cannot be submitted, approved or imported.",
+      // A paper ballot's row (2120, ADR-048): what it was cast on must still be what the meeting voted on.
+      TARGET_CHANGED:
+        "What the paper ballot was cast on has changed on the platform since the meeting began, so the ballot no longer matches it.",
+      PACKAGE_NOT_VOTING: "The package on the paper ballot is no longer before the committee's vote.",
+      VOTE_ALREADY_OPENED:
+        "The vote on the package on the paper ballot has already been opened on the platform.",
       BCP_ROW_FAILED:
         "One row could not be imported, so nothing was imported and the import stays approved. Something on the platform changed since its dry run. Try again later, or cancel the import.",
       resolution: "Choose what happens to the row.",

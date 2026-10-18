@@ -10,6 +10,7 @@ import {
   MEETING_PURPOSES,
   MEMBER_VOTE_CHOICES,
   MINUTES_REVIEW_DECISIONS,
+  OFFLINE_BALLOT_CHOICES,
   OPENABLE_VOTE_TARGETS,
   RECORDABLE_ATTENDANCE,
   RECORDED_FOR_MEMBER_CHOICES,
@@ -150,6 +151,14 @@ export const reviseVoteSchema = z.object({
   reason: optionalText(5, 2000),
 });
 export const recuseForConflictSchema = z.object({ voteItemId: uuid, reason });
+/**
+ * The member confirms their own paper ballot (2120, ADR-048): the choice they read on it, which the database compares
+ * with the ballot (BALLOT_CHOICE_MISMATCH). It names no member: nobody confirms for another.
+ */
+export const confirmOfflineBallotSchema = z.object({
+  voteItemId: uuid,
+  choice: choice(OFFLINE_BALLOT_CHOICES),
+});
 export const recordVoteNoteSchema = z.object({
   voteItemId: uuid,
   note: requiredText(10, 4000),

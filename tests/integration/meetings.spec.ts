@@ -195,6 +195,19 @@ describe("meeting and minutes screens through the service (Phase 12 P12-2a)", ()
         "CONFLICT:VOTES_OUTSTANDING",
       );
       expect(await eventsOf(s, early.requestId)).toEqual([]);
+      // A meeting held on the platform has no paper ballots (2120, ADR-048): nothing to confirm, and a member who
+      // tries gets the business answer through the whole path.
+      const unballoted = full(await ms.meeting(ctxFor("lead"), f.meeting));
+      const unballotedItem = unballoted.deliberation!.voteItems.find((v) => v.voteItemId === item)!;
+      expect([
+        unballoted.logistics.heldOffline,
+        unballotedItem.offlineBallots,
+        unballotedItem.myBallot,
+        unballotedItem.capabilities.mayConfirmBallot,
+      ]).toEqual([false, { provisional: 0, confirmed: 0, superseded: 0, lapsed: 0 }, null, false]);
+      expect(
+        outcome(await ms.confirmOfflineBallot(ctxFor("lead"), { voteItemId: item, choice: "APPROVE" })),
+      ).toBe("CONFLICT:NO_PROVISIONAL_BALLOT");
       expect(outcome(await ms.castVote(ctxFor("lead"), { voteItemId: item, choice: "APPROVE" }))).toBe("ok");
       // A member who voted may revise while the item is open; the screen offers it.
       const leadView = full(await ms.meeting(ctxFor("lead"), f.meeting));

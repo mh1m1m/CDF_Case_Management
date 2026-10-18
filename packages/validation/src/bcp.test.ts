@@ -145,7 +145,8 @@ describe("the committee workbook BCP-C1 (migration 2110, ADR-047)", () => {
 
   it("checks the control row and the rows against the template the control row names", () => {
     expect(bcpTemplateVersion(" bcp-c1 ")).toBe("BCP-C1");
-    expect(bcpTemplateVersion("BCP-C2")).toBeNull();
+    expect(bcpTemplateVersion("bcp-c2")).toBe("BCP-C2");
+    expect(bcpTemplateVersion("BCP-C3")).toBeNull();
     expect(cStage({}).success).toBe(true);
     // OFFLINE_TO is required for a committee workbook: the window is closed.
     const { OFFLINE_TO: _, ...open } = C_CONTROL;
@@ -157,7 +158,7 @@ describe("the committee workbook BCP-C1 (migration 2110, ADR-047)", () => {
     expect(paths(stage({ control: { ...CONTROL, COMMITTEE_CODE: "IC" } }))).toEqual([
       "control.COMMITTEE_CODE",
     ]);
-    expect(paths(cStage({ control: { ...C_CONTROL, TEMPLATE_VERSION: "BCP-C2" } }))).toEqual([
+    expect(paths(cStage({ control: { ...C_CONTROL, TEMPLATE_VERSION: "BCP-C3" } }))).toEqual([
       "control.TEMPLATE_VERSION",
     ]);
     // A case sheet in a committee workbook, and a committee sheet's cells in a case workbook, are refused.
@@ -189,5 +190,39 @@ describe("the committee workbook BCP-C1 (migration 2110, ADR-047)", () => {
     expect(bcpRowProblem("05_SUBJECTS", SUBJECT, false, "BCP-C1")).toBe("SHEET");
     // The same sheet code reads by its own template's columns.
     expect(bcpRowProblem("09_MEETINGS", MEETING, false)).toBe("DETAILS");
+  });
+
+  // BCP-C2 (migration 2120, ADR-048): BCP-C1 with 12_VOTES as a data sheet of signed paper ballots.
+  const BALLOT = {
+    ROW_ID: "BCP-V1",
+    ORIGINAL_EVENT_AT: "2026-10-01T10:30:00Z",
+    RECORDED_OFFLINE_BY: "secretary@example.test",
+    MEETING_REF: "BCP-M1",
+    PARTICIPANT: "member@example.test",
+    TARGET_KIND: "PACKAGE",
+    TARGET_ID: "00000000-0000-4000-8000-0000000000D1",
+    CHOICE: "APPROVE",
+    BALLOT_REFERENCE: "PAPER-BALLOT-DEMO-1",
+  };
+
+  it("reads 12_VOTES as paper ballots only in a BCP-C2 workbook", () => {
+    const c2 = { ...C_CONTROL, TEMPLATE_VERSION: "BCP-C2" };
+    expect(
+      cStage({ control: c2, rows: [row(3, MEETING, "09_MEETINGS"), row(3, BALLOT, "12_VOTES")] }).success,
+    ).toBe(true);
+    // A BCP-C1 workbook records 12_VOTES only (its DETAILS), never as ballots: a ballot's cells are not its columns.
+    expect(paths(cStage({ rows: [row(3, BALLOT, "12_VOTES")] }))).toEqual(["rows.0.cells"]);
+    expect(bcpRowProblem("12_VOTES", BALLOT, false, "BCP-C1")).toBe("DETAILS");
+    expect(bcpRowProblem("12_VOTES", BALLOT, false, "BCP-C2")).toBeNull();
+    // Only a member's own choice, on a finding, a package or one of its items; ABSENT and the like are the
+    // secretary's records on the platform, never a ballot.
+    expect(bcpRowProblem("12_VOTES", { ...BALLOT, CHOICE: "ABSENT" }, false, "BCP-C2")).toBe("CHOICE");
+    expect(bcpRowProblem("12_VOTES", { ...BALLOT, TARGET_KIND: "OTHER" }, false, "BCP-C2")).toBe(
+      "TARGET_KIND",
+    );
+    expect(bcpRowProblem("12_VOTES", { ...BALLOT, TARGET_ID: "BCP-P1" }, false, "BCP-C2")).toBe("TARGET_ID");
+    expect(bcpRowProblem("12_VOTES", { ...BALLOT, BALLOT_REFERENCE: "x" }, false, "BCP-C2")).toBe(
+      "BALLOT_REFERENCE",
+    );
   });
 });

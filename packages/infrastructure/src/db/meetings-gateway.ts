@@ -17,6 +17,8 @@ import type {
   MeetingVoteItemView,
   MinutesSnapshot,
   MinutesView,
+  MyOfflineBallot,
+  OfflineBallotCounts,
   VoteItemProgress,
   VoteTally,
 } from "@cdf/contracts";
@@ -113,6 +115,16 @@ interface RawVoteItem {
   i_have_voted: boolean | null;
   i_have_noted: boolean | null;
   record_vote_for: string[] | null;
+  /** 2120 (ADR-048); absent before it, which reads as no ballots. */
+  offline_ballots?: Partial<Record<keyof OfflineBallotCounts, number | null>> | null;
+  my_ballot?: {
+    ballot_id: string;
+    status: MyOfflineBallot["status"];
+    choice: MyOfflineBallot["choice"];
+    ballot_reference: string;
+    original_event_at: Stamp;
+  } | null;
+  ballots_unconfirmed_for?: string[] | null;
   capabilities: Caps<
     | "may_vote"
     | "may_close"
@@ -120,6 +132,7 @@ interface RawVoteItem {
     | "may_revise"
     | "may_recuse_for_conflict"
     | "may_record_note"
+    | "may_confirm_ballot"
   > | null;
 }
 
@@ -161,6 +174,7 @@ interface RawMeetingFull {
     is_emergency: boolean | null;
     opened_at: Stamp | null;
     closed_at: Stamp | null;
+    held_offline?: boolean | null;
   };
   me: {
     participant_id: string;
@@ -465,6 +479,22 @@ function voteItem(v: RawVoteItem): MeetingVoteItemView {
     iHaveVoted: yes(v.i_have_voted),
     iHaveNoted: yes(v.i_have_noted),
     recordVoteFor: v.record_vote_for ?? [],
+    offlineBallots: {
+      provisional: v.offline_ballots?.provisional ?? 0,
+      confirmed: v.offline_ballots?.confirmed ?? 0,
+      superseded: v.offline_ballots?.superseded ?? 0,
+      lapsed: v.offline_ballots?.lapsed ?? 0,
+    },
+    myBallot: v.my_ballot
+      ? {
+          ballotId: v.my_ballot.ballot_id,
+          status: v.my_ballot.status,
+          choice: v.my_ballot.choice,
+          ballotReference: v.my_ballot.ballot_reference,
+          originalEventAt: isoReq(v.my_ballot.original_event_at),
+        }
+      : null,
+    ballotsUnconfirmedFor: v.ballots_unconfirmed_for ?? [],
     capabilities: {
       mayVote: yes(c?.may_vote),
       mayClose: yes(c?.may_close),
@@ -472,6 +502,7 @@ function voteItem(v: RawVoteItem): MeetingVoteItemView {
       mayRevise: yes(c?.may_revise),
       mayRecuseForConflict: yes(c?.may_recuse_for_conflict),
       mayRecordNote: yes(c?.may_record_note),
+      mayConfirmBallot: yes(c?.may_confirm_ballot),
     },
   };
 }
@@ -560,6 +591,7 @@ export function toMeetingView(m: RawMeetingView): MeetingView {
       isEmergency: yes(l.is_emergency),
       openedAt: iso(l.opened_at),
       closedAt: iso(l.closed_at),
+      heldOffline: yes(l.held_offline),
     },
     me: me
       ? {
@@ -885,6 +917,10 @@ export class PostgresMeetingsGateway implements MeetingsGateway {
 
   async recuseForConflict(ctx: UserRequestContext, i: { voteItemId: string; reason: string }) {
     await this.run(ctx, (tx) => tx`select api.recuse_for_conflict(${i.voteItemId}, ${i.reason})`);
+  }
+
+  async confirmOfflineBallot(ctx: UserRequestContext, i: { voteItemId: string; choice: string }) {
+    await this.run(ctx, (tx) => tx`select api.confirm_offline_ballot(${i.voteItemId}, ${i.choice})`);
   }
 
   recordVoteNote(ctx: UserRequestContext, i: { voteItemId: string; note: string; annexToMinutes: boolean }) {
