@@ -3,8 +3,20 @@
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS } from "@cdf/authorization";
 import {
+  ACTING_CHAIR_BASES,
   ATTENDANCE_STATUSES,
   CASE_TASK_TYPES,
+  COMMITTEE_MINUTES_CONTENT_TYPES,
+  COMMITTEE_MINUTES_MAX_BYTES,
+  COMMITTEE_MINUTES_STATUSES,
+  COMMITTEE_RECORD_ATTENDANCE,
+  COMMITTEE_RECORD_ATTESTATION_ACTIONS,
+  COMMITTEE_RECORD_ATTESTATION_SCOPES,
+  COMMITTEE_RECORD_DECISIONS,
+  COMMITTEE_RECORD_DECLINE_CODES,
+  COMMITTEE_RECORD_DISCREPANCIES,
+  COMMITTEE_RECORD_LINE_STATES,
+  COMMITTEE_RECORD_STATUSES,
   CONFLICT_DECIDERS,
   EMPLOYEE_NOTICE_KINDS,
   EXPORT_PURPOSES,
@@ -148,6 +160,68 @@ describe("mirrors", () => {
       const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
       expect(fromCheck, name).toEqual([...mirror].sort());
     }
+  });
+
+  it("committee record values match the record's checks and derivations (2115, ADR-061)", async () => {
+    const checks: [string, string, readonly string[]][] = [
+      ["bcp_committee_record_status_check", "exchange.bcp_committee_record", COMMITTEE_RECORD_STATUSES],
+      [
+        "bcp_record_roster_attendance_check",
+        "exchange.bcp_record_roster",
+        ["NOT_DECLARED", ...COMMITTEE_RECORD_ATTENDANCE],
+      ],
+      ["bcp_record_document_status_check", "exchange.bcp_record_document", COMMITTEE_MINUTES_STATUSES],
+      ["bcp_record_decision_decision_check", "exchange.bcp_record_decision", COMMITTEE_RECORD_DECISIONS],
+      [
+        "bcp_record_attestation_action_check",
+        "exchange.bcp_record_attestation",
+        COMMITTEE_RECORD_ATTESTATION_ACTIONS,
+      ],
+      [
+        "bcp_record_attestation_scope_check",
+        "exchange.bcp_record_attestation",
+        COMMITTEE_RECORD_ATTESTATION_SCOPES,
+      ],
+      [
+        "bcp_record_attestation_discrepancy_code_check",
+        "exchange.bcp_record_attestation",
+        COMMITTEE_RECORD_DECLINE_CODES,
+      ],
+      ["bcp_record_acting_chair_basis_check", "exchange.bcp_record_acting_chair", ACTING_CHAIR_BASES],
+    ];
+    for (const [name, table, mirror] of checks) {
+      const [row] = await admin<{ def: string }[]>`
+        select pg_get_constraintdef(oid) as def from pg_constraint
+        where conname = ${name} and conrelid = ${table}::regclass`;
+      const fromCheck = [...row!.def.matchAll(/'([A-Z_]+)'::text/g)].map((m) => m[1]).sort();
+      expect(fromCheck, name).toEqual([...mirror].sort());
+    }
+    const [types] = await admin<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conname = 'bcp_record_document_content_type_check' and conrelid = 'exchange.bcp_record_document'::regclass`;
+    expect([...types!.def.matchAll(/'([a-z]+\/[a-z]+)'::text/g)].map((m) => m[1]).sort()).toEqual(
+      [...COMMITTEE_MINUTES_CONTENT_TYPES].sort(),
+    );
+    const [size] = await admin<{ def: string }[]>`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conname = 'bcp_record_document_size_bytes_check' and conrelid = 'exchange.bcp_record_document'::regclass`;
+    expect(size!.def).toContain(`<= ${COMMITTEE_MINUTES_MAX_BYTES}`);
+    // Derived values: every literal a derivation can return is in the mirror, and the discrepancy codes are exactly it.
+    const src = async (fn: string) =>
+      (
+        await admin<{ src: string }[]>`
+          select prosrc as src from pg_proc where pronamespace = 'exchange'::regnamespace and proname = ${fn}`
+      )[0]!.src;
+    for (const m of (await src("bcp_record_line_state")).matchAll(/return '([A-Z_]+)'/g))
+      expect(COMMITTEE_RECORD_LINE_STATES, m[1]).toContain(m[1]);
+    for (const m of (await src("bcp_record_chair_basis")).matchAll(/return '([A-Z_]+)'/g))
+      expect(ACTING_CHAIR_BASES, m[1]).toContain(m[1]);
+    const codes = new Set(
+      [
+        ...(await src("bcp_record_discrepancies")).matchAll(/'((?:MISSING_[A-Z_]+)|(?:[A-Z_]+_MISMATCH))'/g),
+      ].map((m) => m[1]),
+    );
+    expect([...codes].sort()).toEqual([...COMMITTEE_RECORD_DISCREPANCIES].sort());
   });
 
   it("notification templates match notify.template, and each has wording and a short name in both languages (ADR-025)", async () => {

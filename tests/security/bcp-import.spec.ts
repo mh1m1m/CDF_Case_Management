@@ -1286,10 +1286,16 @@ describe("BCP import: integrity", () => {
       order by table_name, privilege_type`;
     expect(grants.every((g) => g.privilege_type === "SELECT")).toBe(true);
     expect(grants.map((g) => g.table_name)).toEqual([
+      "bcp_committee_record", // migration 2115 (ADR-061): the official record, read-only like the rest
       "bcp_continuity_operator", // migration 2040 (DEC-F30): the operator registry, read-only too
       "bcp_import_batch",
       "bcp_import_row",
       "bcp_provenance",
+      "bcp_record_acting_chair",
+      "bcp_record_attestation",
+      "bcp_record_decision",
+      // bcp_record_document: a column grant without the object key (storage-policy.spec.ts).
+      "bcp_record_roster",
       "bcp_template_column",
       "bcp_template_sheet",
       "bcp_workbook_revocation", // migration 2100 (AMB-205): the revocations, read-only too

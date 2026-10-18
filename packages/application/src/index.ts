@@ -36,6 +36,16 @@ export type {
   BcpWorkbookFile,
   StagedBcpImport,
 } from "./bcp-import";
+export { createCommitteeRecordService } from "./committee-record";
+export type {
+  CommitteeMinutesDownload,
+  CommitteeMinutesFile,
+  CommitteeRecordDeps,
+  CommitteeRecordGateway,
+  CommitteeRecordService,
+  RegisterCommitteeMinutes,
+  UploadedCommitteeMinutes,
+} from "./committee-record";
 export { INBOX_PAGE, createInboxService } from "./inbox";
 export type { InboxDeps, InboxGateway, InboxService } from "./inbox";
 export { createCaseStructureService } from "./case-structure";

@@ -114,7 +114,7 @@ describe("storage policy", () => {
     expect(fns.every((f) => f.auth && !f.anon)).toBe(true);
   });
 
-  it("an object key leaves the database only through the register and open commands (2050 adds two)", async () => {
+  it("an object key leaves the database only through the register and open commands (2050 adds two, 2115 two)", async () => {
     const fns = await admin<{ fn: string }[]>`
       select p.oid::regprocedure::text as fn
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -124,14 +124,38 @@ describe("storage policy", () => {
         and (has_function_privilege('authenticated', p.oid, 'EXECUTE') or has_function_privilege('anon', p.oid, 'EXECUTE'))
       order by 1`;
     expect(fns.map((f) => f.fn)).toEqual([
+      // Migration 2115 (ADR-061): the signed committee minutes, opened by whoever may see them, and registered by the
+      // importer; the table grants every column but the key.
+      "api.open_committee_record_document(uuid)",
       // The subject's Defence Packet viewer: a cleared item of a released packet, for server code only (DEC-AMB-006).
       "api.open_defence_packet_item(uuid)",
       "api.open_evidence_version(uuid)",
       "api.open_report_attachment(uuid)",
       // Upload destinations: the key of the version the caller is registering.
+      "api.register_committee_record_document(uuid,text,text,bigint,text,date,text,core.classification_level)",
       "api.register_evidence_rendition(uuid,text,text,bigint,text)",
       "api.register_evidence_version(uuid,uuid,text,text,text,text,date,core.classification_level,text,text,bigint,text)",
       "public_api.register_report_attachment(text,text,text,text,text,bigint,text)",
     ]);
+  });
+
+  it("no application role can select an object key column, and every key column is unique and scheme-checked", async () => {
+    const cols = await admin<{ table: string }[]>`
+      select c.table_schema || '.' || c.table_name as table from information_schema.columns c
+      where c.column_name = 'object_key' and c.table_schema not in ('storage', 'information_schema', 'pg_catalog')
+      order by 1`;
+    expect(cols.length).toBeGreaterThan(0);
+    for (const { table } of cols) {
+      for (const role of ["anon", "authenticated", "cdf_bff"]) {
+        const [r] = await admin<{ ok: boolean }[]>`
+          select has_column_privilege(${role}, ${table}::regclass, 'object_key', 'SELECT') as ok`;
+        expect(r!.ok, `${role} ${table}`).toBe(false);
+      }
+    }
+    const [doc] = await admin<{ def: string }[]>`
+      select pg_get_constraintdef(c.oid) as def from pg_constraint c
+      where c.conrelid = 'exchange.bcp_record_document'::regclass and c.contype = 'c'
+        and pg_get_constraintdef(c.oid) like '%object_key%'`;
+    expect(doc?.def).toContain("^committee-records(/");
   });
 });

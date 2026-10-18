@@ -122,3 +122,4 @@ export * from "./committee";
 export * from "./corrective-actions";
 // ---- Continuity workbook import (ADR-034) -------------------------------------------------------------
 export * from "./bcp";
+export * from "./committee-record";

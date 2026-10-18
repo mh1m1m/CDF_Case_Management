@@ -19,6 +19,7 @@ import {
   type BcpImportCounts,
   type BcpPreview,
   type BcpPreviewRow,
+  type BcpSubmitOutcome,
   type Permission,
 } from "@cdf/contracts";
 import { can } from "@cdf/authorization";
@@ -48,7 +49,8 @@ export interface BcpImportGateway {
   stage(ctx: UserRequestContext, input: In<typeof stageBcpImportSchema>): Promise<string>;
   resolve(ctx: UserRequestContext, input: In<typeof resolveBcpRowSchema>): Promise<void>;
   preview(ctx: UserRequestContext, input: In<typeof bcpBatchSchema>): Promise<BcpPreview>;
-  submit(ctx: UserRequestContext, input: In<typeof submitBcpImportSchema>): Promise<BcpBatchStatus>;
+  /** SUBMITTED, or RECONCILIATION_FAILED for a committee record whose declaration does not reconcile (2115). */
+  submit(ctx: UserRequestContext, input: In<typeof submitBcpImportSchema>): Promise<BcpSubmitOutcome>;
   decide(ctx: UserRequestContext, input: In<typeof decideBcpImportSchema>): Promise<BcpBatchStatus>;
   apply(ctx: UserRequestContext, input: In<typeof applyBcpImportSchema>): Promise<BcpImportCounts>;
   cancel(ctx: UserRequestContext, input: In<typeof cancelBcpImportSchema>): Promise<void>;

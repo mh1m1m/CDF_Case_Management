@@ -30,12 +30,14 @@ import {
   openItem,
   openWithPresent,
   preliminaryReferral,
+  refer,
   scheduleMeeting,
   seat,
   unseatDemoSeats,
   vote,
 } from "../support/committee";
 import { draftPackage, requestLegalReview, voteOnPackage } from "../support/decision";
+import { openRecord, stageOneMeetingWorkbook, uploadMinutes } from "../support/committee-record";
 
 interface Targets {
   case: string;
@@ -1393,6 +1395,79 @@ const BCP_PROBES: Probe<BcpTargets>[] = [
   },
 ];
 
+// Migration 2115 (ADR-061): the official record of a committee workbook. Every command takes the batch, the record,
+// one version of its signed minutes or an acting-chair activation; each is NOT_FOUND unless the caller is the importer
+// or a roster member who counts now (authz.can_view_committee_record), whatever their other roles.
+interface RecordTargets {
+  batch: string;
+  record: string;
+  document: string;
+  activation: string;
+}
+
+const RECORD_2115_PROBES: Probe<RecordTargets>[] = [
+  {
+    fn: "open_committee_record",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.open_committee_record(${t.batch})`,
+  },
+  {
+    fn: "declare_committee_record_roster",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.declare_committee_record_roster(${t.record}, '[]'::jsonb)`,
+  },
+  {
+    fn: "register_committee_record_document",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select * from api.register_committee_record_document(${t.record}, 'probe.pdf', 'application/pdf', 1024,
+        ${SHA}, current_date - 1, 'CDF-MINUTES-TEMPLATE-DEMO', 'CONFIDENTIAL'::core.classification_level)`,
+  },
+  {
+    fn: "complete_committee_record_document",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.complete_committee_record_document(${t.document}, 'CLEAN', 'probe-scanner')`,
+  },
+  {
+    fn: "mark_committee_minutes_signed",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.mark_committee_minutes_signed(${t.document})`,
+  },
+  {
+    fn: "open_committee_record_document",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select * from api.open_committee_record_document(${t.document})`,
+  },
+  {
+    fn: "activate_record_acting_chair",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.activate_record_acting_chair(${t.record}, 'UNAVAILABLE', 'Synthetic: probe activation reason.',
+        now() + interval '1 day')`,
+  },
+  {
+    fn: "end_record_acting_chair",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.end_record_acting_chair(${t.activation}, ${REASON})`,
+  },
+  {
+    fn: "decide_committee_record",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_committee_record(${t.record}, 1, 'APPROVE', null)`,
+  },
+  {
+    fn: "return_committee_record",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.return_committee_record(${t.record}, ${REASON})`,
+  },
+  {
+    fn: "attest_committee_record",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.attest_committee_record(${t.record}, 1, 'ATTEST', null, null)`,
+  },
+];
+
 // Migration 2050 (ADR-041): the exclusion record, the Defence Packet and the prior-sanctions extract.
 interface EvidenceHalfTargets {
   exclusion: string;
@@ -2011,6 +2086,7 @@ describe("catalog guard", () => {
       ...EXPORT_PROBES.map((p) => p.fn),
       ...CORRECTIVE_ACTION_PROBES.map((p) => p.fn),
       ...BCP_PROBES.map((p) => p.fn),
+      ...RECORD_2115_PROBES.map((p) => p.fn),
       ...EVIDENCE_HALF_PROBES.map((p) => p.fn),
       ...CLOSURE_2060_PROBES.map((p) => p.fn),
       ...PRELIMINARY_2070_PROBES.map((p) => p.fn),
@@ -2746,6 +2822,84 @@ describe("IDOR: continuity workbook imports (migration 1960)", () => {
       }
       expect(mismatches).toEqual([]);
       for (const table of ["bcp_import_batch", "bcp_import_row", "bcp_provenance"]) {
+        expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
+      }
+    });
+  });
+});
+
+describe("IDOR: the official record of a committee workbook (migration 2115)", () => {
+  // The Investigation Committee (IC seats, investigator A as deputy chair) on case 0002's referral: the secretary's
+  // workbook of one meeting held on paper, its record declared, its minutes stored and marked, the deputy activated as
+  // acting chair and the record submitted. None of these sits on the IC or imported it: a BCP approver and GRC
+  // director, the case manager, the case's investigator, governance, audit, security, privacy and portal roles.
+  const OUTSIDERS: UserKey[] = [
+    "grcDirector",
+    "caseManager",
+    "investigatorB",
+    "committee",
+    "triage",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+    "employeeB",
+    "intake",
+  ];
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    const { ic } = await committeeIds();
+    await ownerScenario(async (s) => {
+      await seat(s, ic, [...IC_SEATS, ["investigatorA", "DEPUTY_CHAIR"]]);
+      const cp = await refer(s, ic, caseB);
+      await s.as("platformAdmin");
+      await s.tx`select api.authorize_committee_continuity_operator(${USERS.committeeSecretary}, ${cp},
+                   'BCP-AUTH-PROBE-2115', ${REASON})`;
+      const { batch, hash } = await stageOneMeetingWorkbook(s, cp, "BCP-PROBE-2115");
+      const opened = await openRecord(s, batch);
+      const lines = await s.tx<{ id: string; seat: string }[]>`
+        select id, seat from exchange.bcp_record_roster where record_id = ${opened.record}`;
+      await s.tx`select api.declare_committee_record_roster(${opened.record}, ${s.tx.json(
+        lines.map((l) => ({
+          roster_id: l.id,
+          attendance: "ATTENDED",
+          joined_late: false,
+          left_early: false,
+          signature_visible: true,
+          signed_as_chair: l.seat === "CHAIR",
+        })) as never,
+      )}::jsonb)`;
+      const { document } = await uploadMinutes(s, batch, opened.record);
+      const [a] = await s.tx<{ id: string }[]>`
+        select api.activate_record_acting_chair(${opened.record}, 'UNAVAILABLE',
+          'Synthetic: the chair cannot review the record this week.', now() + interval '2 days') as id`;
+      await s.tx`select api.submit_bcp_import(${batch}, ${hash})`;
+      await s.as(actor);
+      const real: RecordTargets = { batch, record: opened.record, document, activation: a!.id };
+      const random: RecordTargets = {
+        batch: randomUUID(),
+        record: randomUUID(),
+        document: randomUUID(),
+        activation: randomUUID(),
+      };
+      const mismatches: string[] = [];
+      for (const probe of RECORD_2115_PROBES) {
+        const onReal = await outcomeOf(s, probe, real, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, random, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      for (const table of [
+        "bcp_committee_record",
+        "bcp_record_roster",
+        "bcp_record_document",
+        "bcp_record_decision",
+        "bcp_record_attestation",
+        "bcp_record_acting_chair",
+        "bcp_import_batch",
+        "bcp_import_row",
+      ]) {
         expect(await s.tx`select id from ${s.tx("exchange." + table)}`, table).toEqual([]);
       }
     });

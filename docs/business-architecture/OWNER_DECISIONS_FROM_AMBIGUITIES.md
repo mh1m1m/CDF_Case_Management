@@ -834,3 +834,21 @@ Register row AMB-146 (R2; class, resolution, risk and test ID unchanged). Status
 **Placement:** The closure hold needs no build: the closure guard of 2060 already refuses closure while a grievance or reconsideration is open (`DECISION_NOT_FINAL`). The derived finality read model (the GRIEVANCE_FINALITY flag and a field of the closure view, read under CASE_CLOSURE_FINALITY) is placed in migration 2170.
 
 **Until then:** Closure is refused while a grievance or reconsideration is RECEIVED, AWAITING_ADMISSIBILITY_DECISION or ADMITTED (2060). An unused reconsideration right does not hold closure, and no default period exists.
+
+## Owner decisions on AMB-201 (2026-10-17 and 2026-10-18)
+
+Two owner decisions settle how AMB-201 (R2, the committee's offline meetings) is built. Like the gap-row decisions above, they are not R5 decisions: the row's class, resolution, risk and test ID do not change.
+
+### The dual record and attestation model (2026-10-17)
+
+**Decision owner:** Fady, 2026-10-17 19:00 UTC, in the project chat: "OWNER DECISION — AMB-201 / MIGRATION 2110 · Committee-Proceeding Workbook Import Approval + Dual Institutional Record and Platform Attestation Model". It "supersedes the earlier simple Chair/Deputy approval model": a committee workbook becomes authoritative only through two linked records, the final signed CDF minutes and, in the platform, the chair's (or a formally activated acting chair's) approval and each attending eligible member's own attestation, reconciled before commit. "Neither replaces the other." Its sections (§1 to §18) are quoted and cited in ADR-061.
+
+**Placement:** 2110 (ADR-047, CDF-252, merged 2026-10-18) refuses to submit or decide a committee workbook (`CONFLICT:OFFICIAL_RECORD_REQUIRED`). Migration 2115 (ADR-061, CDF-254) builds the two layers and the owner's 18 negative tests.
+
+### Who activates the acting chair (2026-10-18)
+
+**Decision owner:** Fady, 2026-10-18 09:17 UTC, by tapping "Secretary activates" on the coordinator's card (no words), relayed by the coordinator at 09:18 UTC. The card asked who may activate the deputy as acting chair for an imported committee record. Its options were "Secretary activates" (recommended), "Chair only", and "Nobody until sourced".
+
+**What it means:** the secretary keeps the DEC-F03 rule (2030). They activate the deputy chair for one record only, with a reason, an effective period and an audit event. The importer never approves. The chair is notified and can end the activation before approval. One exception follows from the existing ruling that a conflict's subject never decides on it: a chair who is the subject of a conflict noted on paper never sees the activation that replaced them, so cannot end it (R9, AGENT-09's review of PR #108); they could not approve in any case.
+
+**Placement:** 2115 was built on this option while the card was open, so nothing changes. `api.activate_record_acting_chair` and `api.end_record_acting_chair` (ADR-061 §5) are pinned by §17 test 6 and the E5 test in `tests/security/bcp-committee-record-2115.spec.ts`.

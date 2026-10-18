@@ -2312,6 +2312,10 @@ export const en = {
     DEFENCE_PACKET_RELEASED: "Evidence for your defence",
     SANCTION_EXTRACT_APPROVAL_REQUESTED: "Prior sanction to approve",
     CASE_URGENT_FLAGGED: "Case flagged as urgent",
+    COMMITTEE_RECORD_APPROVAL_REQUESTED: "Committee record awaits your approval",
+    COMMITTEE_RECORD_ATTESTATION_REQUESTED: "Committee record requires your confirmation",
+    COMMITTEE_RECORD_RETURNED: "Committee record returned",
+    COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED: "Acting chair activated for a committee record",
   },
   oversight: {
     title: "Oversight",
@@ -2395,6 +2399,13 @@ export const en = {
     SANCTION_EXTRACT_APPROVAL_REQUESTED:
       "A committee asked to include a prior sanction from your restricted case. It awaits your decision.",
     CASE_URGENT_FLAGGED: "A case you can open was flagged as urgent and may need your attention.",
+    COMMITTEE_RECORD_APPROVAL_REQUESTED:
+      "A committee workbook and its signed minutes were submitted and await your approval as chair.",
+    COMMITTEE_RECORD_ATTESTATION_REQUESTED:
+      "A committee record you are listed on was approved and requires your own confirmation.",
+    COMMITTEE_RECORD_RETURNED: "A committee record you submitted was returned for correction.",
+    COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED:
+      "A deputy chair was activated as acting chair for a committee record of your committee. You can end the activation before it approves.",
   },
   bcpTemplate: {
     readme: {

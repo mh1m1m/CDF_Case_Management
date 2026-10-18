@@ -77,6 +77,11 @@ describe("storage adapters accept only canonical keys", () => {
     `cases/${UUID}/evidence/${UUID}/${UUID}%2e%2e`,
     `cases/${UUID.toUpperCase()}/evidence/${UUID}/${UUID}`,
     `cases/${UUID}/evidence/${UUID}`,
+    // Migration 2115 (ADR-061): the signed committee minutes, three ids and nothing else.
+    `committee-records/${UUID}/${UUID}`,
+    `committee-records/${UUID}/${UUID}/${UUID}/${UUID}`,
+    `committee-records/${UUID}/../${UUID}/${UUID}`,
+    `committee-records/${UUID}/${UUID}/signed-minutes.pdf`,
     `https://example.test/storage/v1/object/public/evidence-vault/cases/${UUID}/evidence/${UUID}/${UUID}`,
   ];
 
