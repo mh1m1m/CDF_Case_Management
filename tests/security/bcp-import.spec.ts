@@ -1561,12 +1561,18 @@ describe("ambiguity register: what never happens offline (CDF-205, ADR-034)", ()
       // conflict; attendance, votes and documents stay recorded only (F3).
       ["BCP-C1", "09_MEETINGS", "record_offline_meeting"],
       ["BCP-C1", "11_CONFLICTS", "raise_meeting_conflict"],
+      // Migration 2120 (ADR-048): BCP-C2 is BCP-C1 with signed paper ballots imported, provisional until each member
+      // confirms their own (DEC-AMB-008); the executor's helper writes the ballot, never a vote.
+      ["BCP-C2", "09_MEETINGS", "record_offline_meeting"],
+      ["BCP-C2", "11_CONFLICTS", "raise_meeting_conflict"],
+      ["BCP-C2", "12_VOTES", "record_offline_ballot"],
     ]);
     const FORBIDDEN =
       /(identity|reveal|legal_hold|disposition|destroy|export|approve_restricted|restricted_.*approval|grant_case_access|break_glass)/i;
     expect(sheets.filter((x) => FORBIDDEN.test(x.command!))).toEqual([]);
     // The executor calls exactly those commands (a held meeting through its own helper,
-    // exchange.bcp_record_offline_meeting, never api.schedule_meeting) and refuses every other sheet.
+    // exchange.bcp_record_offline_meeting, never api.schedule_meeting; a paper ballot through
+    // exchange.bcp_record_offline_ballot, never api.cast_vote) and refuses every other sheet.
     const [body] = await admin<{ src: string }[]>`
       select pg_get_functiondef('exchange.bcp_execute_row'::regproc) as src`;
     const called = [...body!.src.matchAll(/api\.([a-z_]+)\(/g)]
@@ -1580,6 +1586,15 @@ describe("ambiguity register: what never happens offline (CDF-205, ADR-034)", ()
       "record_defence_response",
     ]);
     expect(body!.src).toContain("SHEET_NOT_IMPORTABLE");
+    // The ballot helper calls no command and writes no vote: only the provisional ballot.
+    const [ballot] = await admin<{ src: string }[]>`
+      select pg_get_functiondef('exchange.bcp_record_offline_ballot(exchange.bcp_import_batch, exchange.bcp_import_row, uuid)'::regprocedure) as src`;
+    expect(
+      [...ballot!.src.matchAll(/api\.([a-z_]+)\(/g)].map((m) => m[1]).filter((f) => !f!.startsWith("_")),
+    ).toEqual([]);
+    expect([...ballot!.src.matchAll(/insert into ([a-z_.]+)/g)].map((m) => m[1])).toEqual([
+      "committee.offline_ballot",
+    ]);
   });
 
   it("T-AMB-121: the distributed template's README sheet carries the handling notice in both languages", async () => {

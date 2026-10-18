@@ -17,7 +17,7 @@ import {
 } from "../support/db";
 import { addShortRetentionClass, legalHoldTasks } from "../support/records";
 import { preliminaryReferral, unseatDemoSeats } from "../support/committee";
-import { stageOneMeetingWorkbook } from "../support/committee-record";
+import { attestAll, commitRecord, stageOneMeetingWorkbook, userKey } from "../support/committee-record";
 import { setClosureAuthority } from "../support/closure";
 import { setPreliminaryCorrectiveTypes } from "../support/preliminary";
 import {
@@ -2962,7 +2962,10 @@ describe("every state-changing command writes its audit event in the same transa
       // the walk's committee proceeding: the secretary stages a workbook of one meeting held on paper (fixture: the
       // owner backdates the referral), opens its record, declares the roster, uploads, marks and opens the signed
       // minutes, and activates the deputy chair (the chair attended but is unavailable), which the chair ends; the
-      // secretary submits and returns it once and submits again; the chair approves and a member attests.
+      // secretary submits and returns it once and submits again; the chair approves and a member attests. Since 2120
+      // (ADR-048) the workbook is a BCP-C2 one carrying the deputy chair's signed paper ballot on a package put to the
+      // vote before the meeting (fixture: the owner backdates it), which they confirm once the meeting is completed
+      // online.
       {
         fn: "open_committee_record",
         actor: "committeeSecretary",
@@ -2973,7 +2976,29 @@ describe("every state-changing command writes its audit event in the same transa
               // The walk suspended its deputy chair (set_user_status); reactivated, they sit on the record's roster.
               await s.as("platformAdmin");
               await s.tx`select api.set_user_status(${USERS.investigatorB}, 'ACTIVE'::core.record_status, ${REASON})`;
-              return stageOneMeetingWorkbook(s as OwnerScenario, ids.committeeProceeding!, "BCP-WALK-2115");
+              await s.as("committeeSecretary");
+              ids.ballotPkg = await one(
+                s,
+                s.tx`select api.create_recommendation_package(${ids.committeeProceeding!}, 'PACKAGE') as id`,
+              );
+              await s.tx`select api.add_recommendation_item(${ids.ballotPkg}, 'CORRECTIVE_ACTION', null, null,
+                'Synthetic: review the approval matrix.', null, null)`;
+              await s.tx`select api.submit_package_for_vote(${ids.ballotPkg})`;
+              const o = s as OwnerScenario;
+              await o.asOwner();
+              await s.tx`alter table decision.recommendation_package disable trigger recommendation_package_protect`;
+              await s.tx`update decision.recommendation_package
+                            set created_at = now() - interval '3 days', updated_at = now() - interval '3 days'
+                          where id = ${ids.ballotPkg}`;
+              await s.tx`alter table decision.recommendation_package enable trigger recommendation_package_protect`;
+              return stageOneMeetingWorkbook(
+                o,
+                ids.committeeProceeding!,
+                "BCP-WALK-2115",
+                "IC",
+                "committeeSecretary",
+                [{ voter: "investigatorB", kind: "PACKAGE", target: ids.ballotPkg, choice: "APPROVE" }],
+              );
             },
             "committeeSecretary",
           );
@@ -3082,6 +3107,54 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "attest_committee_record",
         actor: "committee",
         run: (s) => s.tx`select api.attest_committee_record(${ids.record!}, 2, 'ATTEST', null, null)`,
+      },
+      // Migration 2120 (ADR-048): the remaining lines attest, the secretary commits, opens the meeting held on paper,
+      // records the members present as the attested roster shows and opens the package's vote, which binds the
+      // deputy chair's ballot; they confirm it.
+      {
+        fn: "confirm_offline_ballot",
+        actor: "investigatorB",
+        run: async (s) => {
+          const item = await apart(
+            s,
+            async () => {
+              const o = s as OwnerScenario;
+              await o.asOwner();
+              const lines = await s.tx<{ id: string; user_id: string }[]>`
+                select id, user_id from exchange.bcp_record_roster where record_id = ${ids.record!}`;
+              const roster = Object.fromEntries(lines.map((l) => [userKey(l.user_id), l.id]));
+              await attestAll(o, { record: ids.record!, roster }, 2);
+              await commitRecord(s, ids.recordBatch!);
+              await o.asOwner();
+              const m = await one(
+                s,
+                s.tx`select meeting_id from exchange.bcp_committee_record where id = ${ids.record!}`,
+              );
+              const voters = await s.tx<{ id: string; user_id: string }[]>`
+                select mp.id, mp.user_id from committee.meeting_participant mp
+                join exchange.bcp_record_roster l on l.record_id = ${ids.record!} and l.user_id = mp.user_id
+                where mp.meeting_id = ${m} and mp.is_voting and l.attendance = 'ATTENDED'
+                  -- Not a member who declared a conflict earlier in the walk's proceeding (PRIOR_CONFLICT_DECLARED).
+                  and not exists (select 1 from committee.meeting_participant prior
+                                  where prior.proceeding_member_id = mp.proceeding_member_id
+                                    and prior.coi_status = 'CONFLICT_DECLARED')`;
+              for (const v of voters) {
+                await s.as(userKey(v.user_id));
+                await s.tx`select api.declare_meeting_conflict(${v.id}, 'NO_CONFLICT', null)`;
+              }
+              await s.as("committeeSecretary");
+              await s.tx`select api.open_meeting(${m}, ${REASON})`;
+              for (const v of voters) await s.tx`select api.record_attendance(${v.id}, 'PRESENT')`;
+              await s.tx`select api.open_package_vote(${m}, ${ids.ballotPkg!})`;
+              return one(
+                s,
+                s.tx`select id from committee.vote_item where meeting_id = ${m} and package_id = ${ids.ballotPkg!}`,
+              );
+            },
+            "investigatorB",
+          );
+          return s.tx`select api.confirm_offline_ballot(${item}, 'APPROVE')`;
+        },
       },
     ];
 
@@ -3270,6 +3343,9 @@ describe("audit internals are not reachable", () => {
       "authz.can_review_legal_hold",
       "authz.can_route_retention_review",
       "authz.can_upload_evidence",
+      // Migration 2120 (ADR-048): who reads a committee workbook's ballot rows before commit (F3), and a ballot's
+      // provenance after it.
+      "authz.can_view_bcp_ballot_rows",
       "authz.can_view_bcp_import",
       "authz.can_view_bcp_provenance",
       "authz.can_view_case",
@@ -3292,6 +3368,7 @@ describe("audit internals are not reachable", () => {
       "authz.can_view_meeting_concern",
       "authz.can_view_meeting_deliberation",
       "authz.can_view_meeting_roster",
+      "authz.can_view_offline_ballot",
       "authz.can_view_packet",
       "authz.can_view_preliminary_recommendation",
       "authz.can_view_proceeding",

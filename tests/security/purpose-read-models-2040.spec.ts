@@ -1718,7 +1718,8 @@ describe("api.bcp_import_batch_view (authz.can_view_bcp_import)", () => {
       await step("STAGED", { caseManager: ["may_cancel", "may_preview", "may_resolve_rows"] });
       const v = (await read(s, BATCH, "caseManager", batch))!;
       expect(JSON.stringify(v)).not.toContain("unique-cell-marker");
-      expect(v.counts).toEqual({ rows: 1, unresolved: 0, by_state: { NEW: 1 } });
+      // 2120 (ADR-048, F3) adds the paper ballots to import, as a count: none in a case workbook.
+      expect(v.counts).toEqual({ rows: 1, unresolved: 0, ballots: 0, by_state: { NEW: 1 } });
       expect(v.rows).toEqual([
         expect.objectContaining({
           row_id: row,
