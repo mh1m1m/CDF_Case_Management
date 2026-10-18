@@ -61,16 +61,17 @@ export function areaOfPath(pathname: string): WorkArea | undefined {
  * a My Work row's target (2045); the inbox and My Work link to them only once the page has shipped, so nobody lands
  * on a missing page. The purpose routes of Phase 12 join this list as each one ships, under the root
  * notify.deep_link writes, and that page re-checks access in the database: meetings and minutes since P12-2a
- * (ADR-054), committees since P12-2b (ADR-055), legal reviews since P12-3a (ADR-057); my defence, grievances,
- * exports, actions, continuity imports, referrals and preliminary reviews to come. An action's page exists since
- * P12-3b (ADR-058) for the case team's disposition of a frozen action alone, which My Work links directly
- * (`itemHref`); /actions joins this list with P12-6, when the page serves its owner and verifier.
+ * (ADR-054), committees since P12-2b (ADR-055), legal reviews since P12-3a (ADR-057), and a corrective action
+ * since P12-6a (ADR-058), when its page came to serve its owner and verifier as well as the case team's disposition
+ * of a frozen action (P12-3b); my defence, grievances, exports, continuity imports, referrals and preliminary reviews
+ * to come.
  */
 export const LIVE_PURPOSE_ROOTS: readonly string[] = [
   "/committees",
   "/meetings",
   "/minutes",
   "/legal-reviews",
+  "/actions",
 ];
 
 /**
@@ -88,6 +89,13 @@ const PURPOSE_ROOT: Partial<Record<WorkTargetType, string>> = {
   EXPORT: "/exports",
   CORRECTIVE_ACTION: "/actions",
   BCP_IMPORT: "/continuity/imports",
+};
+
+/** Where on the action's page each of its My Work rows lands (2045's categories; P12-6a). */
+const ACTION_STEP: Readonly<Record<string, string>> = {
+  ACTION_ASSIGNED: "#report",
+  ACTION_RETURNED: "#report",
+  ACTION_TO_VERIFY: "#verify",
 };
 
 /**
@@ -130,11 +138,12 @@ export function itemHref(i: WorkItem, live: readonly string[] = LIVE_PURPOSE_ROO
         ? `${onCase}/proceedings/legal-review-approval/${i.targetId}`
         : null;
     case "CORRECTIVE_ACTION":
-      // P12-3b (ADR-058): a frozen action's disposition is recorded on the action's page, which A2 gives the case
-      // team. The owner's and the verifier's work there (ACTION_ASSIGNED, ACTION_RETURNED, ACTION_TO_VERIFY) waits
-      // for P12-6, so those rows, and the inbox's links under /actions, open nothing until the root goes live.
+      // The action's page (ADR-058), at the step the row asks for: a frozen action's disposition for the case team
+      // (P12-3b), whatever roots are live, and the owner's report or the verifier's decision (P12-6a) once /actions is.
+      // The page shows each form only where A2 says its command would accept the reader now.
       if (i.category === "ACTION_TO_DISPOSE") return `/actions/${i.targetId}#dispose`;
-      return live.includes("/actions") ? `/actions/${i.targetId}` : null;
+      if (!live.includes("/actions")) return null;
+      return `/actions/${i.targetId}${ACTION_STEP[i.category] ?? ""}`;
     default: {
       const root = PURPOSE_ROOT[i.targetType];
       return root && live.includes(root) ? `${root}/${i.targetId}` : null;

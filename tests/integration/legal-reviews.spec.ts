@@ -9,15 +9,17 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   createCommitteeProceedingsService,
+  createInvestigationService,
   createLegalReviewsService,
   type CommitteeProceedingsService,
   type LegalReviewChoicesResult,
   type LegalReviewsService,
 } from "@cdf/application";
-import type { CommitteeItemsView, LegalReviewChoices } from "@cdf/contracts";
+import type { Actor, CommitteeItemsView, LegalReviewChoices } from "@cdf/contracts";
 import {
   PostgresCommitteeProceedingsGateway,
   PostgresCommitteesGateway,
+  PostgresInvestigationGateway,
   PostgresLegalReviewsGateway,
   PostgresSecurityEventSink,
   type Sql,
@@ -56,11 +58,16 @@ beforeAll(async () => {
 function servicesIn(s: OwnerScenario): {
   proceedings: CommitteeProceedingsService;
   legal: LegalReviewsService;
+  actor: (user: UserKey) => Promise<Actor>;
 } {
   const sql = {
     begin: (fn: (tx: unknown) => Promise<unknown>) => s.tx.savepoint(fn as never),
   } as unknown as Sql;
   const securityEvents = new PostgresSecurityEventSink(sql);
+  const investigation = createInvestigationService({
+    gateway: new PostgresInvestigationGateway(sql),
+    securityEvents,
+  });
   return {
     proceedings: createCommitteeProceedingsService({
       committees: new PostgresCommitteesGateway(sql),
@@ -68,6 +75,12 @@ function servicesIn(s: OwnerScenario): {
       securityEvents,
     }),
     legal: createLegalReviewsService({ gateway: new PostgresLegalReviewsGateway(sql), securityEvents }),
+    // The reviewer's opinions are pre-checked against the caller's permissions, as the server action does.
+    actor: async (user) => {
+      const a = await investigation.loadActor(ctxFor(user));
+      if (!a) throw new Error(`no actor for ${user}`);
+      return a;
+    },
   };
 }
 
@@ -152,7 +165,7 @@ async function adopted(s: OwnerScenario): Promise<PackageFixture & { cp: string 
 describe("legal review and the authority's decision through the service (Phase 12 P12-3a)", () => {
   it("the secretary asks for a review from the page's choices; the reviewer reads the request and its packet, gives an opinion and a later one", async () => {
     await ownerScenario(async (s) => {
-      const { proceedings, legal } = servicesIn(s);
+      const { proceedings, legal, actor } = servicesIn(s);
       const f = await adopted(s);
       const secretary = ctxFor("committeeSecretary");
 
@@ -225,7 +238,7 @@ describe("legal review and the authority's decision through the service (Phase 1
       // The opinion form, then the later opinion's.
       expect(
         outcome(
-          await legal.giveLegalOpinion(reviewer, {
+          await legal.giveLegalOpinion(reviewer, await actor("legalB"), {
             requestId: request,
             opinion: "CONCURS_WITH_COMMENTS",
             opinionText: `${SECRET}: the reviewer's comment.`,
@@ -242,7 +255,7 @@ describe("legal review and the authority's decision through the service (Phase 1
       });
       expect(given?.opinionAt).toBeTruthy();
       const revision = value<string>(
-        await legal.giveSupersedingLegalOpinion(reviewer, {
+        await legal.giveSupersedingLegalOpinion(reviewer, await actor("legalB"), {
           requestId: request,
           opinion: "CONCURS",
           opinionText: "",
@@ -279,7 +292,7 @@ describe("legal review and the authority's decision through the service (Phase 1
 
   it("the secretary submits to the authority and records its decision from the record form; the case team reads it all through the case", async () => {
     await ownerScenario(async (s) => {
-      const { proceedings, legal } = servicesIn(s);
+      const { proceedings, legal, actor } = servicesIn(s);
       const f = await adopted(s);
       const secretary = ctxFor("committeeSecretary");
       const request = value<string>(
@@ -292,7 +305,12 @@ describe("legal review and the authority's decision through the service (Phase 1
         }),
       );
       expect(
-        outcome(await legal.giveLegalOpinion(ctxFor("legalB"), { requestId: request, opinion: "CONCURS" })),
+        outcome(
+          await legal.giveLegalOpinion(ctxFor("legalB"), await actor("legalB"), {
+            requestId: request,
+            opinion: "CONCURS",
+          }),
+        ),
       ).toBe("ok");
 
       // Submit: the rules in force for both item types, then the package as submitted.

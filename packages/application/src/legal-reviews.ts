@@ -8,14 +8,24 @@
  * The package's legal review and authority half arrive with R2 (api.committee_items_view), through the committee
  * proceedings service. Each command:
  *   1. validates input with the shared Zod schema (§45),
- *   2. needs no permission code here: who may act comes from the request's assignee, the package's secretary or the
- *      case's Restricted Case Authority, and the package's state, which only the database knows,
+ *   2. pre-checks the opinion permission (LEGAL_OPINION_GIVE) with @cdf/authorization for the reviewer's two opinions,
+ *      the permission their commands check (first enforcement point, §19); beyond it, who may act comes from the
+ *      request's assignee, the package's secretary or the case's Restricted Case Authority, and the package's state,
+ *      which only the database knows,
  *   3. runs the api.* command in the caller's security context (the authoritative check),
  *   4. maps failures to safe AppErrors and records refusals as COMMAND_DENIED SECURITY events (§30).
  * A request, packet or package the caller may not read is the uniform not-found, recorded as ACCESS_DENIED. Reasons,
  * opinions, decisions and packet content are case content: they are never logged.
  */
-import type { LegalReviewAct, LegalReviewChoices, LegalReviewView, PacketView } from "@cdf/contracts";
+import type {
+  Actor,
+  LegalReviewAct,
+  LegalReviewChoices,
+  LegalReviewView,
+  PacketView,
+  Permission,
+} from "@cdf/contracts";
+import { can } from "@cdf/authorization";
 import type { SecurityEventSink } from "@cdf/audit";
 import {
   approveRestrictedLegalReviewSchema,
@@ -27,7 +37,7 @@ import {
   submitToAuthoritySchema,
 } from "@cdf/validation";
 import type { z } from "zod";
-import { toAppError, type AppError } from "./errors";
+import { AppError, toAppError } from "./errors";
 import type { CommandResult } from "./investigation";
 import type { UserRequestContext } from "./ports";
 
@@ -79,6 +89,9 @@ export interface LegalReviewsDeps {
  */
 export type LegalReviewChoicesResult =
   { ok: true; choices: LegalReviewChoices } | { ok: false; code: string };
+
+/** The permission api.give_legal_opinion and api.give_superseding_legal_opinion check (migrations 1900 and 2030). */
+const OPINION: Permission = "LEGAL_OPINION_GIVE";
 
 export function createLegalReviewsService(deps: LegalReviewsDeps) {
   const { gateway, securityEvents } = deps;
@@ -132,9 +145,15 @@ export function createLegalReviewsService(deps: LegalReviewsDeps) {
     raw: unknown,
     run: (input: In<S>) => Promise<T>,
     objectId: (input: In<S>) => string,
+    gate?: { actor: Actor; permission: Permission },
   ): Promise<CommandResult<T>> {
     const parsed = schema.safeParse(raw);
     if (!parsed.success) return { ok: false, fieldErrors: parsed.error };
+    if (gate && !can(gate.actor, gate.permission)) {
+      const error = new AppError("FORBIDDEN", ctx.requestId);
+      await recordDenial(ctx, "COMMAND_DENIED", "command", name, error, objectId(parsed.data));
+      return { ok: false, error };
+    }
     try {
       return { ok: true, value: await run(parsed.data) };
     } catch (cause) {
@@ -225,7 +244,7 @@ export function createLegalReviewsService(deps: LegalReviewsDeps) {
         (i) => gateway.cancelLegalReviewRequest(ctx, i),
         (i) => i.requestId,
       ),
-    giveLegalOpinion: (ctx: UserRequestContext, raw: unknown) =>
+    giveLegalOpinion: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(
         ctx,
         "give_legal_opinion",
@@ -233,8 +252,9 @@ export function createLegalReviewsService(deps: LegalReviewsDeps) {
         raw,
         (i) => gateway.giveLegalOpinion(ctx, i),
         (i) => i.requestId,
+        { actor, permission: OPINION },
       ),
-    giveSupersedingLegalOpinion: (ctx: UserRequestContext, raw: unknown) =>
+    giveSupersedingLegalOpinion: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(
         ctx,
         "give_superseding_legal_opinion",
@@ -242,6 +262,7 @@ export function createLegalReviewsService(deps: LegalReviewsDeps) {
         raw,
         (i) => gateway.giveSupersedingLegalOpinion(ctx, i),
         (i) => i.requestId,
+        { actor, permission: OPINION },
       ),
     submitToAuthority: (ctx: UserRequestContext, raw: unknown) =>
       command(

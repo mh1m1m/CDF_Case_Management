@@ -1,12 +1,13 @@
 // The legal review and authority service (Phase 12 P12-3a; ADR-057). L1 and the packet read are null, the uniform
 // not-found recorded as ACCESS_DENIED, for whoever the database refuses; the reviewer's packet is read only after L1
 // names it; L2 answers the command's refusal code for a CONFLICT and null for a refusal of the caller; each command
-// validates before the gateway, and a refusal is recorded as COMMAND_DENIED with the command and outcome only, never
-// the reason or the opinion. Who may act, and when, is the database's:
+// validates before the gateway, the reviewer's two opinions need LEGAL_OPINION_GIVE first, and a refusal is recorded
+// as COMMAND_DENIED with the command and outcome only, never the reason or the opinion. Who may act, and when, is the
+// database's:
 // tests/security/legal-review-and-authority-read-models.spec.ts; the whole path is tests/integration/legal-reviews.spec.ts.
 import { describe, expect, it } from "vitest";
 import type { SecurityEvent } from "@cdf/audit";
-import type { LegalReviewChoices, LegalReviewView, PacketView } from "@cdf/contracts";
+import type { Actor, LegalReviewChoices, LegalReviewView, PacketView, Permission } from "@cdf/contracts";
 import { createLegalReviewsService, type LegalReviewsGateway } from "./legal-reviews";
 
 const REQUEST = "11111111-1111-4111-8111-111111111111";
@@ -20,6 +21,21 @@ const ctx = {
   userId: "a0000000-0000-4000-8000-000000000003",
   requestId: "22222222-2222-4222-8222-222222222222",
 };
+
+function actor(permissions: Permission[]): Actor {
+  return {
+    userId: ctx.userId,
+    email: "legal@example.test",
+    displayName: "Legal Reviewer Epsilon",
+    displayNameAr: "المراجع القانوني إبسيلون",
+    roles: ["LEGAL_REVIEWER"],
+    permissions,
+    clearance: "CONFIDENTIAL",
+  };
+}
+/** The request's reviewer holds the opinion permission; someone else on the committee's work does not. */
+const reviewer = actor(["LEGAL_OPINION_GIVE"]);
+const secretary = actor(["CONFLICT_DECLARE", "FORM_VIEW"]);
 
 const review = { requestId: REQUEST, packetId: PACKET, status: "ASSIGNED" } as unknown as LegalReviewView;
 const packet = { packetId: PACKET, purpose: "LEGAL_REVIEW" } as unknown as PacketView;
@@ -226,8 +242,8 @@ describe("legal review and authority commands", () => {
         findingIds: [FINDING, FINDING],
       }),
       await service.cancelLegalReviewRequest(ctx, { requestId: REQUEST, reason: "no" }),
-      await service.giveLegalOpinion(ctx, { requestId: REQUEST, opinion: "CONCURS_WITH_COMMENTS" }),
-      await service.giveSupersedingLegalOpinion(ctx, { requestId: REQUEST, opinion: "MAYBE" }),
+      await service.giveLegalOpinion(ctx, reviewer, { requestId: REQUEST, opinion: "CONCURS_WITH_COMMENTS" }),
+      await service.giveSupersedingLegalOpinion(ctx, reviewer, { requestId: REQUEST, opinion: "MAYBE" }),
       await service.submitToAuthority(ctx, { packageId: "not-an-id" }),
       await service.recordAuthorityDecision(ctx, { ...decision, decidedAt: "2999-01-01T10:00" }),
     ];
@@ -239,7 +255,11 @@ describe("legal review and authority commands", () => {
     const { service, calls, events } = harness();
     expect(await service.requestLegalReview(ctx, request)).toEqual({ ok: true, value: REQUEST });
     expect(
-      await service.giveLegalOpinion(ctx, { requestId: REQUEST, opinion: "CONCURS", opinionText: "" }),
+      await service.giveLegalOpinion(ctx, reviewer, {
+        requestId: REQUEST,
+        opinion: "CONCURS",
+        opinionText: "",
+      }),
     ).toEqual({ ok: true, value: undefined });
     expect(await service.recordAuthorityDecision(ctx, decision)).toEqual({ ok: true, value: ITEM });
     expect(calls).toEqual([
@@ -276,8 +296,12 @@ describe("legal review and authority commands", () => {
         REQUEST,
         (s) => s.cancelLegalReviewRequest(ctx, { requestId: REQUEST, reason }),
       ],
-      ["give_legal_opinion", REQUEST, (s) => s.giveLegalOpinion(ctx, opinion)],
-      ["give_superseding_legal_opinion", REQUEST, (s) => s.giveSupersedingLegalOpinion(ctx, opinion)],
+      ["give_legal_opinion", REQUEST, (s) => s.giveLegalOpinion(ctx, reviewer, opinion)],
+      [
+        "give_superseding_legal_opinion",
+        REQUEST,
+        (s) => s.giveSupersedingLegalOpinion(ctx, reviewer, opinion),
+      ],
       ["submit_to_authority", PACKAGE, (s) => s.submitToAuthority(ctx, { packageId: PACKAGE })],
       ["record_authority_decision", PACKAGE, (s) => s.recordAuthorityDecision(ctx, decision)],
     ];
@@ -298,6 +322,39 @@ describe("legal review and authority commands", () => {
         expect(JSON.stringify(events)).not.toContain("Synthetic");
       }
     }
+  });
+
+  it("needs LEGAL_OPINION_GIVE before either opinion reaches the database, and records the refusal by its outcome only", async () => {
+    const opinion = { requestId: REQUEST, opinion: "CONCURS_WITH_COMMENTS", opinionText };
+    const { service, calls, events } = harness();
+    for (const who of [secretary, actor([])]) {
+      expect(await service.giveLegalOpinion(ctx, who, opinion)).toMatchObject({
+        ok: false,
+        error: { kind: "FORBIDDEN" },
+      });
+      expect(await service.giveSupersedingLegalOpinion(ctx, who, opinion)).toMatchObject({
+        ok: false,
+        error: { kind: "FORBIDDEN" },
+      });
+    }
+    expect(calls).toEqual([]);
+    const denied = (command: string) => ({
+      action: "COMMAND_DENIED",
+      objectType: "command",
+      objectId: REQUEST,
+      metadata: { command, outcome: "FORBIDDEN" },
+    });
+    expect(events).toEqual(
+      [1, 2].flatMap(() => [denied("give_legal_opinion"), denied("give_superseding_legal_opinion")]),
+    );
+    expect(JSON.stringify(events)).not.toContain("Synthetic");
+    // A malformed opinion is still a field error first, whoever sends it.
+    expect(
+      await service.giveLegalOpinion(ctx, secretary, { requestId: REQUEST, opinion: "MAYBE" }),
+    ).toMatchObject({
+      ok: false,
+      fieldErrors: expect.anything(),
+    });
   });
 
   it("a business conflict comes back with its code and is not a security event", async () => {

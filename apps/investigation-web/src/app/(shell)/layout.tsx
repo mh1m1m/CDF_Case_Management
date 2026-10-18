@@ -2,7 +2,8 @@
 // areas api.my_areas() returns for this caller, which the database derives from permission AND a live
 // relationship, never from a role name; the application floor (shellAreas) can only remove one. Counts are the
 // caller's own actionable items, never case counts; the header bell counts the caller's own unread notices (S4).
-// The shell explains access; every page still enforces it.
+// The shell explains access; every page still enforces it. A command's refusal whose form left the page shows at the
+// top of the content (CDF-232).
 import type { ReactNode } from "react";
 import type { MessageKey } from "@cdf/i18n";
 import { CDFAppShell, CDFEnvironmentStrip, CDFNotificationBell, CDFUserMenu, buttonClass } from "@cdf/ui";
@@ -13,6 +14,7 @@ import { areaHref } from "@/server/work-routes";
 import { LanguageSwitch } from "../language-switch";
 import { signOutAction } from "../session/actions";
 import { SessionTimeout } from "../session/session-timeout";
+import { RefusalNotices } from "./refusal-notices";
 import { ShellNav } from "./shell-nav";
 
 /** Sidebar keys double as e2e test ids (nav-intake, nav-cases, nav-records, …). */
@@ -106,7 +108,8 @@ export default async function ShellLayout({ children }: { children: ReactNode })
       nav={<ShellNav label={t("common.mainNavigation")} items={items} />}
       session={<SessionTimeout idleSeconds={env().CDF_SESSION_IDLE_SECONDS} locale={t.locale} />}
     >
-      {children}
+      {/* CDF-232: a refusal whose form left the page shows at the top of the page's content. */}
+      <RefusalNotices locale={t.locale}>{children}</RefusalNotices>
     </CDFAppShell>
   );
 }
