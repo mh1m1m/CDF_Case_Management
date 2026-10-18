@@ -679,12 +679,17 @@ $$;
 
 -- The importer and the lines that may chair (the chair and the deputy chair) see the whole roster, the decisions,
 -- every line's attestation state and the activations; a member sees their own line and their own attestations.
+-- Never the subject of a paper-noted conflict, whatever their seat (R9): the activation's reason, the decisions'
+-- reasons and the members' declines can all say why, and a subject never reads a concern about them (E6). They keep
+-- their own line and their own attestations, as a member does.
 create function authz.committee_record_overseer(p_record_id uuid)
 returns boolean
 language sql stable security definer
 set search_path = ''
 as $$
-  select authz.can_view_committee_record(p_record_id) and exists (
+  select authz.can_view_committee_record(p_record_id)
+         and not exchange.bcp_record_conflict_subject(p_record_id, authz.current_user_id())
+         and exists (
     select 1 from exchange.bcp_committee_record r
     join exchange.bcp_import_batch b on b.id = r.batch_id
     where r.id = p_record_id
@@ -1189,7 +1194,9 @@ begin
 end;
 $$;
 
--- Ended early by the chair it replaces or by the importer, while no approval exists on this revision.
+-- Ended early by the chair it replaces or by the importer, while no approval exists on this revision. Never by the
+-- subject of a paper-noted conflict, who is no overseer (R9): a chair replaced because of a conflict about them does
+-- not decide on that replacement, and could not approve in any case.
 create function api.end_record_acting_chair(p_activation_id uuid, p_reason text)
 returns void
 language plpgsql security definer

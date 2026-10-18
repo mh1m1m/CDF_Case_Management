@@ -943,6 +943,106 @@ describe("who attests, and for what (§5, §9; E6)", () => {
     });
   });
 
+  it("R9: the subject of a paper-noted conflict in the chair's seat oversees nothing: no activation, no decision, no other member's attestation and no reason, and they cannot end the activation that replaced them", async () => {
+    await ownerScenario(async (s) => {
+      const { batch, opened } = await prepared(s, {
+        subject: "committeeChair",
+        chairSigner: "investigatorA",
+      });
+      expect(await submitRecord(s, batch)).toBe("SUBMITTED");
+      await s.as("committeeSecretary");
+      const [a] = await activateCall(
+        opened.record,
+        "CONFLICTED",
+        `Synthetic: the chair is the subject of a conflict noted on paper (${MARK}).`,
+      )(s.tx);
+      const activation = (a as unknown as { id: string }).id;
+      // Not an overseer, so the activation is not theirs to see or end (a conflict's subject never decides on it).
+      await s.as("committeeChair");
+      await s.expectError("CDF_NOT_FOUND", endCall(activation));
+      await s.as("investigatorA");
+      await decideCall(opened.record, 1, "APPROVE")(s.tx);
+      await s.as("committeeChair");
+      await attestCall(opened.record, 1)(s.tx);
+      await s.as("legal");
+      await attestCall(
+        opened.record,
+        1,
+        "DECLINE",
+        "CONFLICT_SCOPE_MISMATCH",
+        `Synthetic: the conflict's scope is wrong (${MARK}).`,
+      )(s.tx);
+      await s.as("committeeSecretary");
+      await returnCall(opened.record, `Synthetic: returned for correction (${MARK}).`)(s.tx);
+
+      const mine = await reads(s, "committeeChair", opened.record);
+      expect(mine).toEqual({
+        documents: [],
+        roster: [USERS.committeeChair],
+        decisions: [],
+        attestations: [
+          { user_id: USERS.committeeChair, action: "ATTEST", discrepancy_code: null, reason: null },
+        ],
+        acting: [],
+      });
+      const reasons = await s.tx<{ reason: string | null }[]>`
+        select reason from exchange.bcp_record_acting_chair where record_id = ${opened.record}
+        union all select reason from exchange.bcp_record_decision where record_id = ${opened.record}
+        union all select reason from exchange.bcp_record_attestation where record_id = ${opened.record}`;
+      expect(reasons).toEqual([{ reason: null }]);
+      expect(JSON.stringify(mine)).not.toContain(MARK);
+      // The overseers who are not the subject still read all of it.
+      for (const u of ["investigatorA", "committeeSecretary"] as const) {
+        const theirs = await reads(s, u, opened.record);
+        expect(theirs.acting.map((x) => x.basis)).toEqual(["CONFLICTED"]);
+        expect(theirs.decisions.map((d) => d.decision).sort()).toEqual(["APPROVE", "RETURN"]);
+        expect(theirs.attestations.find((x) => x.user_id === USERS.legal)?.reason).toContain(MARK);
+      }
+    });
+  });
+
+  it("R9: the subject of a paper-noted conflict in the deputy chair's seat oversees nothing either, and is never activated", async () => {
+    await ownerScenario(async (s) => {
+      const { batch, opened } = await prepared(s, { subject: "investigatorA" });
+      expect(await submitRecord(s, batch)).toBe("SUBMITTED");
+      await s.as("committeeSecretary");
+      await s.expectError(
+        "CDF_CONFLICT:NO_ELIGIBLE_DEPUTY",
+        activateCall(opened.record, "UNAVAILABLE", `Synthetic: the chair is unavailable (${MARK}).`),
+      );
+      await s.as("committeeChair");
+      await decideCall(opened.record, 1, "APPROVE")(s.tx);
+      await s.as("investigatorA");
+      await attestCall(opened.record, 1)(s.tx);
+      await s.as("legal");
+      await attestCall(
+        opened.record,
+        1,
+        "DECLINE",
+        "CONFLICT_SCOPE_MISMATCH",
+        `Synthetic: the conflict's scope is wrong (${MARK}).`,
+      )(s.tx);
+      await s.as("committeeSecretary");
+      await returnCall(opened.record, `Synthetic: returned for correction (${MARK}).`)(s.tx);
+
+      const mine = await reads(s, "investigatorA", opened.record);
+      expect(mine).toEqual({
+        documents: [],
+        roster: [USERS.investigatorA],
+        decisions: [],
+        attestations: [
+          { user_id: USERS.investigatorA, action: "ATTEST", discrepancy_code: null, reason: null },
+        ],
+        acting: [],
+      });
+      expect(JSON.stringify(mine)).not.toContain(MARK);
+      const theirs = await reads(s, "committeeChair", opened.record);
+      expect(theirs.decisions.map((d) => d.decision).sort()).toEqual(["APPROVE", "RETURN"]);
+      expect(theirs.attestations.find((x) => x.user_id === USERS.legal)?.reason).toContain(MARK);
+      expect(theirs.roster).toHaveLength(Object.keys(opened.roster).length);
+    });
+  });
+
   it("§7: a line's capacity is its seat, not its person: one person holds one seat in a proceeding and one roster line, so a secretary seat never attests and a member seat always does", async () => {
     // If the seat model ever let one person hold a secretary seat and a member seat on the same committee, opening a
     // record would refuse the second line (fail closed) and this pin would fail, forcing the capacity rule to be

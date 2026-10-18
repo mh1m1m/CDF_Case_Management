@@ -849,6 +849,6 @@ Two owner decisions settle how AMB-201 (R2, the committee's offline meetings) is
 
 **Decision owner:** Fady, 2026-10-18 09:17 UTC, by tapping "Secretary activates" on the coordinator's card (no words), relayed by the coordinator at 09:18 UTC. The card asked who may activate the deputy as acting chair for an imported committee record. Its options were "Secretary activates" (recommended), "Chair only", and "Nobody until sourced".
 
-**What it means:** the secretary keeps the DEC-F03 rule (2030). They activate the deputy chair for one record only, with a reason, an effective period and an audit event. The importer never approves. The chair is notified and can end the activation before approval.
+**What it means:** the secretary keeps the DEC-F03 rule (2030). They activate the deputy chair for one record only, with a reason, an effective period and an audit event. The importer never approves. The chair is notified and can end the activation before approval. One exception follows from the existing ruling that a conflict's subject never decides on it: a chair who is the subject of a conflict noted on paper never sees the activation that replaced them, so cannot end it (R9, AGENT-09's review of PR #108); they could not approve in any case.
 
 **Placement:** 2115 was built on this option while the card was open, so nothing changes. `api.activate_record_acting_chair` and `api.end_record_acting_chair` (ADR-061 §5) are pinned by §17 test 6 and the E5 test in `tests/security/bcp-committee-record-2115.spec.ts`.
