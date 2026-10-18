@@ -1,13 +1,15 @@
 // Administration «إدارة المنصة» › Users, read only (UX redesign S1, RC-12; CDF-172). Directory columns and
 // active roles; never case content or a count derived from cases (§21, G14). Changes arrive with dual control
-// (DEC-12); until then users and roles change through migrations only.
+// (DEC-12); until then users and roles change through migrations only. The other Administration pages this caller's
+// permissions open are listed above the register (P12-8a).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { can } from "@cdf/authorization";
+import { adminViews } from "@cdf/authorization";
 import type { MessageKey } from "@cdf/i18n";
-import { CDFPageHeader, CDFTable } from "@cdf/ui";
+import { CDFTable } from "@cdf/ui";
 import { investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
+import { AdminFrame } from "../admin-frame";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -16,18 +18,11 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AdminUsersPage() {
   const { actor, ctx } = await requireActor();
-  if (!can(actor, "USER_ADMIN") && !can(actor, "ROLE_ADMIN")) notFound();
+  if (!adminViews(actor).includes("users")) notFound();
   const t = await getTranslator();
   const users = await investigationService().userRegister(ctx, actor);
   return (
-    <>
-      <CDFPageHeader title={t("admin.usersTitle")} intro={t("admin.usersIntro")} />
-      <p
-        className="mb-4 rounded-cdf-md border border-cdf-border bg-cdf-surface-subtle px-3 py-2 text-sm"
-        data-testid="no-case-content"
-      >
-        {t("shell.noCaseContent")}
-      </p>
+    <AdminFrame t={t} actor={actor} view="users" intro={t("admin.usersIntro")}>
       <CDFTable
         caption={t("admin.tableLabel")}
         testId="user-register"
@@ -54,6 +49,6 @@ export default async function AdminUsersPage() {
           },
         ]}
       />
-    </>
+    </AdminFrame>
   );
 }

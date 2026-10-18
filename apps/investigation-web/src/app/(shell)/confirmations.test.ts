@@ -2,8 +2,8 @@
 // message would show its key in the dialog. The meeting and minutes acts (P12-2a, ADR-054), the committee and
 // logistics acts (P12-2b, ADR-055), the package and invite acts (P12-2c, ADR-056), the legal review and authority
 // acts (P12-3a, ADR-057), the corrective action's dispositions (P12-3b, ADR-058), its completion, verification and
-// reopening (P12-6a, ADR-058), and an export's and a continuity import's acts (P12-6b-1, ADR-026, ADR-034) are listed
-// so that a rename in the catalogue fails here, not on the screen.
+// reopening (P12-6a, ADR-058), an export's and a continuity import's acts (P12-6b-1, ADR-026, ADR-034), and the
+// business calendar's (P12-8a, ADR-051) are listed so that a rename in the catalogue fails here, not on the screen.
 import { describe, expect, it } from "vitest";
 import { createTranslator, messagesFor, type Locale } from "@cdf/i18n";
 import { confirmation, type ConfirmAct } from "./confirmations";
@@ -80,6 +80,9 @@ const MEETING_ACTS: ConfirmAct[] = [
   "rejectBcpImport",
   "applyBcpImport",
   "cancelBcpImport",
+  // The business calendar (P12-8a, ADR-051; DEC-F02).
+  "setBusinessCalendarDay",
+  "setBusinessWeekPattern",
 ];
 
 describe("confirmations", () => {
@@ -165,6 +168,9 @@ describe("confirmations", () => {
       "addExternalRecipient",
       "cancelExport",
       "cancelBcpImport",
+      // Nor does recording a day or a working week in the business calendar (2030 sends no notice for them).
+      "setBusinessCalendarDay",
+      "setBusinessWeekPattern",
     ] as ConfirmAct[]) {
       expect(confirmation(t, act).notified, act).toMatch(/^No one/);
     }
@@ -200,6 +206,8 @@ describe("confirmations", () => {
       "submitBcpImport",
       "approveBcpImport",
       "applyBcpImport",
+      "setBusinessCalendarDay",
+      "setBusinessWeekPattern",
     ] as ConfirmAct[])
       expect(confirmation(t, act).tone, act).toBe("primary");
     // Waiving an action, or replacing it with a new one, ends it: not shown as moving work forward. Nor is sending a

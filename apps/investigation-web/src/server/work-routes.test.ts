@@ -34,6 +34,14 @@ describe("landing (audit §20.6): by where the work is, never by role name", () 
     expect(landingFor([area("OVERSIGHT", "security-events")])).toBe("/oversight?view=security-events");
     expect(landingFor([area("OVERSIGHT", "ledger")])).toBe("/oversight?view=ledger");
     expect(landingFor([area("ADMINISTRATION", "users")])).toBe("/admin/users");
+    // P12-8a: a business administrator lands on the first page their permissions open.
+    expect(landingFor([area("ADMINISTRATION", "committees")])).toBe("/admin/committees");
+    expect(landingFor([area("ADMINISTRATION", "corrective-action-policy")])).toBe(
+      "/admin/corrective-action-policy",
+    );
+    expect(landingFor([area("ADMINISTRATION", "calendar")])).toBe("/admin/calendar");
+    // A view the app does not know opens the area's own page, which picks the first page the caller may use.
+    expect(landingFor([area("ADMINISTRATION", "anything")])).toBe("/admin");
   });
 });
 
@@ -43,6 +51,7 @@ describe("routes", () => {
     expect(areaHref(area("CASES", "my-cases"))).toBe("/cases");
     expect(areaOfPath("/cases/abc/forms")).toBe("CASES");
     expect(areaOfPath("/admin/users")).toBe("ADMINISTRATION");
+    expect(areaOfPath("/admin/calendar")).toBe("ADMINISTRATION");
     expect(areaOfPath("/meetings/abc")).toBe("COMMITTEE");
     expect(areaOfPath("/minutes/abc")).toBe("COMMITTEE");
     expect(areaOfPath("/committees")).toBe("COMMITTEE");

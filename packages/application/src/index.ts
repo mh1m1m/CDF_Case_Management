@@ -67,3 +67,5 @@ export type {
   LegalReviewsGateway,
   LegalReviewsService,
 } from "./legal-reviews";
+export { createAdministrationService } from "./administration";
+export type { AdministrationDeps, AdministrationGateway, AdministrationService } from "./administration";

@@ -87,7 +87,10 @@ export type ConfirmAct =
   | "approveBcpImport"
   | "rejectBcpImport"
   | "applyBcpImport"
-  | "cancelBcpImport";
+  | "cancelBcpImport"
+  // The business calendar (Phase 12 P12-8a, ADR-051; DEC-F02).
+  | "setBusinessCalendarDay"
+  | "setBusinessWeekPattern";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -139,6 +142,9 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   "submitBcpImport",
   "approveBcpImport",
   "applyBcpImport",
+  // Recording a day or a working week sets the calendar up; neither ends or removes anything.
+  "setBusinessCalendarDay",
+  "setBusinessWeekPattern",
 ]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */

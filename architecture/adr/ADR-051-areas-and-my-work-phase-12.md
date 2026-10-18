@@ -1,7 +1,8 @@
 # ADR-051: Areas and My Work for Phase 12
 
 - **Status:** Proposed (2026-10-14). Linear CDF-211. Migration `20261007002045_phase12_areas_and_my_work.sql`, number
-  allocated by the project coordinator. UX redesign Phase 12, step P12-0b.
+  allocated by the project coordinator. UX redesign Phase 12, step P12-0b. The P12-8a amendment (Linear CDF-263,
+  2026-10-18) adds the Administration pages, with no migration.
 - **Protocol:** §19 (authorization twice), §21 (administration never implies content), §39, §40 (authorise before
   results and counts), §42 (Arabic and English); ADR-016 D0; ADR-030.
 
@@ -141,3 +142,107 @@ corporate IdP and the committee registry in production (PRODUCTION_SUBSTITUTION_
 Phase 12 plan §2 and §5; DEC-22; AMB-010, AMB-039, AMB-047, AMB-246, AMB-250; DEC-F04, DEC-F19, DEC-F20, DEC-F24;
 DEC-AMB-003, DEC-AMB-013, DEC-AMB-014; CDF-208; the coordinator's notes of 2026-10-13 (13:24, 13:25) and ruling of
 2026-10-14.
+
+## P12-8a amendment: the Administration pages (2026-10-18)
+
+UX redesign Phase 12, slice P12-8a (Linear CDF-263), with no migration. The pages read the registers' own tables and
+two reads already granted, in the administrator's own context, and run two commands of 2030. On 2026-10-18 at 12:27
+the coordinator approved splitting P12-8 into P12-8a (these pages), P12-8b (one read-model migration) and P12-8c
+(after 2160), and ruled on the forks F1 to F13 of the P12-8 domain map. Who may read a register and what each command
+accepts are unchanged.
+
+- **The area (gap G1).** §2's floor hid the widened Administration until its pages shipped. So the area showed only to
+  user and role administrators, and its link always opened the user register, which is a 404 for every other
+  administrator.
+  - The floor is now the pages themselves. Administration shows where the caller's permissions open one of its pages
+    (`adminViews`, in `api.my_areas`' order). The export policy counts only where `authz.is_export_policy_admin` would
+    allow it (DEC-F24). This is the gate 2045 already applies, so the floor can still only remove an area.
+  - The area's link and `/admin` open the database's default view, the caller's first page. Each page lists the
+    caller's other pages (F3: from `can()` now, from the database in P12-8b).
+  - In the seed, Platform Admin Eta has users, committees, sectors, notification rules, export policy and the
+    calendar. GRC Directors Zeta and Mu have the committees and the corrective-action policy; their
+    `EXPORT_POLICY_ADMIN` stays inert beside their export approval. Compliance Section Manager Tau has the committees.
+- **Six registers, read only (F2).**
+  - **Access.** Each page first asks the database for its permission: the caller check every command of its register
+    starts with (`authz.has_permission`, or `authz.is_export_policy_admin` for the export policy). A caller without it
+    gets the same 404 as a page that does not exist, recorded as ACCESS_DENIED with the page's name only. Nothing of
+    the area shows before that check.
+  - **Reads.** The register comes from tables whose row-level security returns what that administrator keeps. Nothing
+    is read past RLS, and no table, policy or grant changes.
+  - **Content.** A register carries ids, codes, dates, the reasons administrators wrote and names from the directory.
+    It never carries case content or a count derived from cases (§21), and every page says so.
+  - **Periods and sources.** Whether a row is in force, starts later or has ended is judged by the database's clock,
+    with `effective_to` exclusive. A governed value says where it comes from: owner default, provisional awaiting the
+    CDF source, or approved. A value nobody has set says "not configured yet", never a guess.
+  - **Committees** (`COMMITTEE_ADMIN`):
+    - each committee's seats (in office, starting later and ended), with who appointed and who ended them;
+    - seat corrections (AMB-045) beside the seat, with how many proceeding snapshots named it;
+    - every rule-set version, with its source;
+    - the independent conflict authorities (DEC-F04) and the status changes;
+    - which recommendation kinds have an authority rule in force (`api.authority_rule_coverage`, 2030). A package
+      of a kind with no rule cannot go.
+  - **Sectors** (`SECTOR_ADMIN`): sectors, positions and referral-approval delegations, with revoked ones kept. The
+    delegation limit is SOURCE_REQUIRED (2040).
+  - **Notification rules** (`NOTIFICATION_ADMIN`): what each notice does now on each channel (always for a mandatory
+    rule, else the event rule in force, else no rule), changes that start later, committee defaults and ended rules.
+  - **Export policy** (`authz.is_export_policy_admin`):
+    - the approval rules, with their source;
+    - the purposes, with legacy ones marked;
+    - the approved external domains (SOURCE_REQUIRED; no command keeps them yet);
+    - the approver pools for each stage;
+    - `api.export_approval_config_warnings` (2040): ids, stages and counts only.
+  - **Corrective-action policy** (`CORRECTIVE_ACTION_POLICY_ADMIN`; DEC-F25 to DEC-F27):
+    - each action type's due date, reminders, overdue notice and escalation, version by version;
+    - an empty setting is said as what `notify.emit_due_reminders` does with it (no reminder, no repeat, off);
+    - the kinds of evidence and the action pools.
+  - **Business calendar** (`BUSINESS_CALENDAR_ADMIN`; DEC-F02): the calendar's source (SOURCE_REQUIRED), every
+    working-week version and every dated day. Upcoming days come first; past and withdrawn ones are kept.
+- **The calendar's two forms (F1, F4).**
+  - One adds a day, from today in Riyadh, one entry per date: a holiday, a non-working day, or a working day on a
+    weekend. The other changes the working week from a later date.
+  - Each form shows only where its command's own caller check, `authz.has_permission('BUSINESS_CALENDAR_ADMIN')`,
+    passes when asked of the database. Every other check is the command's, on submit. Its refusal shows in the
+    calendar's own words: a date that already has an entry, a week that does not start after the last version, a
+    date in the past, no working day left.
+  - Both go through the administration service, which validates with the shared schema, pre-checks the permission
+    and runs the `api.*` command in the caller's context.
+  - A new week always records SOURCE_REQUIRED, because the form sends no source (F4). It starts at the beginning of
+    its date in Riyadh.
+  - Each form asks first. The confirmation says that a due date already set does not move and that no one is sent a
+    message. Withdrawing a day is not on this page yet.
+- **Audit.** The commands record BUSINESS_CALENDAR_DAY_SET and BUSINESS_WEEK_PATTERN_CHANGED as before (2030).
+  Reading a register records nothing. A refused page is recorded as ACCESS_DENIED and a refused command as
+  COMMAND_DENIED, with the page, or the command and outcome, only: never a reason typed.
+- **Not in this change.**
+  - P12-8b, one read-model migration: one read per page with capability flags, then the row-level controls. The same
+    migration carries the self-appointment refusal (F6, CDF-259), LATER_RULE_EXISTS (F8, CDF-260) and a fail-closed
+    version check on in-place updates (F13).
+  - Waiting:
+    - the seat, HEAD and continuity-operator appointment forms (F5);
+    - the seat and position forms, until the owner decides on backdated appointments (F7);
+    - the `COMMITTEE_ADMIN` commands with no route (F9, P12-8c or later);
+    - the continuity-operator registry (F10, P12-10 with 2160);
+    - Create pool (F12).
+  - The export purposes' static list stays recorded debt (F11). `CLEARANCE_ADMIN` and the finding vocabulary come with
+    2160 and 2150, as §2 says.
+- **Tests.**
+  - Unit:
+    - `adminViews` and the area floor for each permission, in order, with DEC-F24 and every seeded role
+      (`authorization/src/index.test.ts`);
+    - the service (`application/src/administration.test.ts`): the uniform not-found with ACCESS_DENIED before the
+      gateway, a database refusal treated the same and any other failure not hidden; for the calendar commands,
+      validation, the pre-check and COMMAND_DENIED;
+    - the calendar schemas (`validation/src/administration.test.ts`);
+    - a row's period and the start of a date in Riyadh (`administration-gateway.test.ts`);
+    - every code's words in both languages, the calendar's refusals, and how a person, a period and a state are said
+      (`admin/labels.test.ts`);
+    - the confirmations and the routes.
+  - Integration, `tests/integration/administration.spec.ts`: each page against the database, the RLS and the audit.
+    Each administrator opens exactly their pages. A page the application pre-check would let through is refused by
+    the database. Each register is the seed as recorded. The calendar's commands run and refuse.
+  - `tests/e2e/administration.spec.ts` (+5):
+    - each administrator's landing and page list, and the uniform 404 everywhere else, and for an investigator;
+    - every register in Arabic at 390 px and in English at 1280 px;
+    - the calendar journey, with its refusals.
+  - `tests/accessibility/administration.spec.ts` (+4): every register at 1280, 390 and 320 px, and the calendar's
+    forms with their error summaries and confirmations, in both languages.
