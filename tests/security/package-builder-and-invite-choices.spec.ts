@@ -9,9 +9,9 @@
 //     and may_withdraw each equal what their command answers, run and rolled back; open_vote_in is exactly the meetings
 //     where api.open_package_vote accepts the package; taint_resolutions is exactly the resolutions
 //     api.resolve_conflict_taint accepts on the item. Every package of the proceeding is shown with its active items,
-//     and no command accepts on a withdrawn item. Where the read is NOT_FOUND no package command accepts, except on a
-//     proceeding that is no longer open (ADR-056, "Known limitations"). The read without 2086's keys equals 2060's,
-//     installed from its migration text and run side by side.
+//     and no command accepts on a withdrawn item. Where the read is NOT_FOUND no package command accepts, on a
+//     proceeding that is no longer open too: migration 2117 (CDF-226) closed ADR-056's known limitation there. The read
+//     without 2086's keys equals 2060's, installed from its migration text and run side by side.
 //   * invites(): api.meeting_invite_choices refuses exactly as api.invite_to_meeting does. Otherwise it lists exactly
 //     the case's persons, and the accounts on the ruled bases, that the command accepts for at least one role and that
 //     no declared conflict or witness exclusion in a meeting of the proceeding narrows out, each with exactly the roles
@@ -29,6 +29,7 @@ import { USERS, caseId, ownerScenario, type OwnerScenario, type Scenario, type U
 import {
   IC_SEATS,
   REASON,
+  closeAsBefore2117,
   committeeIds,
   openWithPresent,
   refer,
@@ -275,11 +276,9 @@ async function packages(
     const a = (k: string) => o[k] === true;
     if (!v) {
       // NOT_FOUND: no package command accepts. A proceeding no longer open is NOT_FOUND to the committee side (2060),
-      // while the package commands do not check the proceeding's status: the page offers less than they accept there,
-      // never more (ADR-056). Creating a package is refused there too (PROCEEDING_CLOSED).
+      // and from 2117 every package command refuses there too (PROCEEDING_CLOSED), so this holds whatever its status.
       const accepted = Object.keys(o).filter(a);
-      if (proceeding!.status === "OPEN") expect(accepted, `${user}: nothing accepted, unseen`).toEqual([]);
-      else expect(a("create"), `${user} creates a package on a closed proceeding`).toBe(false);
+      expect(accepted, `${user}: nothing accepted, unseen (proceeding ${proceeding!.status})`).toEqual([]);
     } else {
       expect(v.capabilities.may_create_package, `${user} may_create_package`).toBe(a("create"));
       expect(
@@ -555,8 +554,9 @@ describe("api.committee_items_view: the package capabilities (migration 2086, AD
       expect((await secretaryPackages(s, cp))[0]!.open_vote_in).toEqual([]);
 
       // 8. A second package whose only item is withdrawn: nothing to put to the committee (PACKAGE_EMPTY). Then the
-      //    committee's proceeding concludes: the committee side no longer reads it, and the case team reads it with
-      //    every capability false.
+      //    committee's proceeding cannot conclude while the first package is in its vote (2117's guard). Closed as
+      //    before 2117, the committee side no longer reads it, the case team reads it with every capability false, and
+      //    no package command accepts (2117, PROCEEDING_CLOSED).
       await s.as("committeeSecretary");
       const [second] = await s.tx<{ id: string }[]>`
         select api.create_recommendation_package(${cp}, 'ITEM') as id`;
@@ -575,7 +575,12 @@ describe("api.committee_items_view: the package capabilities (migration 2086, AD
       const [own] = await s.tx<{ proceeding_id: string }[]>`
         select proceeding_id from committee.committee_proceeding where id = ${cp}`;
       await s.as("caseManager");
-      await s.tx`select api.close_proceeding(${own!.proceeding_id}, 'CONCLUDED', 'DECISION_RECORDED', ${REASON})`;
+      await s.expectError(
+        "CDF_CONFLICT:PACKAGE_VOTING",
+        (tx) =>
+          tx`select api.close_proceeding(${own!.proceeding_id}, 'CONCLUDED', 'DECISION_RECORDED', ${REASON})`,
+      );
+      await closeAsBefore2117(s, cp, "CONCLUDED");
       await packages(s, cp);
       expect(await itemsView(s, "committeeSecretary", cp)).toBeNull();
       const team = (await itemsView(s, "investigatorB", cp))!;

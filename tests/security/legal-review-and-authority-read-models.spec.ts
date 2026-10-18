@@ -41,6 +41,7 @@ import {
 } from "../support/db";
 import {
   REASON,
+  closeAsBefore2117,
   committeeIds,
   openWithPresent,
   preliminaryReferral,
@@ -419,13 +420,12 @@ async function acts(s: OwnerScenario, cp: string, callers: UserKey[] = CALLERS):
       probes[`cancel:${r.id}`] = `select api.cancel_legal_review_request('${r.id}', '${REASON}')`;
     const o = await outcomes(s, user, probes);
     if (!v) {
-      // NOT_FOUND: no command accepts. A committee proceeding no longer open is NOT_FOUND to the committee side while
-      // the commands do not check it (ADR-057, "Known limitations"): the page offers less there, never more.
-      if (t.open)
-        expect(
-          Object.keys(o).filter((k) => o[k] === true),
-          `${user}: nothing accepted, unseen`,
-        ).toEqual([]);
+      // NOT_FOUND: no command accepts. A committee proceeding no longer open is NOT_FOUND to the committee side, and
+      // from 2117 the commands refuse there too (PROCEEDING_CLOSED), so this holds whatever its status.
+      expect(
+        Object.keys(o).filter((k) => o[k] === true),
+        `${user}: nothing accepted, unseen (open: ${t.open})`,
+      ).toEqual([]);
     } else {
       expect(
         v.packages.map((p) => p.package_id),
@@ -1946,7 +1946,7 @@ describe("api.committee_items_view, api.legal_review_view and api.legal_review_c
     });
   });
 
-  it("known limitation (ADR-057): once the committee's proceeding is closed, the committee side no longer reads R2 while the authority command still accepts; the page offers less, never more", async () => {
+  it("from 2117 (CDF-226): the committee's proceeding cannot close while a package is with the authority; on one closed before 2117 the authority's record refuses too, so nothing is offered and nothing accepts (ADR-057's known limitation closed)", async () => {
     await ownerScenario(async (s) => {
       await install(s);
       const f = await draftPackage(s, ic, caseB);
@@ -1959,14 +1959,19 @@ describe("api.committee_items_view, api.legal_review_view and api.legal_review_c
       const [own] = await s.tx<{ proceeding_id: string }[]>`
         select proceeding_id from committee.committee_proceeding where id = ${cp}`;
       await s.as("caseManager");
-      await s.tx`select api.close_proceeding(${own!.proceeding_id}, 'CONCLUDED', 'DECISION_RECORDED', ${REASON})`;
+      await s.expectError(
+        "CDF_CONFLICT:PACKAGE_WITH_AUTHORITY",
+        (tx) =>
+          tx`select api.close_proceeding(${own!.proceeding_id}, 'CONCLUDED', 'DECISION_RECORDED', ${REASON})`,
+      );
+      await closeAsBefore2117(s, cp, "CONCLUDED");
       await acts(s, cp, ["committeeSecretary", "committeeChair", "investigatorB", "caseManager"]);
       expect(await itemsView(s, "committeeSecretary", cp)).toBeNull();
       expect(
         await outcomes(s, "committeeSecretary", {
           record: recordSql(f.pkg, "CEO", "APPROVE_AS_RECOMMENDED"),
         }),
-      ).toEqual({ record: true });
+      ).toEqual({ record: "CDF_CONFLICT:PROCEEDING_CLOSED" });
       const team = (await itemsView(s, "investigatorB", cp))!;
       for (const p of team.packages) {
         expect(Object.values(p.capabilities).every((x) => x === false)).toBe(true);
