@@ -354,7 +354,7 @@ requirements:
     title: "Work-led shell: at most five areas from permission and relationship, a landing where the user's work is, and My Work listing only the user's own actionable items"
     source: [UX audit 2026-10-10 RC-06, RC-07, RC-08, RC-12, ADR-016]
     external_ids: []
-    linear_issues: [CDF-117, CDF-118, CDF-121, CDF-171, CDF-172, CDF-211]
+    linear_issues: [CDF-117, CDF-118, CDF-121, CDF-171, CDF-172, CDF-211, CDF-263]
     status: IN_PROGRESS
     enforcement:
       [
@@ -372,8 +372,9 @@ requirements:
         tests/e2e/my-work-purpose.spec.ts,
         tests/accessibility/shell.spec.ts,
         tests/accessibility/my-work-purpose.spec.ts,
+        tests/e2e/administration.spec.ts,
       ]
-    notes: "Migration 2045 (ADR-051) lists the Phase 12 committee and decision work with DEC-22's fields, a code and the structured reasons of returned work, and opens My Committees for a current seat and Administration for each business administration permission. The application floor keeps both areas hidden until their pages ship (P12-2, P12-8), and purpose rows show without a link until then. Reporting (S6), pools and Done recently (S4), and break-glass and reveal items (DEC-16) are not built yet."
+    notes: "Migration 2045 (ADR-051) lists the Phase 12 committee and decision work with DEC-22's fields, a code and the structured reasons of returned work, and opens My Committees for a current seat and Administration for each business administration permission. The application floor keeps both areas hidden until their pages ship (P12-2, P12-8), and purpose rows show without a link until then. Since P12-8a (CDF-UX-026) Administration shows wherever the caller's permissions open one of its pages, and its link opens the first of them. Reporting (S6), pools and Done recently (S4), and break-glass and reveal items (DEC-16) are not built yet."
 
   - id: CDF-UX-006
     title: "A declared conflict is decided from My Work on the case, explicitly and with a reason"
@@ -1145,6 +1146,71 @@ requirements:
         tests/security/my-work-phase12.spec.ts,
       ]
     notes: "No migration (P12-6b-1, on api.bcp_import_batch_view as 2110 left it and the batch commands). Each form shows only where the view says its command would accept the caller now, and runs its api.* command in the caller's security context after the schema and the role permission (BCP_IMPORT to skip a row, run the dry run, submit, import or cancel; BCP_IMPORT_APPROVE to decide); a refusal is recorded as COMMAND_DENIED with the command and outcome only, and anyone the view refuses gets the same 404 as an id that names nothing (ACCESS_DENIED). The page shows the rows' metadata only, never a cell, the control sheet or a row about the reader, and counts over the rows it lists. An approver decides on the rows' metadata as submitted, which satisfies ADR-034 section 7 (coordinator ruling, F13); the preparer and offline recorders never decide and find nothing of it in My Work. A row refused while importing answers BCP_ROW_FAILED only; nothing is imported. How long staged rows are kept is SOURCE_REQUIRED (DEC-F31). A workbook reported lost (AMB-205) is never approved or imported, and a committee workbook is read-only: it goes on only through its official record (ADR-061), whose pages come later. A workbook id and a row id run to 64 characters and wrap anywhere. Not in this change (the P12-6b read-model migration): reporting a workbook lost (F2), uploading from the page (F3) and the template download (F12), resolutions other than skipping (F4) and lists of imports (F8); the continuity-operator registry's administration goes to P12-10, with 2160."
+
+  - id: CDF-UX-026
+    title: "Each business administrator opens Administration at their own first page and reads, read only, every register their permissions keep: committees, sectors, notification rules, export policy, corrective-action policy and the business calendar; the business calendar's administrator adds a day and changes the working week, each form only where its command's caller check passes now; in Arabic and English"
+    source:
+      [
+        Phase 12 plan P12-8,
+        UX-004,
+        UX-028,
+        UX-116,
+        ADR-016 D0 and D2,
+        ADR-051,
+        DEC-F02,
+        DEC-F04,
+        DEC-F24,
+        DEC-F25,
+        DEC-F26,
+        DEC-F27,
+        AMB-045,
+        ADR-051 P12-8a amendment,
+        coordinator ruling 2026-10-18 12:27 (F1 to F13),
+      ]
+    external_ids: []
+    linear_issues: [CDF-263]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.my_areas,
+        authz.has_permission,
+        authz.is_export_policy_admin,
+        api.authority_rule_coverage,
+        api.export_approval_config_warnings,
+        api.set_business_calendar_day,
+        api.set_business_week_pattern,
+        packages/authorization/src/index.ts,
+        packages/application/src/administration.ts,
+        packages/validation/src/administration.ts,
+        packages/infrastructure/src/db/administration-gateway.ts,
+        "apps/investigation-web/src/app/(shell)/admin/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/admin-frame.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/users/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/committees/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/sectors/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/notification-rules/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/export-policy/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/corrective-action-policy/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/calendar/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/calendar/actions.ts",
+        "apps/investigation-web/src/app/(shell)/admin/labels.ts",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/e2e/administration.spec.ts,
+        tests/accessibility/administration.spec.ts,
+        tests/integration/administration.spec.ts,
+        packages/authorization/src/index.test.ts,
+        packages/application/src/administration.test.ts,
+        packages/validation/src/administration.test.ts,
+        packages/infrastructure/src/db/administration-gateway.test.ts,
+        "apps/investigation-web/src/app/(shell)/admin/labels.test.ts",
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+        tests/e2e/security-csrf.spec.ts,
+      ]
+    notes: "No migration (P12-8a). Administration shows where the caller's permissions open one of its pages, in api.my_areas' order; the export policy counts only where authz.is_export_policy_admin would allow it (DEC-F24), so the floor can still only remove an area (gap G1). The area's link and /admin open the caller's first page, and each page lists the caller's other pages (F3). Each page first asks the database for the caller check every command of its register starts with; a caller without it gets the same 404 as a page that does not exist, recorded as ACCESS_DENIED with the page's name only. The registers come from tables whose row-level security returns what that administrator keeps (F2), in the caller's security context; nothing is read past RLS and no table, policy or grant changes. A register carries ids, codes, dates, the reasons administrators wrote and names from the directory, never case content or a count derived from cases (§21), and every page says so. Whether a row is in force is judged by the database's clock with effective_to exclusive; a governed value says whether it is the owner default, provisional awaiting the CDF source (SOURCE_REQUIRED, never a guess) or approved, and a value nobody has set says so. The business calendar's two forms show only where authz.has_permission('BUSINESS_CALENDAR_ADMIN') passes when asked of the database (F1); every other check is the command's, on submit, and its refusal shows in the calendar's own words. Each form validates with the shared schema, pre-checks the permission, runs its api.* command in the caller's context and asks first; a refusal is recorded as COMMAND_DENIED with the command and outcome only. A new week records SOURCE_REQUIRED because the form sends no source (F4). Reading a register records nothing. Not in this change: the P12-8b read-model migration (one read per page with capability flags, then the row-level controls, with the self-appointment refusal F6 CDF-259, LATER_RULE_EXISTS F8 CDF-260 and a fail-closed version check F13); the seat, HEAD and continuity-operator appointment forms (F5) and the seat and position forms until the owner decides on backdated appointments (F7); the COMMITTEE_ADMIN commands with no route (F9); the continuity-operator registry (F10, P12-10 with 2160); Create pool (F12); withdrawing a calendar day. The export purposes' static list stays recorded debt (F11)."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"

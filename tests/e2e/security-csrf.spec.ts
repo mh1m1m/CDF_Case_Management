@@ -92,7 +92,9 @@ test("the session cookie is HttpOnly and SameSite, and state never changes on GE
   expect(session!.httpOnly).toBe(true);
   expect(["Strict", "Lax"]).toContain(session!.sameSite);
 
-  // The only GET route with a side effect is the language preference, and it accepts only local paths.
+  // Two GET routes have a side effect. The language preference accepts only local paths, as tested here. The export
+  // preview records that its content was shown (EXPORT_PREVIEWED) and, for a draft, stores the hash its submission is
+  // bound to (ADR-026's P12-6b-1 amendment); every decision still needs the requester's own same-origin POST.
   for (const next of [
     "https://attacker.example.test/",
     "//attacker.example.test/",

@@ -6,6 +6,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
+  createAdministrationService,
   createBcpImportService,
   createCaseStructureService,
   createCommitteeProceedingsService,
@@ -20,6 +21,7 @@ import {
   createLegalReviewsService,
   createMeetingsService,
   createRecordsService,
+  type AdministrationService,
   type BcpImportService,
   type CaseStructureService,
   type CommitteeProceedingsService,
@@ -43,6 +45,7 @@ import {
   InMemoryExportStore,
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
+  PostgresAdministrationGateway,
   PostgresBcpImportGateway,
   PostgresCaseStructureGateway,
   PostgresCommitteeProceedingsGateway,
@@ -78,6 +81,7 @@ const globalForApp = globalThis as unknown as {
   cdfRecords?: RecordsService;
   cdfInbox?: InboxService;
   cdfCaseStructure?: CaseStructureService;
+  cdfAdministration?: AdministrationService;
   cdfMeetings?: MeetingsService;
   cdfCommittees?: CommitteesService;
   cdfCommitteeProceedings?: CommitteeProceedingsService;
@@ -257,6 +261,18 @@ export function bcpImportService(): BcpImportService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfBcpImport;
+}
+
+/**
+ * Administration (Phase 12 P12-8a; ADR-051): each administrator's register, gated by the page's permission in the
+ * database, and the business calendar's two commands (DEC-F02).
+ */
+export function administrationService(): AdministrationService {
+  globalForApp.cdfAdministration ??= createAdministrationService({
+    gateway: new PostgresAdministrationGateway(pool()),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfAdministration;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */
