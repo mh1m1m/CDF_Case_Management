@@ -84,11 +84,14 @@ describe("the refusals the pages explain", () => {
         "OPINION_NOT_GIVEN",
         "PACKAGE_NOT_ADOPTED",
         "TAINTED_BY_CONFLICT",
+        // Only on a proceeding closed before 2117: the conclusion guard keeps a request from outliving it now.
+        "PROCEEDING_CLOSED",
       ],
     ],
   ];
-  /** What the commands answer the forms with (2030's, 2060's and 2095's codes, and the fields they name). */
+  /** What the commands answer the forms with (2030's, 2060's, 2095's and 2117's codes, and the fields they name). */
   const commands = [
+    "PROCEEDING_CLOSED",
     "PACKAGE_NOT_ADOPTED",
     "LEGAL_REVIEW_OPEN",
     "TAINTED_BY_CONFLICT",

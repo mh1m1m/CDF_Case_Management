@@ -285,6 +285,11 @@ that runs the `api.*` command in the caller's security context, so the database 
   is for the coordinator. Until then the pages follow R2: once the proceeding is closed, the proceeding's page shows
   the secretary, who is not on the case team, no package, and the ask and record pages are the 404, so an authority's
   decision that arrives after the proceeding closed cannot be recorded from the product.
+  **Amended by migration 2117 (CDF-226; coordinator ruling, 2026-10-18):** the authority's half closes with the
+  proceeding. `api.close_proceeding` now refuses while a package is in its vote, adopted, in legal review or with the
+  authority, and on a proceeding closed before 2117 these four commands, both opinion commands and the restricted
+  approval refuse `PROCEEDING_CLOSED`; the reads mirror them, so the page and the commands agree there, and the test
+  that pinned the gap now asserts the refusal.
 - **An approval waiting to be used.** No read model gives the case an unused approval, so the case owner's link stays
   on the package while one waits; the approval page then says that an approved review of the round is already waiting
   to be sent. The committee's ask page is where it is used.
