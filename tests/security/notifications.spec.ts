@@ -66,6 +66,9 @@ describe("notification content (N18)", () => {
         "created_at",
         "delivered_at",
         "read_at",
+        // 2110 (AMB-210): a restore notice names its workbook row and the offline event time; an id and a time.
+        "restored_row_id",
+        "original_event_at",
       ]);
       const templates = await s.tx<{ code: string }[]>`select code from notify.template`;
       for (const t of templates) expect(t.code).toMatch(/^[A-Z][A-Z0-9_]+$/);
