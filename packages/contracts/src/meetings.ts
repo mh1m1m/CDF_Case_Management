@@ -39,6 +39,15 @@ export const CONCERN_DECISIONS = ["UPHELD", "DISMISSED"] as const;
 export type ConcernDecision = (typeof CONCERN_DECISIONS)[number];
 /** A member's own vote (`api.cast_vote`, `api.revise_vote`). */
 export const MEMBER_VOTE_CHOICES = ["APPROVE", "REJECT", "ABSTAIN", "RECUSED"] as const;
+/**
+ * A paper ballot the member signed while the platform was unavailable (2120, ADR-048): staged by the secretary from a
+ * BCP-C2 workbook, it counts only once the member confirms it themself (`api.confirm_offline_ballot`). SUPERSEDED: a
+ * recusal or the secretary's record for a member not present replaced it; LAPSED: its vote or meeting closed first.
+ */
+export const OFFLINE_BALLOT_STATUSES = ["PROVISIONAL", "CONFIRMED", "SUPERSEDED", "LAPSED"] as const;
+export type OfflineBallotStatus = (typeof OFFLINE_BALLOT_STATUSES)[number];
+/** What a member confirms: the choice on their own paper ballot (the database refuses any other, BALLOT_CHOICE_MISMATCH). */
+export const OFFLINE_BALLOT_CHOICES = MEMBER_VOTE_CHOICES;
 /** What the secretary records for a member who is not present (`api.record_vote_for_member`, Q60, N6). */
 export const RECORDED_FOR_MEMBER_CHOICES = ["ABSENT", "UNABLE_TO_VOTE", "RECUSED"] as const;
 /** The deciding vote on a tie (`api.cast_casting_vote`, DEC-F01, DEC-F03). */
@@ -186,6 +195,12 @@ export interface MeetingVoteItemView {
   iHaveNoted: boolean;
   /** The members for whom the runner may record ABSENT, UNABLE_TO_VOTE or RECUSED now; empty for anyone else. */
   recordVoteFor: string[];
+  /** 2120 (ADR-048): the paper ballots bound to this item, counted by state; never a choice. */
+  offlineBallots: OfflineBallotCounts;
+  /** The caller's own paper ballot on this item, with its choice; null for anyone without one. */
+  myBallot: MyOfflineBallot | null;
+  /** For the runner while the item is open: the counting members whose paper ballot still waits (BALLOTS_UNCONFIRMED). */
+  ballotsUnconfirmedFor: string[];
   capabilities: {
     mayVote: boolean;
     mayClose: boolean;
@@ -193,7 +208,25 @@ export interface MeetingVoteItemView {
     mayRevise: boolean;
     mayRecuseForConflict: boolean;
     mayRecordNote: boolean;
+    /** `api.confirm_offline_ballot` (2120): the caller's own provisional ballot on this open item. */
+    mayConfirmBallot: boolean;
   };
+}
+
+export interface OfflineBallotCounts {
+  provisional: number;
+  confirmed: number;
+  superseded: number;
+  lapsed: number;
+}
+
+export interface MyOfflineBallot {
+  ballotId: string;
+  status: OfflineBallotStatus;
+  choice: (typeof OFFLINE_BALLOT_CHOICES)[number];
+  ballotReference: string;
+  /** When the member signed the paper: the vote's original_event_at once confirmed. */
+  originalEventAt: string;
 }
 
 export interface MeetingDeliberationView {
@@ -274,6 +307,8 @@ export interface MeetingFullView {
     isEmergency: boolean;
     openedAt: string | null;
     closedAt: string | null;
+    /** 2110/2120: held while the platform was unavailable; its substantive votes come only from paper ballots (F2). */
+    heldOffline: boolean;
   };
   me: MeetingSelfView | null;
   /** Null unless `authz.can_view_meeting_roster`. */

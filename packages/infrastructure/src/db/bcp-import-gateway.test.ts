@@ -93,7 +93,7 @@ describe("continuity batch view mapping", () => {
       currentHash: HASH,
       workbookRevoked: false,
       officialRecordRequired: false,
-      counts: { rows: 2, unresolved: 0, byState: { NEW: 1, INVALID: 1 } },
+      counts: { rows: 2, unresolved: 0, ballots: 0, byState: { NEW: 1, INVALID: 1 } },
       caseId: CASE,
       caseNumber: "CDF-DEMO-2026-0002",
       capabilities: {
@@ -142,7 +142,7 @@ describe("continuity batch view mapping", () => {
       capabilities: null,
     });
     expect([v.previewClean, v.workbookRevoked, v.officialRecordRequired]).toEqual([false, false, false]);
-    expect(v.counts).toEqual({ rows: 0, unresolved: 0, byState: {} });
+    expect(v.counts).toEqual({ rows: 0, unresolved: 0, ballots: 0, byState: {} });
     expect(v.rows[0]!.maySkip).toBe(false);
     expect([v.caseId, v.caseNumber]).toEqual([null, null]);
     expect(Object.values(v.capabilities).every((f) => f === false)).toBe(true);

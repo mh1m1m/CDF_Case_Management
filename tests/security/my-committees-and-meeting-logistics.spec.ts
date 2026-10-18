@@ -34,7 +34,13 @@ import {
   vote,
   type MeetingFixture,
 } from "../support/committee";
-import { MEETING_FLAGS_2085, ROSTER_FLAGS_2085, outcomes, without2085 } from "../support/capabilities";
+import {
+  MEETING_FLAGS_2085,
+  ROSTER_FLAGS_2085,
+  outcomes,
+  without2085,
+  without2120,
+} from "../support/capabilities";
 import { concludeProceedings } from "../support/closure";
 
 const EXCLUSION = "Synthetic: the witness approached a member, for the logistics test.";
@@ -837,7 +843,7 @@ async function sameAs2065(s: OwnerScenario, user: UserKey, meeting: string): Pro
   const after = await runAs(s, "api.meeting_view", meeting);
   expect(after.error, `${user}: the same refusal`).toBe(before.error);
   if (before.error === undefined)
-    expect(without2085(after.view), `${user}: 2065's view`).toEqual(before.view);
+    expect(without2085(without2120(after.view)), `${user}: 2065's view`).toEqual(before.view);
 }
 
 /** Callers of the meeting sweeps: the runner, the chair, a member, the deputy, the alternates, a witness with an

@@ -140,3 +140,30 @@ export function without2095<V>(view: V): V {
   }
   return v as V;
 }
+
+// ---- api.meeting_view: the keys migration 2120 adds (ADR-048) ------------------------------------------------------
+
+/** On each vote item, beside its capabilities. */
+export const VOTE_ITEM_KEYS_2120 = ["ballots_unconfirmed_for", "my_ballot", "offline_ballots"] as const;
+/** On each vote item's capabilities. */
+export const VOTE_ITEM_FLAGS_2120 = ["may_confirm_ballot"] as const;
+
+interface ViewWith2120Keys {
+  logistics?: Record<string, unknown> | null;
+  deliberation?: {
+    vote_items?: (Record<string, unknown> & { capabilities?: Record<string, unknown> })[] | null;
+  } | null;
+}
+
+/** A meeting view without the keys 2120 adds: what 2085's api.meeting_view returned. On a meeting not held offline,
+ *  2120 narrows no flag, so the rest is unchanged there. Null stays null. */
+export function without2120<V>(view: V): V {
+  if (view === null || view === undefined) return view;
+  const v = structuredClone(view) as ViewWith2120Keys;
+  if (v.logistics) delete v.logistics.held_offline;
+  for (const i of v.deliberation?.vote_items ?? []) {
+    for (const k of VOTE_ITEM_KEYS_2120) delete i[k];
+    for (const f of VOTE_ITEM_FLAGS_2120) delete i.capabilities?.[f];
+  }
+  return v as V;
+}

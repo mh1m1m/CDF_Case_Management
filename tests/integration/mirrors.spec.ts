@@ -218,7 +218,9 @@ describe("mirrors", () => {
       expect(ACTING_CHAIR_BASES, m[1]).toContain(m[1]);
     const codes = new Set(
       [
-        ...(await src("bcp_record_discrepancies")).matchAll(/'((?:MISSING_[A-Z_]+)|(?:[A-Z_]+_MISMATCH))'/g),
+        ...(await src("bcp_record_discrepancies")).matchAll(
+          /'((?:MISSING_[A-Z_]+)|(?:[A-Z_]+_MISMATCH)|(?:BALLOT_[A-Z_]+))'/g,
+        ),
       ].map((m) => m[1]),
     );
     expect([...codes].sort()).toEqual([...COMMITTEE_RECORD_DISCREPANCIES].sort());

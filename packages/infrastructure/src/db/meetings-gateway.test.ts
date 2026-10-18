@@ -97,6 +97,7 @@ describe("meeting read model mapping", () => {
     if (v.view !== "FULL") return;
     expect(v.case).toEqual({ caseId: null, caseNumber: null });
     expect(v.logistics.isEmergency).toBe(false);
+    expect(v.logistics.heldOffline).toBe(false);
     expect(v.logistics.scheduledStart).toBe("2026-10-14T06:30:00.000Z");
     expect([v.me, v.roster, v.deliberation]).toEqual([null, null, null]);
     expect([v.concerns, v.actingRoles, v.minutes, v.inviteeRoles]).toEqual([[], [], [], []]);
@@ -207,6 +208,12 @@ describe("meeting read model mapping", () => {
     expect([v.roster?.[0]?.alternateFor, v.roster?.[0]?.arrangements]).toEqual([[], null]);
     const item = v.deliberation?.voteItems[0];
     expect(item).toMatchObject({ iHaveVoted: false, iHaveNoted: true, recordVoteFor: [], tally: null });
+    // Before 2120 (or with its keys left out) an item has no paper ballots, and nothing to confirm.
+    expect([item?.offlineBallots, item?.myBallot, item?.ballotsUnconfirmedFor]).toEqual([
+      { provisional: 0, confirmed: 0, superseded: 0, lapsed: 0 },
+      null,
+      [],
+    ]);
     expect(item?.capabilities).toEqual({
       mayVote: true,
       mayClose: false,
@@ -214,8 +221,88 @@ describe("meeting read model mapping", () => {
       mayRevise: false,
       mayRecuseForConflict: false,
       mayRecordNote: false,
+      mayConfirmBallot: false,
     });
     expect(v.deliberation?.witnessExclusions).toEqual([]);
+  });
+
+  it("2120's paper ballots map through: counts by state, the caller's own ballot, the runner's waiting list (ADR-048)", () => {
+    const item = {
+      vote_item_id: M,
+      sequence_no: 1,
+      target_type: "PACKAGE",
+      finding_id: null,
+      package_id: M,
+      recommendation_item_id: null,
+      package_round: 1,
+      title: "Synthetic package",
+      status: "OPEN",
+      result: null,
+      decided_by_casting_vote: false,
+      opened_at: AT,
+      closed_at: null,
+      tally: null,
+      i_have_voted: false,
+      i_have_noted: false,
+      record_vote_for: [],
+      offline_ballots: { provisional: 2, confirmed: 1, superseded: null, lapsed: 0 },
+      my_ballot: {
+        ballot_id: P,
+        status: "PROVISIONAL",
+        choice: "APPROVE",
+        ballot_reference: "PAPER-BALLOT-DEMO-1",
+        original_event_at: AT,
+      },
+      ballots_unconfirmed_for: [P],
+      capabilities: { may_vote: false, may_revise: false, may_confirm_ballot: true },
+    };
+    const raw = {
+      meeting_id: M,
+      committee_proceeding_id: M,
+      committee: { committee_id: M, code: "IC", kind: "INVESTIGATION" },
+      case: null,
+      logistics: {
+        sequence_no: 1,
+        purpose: "DELIBERATION",
+        mode: "IN_PERSON",
+        provider: "MANUAL",
+        status: "OPEN",
+        location: null,
+        online_url: null,
+        scheduled_start: AT,
+        scheduled_end: null,
+        is_emergency: false,
+        opened_at: AT,
+        closed_at: null,
+        held_offline: true,
+      },
+      me: null,
+      roster: null,
+      deliberation: {
+        ballot_secrecy: "COMMITTEE_AFTER_CLOSE",
+        quorum: null,
+        vote_items: [item],
+        witness_exclusions: [],
+      },
+      concerns: [],
+      acting_roles: [],
+      minutes: [],
+      capabilities: {},
+    } as unknown as RawMeeting;
+    const v = toMeetingView(raw);
+    if (v.view !== "FULL") throw new Error("expected the full view");
+    expect(v.logistics.heldOffline).toBe(true);
+    const i = v.deliberation?.voteItems[0];
+    expect(i?.offlineBallots).toEqual({ provisional: 2, confirmed: 1, superseded: 0, lapsed: 0 });
+    expect(i?.myBallot).toEqual({
+      ballotId: P,
+      status: "PROVISIONAL",
+      choice: "APPROVE",
+      ballotReference: "PAPER-BALLOT-DEMO-1",
+      originalEventAt: "2026-10-14T06:30:00.000Z",
+    });
+    expect(i?.ballotsUnconfirmedFor).toEqual([P]);
+    expect(i?.capabilities).toMatchObject({ mayVote: false, mayRevise: false, mayConfirmBallot: true });
   });
 
   it("2085's logistics map through: accommodations, arrangements, alternates, invitee roles and the new flags", () => {

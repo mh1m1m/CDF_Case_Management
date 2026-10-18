@@ -268,9 +268,11 @@ describe("the official record end to end (owner decision §1, §3, §5, §12, §
       const chair = await reads(s, "committeeChair", opened.record);
       expect(chair.documents).toEqual([{ version_no: 1, status: "SIGNED_OFFICIAL_RECORD" }]);
       expect(chair.roster).toHaveLength(6);
+      // Since 2120 (F3, ADR-048) a committee workbook's 12_VOTES rows are its importer's only: the chair reads the
+      // other three, and the votes sheet as a count.
       expect(
         await s.tx`select count(*)::int as n from exchange.bcp_import_row where batch_id = ${batch}`,
-      ).toEqual([{ n: 4 }]);
+      ).toEqual([{ n: 3 }]);
       await s.tx`select * from api.open_committee_record_document(${document})`;
       expect((await decideCall(opened.record, 1, "APPROVE")(s.tx))[0]!.r).toBe(
         "PLATFORM_ATTESTATION_IN_PROGRESS",

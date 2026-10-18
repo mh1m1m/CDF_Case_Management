@@ -125,7 +125,7 @@ function harness(
           currentHash: HASH,
           workbookRevoked: false,
           officialRecordRequired: false,
-          counts: { rows: 0, unresolved: 0, byState: {} },
+          counts: { rows: 0, unresolved: 0, ballots: 0, byState: {} },
           rows: [],
           caseId: CASE,
           caseNumber: "CDF-DEMO-2026-0001",

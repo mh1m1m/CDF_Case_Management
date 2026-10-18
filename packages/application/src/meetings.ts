@@ -24,6 +24,7 @@ import {
   castVoteSchema,
   closeMeetingSchema,
   closeVoteItemSchema,
+  confirmOfflineBallotSchema,
   declareMeetingConflictSchema,
   decideMeetingConflictSchema,
   excludeMeetingWitnessSchema,
@@ -76,6 +77,8 @@ export interface MeetingsGateway {
   castVote(ctx: UserRequestContext, input: In<typeof castVoteSchema>): Promise<void>;
   reviseVote(ctx: UserRequestContext, input: In<typeof reviseVoteSchema>): Promise<void>;
   recuseForConflict(ctx: UserRequestContext, input: In<typeof recuseForConflictSchema>): Promise<void>;
+  /** 2120 (ADR-048): the caller's own paper ballot becomes their vote. */
+  confirmOfflineBallot(ctx: UserRequestContext, input: In<typeof confirmOfflineBallotSchema>): Promise<void>;
   recordVoteNote(ctx: UserRequestContext, input: In<typeof recordVoteNoteSchema>): Promise<string>;
   recordVoteForMember(ctx: UserRequestContext, input: In<typeof recordVoteForMemberSchema>): Promise<void>;
   /** The item's result (or AWAITING_CASTING_VOTE on a tie the casting voter may break). */
@@ -318,6 +321,15 @@ export function createMeetingsService(deps: MeetingsDeps) {
         recuseForConflictSchema,
         raw,
         (i) => gateway.recuseForConflict(ctx, i),
+        (i) => i.voteItemId,
+      ),
+    confirmOfflineBallot: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "confirm_offline_ballot",
+        confirmOfflineBallotSchema,
+        raw,
+        (i) => gateway.confirmOfflineBallot(ctx, i),
         (i) => i.voteItemId,
       ),
     recordVoteNote: (ctx: UserRequestContext, raw: unknown) =>

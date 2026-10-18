@@ -243,27 +243,43 @@ export async function backdateReferral(s: OwnerScenario, proceeding: string, day
   await s.tx`alter table committee.committee_proceeding enable trigger committee_proceeding_protect`;
 }
 
+/** A signed paper ballot of the meeting (BCP-C2, migration 2120): the member, the target and the choice. */
+export interface PaperBallot {
+  voter: UserKey;
+  kind: "FINDING" | "PACKAGE" | "RECOMMENDATION_ITEM";
+  target: string;
+  choice: string;
+}
+
 /** The importer (a registry entry for the proceeding) stages, resolves and previews a committee workbook of one
- *  meeting held on paper two days ago; the referral is backdated first. Returns the batch and its preview hash. */
+ *  meeting held on paper two days ago; the referral is backdated first. With `ballots`, the workbook is a BCP-C2
+ *  one carrying them, signed half an hour into the meeting (their targets must predate it). Returns the batch and
+ *  its preview hash. */
 export async function stageOneMeetingWorkbook(
   s: OwnerScenario,
   proceeding: string,
   workbookId: string,
   committeeCode = "IC",
   importer: UserKey = "committeeSecretary",
+  ballots: PaperBallot[] = [],
 ): Promise<{ batch: string; hash: string }> {
   await backdateReferral(s, proceeding);
   const iso = (expr: string) => `to_char((${expr}) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-  const [t] = await s.tx.unsafe<{ from: string; start: string; end: string; to: string; email: string }[]>(
+  const [t] = await s.tx.unsafe<
+    { from: string; start: string; signed: string; end: string; to: string; email: string }[]
+  >(
     `select ${iso("now() - interval '2 days'")} as "from",
             ${iso("now() - interval '2 days' + interval '1 hour'")} as "start",
+            ${iso("now() - interval '2 days' + interval '1 hour 30 minutes'")} as "signed",
             ${iso("now() - interval '2 days' + interval '3 hours'")} as "end",
             ${iso("now() - interval '1 day'")} as "to",
             (select email from iam.user_profile where id = $1) as email`,
     [USERS[importer]],
   );
+  const voters = await s.tx<{ id: string; email: string }[]>`
+    select id, email from iam.user_profile where id = any(${ballots.map((b) => USERS[b.voter])}::uuid[])`;
   const control = {
-    TEMPLATE_VERSION: "BCP-C1",
+    TEMPLATE_VERSION: ballots.length ? "BCP-C2" : "BCP-C1",
     WORKBOOK_ID: workbookId,
     COMMITTEE_PROCEEDING_ID: proceeding,
     COMMITTEE_CODE: committeeCode,
@@ -289,6 +305,22 @@ export async function stageOneMeetingWorkbook(
         REASON: "Synthetic: the committee met on paper during the outage.",
       },
     },
+    ...ballots.map((b, i) => ({
+      sheet: "12_VOTES",
+      row_number: 3 + i,
+      has_formula: false,
+      cells: {
+        ROW_ID: `BCP-V${i + 1}`,
+        ORIGINAL_EVENT_AT: t!.signed,
+        RECORDED_OFFLINE_BY: t!.email,
+        MEETING_REF: "BCP-M1",
+        PARTICIPANT: voters.find((v) => v.id === USERS[b.voter])!.email,
+        TARGET_KIND: b.kind,
+        TARGET_ID: b.target,
+        CHOICE: b.choice,
+        BALLOT_REFERENCE: `PAPER-BALLOT-DEMO-${i + 1}`,
+      },
+    })),
   ];
   await s.as(importer);
   const [b] = await s.tx<{ id: string }[]>`

@@ -53,3 +53,10 @@ it("the committee template's README is its own, not the case workbook's", () => 
   expect(bcpTemplateText("BCP-C1").readme[0]).toContain("BCP-C1");
   expect(bcpTemplateText("BCP-1").readme[0]).toContain("BCP-1");
 });
+
+it("the paper-ballot template (BCP-C2, ADR-048) says a ballot is provisional until its member confirms it", () => {
+  const { readme } = bcpTemplateText("BCP-C2");
+  expect(readme[0]).toContain("BCP-C2");
+  expect(readme.some((line) => line.includes("provisional") && line.includes("confirms"))).toBe(true);
+  expect(readme.some((line) => line.includes("مؤقتة"))).toBe(true);
+});

@@ -701,6 +701,12 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     call: (tx, t) => tx`select api.cast_vote(${t.voteItem}, 'APPROVE', null)`,
   },
   {
+    // Migration 2120 (ADR-048): a member's confirmation of their own paper ballot.
+    fn: "confirm_offline_ballot",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.confirm_offline_ballot(${t.voteItem}, 'APPROVE')`,
+  },
+  {
     fn: "record_vote_for_member",
     outcome: "NOT_FOUND",
     call: (tx, t) =>
