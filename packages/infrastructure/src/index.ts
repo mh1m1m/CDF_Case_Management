@@ -43,6 +43,7 @@ export {
   InMemoryExportStore,
   StubExportMailer,
   StubJsonExportRenderer,
+  type StubJsonExportRendererOptions,
 } from "./exports/stubs";
 // Continuity workbook (ADR-034): the SpreadsheetML subset reader behind WorkbookReader, and the template writer.
 export { BCP_WORKBOOK_LIMITS, SpreadsheetMlSubsetReader, readWorkbook } from "./bcp/workbook-reader";

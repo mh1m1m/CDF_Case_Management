@@ -1027,6 +1027,125 @@ requirements:
       ]
     notes: "No migration (P12-6a, on 2096's view). Each form shows only where A2's flag says its command would accept the caller now, and runs its api.* command in the caller's security context after the schema and the role permission (CORRECTIVE_ACTION_OWN to report, CORRECTIVE_ACTION_MANAGE to verify or reopen); a refusal is recorded as COMMAND_DENIED with the command and outcome only, and the audit events carry no note. The completion asks for a reference unless the policy in force accepts a note alone, and for a kind of evidence from the policy's list where it lists any. The history names only the reader ('by you') and, for the case team, the owner; notes are shown as A2 gives them (CDF-227). Outside the case team an action that may not move reads as paused, never why, and the page's answers carry ACTION_BLOCKED in place of each block code. My Work's ACTION_ASSIGNED and ACTION_RETURNED rows open the report, ACTION_TO_VERIFY the verification. Known limitation (ADR-058): a progress note that leaves the percentage of an action in progress unchanged is recorded while the action is held; the page never offers it, and 2170 closes it in the command (CDF-253). Not in this change (P12-6b): reassignment, the kind of owner, the due date and the waiver."
 
+  - id: CDF-UX-024
+    title: "An export is asked for from its case, then prepared, previewed, submitted, approved stage by stage, consented to by a restricted case's authority, sent or cancelled on pages of its own; each form only where its command would accept the caller now, and its content only on the preview, each opening recorded, in Arabic and English"
+    source:
+      [
+        Phase 12 plan P12-6,
+        UX-116,
+        ADR-016 D0 and D2,
+        ADR-026,
+        ADR-032,
+        DEC-F21,
+        DEC-F23,
+        DEC-F24,
+        DEC-51,
+        AMB-187,
+        CDF-208,
+        ADR-026 P12-6b-1 amendment,
+        coordinator ruling 2026-10-18 12:18 (F1 to F13),
+      ]
+    external_ids: []
+    linear_issues: [CDF-258]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.export_request_view,
+        api.create_export_request,
+        api.add_export_item,
+        api.add_export_recipient,
+        api.preview_export,
+        api.submit_export,
+        api.decide_export,
+        api.decide_restricted_export,
+        api.generate_export,
+        api.record_export_sent,
+        api.cancel_export,
+        packages/application/src/exports.ts,
+        packages/validation/src/exports.ts,
+        packages/infrastructure/src/db/export-gateway.ts,
+        "apps/investigation-web/src/app/(shell)/cases/[id]/export/page.tsx",
+        "apps/investigation-web/src/app/(shell)/cases/[id]/export/actions.ts",
+        "apps/investigation-web/src/app/(shell)/exports/[requestId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/exports/[requestId]/actions.ts",
+        "apps/investigation-web/src/app/(shell)/exports/[requestId]/preview/page.tsx",
+        "apps/investigation-web/src/app/(shell)/exports/[requestId]/preview/actions.ts",
+        "apps/investigation-web/src/app/(shell)/exports/labels.ts",
+        "apps/investigation-web/src/app/(shell)/exports/content.tsx",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/e2e/exports.spec.ts,
+        tests/accessibility/exports.spec.ts,
+        packages/validation/src/exports.test.ts,
+        packages/application/src/exports.test.ts,
+        packages/infrastructure/src/db/export-gateway.test.ts,
+        packages/infrastructure/src/exports/stubs.test.ts,
+        "apps/investigation-web/src/app/(shell)/exports/labels.test.ts",
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+        tests/security/export.spec.ts,
+        tests/security/purpose-read-models-2040.spec.ts,
+        tests/security/my-work-phase12.spec.ts,
+      ]
+    notes: "No migration (P12-6b-1, on 2040's api.export_request_view and the 1930 and 2040 commands). Each form shows only where the view says its command would accept the caller now, and runs its api.* command in the caller's security context after the schema and the role permission (EXPORT_REQUEST to ask for, prepare, submit, send or cancel; EXPORT_APPROVE or EXPORT_SECOND_APPROVE to give a stage; RESTRICTED_CASE_AUTHORITY to consent); a refusal is recorded as COMMAND_DENIED with the command and outcome only. The content shows only on the preview page, which runs api.preview_export (EXPORT_PREVIEWED) once per visit and is never prefetched; the export's own page records nothing, and anyone it refuses gets the same 404 as an id that names nothing (ACCESS_DENIED). The request form narrows the command: an email export goes to external addresses only until internal recipients have their candidate read (F9), and an external address is typed twice (AMB-187). The requester is never offered a decision (DEC-F24, CDF-208). Every seeded rule, the restricted-case consent and the second approval are SOURCE_REQUIRED and say so. The stub mail relay is PRODUCTION_SUBSTITUTION_REQUIRED; a PDF or Excel export waits for a download read (F6); an email the relay did not accept shows its status only (F7). The request offers the catalogue's active purposes that the contracts' list names, so a purpose the catalogue gains later waits for that list (recorded debt; the database will judge a purpose's shape before the catalogue's Add purpose ships, P12-8). Not in this change (the P12-6b read-model migration): item kinds other than the case summary and internal recipients (F9), lists of exports (F8), the fact that no approver is eligible (F5, to P12-8), downloads (F6) and recording a delivery made another way (F7)."
+
+  - id: CDF-UX-025
+    title: "A continuity import's importer skips a row that cannot be imported, runs the dry run, submits, imports the approved rows all at once or none, and cancels; its approvers open it from My Work and decide on the rows' metadata, never the workbook's cells; the preparer and the offline recorders never decide; each form only where its command would accept the caller now, in Arabic and English"
+    source:
+      [
+        Phase 12 plan P12-6,
+        UX-116,
+        ADR-016 D0 and D2,
+        ADR-027,
+        ADR-034,
+        ADR-046,
+        ADR-047,
+        DEC-F30,
+        DEC-F31,
+        AMB-201,
+        AMB-205,
+        ADR-034 P12-6b-1 amendment,
+        coordinator ruling 2026-10-18 12:18 (F2 to F13),
+      ]
+    external_ids: []
+    linear_issues: [CDF-258]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.bcp_import_batch_view,
+        api.resolve_bcp_row,
+        api.preview_bcp_import,
+        api.submit_bcp_import,
+        api.decide_bcp_import,
+        api.apply_bcp_import,
+        api.cancel_bcp_import,
+        packages/application/src/bcp-import.ts,
+        packages/validation/src/bcp.ts,
+        packages/infrastructure/src/db/bcp-import-gateway.ts,
+        "apps/investigation-web/src/app/(shell)/continuity/imports/[batchId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/continuity/imports/[batchId]/actions.ts",
+        "apps/investigation-web/src/app/(shell)/continuity/imports/labels.ts",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/e2e/continuity-imports.spec.ts,
+        tests/accessibility/continuity-imports.spec.ts,
+        packages/validation/src/bcp.test.ts,
+        packages/application/src/bcp-import.test.ts,
+        packages/infrastructure/src/db/bcp-import-gateway.test.ts,
+        "apps/investigation-web/src/app/(shell)/continuity/imports/labels.test.ts",
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+        tests/security/bcp-import.spec.ts,
+        tests/security/bcp-committee-2110.spec.ts,
+        tests/security/purpose-read-models-2040.spec.ts,
+        tests/security/my-work-phase12.spec.ts,
+      ]
+    notes: "No migration (P12-6b-1, on api.bcp_import_batch_view as 2110 left it and the batch commands). Each form shows only where the view says its command would accept the caller now, and runs its api.* command in the caller's security context after the schema and the role permission (BCP_IMPORT to skip a row, run the dry run, submit, import or cancel; BCP_IMPORT_APPROVE to decide); a refusal is recorded as COMMAND_DENIED with the command and outcome only, and anyone the view refuses gets the same 404 as an id that names nothing (ACCESS_DENIED). The page shows the rows' metadata only, never a cell, the control sheet or a row about the reader, and counts over the rows it lists. An approver decides on the rows' metadata as submitted, which satisfies ADR-034 section 7 (coordinator ruling, F13); the preparer and offline recorders never decide and find nothing of it in My Work. A row refused while importing answers BCP_ROW_FAILED only; nothing is imported. How long staged rows are kept is SOURCE_REQUIRED (DEC-F31). A workbook reported lost (AMB-205) is never approved or imported, and a committee workbook is read-only: it goes on only through its official record (ADR-061), whose pages come later. A workbook id and a row id run to 64 characters and wrap anywhere. Not in this change (the P12-6b read-model migration): reporting a workbook lost (F2), uploading from the page (F3) and the template download (F12), resolutions other than skipping (F4) and lists of imports (F8); the continuity-operator registry's administration goes to P12-10, with 2160."
+
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

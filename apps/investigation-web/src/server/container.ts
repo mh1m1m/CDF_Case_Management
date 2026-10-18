@@ -6,11 +6,13 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { join } from "node:path";
 import {
+  createBcpImportService,
   createCaseStructureService,
   createCommitteeProceedingsService,
   createCommitteesService,
   createCorrectiveActionService,
   createEvidenceService,
+  createExportService,
   createFormsService,
   createInboxService,
   createInterviewService,
@@ -18,12 +20,14 @@ import {
   createLegalReviewsService,
   createMeetingsService,
   createRecordsService,
+  type BcpImportService,
   type CaseStructureService,
   type CommitteeProceedingsService,
   type CommitteesService,
   type CorrectiveActionService,
   type EvidenceService,
   type EvidenceStorage,
+  type ExportService,
   type FormsService,
   type InboxService,
   type InterviewService,
@@ -34,14 +38,18 @@ import {
 } from "@cdf/application";
 import { shellAreas } from "@cdf/authorization";
 import type { Actor, MyArea } from "@cdf/contracts";
+import { formatRecordDate } from "@cdf/i18n";
 import {
+  InMemoryExportStore,
   LocalFilesystemEvidenceStorage,
   MockMalwareScanner,
+  PostgresBcpImportGateway,
   PostgresCaseStructureGateway,
   PostgresCommitteeProceedingsGateway,
   PostgresCommitteesGateway,
   PostgresCorrectiveActionGateway,
   PostgresEvidenceGateway,
+  PostgresExportGateway,
   PostgresFormsGateway,
   PostgresInboxGateway,
   PostgresInterviewGateway,
@@ -50,6 +58,9 @@ import {
   PostgresMeetingsGateway,
   PostgresRecordsGateway,
   PostgresSecurityEventSink,
+  SpreadsheetMlSubsetReader,
+  StubExportMailer,
+  StubJsonExportRenderer,
   SupabaseEvidenceStorage,
   createPool,
   type Sql,
@@ -72,6 +83,8 @@ const globalForApp = globalThis as unknown as {
   cdfCommitteeProceedings?: CommitteeProceedingsService;
   cdfLegalReviews?: LegalReviewsService;
   cdfCorrectiveActions?: CorrectiveActionService;
+  cdfExports?: ExportService;
+  cdfBcpImport?: BcpImportService;
 };
 
 function pool(): Sql {
@@ -210,6 +223,40 @@ export function correctiveActionService(): CorrectiveActionService {
     securityEvents: new PostgresSecurityEventSink(pool()),
   });
   return globalForApp.cdfCorrectiveActions;
+}
+
+/**
+ * Exports (ADR-026; Phase 12 P12-6b-1): the export's purpose read (`api.export_request_view`) and its commands.
+ * PRODUCTION_SUBSTITUTION_REQUIRED: the renderer writes canonical JSON with the generation date in both calendars
+ * (CDF document rendering), the store keeps files in memory (a private, KMS-encrypted OSS bucket) and the mailer sends
+ * nothing and accepts synthetic @example.test addresses only (the CDF mail relay with approved domains).
+ */
+export function exportService(): ExportService {
+  globalForApp.cdfExports ??= createExportService({
+    gateway: new PostgresExportGateway(pool()),
+    renderer: new StubJsonExportRenderer({
+      recordDate: (locale, at) => formatRecordDate(locale, at, { withTime: true }),
+    }),
+    store: new InMemoryExportStore(),
+    mailer: new StubExportMailer(),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfExports;
+}
+
+/**
+ * Continuity workbook import (ADR-034, ADR-047; Phase 12 P12-6b-1): the batch's purpose read
+ * (`api.bcp_import_batch_view`) and its commands. No page uploads a workbook yet (the upload waits for its read model).
+ * PRODUCTION_SUBSTITUTION_REQUIRED: the malware scanner is a mock (the CDF scanning service).
+ */
+export function bcpImportService(): BcpImportService {
+  globalForApp.cdfBcpImport ??= createBcpImportService({
+    gateway: new PostgresBcpImportGateway(pool()),
+    reader: new SpreadsheetMlSubsetReader(),
+    scanner: new MockMalwareScanner(),
+    securityEvents: new PostgresSecurityEventSink(pool()),
+  });
+  return globalForApp.cdfBcpImport;
 }
 
 /** Cookie jar over next/headers. Writes are ignored where Next forbids them (Server Components). */

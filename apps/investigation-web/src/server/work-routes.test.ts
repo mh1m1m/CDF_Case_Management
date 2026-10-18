@@ -53,6 +53,10 @@ describe("routes", () => {
     expect(areaOfPath("/legal-reviews/abc/packet")).toBe("MY_WORK");
     // So is a corrective action: its disposition (P12-3b), its owner's and its verifier's work (P12-6).
     expect(areaOfPath("/actions/abc")).toBe("MY_WORK");
+    // And an export or a continuity import, to its approvers (P12-6b-1).
+    expect(areaOfPath("/exports/abc")).toBe("MY_WORK");
+    expect(areaOfPath("/exports/abc/preview")).toBe("MY_WORK");
+    expect(areaOfPath("/continuity/imports/abc")).toBe("MY_WORK");
     expect(areaHref(area("COMMITTEE", "committees"))).toBe("/committees");
     expect(areaOfPath("/settings/access")).toBeUndefined();
   });
@@ -100,8 +104,16 @@ describe("routes", () => {
     } as const;
     const all = Object.values(roots);
     // P12-2a (ADR-054): the meeting and minutes pages have shipped; P12-3a (ADR-057) the legal review page; P12-6a
-    // (ADR-058) the corrective action's page; the rest have not.
-    const shipped: readonly string[] = ["/meetings", "/minutes", "/legal-reviews", "/actions"];
+    // (ADR-058) the corrective action's page; P12-6b-1 the export request's (ADR-026) and the continuity import's
+    // (ADR-034); the rest have not.
+    const shipped: readonly string[] = [
+      "/meetings",
+      "/minutes",
+      "/legal-reviews",
+      "/actions",
+      "/exports",
+      "/continuity/imports",
+    ];
     for (const [targetType, root] of Object.entries(roots) as [keyof typeof roots, string][]) {
       const i = item({ area: "MY_WORK", targetType, targetId: "x", caseId: "c" });
       expect(itemHref(i), targetType).toBe(shipped.includes(root) ? `${root}/x` : null);
@@ -136,7 +148,7 @@ describe("routes", () => {
     ).toBeNull();
   });
   it("opens each corrective-action row at its step on the action's page (P12-3b, P12-6a)", () => {
-    const all = ["/meetings", "/minutes", "/legal-reviews", "/actions"];
+    const all = ["/meetings", "/minutes", "/legal-reviews", "/actions", "/exports", "/continuity/imports"];
     // P12-3b (ADR-058): the page serves the case team's disposition, whatever roots are live, at its form.
     for (const live of [all, []])
       expect(
@@ -224,6 +236,12 @@ describe("notification links (UX redesign S4)", () => {
   it("links nowhere while the page has not shipped", () => {
     expect(notificationHref({ deepLink: `/grievances/${id}` })).toBeNull();
     expect(notificationHref({ deepLink: `/my-defence/${id}` })).toBeNull();
+  });
+  it("links an export's and a continuity import's notices to their pages (P12-6b-1)", () => {
+    expect(notificationHref({ deepLink: `/exports/${id}` })).toBe(`/exports/${id}`);
+    expect(notificationHref({ deepLink: `/continuity/imports/${id}` })).toBe(`/continuity/imports/${id}`);
+    expect(notificationHref({ deepLink: `/exports/${id}?preview=1` })).toBeNull();
+    expect(notificationHref({ deepLink: `/continuity/${id}` })).toBeNull();
   });
   it("links a legal review's notice to the reviewer's page (P12-3a)", () => {
     expect(notificationHref({ deepLink: `/legal-reviews/${id}` })).toBe(`/legal-reviews/${id}`);

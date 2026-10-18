@@ -1,8 +1,9 @@
 // Every confirmation has its whole copy in both languages (UX-031; Phase 12 consequence preview, ADR-030): a missing
 // message would show its key in the dialog. The meeting and minutes acts (P12-2a, ADR-054), the committee and
 // logistics acts (P12-2b, ADR-055), the package and invite acts (P12-2c, ADR-056), the legal review and authority
-// acts (P12-3a, ADR-057), the corrective action's dispositions (P12-3b, ADR-058) and its completion, verification and
-// reopening (P12-6a, ADR-058) are listed so that a rename in the catalogue fails here, not on the screen.
+// acts (P12-3a, ADR-057), the corrective action's dispositions (P12-3b, ADR-058), its completion, verification and
+// reopening (P12-6a, ADR-058), and an export's and a continuity import's acts (P12-6b-1, ADR-026, ADR-034) are listed
+// so that a rename in the catalogue fails here, not on the screen.
 import { describe, expect, it } from "vitest";
 import { createTranslator, messagesFor, type Locale } from "@cdf/i18n";
 import { confirmation, type ConfirmAct } from "./confirmations";
@@ -64,6 +65,21 @@ const MEETING_ACTS: ConfirmAct[] = [
   "verifyActionCompletion",
   "returnActionCompletion",
   "reopenAction",
+  // An export request (P12-6b-1, ADR-026).
+  "addExternalRecipient",
+  "submitExport",
+  "approveExport",
+  "rejectExport",
+  "consentToExport",
+  "refuseExport",
+  "generateExport",
+  "cancelExport",
+  // A continuity workbook import (P12-6b-1, ADR-034).
+  "submitBcpImport",
+  "approveBcpImport",
+  "rejectBcpImport",
+  "applyBcpImport",
+  "cancelBcpImport",
 ];
 
 describe("confirmations", () => {
@@ -111,6 +127,18 @@ describe("confirmations", () => {
       "submitActionCompletion",
       "returnActionCompletion",
       "reopenAction",
+      // P12-6b-1: a submission asks its approvers, a decision tells the requester or importer (1930, 1960), and
+      // generating sends the export to its recipients; applying an import generates its restore notices (AMB-210).
+      "submitExport",
+      "approveExport",
+      "rejectExport",
+      "consentToExport",
+      "refuseExport",
+      "generateExport",
+      "submitBcpImport",
+      "approveBcpImport",
+      "rejectBcpImport",
+      "applyBcpImport",
     ]) {
       expect(confirmation(t, act as ConfirmAct).notified, act).not.toMatch(/^No one/);
     }
@@ -133,6 +161,10 @@ describe("confirmations", () => {
       "disposeReAdopt",
       // A verified completion tells no one (1940).
       "verifyActionCompletion",
+      // Nor does adding an address to a draft export, or cancelling an export or an import (1930, 1960).
+      "addExternalRecipient",
+      "cancelExport",
+      "cancelBcpImport",
     ] as ConfirmAct[]) {
       expect(confirmation(t, act).notified, act).toMatch(/^No one/);
     }
@@ -160,6 +192,14 @@ describe("confirmations", () => {
       "disposeModify",
       "submitActionCompletion",
       "verifyActionCompletion",
+      "addExternalRecipient",
+      "submitExport",
+      "approveExport",
+      "consentToExport",
+      "generateExport",
+      "submitBcpImport",
+      "approveBcpImport",
+      "applyBcpImport",
     ] as ConfirmAct[])
       expect(confirmation(t, act).tone, act).toBe("primary");
     // Waiving an action, or replacing it with a new one, ends it: not shown as moving work forward. Nor is sending a
@@ -169,7 +209,15 @@ describe("confirmations", () => {
       "disposeReplace",
       "returnActionCompletion",
       "reopenAction",
+      // Rejecting, refusing or cancelling an export or an import ends it.
+      "rejectExport",
+      "refuseExport",
+      "cancelExport",
+      "rejectBcpImport",
+      "cancelBcpImport",
     ] as ConfirmAct[])
       expect(confirmation(t, act).tone, act).toBeUndefined();
+    expect(confirmation(t, "cancelExport").cancelLabel).toBe("Keep the request");
+    expect(confirmation(t, "cancelBcpImport").cancelLabel).toBe("Keep the import");
   });
 });

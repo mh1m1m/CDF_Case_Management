@@ -10,12 +10,38 @@ import type { ExportDelivery, ExportDocument } from "@cdf/contracts";
 /** Exports keys produced by api.generate_export only; anything else is refused (no path traversal). */
 export const EXPORT_KEY_PATTERN = /^exports\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
-/** Canonical JSON of the document: honest about what it is, whatever format was requested. */
+export interface StubJsonExportRendererOptions {
+  /**
+   * DEC-51 (P12-6b-1, F10): the generation date as a formal record shows it, Gregorian and Hijri, in each locale. The
+   * app passes its formatter, so this adapter carries no locale rules of its own.
+   */
+  recordDate?: (locale: "en" | "ar", at: Date) => string;
+  /** The clock; tests pass a fixed one. */
+  now?: () => Date;
+}
+
+/**
+ * Canonical JSON of the document: honest about what it is, whatever format was requested. With a `recordDate`, the
+ * file also says when it was generated: the instant (`generatedAt`) and the record date in English and Arabic
+ * (`generatedOn`). Presentation only: the database's hash binds the document, not the file.
+ */
 export class StubJsonExportRenderer implements ExportRenderer {
   readonly kind = "stub-json" as const;
 
+  constructor(private readonly options: StubJsonExportRendererOptions = {}) {}
+
   async render(document: ExportDocument): Promise<RenderedExport> {
-    const body = new TextEncoder().encode(JSON.stringify(document, null, 2));
+    const { recordDate, now = () => new Date() } = this.options;
+    let content: object = document;
+    if (recordDate) {
+      const at = now();
+      content = {
+        ...document,
+        generatedAt: at.toISOString(),
+        generatedOn: { en: recordDate("en", at), ar: recordDate("ar", at) },
+      };
+    }
+    const body = new TextEncoder().encode(JSON.stringify(content, null, 2));
     return { body, contentType: "application/json", fileName: `export-${document.requestId}.json` };
   }
 }

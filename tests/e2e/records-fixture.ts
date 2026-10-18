@@ -42,6 +42,8 @@ const USERS = {
   dpo: "a0000000-0000-4000-8000-000000000012",
   // Employee Chi, a corrective action's owner (Phase 12 P12-3b; no other browser spec uses it)
   financeEmployee: "a0000000-0000-4000-8000-000000000028",
+  // GRC Deputy Mu, who asks for an export of a restricted case (Phase 12 P12-6b-1)
+  grcDeputy: "a0000000-0000-4000-8000-000000000014",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -1339,4 +1341,193 @@ export async function disposedAs(
         ${reword ? MODIFIED_ACTION.title : null}::text, ${reword ? MODIFIED_ACTION.description : null}::text,
         null::uuid, null::date)`,
   );
+}
+
+// ---- Export requests and continuity imports (Phase 12 P12-6b-1; ADR-026, ADR-034) -------------------------------
+
+const EXCHANGE_REASON = "Synthetic: export and continuity import e2e fixture.";
+
+/** Who an external export of the fixtures goes to: a synthetic party and a synthetic address (DEC-F22). */
+export const EXPORT_TO = {
+  party: "Regulator Alpha (synthetic)",
+  address: "officer.alpha@example.test",
+  justification: "Synthetic: the regulator asked for the case summary, for the e2e check.",
+} as const;
+
+export interface ExportFixture {
+  caseId: string;
+  caseNumber: string;
+  /** The case's title, which the case summary item carries. */
+  caseTitle: string;
+  requestId: string;
+}
+
+/**
+ * An email export of a fresh CONFIDENTIAL case's summary that the case manager prepared for EXPORT_TO, as a draft;
+ * with `submitted`, previewed and submitted, when it waits for two approval stages (an external audience, and the
+ * seeded EXTERNAL_CONFIDENTIAL rule, SOURCE_REQUIRED). The GRC Director and the GRC Deputy may give either stage.
+ */
+export async function preparedExport(label: string, submitted = false): Promise<ExportFixture> {
+  const c = await screeningCase(label);
+  const requestId = await as("caseManager", async (tx) => {
+    const [r] = await tx<{ id: string }[]>`
+      select api.create_export_request(${c.caseId}, 'EMAIL', 'EXTERNAL', 'REGULATORY_OR_EXTERNAL_AUTHORITY',
+        ${EXPORT_TO.party}, ${EXPORT_TO.justification}) as id`;
+    await tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${c.caseId})`;
+    await tx`select api.add_export_recipient(${r!.id}, 'EXTERNAL', null, ${EXPORT_TO.address})`;
+    if (submitted) {
+      const [p] = await tx<{ h: string }[]>`select api.preview_export(${r!.id}) ->> 'hash' as h`;
+      await tx`select api.submit_export(${r!.id}, ${p!.h}, 'CONFIDENTIAL'::core.classification_level)`;
+    }
+    return r!.id;
+  });
+  return { ...c, caseTitle: `Records e2e case ${label} (synthetic)`, requestId };
+}
+
+/**
+ * An internal PDF of a fresh case's summary for a legal review, on a case the GRC Director owns and the GRC Deputy
+ * restricted (the restricting officer keeps access by an audited grant); the GRC Deputy asks for it, previews and
+ * submits it. It waits for one approval stage (the seeded RESTRICTED_CASE rule) and the consent of the case's
+ * Restricted Case Authority, its owner (RESTRICTED_CASE_AUTHORITY, DEC-F23), both SOURCE_REQUIRED. Nobody else sees
+ * the case, and its requester gives neither (DEC-F24, CDF-208): the GRC Director gives both.
+ */
+export async function restrictedExport(label: string): Promise<ExportFixture> {
+  const c = await screeningCase(label);
+  await as("caseManager", async (tx) => {
+    await tx`select api.assign_case(${c.caseId}, ${USERS.grcDirector}, 'CASE_OWNER', ${EXCHANGE_REASON})`;
+  });
+  const requestId = await as("grcDeputy", async (tx) => {
+    await tx`select api.change_case_classification(${c.caseId}, 'CONFIDENTIAL', true, ${EXCHANGE_REASON})`;
+    const [r] = await tx<{ id: string }[]>`
+      select api.create_export_request(${c.caseId}, 'PDF', 'INTERNAL', 'LEGAL_REVIEW', null, null) as id`;
+    await tx`select api.add_export_item(${r!.id}, 'CASE_SUMMARY', ${c.caseId})`;
+    const [p] = await tx<{ h: string }[]>`select api.preview_export(${r!.id}) ->> 'hash' as h`;
+    await tx`select api.submit_export(${r!.id}, ${p!.h}, 'CONFIDENTIAL'::core.classification_level)`;
+    return r!.id;
+  });
+  return { ...c, caseTitle: `Records e2e case ${label} (synthetic)`, requestId };
+}
+
+/** Its requester ends an export still open (a draft, waiting for approval, or approved), so no approver keeps it. */
+export async function cancelOpenExport(
+  requestId: string,
+  by: "caseManager" | "grcDeputy" = "caseManager",
+): Promise<void> {
+  await as(by, async (tx) => {
+    const [r] = await tx<{ status: string | null }[]>`
+      select api.export_request_view(${requestId}) ->> 'status' as status`;
+    if (r?.status === "DRAFT" || r?.status === "SUBMITTED" || r?.status === "APPROVED")
+      await tx`select api.cancel_export(${requestId}, ${EXCHANGE_REASON})`;
+  });
+}
+
+/**
+ * How many times the export's content was shown (EXPORT_PREVIEWED in the audit ledger, which only the preview page
+ * records), read with the owner connection as eligibleCase reads it: no application role reads the ledger this way.
+ */
+export async function previewsOf(requestId: string): Promise<number> {
+  const admin = postgres(process.env.CDF_ADMIN_DATABASE_URL ?? url("postgres", "CDF_ADMIN_DB_PASSWORD"), {
+    max: 1,
+    onnotice: () => undefined,
+  });
+  try {
+    const [r] = await admin<{ n: number }[]>`
+      select count(*)::int as n from audit.audit_event where action = 'EXPORT_PREVIEWED' and object_id = ${requestId}`;
+    return r!.n;
+  } finally {
+    await admin.end();
+  }
+}
+
+/** Who prepared the fixtures' workbook and recorded its rows offline: the GRC Deputy, so the GRC Director approves. */
+export const WORKBOOK_PREPARER = "grc.deputy@example.test";
+/** The person the workbook's subject row adds to the case. */
+export const IMPORTED_SUBJECT = "Employee Omega (synthetic)";
+
+export interface ImportFixture {
+  caseId: string;
+  caseNumber: string;
+  batchId: string;
+  /** The subject row the platform imports (05_SUBJECTS, NEW). */
+  subjectRowId: string;
+  /** The row of a sheet the platform does not import (02_CASE_MASTER, UNSUPPORTED), to skip. */
+  unsupportedRowId: string;
+}
+
+/**
+ * A continuity workbook (BCP-1) staged by the case manager, the seed's authorized continuity operator (DEC-F30), for a
+ * fresh CONFIDENTIAL case: prepared and recorded offline by the GRC Deputy, so only the GRC Director may approve it.
+ * One subject row the platform imports and one row it does not. With `submitted`, the case manager skips that row,
+ * runs the dry run and submits the batch for approval.
+ */
+export async function stagedImport(label: string, submitted = false): Promise<ImportFixture> {
+  const c = await screeningCase(label);
+  // The longest workbook id the template allows (64 characters), so each page's reflow check at 320 px covers it.
+  const workbook = `BCP-E2E-${label}`
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "-")
+    .slice(0, 64)
+    .padEnd(64, "0");
+  return as("caseManager", async (tx) => {
+    const iso = `'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`;
+    const [t] = await tx.unsafe<{ created: string; now: string }[]>(
+      `select to_char(created_at at time zone 'UTC', ${iso}) as created, to_char(now() at time zone 'UTC', ${iso}) as now
+         from case_mgmt.case_record where id = $1`,
+      [c.caseId],
+    );
+    const offline = { ORIGINAL_EVENT_AT: t!.now, RECORDED_OFFLINE_BY: WORKBOOK_PREPARER };
+    const control = {
+      TEMPLATE_VERSION: "BCP-1",
+      WORKBOOK_ID: workbook,
+      CASE_ID: c.caseId,
+      CASE_NUMBER: c.caseNumber,
+      OFFLINE_FROM: t!.created,
+      PREPARED_BY: WORKBOOK_PREPARER,
+    };
+    const rows = [
+      {
+        sheet: "05_SUBJECTS",
+        row_number: 3,
+        cells: {
+          ROW_ID: "BCP-S1",
+          ...offline,
+          DISPLAY_LABEL: IMPORTED_SUBJECT,
+          SUBJECT_CATEGORY: "EMPLOYEE",
+        },
+        has_formula: false,
+      },
+      {
+        sheet: "02_CASE_MASTER",
+        row_number: 3,
+        cells: { ROW_ID: "BCP-C1", ...offline, DETAILS: "Synthetic: the case's details noted on paper." },
+        has_formula: false,
+      },
+    ];
+    const [b] = await tx<{ id: string }[]>`
+      select api.stage_bcp_import(${tx.json(control)}::jsonb, ${"e".repeat(64)}, ${tx.json(rows)}::jsonb) as id`;
+    const staged = await tx<{ id: string; row_key: string }[]>`
+      select id, row_key from exchange.bcp_import_row where batch_id = ${b!.id}`;
+    const rowId = (key: string) => staged.find((r) => r.row_key === key)!.id;
+    if (submitted) {
+      await tx`select api.resolve_bcp_row(${rowId("BCP-C1")}, 'SKIP', ${EXCHANGE_REASON})`;
+      const [p] = await tx<{ h: string }[]>`select api.preview_bcp_import(${b!.id}) ->> 'hash' as h`;
+      await tx`select api.submit_bcp_import(${b!.id}, ${p!.h})`;
+    }
+    return {
+      ...c,
+      batchId: b!.id,
+      subjectRowId: rowId("BCP-S1"),
+      unsupportedRowId: rowId("BCP-C1"),
+    };
+  });
+}
+
+/** Its importer ends a batch still open (staged, submitted or approved), so no approver keeps it in My Work. */
+export async function cancelOpenImport(batchId: string): Promise<void> {
+  await as("caseManager", async (tx) => {
+    const [r] = await tx<{ status: string | null }[]>`
+      select api.bcp_import_batch_view(${batchId}) ->> 'status' as status`;
+    if (r?.status === "STAGED" || r?.status === "SUBMITTED" || r?.status === "APPROVED")
+      await tx`select api.cancel_bcp_import(${batchId}, ${EXCHANGE_REASON})`;
+  });
 }
