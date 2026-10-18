@@ -529,9 +529,14 @@ test("ar: an owner's report left open while the decision is superseded records n
   await progress.getByTestId("action-progress-note").fill("Synthetic: half of the approvers are named.");
   // Meanwhile the decision the action carries out is superseded, which freezes the action.
   await supersededDecision(f);
-  const answers: Promise<string>[] = [];
-  owner.on("response", (r) => {
-    if (r.request().method() === "POST") answers.push(r.text().catch(() => ""));
+  // CDF-257: the answer is read as it passes, then handed to the page unchanged. Read from the browser afterwards, it
+  // is sometimes gone: the browser can drop the body of an answer the page has already used.
+  const answers: string[] = [];
+  await owner.route(`**/actions/${f.actionId}`, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const response = await route.fetch();
+    answers.push(await response.text());
+    await route.fulfill({ response });
   });
   await progress.locator('button[type="submit"]').click();
   // The page, read again, says reporting is paused; the notice at its top says nothing was recorded, in words that
@@ -544,8 +549,9 @@ test("ar: an owner's report left open while the decision is superseded records n
     /^غير ممكن الآن\s*يتعذّر المضي في الإجراء حالياً، فلم يُسجَّل شيء\. المرجع: [0-9a-f-]{36}$/,
   );
   await expect(notice).toBeFocused();
-  // What the browser was sent carries ACTION_BLOCKED, never the block's own code.
-  const sent = (await Promise.all(answers)).join("\n");
+  // What the browser was sent, in its one answer, carries ACTION_BLOCKED, never the block's own code.
+  expect(answers).toHaveLength(1);
+  const sent = answers.join("\n");
   expect(sent).toContain("ACTION_BLOCKED");
   expect(sent).not.toContain("FROZEN_BY_SUPERSEDED_DECISION");
   for (const id of ["action-block", "action-origin"]) await expect(owner.getByTestId(id), id).toHaveCount(0);
