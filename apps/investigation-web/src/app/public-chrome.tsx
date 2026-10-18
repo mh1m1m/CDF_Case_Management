@@ -1,8 +1,9 @@
 // The chrome for pages outside the signed-in shell: sign-in and unknown addresses. The environment marker, the
-// product mark and the language switch; no navigation and no account menu.
+// product mark and the language switch; no navigation and no account menu. With JavaScript off, a line says that
+// signing in needs it (CDF-255).
 import type { ReactNode } from "react";
 import type { Translator } from "@cdf/i18n";
-import { CDFClassificationBanner, CDFShell } from "@cdf/ui";
+import { CDFClassificationBanner, CDFNoScriptNotice, CDFShell } from "@cdf/ui";
 import { LanguageSwitch } from "./language-switch";
 
 export function PublicChrome({ t, children }: { t: Translator; children: ReactNode }) {
@@ -10,10 +11,13 @@ export function PublicChrome({ t, children }: { t: Translator; children: ReactNo
     <CDFShell
       skipLabel={t("common.skipToContent")}
       banner={
-        <CDFClassificationBanner
-          label={t("common.classificationBanner")}
-          detail={t("common.classificationBannerDetail")}
-        />
+        <>
+          <CDFClassificationBanner
+            label={t("common.classificationBanner")}
+            detail={t("common.classificationBannerDetail")}
+          />
+          <CDFNoScriptNotice text={t("common.noScript")} />
+        </>
       }
       brand={
         <a href="/" className="flex items-center gap-3">

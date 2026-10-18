@@ -3,6 +3,7 @@
 // approver and the hash binding.
 import type { BcpImportGateway, UserRequestContext } from "@cdf/application";
 import type {
+  BcpBatchScope,
   BcpBatchStatus,
   BcpImportBatch,
   BcpImportCounts,
@@ -16,6 +17,8 @@ type P<K extends keyof BcpImportGateway> = Parameters<BcpImportGateway[K]>[1];
 interface BatchRow {
   id: string;
   case_id: string;
+  scope: BcpBatchScope;
+  committee_proceeding_id: string | null;
   workbook_id: string;
   template_version: string;
   status: BcpBatchStatus;
@@ -85,8 +88,8 @@ export class PostgresBcpImportGateway implements BcpImportGateway {
   list(ctx: UserRequestContext, filter: P<"list">): Promise<BcpImportBatch[]> {
     return this.run(ctx, async (tx) => {
       const rows = await tx<BatchRow[]>`
-        select b.id, b.case_id, b.workbook_id, b.template_version, b.status, b.imported_by, b.preview_hash,
-               b.preview_clean, b.submitted_hash, b.created_at::text as created_at,
+        select b.id, b.case_id, b.scope, b.committee_proceeding_id, b.workbook_id, b.template_version, b.status,
+               b.imported_by, b.preview_hash, b.preview_clean, b.submitted_hash, b.created_at::text as created_at,
                b.submitted_at::text as submitted_at, b.decided_at::text as decided_at
         from exchange.bcp_import_batch b
         where (${filter.caseId ?? null}::uuid is null or b.case_id = ${filter.caseId ?? null}::uuid)
@@ -95,6 +98,8 @@ export class PostgresBcpImportGateway implements BcpImportGateway {
       return rows.map((r) => ({
         id: r.id,
         caseId: r.case_id,
+        scope: r.scope,
+        committeeProceedingId: r.committee_proceeding_id,
         workbookId: r.workbook_id,
         templateVersion: r.template_version,
         status: r.status,

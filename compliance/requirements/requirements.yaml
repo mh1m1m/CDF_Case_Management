@@ -325,15 +325,30 @@ requirements:
     title: "A refused command keeps every value and choice; consequential choices are never preselected; controlled acts are confirmed"
     source: [UX audit 2026-10-10 UX-001, UX-019, UX-031]
     external_ids: []
-    linear_issues: [CDF-132, CDF-133, CDF-183]
+    linear_issues: [CDF-132, CDF-133, CDF-183, CDF-232, CDF-255]
     status: COMPLETE
     enforcement:
       [
         packages/ui/src/command-form.tsx,
+        packages/ui/src/hydration.tsx,
         packages/ui/src/confirm-dialog.tsx,
+        packages/ui/src/refusal-notice.tsx,
+        packages/ui/src/refusal-notice-state.ts,
         apps/investigation-web/src/app/(shell)/confirmations.ts,
+        apps/investigation-web/src/app/(shell)/refusal-notices.tsx,
       ]
-    tests: [tests/e2e/command-form.spec.ts, packages/ui/src/command-form-fields.test.ts]
+    tests:
+      [
+        tests/e2e/command-form.spec.ts,
+        packages/ui/src/command-form-fields.test.ts,
+        packages/ui/src/refusal-notice-state.test.ts,
+        tests/e2e/corrective-actions.spec.ts,
+        tests/accessibility/corrective-actions.spec.ts,
+        tests/e2e/investigation-no-js.spec.ts,
+        packages/ui/src/hydration.test.ts,
+        apps/investigation-web/src/app/forms-wait-for-hydration.test.ts,
+      ]
+    notes: "CDF-232 (2026-10-17, with P12-6a): a form that leaves the page with its command's refusal, because the page read again no longer offers it after another user's action moved its subject on, hands the refusal to a page-level notice at the top of the content: the class of refusal, the command's own words for its code and the reference, nothing about the subject or the other user. In memory only; it takes focus when the form had it and clears on navigation and on the next command's answer. A form still on the page shows its own refusal, so only one ever shows. The form's server-rendered markup still names its command, as before (the positive controls of tests/e2e/security-csrf.spec.ts replay it). CDF-255 (2026-10-18): every submit button of the investigation app, sign-in and sign-out included, waits until the page is interactive, so the browser never posts a form on its own. Such a post carries `Origin: null` under `Referrer-Policy: no-referrer`, and the framework refused it with a bare error page. With JavaScript off the buttons stay disabled and a notice says that signing in, signing out and sending forms need it; pages can still be read. The origin check is unchanged (SECURITY_RULES I-8)."
 
   - id: CDF-UX-005
     title: "Work-led shell: at most five areas from permission and relationship, a landing where the user's work is, and My Work listing only the user's own actionable items"
@@ -876,7 +891,7 @@ requirements:
         "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
         apps/investigation-web/src/server/work-routes.test.ts,
       ]
-    notes: "No migration. The pages read only the purpose read models and the audited packet read, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. The reviewer's page and packet open only for the request's assignee while the packet is theirs; anyone else gets the same 404 as a missing request, with ACCESS_DENIED recorded. The ask page reads L2 only when opened; the record page reads R2 only. Packets show the persons concerned as stored (ruling 4); elsewhere people are by number and category until the owner answers the DEC-02 label card. Known limitations (ADR-057): once the proceeding is closed an authority's decision cannot be recorded from the product though the command accepts; an unused approval is not shown on the case; with the default grace of 0 days the reviewer's page ends with the decision. Not in this change: the corrective actions of a superseded decision (P12-3b, CDF-230) and the sanction extract (P12-5)."
+    notes: "No migration. The pages read only the purpose read models and the audited packet read, never a case table; every action runs its api.* command in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only. The reviewer's page and packet open only for the request's assignee while the packet is theirs; anyone else gets the same 404 as a missing request, with ACCESS_DENIED recorded. The ask page reads L2 only when opened; the record page reads R2 only. Packets show the persons concerned as stored (ruling 4); elsewhere people are by number and category until the owner answers the DEC-02 label card. Known limitations (ADR-057): once the proceeding is closed an authority's decision cannot be recorded from the product though the command accepts; an unused approval is not shown on the case; with the default grace of 0 days the reviewer's page ends with the decision. Not in this change: the corrective actions of a superseded decision (P12-3b, CDF-230) and the sanction extract (P12-5). Since 2026-10-17 the service pre-checks LEGAL_OPINION_GIVE before either opinion reaches the database, recording a refusal as COMMAND_DENIED with the command and outcome only (AGENT-09's INFO item; ADR-057)."
 
   - id: CDF-UX-021
     title: "Corrective actions under a superseded decision: the case's actions with why each may not move, and on a frozen action what a disposition is checked against, offered only to whoever its command would accept now"
@@ -961,7 +976,56 @@ requirements:
         "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
         apps/investigation-web/src/server/work-routes.test.ts,
       ]
-    notes: "No migration. The pages read only A1 and A2, never a case table; the disposition runs api.dispose_superseded_corrective_action in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only, never the reason, wording or document typed. The action's page gives whoever may see the action its card and the case team its origin and dispositions, never a disposition's reason; anyone else, and an id that names nothing, get the same 404, with ACCESS_DENIED recorded. Forms show only per may_dispose, disposition_options, may_name_owner and the owner candidates; each cites one of the replacement decision's own documents. My Work's ACTION_TO_DISPOSE row opens the action's disposition; the owner's and verifier's rows wait for P12-6, when /actions joins the live purpose roots. Known limitation (ADR-058): a form whose action moved on shows the disposition recorded first, not the refusal's words (CDF-232)."
+    notes: "No migration. The pages read only A1 and A2, never a case table; the disposition runs api.dispose_superseded_corrective_action in the caller's security context, and a refusal is recorded as COMMAND_DENIED with the command and outcome only, never the reason, wording or document typed. The action's page gives whoever may see the action its card and the case team its origin and dispositions, never a disposition's reason; anyone else, and an id that names nothing, get the same 404, with ACCESS_DENIED recorded. Forms show only per may_dispose, disposition_options, may_name_owner and the owner candidates; each cites one of the replacement decision's own documents. My Work's ACTION_TO_DISPOSE row opens the action's disposition; since P12-6a (CDF-UX-023) the owner's and verifier's rows open their steps and /actions is a live purpose root. A form whose action moved on showed the disposition recorded first, not the refusal's words (CDF-232); since P12-6a a page-level notice shows them (CDF-UX-004)."
+
+  - id: CDF-UX-023
+    title: "A corrective action's owner reports progress and submits it as complete with the evidence the policy asks for; a manager other than the owner and any submitter verifies or returns it and reopens a completed one; the action's history for whoever may see it; each form only where its command would accept the caller now, in Arabic and English"
+    source:
+      [
+        Phase 12 plan P12-6,
+        UX-045,
+        UX-116,
+        ADR-016 D0 and D2,
+        CDF-73 option D,
+        ADR-033,
+        DEC-F27,
+        DEC-AMB-014,
+        CDF-227,
+        ADR-058 P12-6a amendment,
+        coordinator ruling 2026-10-17 18:41 (CDF-253),
+      ]
+    external_ids: []
+    linear_issues: [CDF-250, CDF-253]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.corrective_action_view,
+        api.record_corrective_action_progress,
+        api.submit_corrective_action_completion,
+        api.verify_corrective_action,
+        api.reopen_corrective_action,
+        packages/application/src/corrective-actions.ts,
+        packages/validation/src/corrective-actions.ts,
+        "apps/investigation-web/src/app/(shell)/actions/[actionId]/page.tsx",
+        "apps/investigation-web/src/app/(shell)/actions/[actionId]/actions.ts",
+        "apps/investigation-web/src/app/(shell)/actions/labels.ts",
+        apps/investigation-web/src/server/work-routes.ts,
+      ]
+    tests:
+      [
+        tests/integration/corrective-actions.spec.ts,
+        tests/e2e/corrective-actions.spec.ts,
+        tests/accessibility/corrective-actions.spec.ts,
+        packages/validation/src/corrective-actions.test.ts,
+        packages/application/src/corrective-actions.test.ts,
+        packages/infrastructure/src/db/corrective-action-gateway.test.ts,
+        "apps/investigation-web/src/app/(shell)/actions/labels.test.ts",
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        apps/investigation-web/src/server/work-routes.test.ts,
+        tests/security/superseded-decision-corrective-actions.spec.ts,
+        tests/security/my-work-phase12.spec.ts,
+      ]
+    notes: "No migration (P12-6a, on 2096's view). Each form shows only where A2's flag says its command would accept the caller now, and runs its api.* command in the caller's security context after the schema and the role permission (CORRECTIVE_ACTION_OWN to report, CORRECTIVE_ACTION_MANAGE to verify or reopen); a refusal is recorded as COMMAND_DENIED with the command and outcome only, and the audit events carry no note. The completion asks for a reference unless the policy in force accepts a note alone, and for a kind of evidence from the policy's list where it lists any. The history names only the reader ('by you') and, for the case team, the owner; notes are shown as A2 gives them (CDF-227). Outside the case team an action that may not move reads as paused, never why, and the page's answers carry ACTION_BLOCKED in place of each block code. My Work's ACTION_ASSIGNED and ACTION_RETURNED rows open the report, ACTION_TO_VERIFY the verification. Known limitation (ADR-058): a progress note that leaves the percentage of an action in progress unchanged is recorded while the action is held; the page never offers it, and 2170 closes it in the command (CDF-253). Not in this change (P12-6b): reassignment, the kind of owner, the due date and the waiver."
 
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"

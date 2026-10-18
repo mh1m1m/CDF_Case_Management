@@ -67,7 +67,12 @@ export type ConfirmAct =
   | "disposeReAdopt"
   | "disposeModify"
   | "disposeWaive"
-  | "disposeReplace";
+  | "disposeReplace"
+  // The owner's completion, its verification and a reopening (Phase 12 P12-6a, ADR-058).
+  | "submitActionCompletion"
+  | "verifyActionCompletion"
+  | "returnActionCompletion"
+  | "reopenAction";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -105,6 +110,10 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   // The action carries on under the replacement decision; waiving or replacing it ends it.
   "disposeReAdopt",
   "disposeModify",
+  // A completion goes forward to its verifier and, verified, ends the action's work; returning or reopening it sends
+  // the work back.
+  "submitActionCompletion",
+  "verifyActionCompletion",
 ]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */

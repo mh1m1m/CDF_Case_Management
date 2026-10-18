@@ -630,6 +630,13 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
       tx`select api.schedule_meeting(${t.committeeProceeding}, 'DELIBERATION', 'IN_PERSON', 'Room (synthetic)', null,
         now() + interval '1 day', now() + interval '1 day 1 hour', ${REASON})`,
   },
+  // Migration 2110 (ADR-047): a lost committee workbook is revoked in its proceeding's namespace.
+  {
+    fn: "revoke_committee_bcp_workbook",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.revoke_committee_bcp_workbook(${t.committeeProceeding}, 'BCP-PROBE-2110', 'INC-DEMO-2110', ${REASON})`,
+  },
   {
     fn: "invite_to_meeting",
     outcome: "NOT_FOUND",
@@ -1717,6 +1724,9 @@ const ADMIN_COMMANDS = [
   // Continuity-workbook operator registry (migration 2040, DEC-F30): BCP_CONTINUITY_ADMIN only, no batch or case.
   "authorize_continuity_operator",
   "revoke_continuity_operator",
+  // Migration 2110 (ADR-047): a registry entry for one committee proceeding; BCP_CONTINUITY_ADMIN only, which sees no
+  // proceeding: one refusal code whether the proceeding is unknown, closed or the user holds no secretary seat.
+  "authorize_committee_continuity_operator",
   // Corrective-action policy (migration 1940): CORRECTIVE_ACTION_POLICY_ADMIN only, no action or case; its shared
   // owner pools (migration 2040, DEC-F28) likewise.
   "set_corrective_action_policy",

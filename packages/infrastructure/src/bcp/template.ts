@@ -1,6 +1,7 @@
-// The empty BCP-1 continuity workbook (ADR-034 D1), generated from the template definition in @cdf/contracts. Row 1
-// of every sheet holds the column codes the importer matches, row 2 their labels; data starts on row 3.
-import { BCP_TEMPLATE, BCP_TEMPLATE_VERSION, type BcpSheet } from "@cdf/contracts";
+// The empty continuity workbooks, generated from the template definitions in @cdf/contracts: BCP-1 for a case
+// (ADR-034 D1) and BCP-C1 for a committee proceeding (migration 2110, ADR-047). Row 1 of every sheet holds the column
+// codes the importer matches, row 2 their labels; data starts on row 3.
+import { BCP_TEMPLATE_VERSION, BCP_TEMPLATES, type BcpSheet, type BcpTemplateVersion } from "@cdf/contracts";
 import { writeWorkbook, type WrittenSheet } from "./workbook-writer";
 
 export interface BcpTemplateText {
@@ -19,13 +20,16 @@ function dataSheet(sheet: BcpSheet, text: BcpTemplateText): WrittenSheet {
   };
 }
 
-/** The template's sheets, in template order. */
-export function bcpTemplateSheets(text: BcpTemplateText): WrittenSheet[] {
-  return BCP_TEMPLATE.map((sheet) =>
+/** The template's sheets, in template order (BCP-1 unless another is named). */
+export function bcpTemplateSheets(
+  text: BcpTemplateText,
+  version: BcpTemplateVersion = BCP_TEMPLATE_VERSION,
+): WrittenSheet[] {
+  return BCP_TEMPLATES[version].map((sheet) =>
     sheet.kind === "README"
       ? {
           name: sheet.code,
-          rows: [[`${BCP_TEMPLATE_VERSION}`], ...text.readme.map((line) => [line])],
+          rows: [[`${version}`], ...text.readme.map((line) => [line])],
           columnWidth: 120,
           boldRows: [1],
         }
@@ -34,6 +38,9 @@ export function bcpTemplateSheets(text: BcpTemplateText): WrittenSheet[] {
 }
 
 /** The template workbook's bytes. Deterministic: the committed file is checked against this output. */
-export function buildBcpTemplate(text: BcpTemplateText): Uint8Array {
-  return writeWorkbook(bcpTemplateSheets(text));
+export function buildBcpTemplate(
+  text: BcpTemplateText,
+  version: BcpTemplateVersion = BCP_TEMPLATE_VERSION,
+): Uint8Array {
+  return writeWorkbook(bcpTemplateSheets(text, version));
 }

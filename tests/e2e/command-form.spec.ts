@@ -107,6 +107,8 @@ for (const locale of ["ar", "en"] as const) {
     await close.getByRole("button").click();
     await manager.getByRole("dialog").getByTestId("confirm-submit").click();
     await expect(close.getByRole("alert")).toBeVisible();
+    // The form is still on the page and shows the refusal itself, so the page-level notice stays away (CDF-232).
+    await expect(manager.getByTestId("refusal-notice")).toHaveCount(0);
     await expect(close.locator("textarea")).toHaveValue("short");
     await expect(manager.getByTestId("case-state")).toHaveText(
       locale === "ar" ? "الفحص الأولي" : "Screening",

@@ -2,19 +2,23 @@
 // through RLS, in the caller's security context: the database decides ownership, the case gate and the authority.
 // Phase 12 P12-3b (ADR-058, migration 2096): the case's actions (A1, api.case_corrective_actions) and one action
 // (A2, api.corrective_action_view) come from their read models, whose keys the gateway renames, and a frozen action's
-// disposition from its command (api.dispose_superseded_corrective_action).
+// disposition from its command (api.dispose_superseded_corrective_action). P12-6a: A2's policy and history too, and a
+// completion with its evidence type (the four-argument command).
 import type { CorrectiveActionGateway, UserRequestContext } from "@cdf/application";
 import type {
   ActionBlock,
   ActionDisposition,
+  ActionEventType,
   ActionOwner,
   ActionOwnerKind,
   ActionSource,
   CaseCorrectiveAction,
+  CompletionEvidenceRule,
   CorrectiveAction,
   CorrectiveActionStatus,
   CorrectiveActionType,
   CorrectiveActionView,
+  CorrectiveEvidenceType,
 } from "@cdf/contracts";
 import { account, each, iso, isoOrNull, yes, type RawAccount } from "./committee-proceedings-gateway";
 import { withUserContext, type Sql, type Tx } from "./security-context";
@@ -116,6 +120,23 @@ interface RawView {
     } | null;
   } | null;
   case: { case_id: string | null; case_number: string | null };
+  policy: {
+    completion_evidence: CompletionEvidenceRule | null;
+    allowed_evidence_types: CorrectiveEvidenceType[] | null;
+  } | null;
+  events:
+    | {
+        event_id: string;
+        event_type: ActionEventType;
+        actor_id: string;
+        note: string | null;
+        evidence_reference: string | null;
+        evidence_type: CorrectiveEvidenceType | null;
+        percent_complete: number | null;
+        due_date: string | null;
+        created_at: string;
+      }[]
+    | null;
   capabilities: {
     may_record_progress: boolean;
     may_submit_completion: boolean;
@@ -238,6 +259,23 @@ export function toCorrectiveActionView(v: RawView): CorrectiveActionView {
         }
       : null,
     case: { caseId: v.case.case_id ?? null, caseNumber: v.case.case_number ?? null },
+    // With no policy in force the command asks for a reference (anything but NOTE_ONLY does), so the page asks too.
+    policy: {
+      completionEvidence: v.policy?.completion_evidence === "NOTE_ONLY" ? "NOTE_ONLY" : "REFERENCE_REQUIRED",
+      allowedEvidenceTypes: v.policy?.allowed_evidence_types ?? null,
+    },
+    // The view's history, without the person OPENED and OWNER_CHANGED name or a waiver's document (not shown).
+    events: each(v.events, (e) => ({
+      eventId: e.event_id,
+      eventType: e.event_type,
+      actorId: e.actor_id,
+      note: e.note ?? null,
+      evidenceReference: e.evidence_reference ?? null,
+      evidenceType: e.evidence_type ?? null,
+      percentComplete: e.percent_complete ?? null,
+      dueDate: e.due_date ?? null,
+      createdAt: iso(e.created_at),
+    })),
     capabilities: {
       mayRecordProgress: yes(c.may_record_progress),
       maySubmitCompletion: yes(c.may_submit_completion),
@@ -335,11 +373,13 @@ export class PostgresCorrectiveActionGateway implements CorrectiveActionGateway 
     );
   }
 
+  /** The four-argument command (DEC-F27, migration 2040): the evidence type, where the policy lists types. */
   async submitCompletion(ctx: UserRequestContext, i: P<"submitCompletion">): Promise<void> {
     await this.run(
       ctx,
       (tx) =>
-        tx`select api.submit_corrective_action_completion(${i.actionId}, ${i.note}, ${i.evidenceReference ?? null})`,
+        tx`select api.submit_corrective_action_completion(${i.actionId}, ${i.note}, ${i.evidenceReference ?? null},
+          ${i.evidenceType ?? null}::text)`,
     );
   }
 

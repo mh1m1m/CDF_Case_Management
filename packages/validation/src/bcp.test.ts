@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { BCP_MAX_ROWS } from "@cdf/contracts";
 import {
   bcpRowProblem,
+  bcpTemplateVersion,
   bcpUploadSchema,
   decideBcpImportSchema,
   resolveBcpRowSchema,
@@ -109,5 +110,84 @@ describe("continuity workbook schemas", () => {
         previewHash: hash,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("the committee workbook BCP-C1 (migration 2110, ADR-047)", () => {
+  const C_CONTROL = {
+    TEMPLATE_VERSION: "bcp-c1",
+    WORKBOOK_ID: "BCP-WB-C1",
+    COMMITTEE_PROCEEDING_ID: "00000000-0000-4000-8000-0000000000C1",
+    COMMITTEE_CODE: "IC",
+    OFFLINE_FROM: "2026-10-01T08:00:00Z",
+    OFFLINE_TO: "2026-10-02T08:00:00Z",
+    PREPARED_BY: "secretary@example.test",
+  };
+  const MEETING = {
+    ROW_ID: "BCP-M1",
+    ORIGINAL_EVENT_AT: "2026-10-01T10:00:00Z",
+    RECORDED_OFFLINE_BY: "secretary@example.test",
+    PURPOSE: "DELIBERATION",
+    MODE: "IN_PERSON",
+    LOCATION: "Room 1 (synthetic)",
+    HELD_START: "2026-10-01T10:00:00Z",
+    HELD_END: "2026-10-01T11:00:00Z",
+    PAPER_MINUTES_REFERENCE: "PAPER-MIN-1",
+    REASON: "Synthetic: held during the outage.",
+  };
+  const cStage = (input: Record<string, unknown>) =>
+    stageBcpImportSchema.safeParse({
+      control: C_CONTROL,
+      fileSha256: "a".repeat(64),
+      rows: [row(3, MEETING, "09_MEETINGS")],
+      ...input,
+    });
+
+  it("checks the control row and the rows against the template the control row names", () => {
+    expect(bcpTemplateVersion(" bcp-c1 ")).toBe("BCP-C1");
+    expect(bcpTemplateVersion("BCP-C2")).toBeNull();
+    expect(cStage({}).success).toBe(true);
+    // OFFLINE_TO is required for a committee workbook: the window is closed.
+    const { OFFLINE_TO: _, ...open } = C_CONTROL;
+    expect(paths(cStage({ control: open }))).toEqual(["control.OFFLINE_TO"]);
+    // A case column in a committee control row, and the reverse, are unknown keys.
+    expect(paths(cStage({ control: { ...C_CONTROL, CASE_ID: CONTROL.CASE_ID } }))).toEqual([
+      "control.CASE_ID",
+    ]);
+    expect(paths(stage({ control: { ...CONTROL, COMMITTEE_CODE: "IC" } }))).toEqual([
+      "control.COMMITTEE_CODE",
+    ]);
+    expect(paths(cStage({ control: { ...C_CONTROL, TEMPLATE_VERSION: "BCP-C2" } }))).toEqual([
+      "control.TEMPLATE_VERSION",
+    ]);
+    // A case sheet in a committee workbook, and a committee sheet's cells in a case workbook, are refused.
+    expect(paths(cStage({ rows: [row(3)] }))).toEqual(["rows.0.sheet"]);
+    expect(paths(stage({ rows: [row(3, MEETING, "09_MEETINGS")] }))).toEqual(["rows.0.cells"]);
+  });
+
+  it("classifies a committee row as the database will", () => {
+    expect(bcpRowProblem("09_MEETINGS", MEETING, false, "BCP-C1")).toBeNull();
+    expect(bcpRowProblem("09_MEETINGS", { ...MEETING, MODE: "PHONE" }, false, "BCP-C1")).toBe("MODE");
+    expect(bcpRowProblem("09_MEETINGS", { ...MEETING, PAPER_MINUTES_REFERENCE: "x" }, false, "BCP-C1")).toBe(
+      "PAPER_MINUTES_REFERENCE",
+    );
+    expect(
+      bcpRowProblem(
+        "11_CONFLICTS",
+        {
+          ROW_ID: "BCP-K1",
+          ORIGINAL_EVENT_AT: "2026-10-01T10:30:00Z",
+          RECORDED_OFFLINE_BY: "secretary@example.test",
+          MEETING_REF: "BCP-M1",
+          PARTICIPANT: "member@example.test",
+          REASON: "Synthetic: noted on paper.",
+        },
+        false,
+        "BCP-C1",
+      ),
+    ).toBeNull();
+    expect(bcpRowProblem("05_SUBJECTS", SUBJECT, false, "BCP-C1")).toBe("SHEET");
+    // The same sheet code reads by its own template's columns.
+    expect(bcpRowProblem("09_MEETINGS", MEETING, false)).toBe("DETAILS");
   });
 });
