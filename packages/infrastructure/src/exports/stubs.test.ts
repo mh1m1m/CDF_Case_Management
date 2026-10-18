@@ -1,4 +1,5 @@
-// Prototype export adapters (ADR-026): keys from the database only, write-once storage, synthetic delivery only.
+// Prototype export adapters (ADR-026): keys from the database only, write-once storage, synthetic delivery only, and
+// (P12-6b-1, DEC-51) the generation date in both calendars when the app gives the formatter.
 import { describe, expect, it } from "vitest";
 import type { ExportDocument } from "@cdf/contracts";
 import { InMemoryExportStore, StubExportMailer, StubJsonExportRenderer } from "./stubs";
@@ -21,6 +22,21 @@ describe("export stubs", () => {
     const file = await new StubJsonExportRenderer().render(doc);
     expect(file.contentType).toBe("application/json");
     expect(JSON.parse(new TextDecoder().decode(file.body))).toEqual(doc);
+  });
+
+  it("adds the generation date as a formal record shows it, in both languages, when given the formatter (DEC-51)", async () => {
+    const at = new Date("2026-10-18T09:30:00.000Z");
+    const renderer = new StubJsonExportRenderer({
+      recordDate: (locale, when) => `${locale}:${when.toISOString()}`,
+      now: () => at,
+    });
+    const file = await renderer.render(doc);
+    expect(JSON.parse(new TextDecoder().decode(file.body))).toEqual({
+      ...doc,
+      generatedAt: "2026-10-18T09:30:00.000Z",
+      generatedOn: { en: "en:2026-10-18T09:30:00.000Z", ar: "ar:2026-10-18T09:30:00.000Z" },
+    });
+    expect(file.fileName).toBe(`export-${doc.requestId}.json`);
   });
 
   it("stores under database keys only, and never overwrites", async () => {

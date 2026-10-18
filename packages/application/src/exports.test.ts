@@ -2,7 +2,14 @@
 // that renders and stores inside the gateway's transaction, and delivery recorded only when the mailer accepts it.
 // The database side (per-item authorization, hashes, approvals) is in tests/security/export.spec.ts.
 import { describe, expect, it } from "vitest";
-import type { Actor, ExportDelivery, ExportDocument, GeneratedExport, Permission } from "@cdf/contracts";
+import type {
+  Actor,
+  ExportDelivery,
+  ExportDocument,
+  ExportRequestPage,
+  GeneratedExport,
+  Permission,
+} from "@cdf/contracts";
 import type { SecurityEvent } from "@cdf/audit";
 import { createExportService, type ExportGateway } from "./exports";
 import type { RenderedExport } from "./ports";
@@ -47,8 +54,76 @@ function document(format: ExportDocument["format"]): ExportDocument {
   };
 }
 
+/** The page as the gateway returns it: a draft the requester sees, every flag off but the preview. */
+function page(): ExportRequestPage {
+  return {
+    view: {
+      requestId: REQUEST,
+      status: "DRAFT",
+      format: "EMAIL",
+      audience: "EXTERNAL",
+      purpose: "REGULATORY_OR_EXTERNAL_AUTHORITY",
+      externalParty: "Regulator Alpha (synthetic)",
+      justification: "Synthetic: the regulator asked for the case summary.",
+      classificationAtSubmit: null,
+      approvalsRequired: null,
+      authorityApprovalRequired: false,
+      matchedRules: [],
+      previewHash: null,
+      previewedAt: null,
+      submittedHash: null,
+      requestedBy: ctx.userId,
+      createdAt: "2026-10-18T09:00:00.000Z",
+      submittedAt: null,
+      decidedAt: null,
+      generatedAt: null,
+      sentAt: null,
+      cancelledAt: null,
+      updatedAt: "2026-10-18T09:00:00.000Z",
+      rowVersion: 1,
+      current: {
+        hash: HASH,
+        withheld: 0,
+        refusedByRule: false,
+        approvalsRequired: 2,
+        authorityApprovalRequired: false,
+        nextStage: null,
+        authorityConsentBlocked: null,
+      },
+      items: [],
+      recipients: [],
+      approvals: [],
+      authorityDecision: null,
+      caseId: CASE,
+      caseNumber: "CDF-DEMO-2026-0001",
+      capabilities: {
+        mayAddItem: false,
+        mayAddRecipient: false,
+        mayPreview: true,
+        maySubmit: false,
+        mayApprove: false,
+        mayReject: false,
+        mayAuthorityApprove: false,
+        mayAuthorityReject: false,
+        mayGenerate: false,
+        mayRecordSent: false,
+        mayCancel: false,
+      },
+    },
+    people: [],
+    purpose: null,
+    rules: [],
+    approvedDomains: "SOURCE_REQUIRED",
+  };
+}
+
 function harness(
-  opts: { format?: ExportDocument["format"]; mailer?: "ok" | "refuse" | "throw"; renderFails?: boolean } = {},
+  opts: {
+    format?: ExportDocument["format"];
+    mailer?: "ok" | "refuse" | "throw";
+    renderFails?: boolean;
+    readRefusal?: string;
+  } = {},
 ) {
   const calls: string[] = [];
   const events: SecurityEvent[] = [];
@@ -67,6 +142,16 @@ function harness(
         : [],
   };
   const gateway: ExportGateway = {
+    view: async () => {
+      calls.push("view");
+      if (opts.readRefusal) throw new Error(opts.readRefusal);
+      return page();
+    },
+    purposes: async () => {
+      calls.push("purposes");
+      if (opts.readRefusal) throw new Error(opts.readRefusal);
+      return [];
+    },
     create: async () => (calls.push("create"), REQUEST),
     addItem: async () => (calls.push("addItem"), REQUEST),
     addRecipient: async () => (calls.push("addRecipient"), REQUEST),
@@ -162,9 +247,59 @@ describe("export service", () => {
       requestId: REQUEST,
       kind: "EXTERNAL",
       email: "officer@regulator.example.com",
+      emailConfirmation: "officer@regulator.example.com",
     });
     expect(r.ok).toBe(false);
+    if (!r.ok && "fieldErrors" in r)
+      expect(r.fieldErrors.issues.map((i) => i.path.join("."))).toEqual(["email"]);
     expect(calls).toEqual([]);
+  });
+
+  it("AMB-187: an external address typed twice differently never reaches the gateway", async () => {
+    const { service, calls } = harness();
+    const r = await service.addRecipient(ctx, requester, {
+      requestId: REQUEST,
+      kind: "EXTERNAL",
+      email: "officer.alpha@example.test",
+      emailConfirmation: "officer.alpah@example.test",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok && "fieldErrors" in r)
+      expect(r.fieldErrors.issues.map((i) => [i.path.join("."), i.message])).toEqual([
+        ["emailConfirmation", "validation.emailMismatch"],
+      ]);
+    expect(calls).toEqual([]);
+    const same = await service.addRecipient(ctx, requester, {
+      requestId: REQUEST,
+      kind: "EXTERNAL",
+      email: " Officer.Alpha@example.test",
+      emailConfirmation: "officer.alpha@EXAMPLE.test ",
+    });
+    expect(same.ok).toBe(true);
+    expect(calls).toEqual(["addRecipient"]);
+  });
+
+  it("P12-6b-1: reads the export's page, and a refused read is the uniform not-found recorded as ACCESS_DENIED", async () => {
+    const ok = harness();
+    expect((await ok.service.view(ctx, REQUEST))?.view.requestId).toBe(REQUEST);
+    expect(ok.events).toEqual([]);
+    for (const refusal of ["CDF_NOT_FOUND", "CDF_FORBIDDEN"]) {
+      const { service, events } = harness({ readRefusal: refusal });
+      expect(await service.view(ctx, REQUEST)).toBeNull();
+      expect(events).toEqual([
+        {
+          action: "ACCESS_DENIED",
+          objectType: "export_request",
+          objectId: REQUEST,
+          metadata: { read: "export_request_view" },
+        },
+      ]);
+    }
+    // Anything else is not a refusal: it is never turned into a not-found.
+    const down = harness({ readRefusal: "connection reset" });
+    await expect(down.service.view(ctx, REQUEST)).rejects.toMatchObject({ kind: "UNAVAILABLE" });
+    expect(down.events).toEqual([]);
+    await expect(down.service.purposes(ctx)).rejects.toMatchObject({ kind: "UNAVAILABLE" });
   });
 
   it("pre-checks the permission and records the refusal without calling the gateway", async () => {

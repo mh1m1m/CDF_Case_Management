@@ -2,10 +2,12 @@
 // Pages never pick a colour for a status: they name the domain and the status code, and the registry decides.
 import type {
   AllegationStatus,
+  BcpBatchStatus,
   CaseTaskStatus,
   CorrectiveActionStatus,
   EvidenceStatus,
   EvidenceVersionStatus,
+  ExportStatus,
   FormStatus,
   FindingResult,
   InterviewStatus,
@@ -56,6 +58,13 @@ interface Registry {
   legalReview: Record<LegalReviewStatus, StatusTone>;
   /** A corrective action (P12-3b): amber while its completion waits for the verifier; a waiver ends it, neutrally. */
   correctiveAction: Record<CorrectiveActionStatus, StatusTone>;
+  /**
+   * An export request (P12-6b-1): amber while it waits for its approvers or for its requester to generate it; green
+   * once sent; a rejection is a decision, so neutral.
+   */
+  exportRequest: Record<ExportStatus, StatusTone>;
+  /** A continuity workbook import (P12-6b-1): amber while it waits for its approver or to be applied. */
+  bcpImport: Record<BcpBatchStatus, StatusTone>;
 }
 export type StatusDomain = keyof Registry;
 
@@ -157,6 +166,25 @@ export const STATUS_TONES: Registry = {
     PENDING_VERIFICATION: "warning",
     COMPLETED: "success",
     WAIVED: "neutral",
+  },
+  // GENERATED is the end of a PDF or Excel export, and an email export the mail relay did not take: info either way,
+  // and the page says which.
+  exportRequest: {
+    DRAFT: "info",
+    SUBMITTED: "warning",
+    APPROVED: "warning",
+    GENERATED: "info",
+    SENT: "success",
+    REJECTED: "neutral",
+    CANCELLED: "neutral",
+  },
+  bcpImport: {
+    STAGED: "info",
+    SUBMITTED: "warning",
+    APPROVED: "warning",
+    IMPORTED: "success",
+    REJECTED: "neutral",
+    CANCELLED: "neutral",
   },
 };
 

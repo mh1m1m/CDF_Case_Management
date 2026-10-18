@@ -10,12 +10,16 @@
  * COMMAND_DENIED or VALIDATION_REJECTED security events with codes only. The file is not kept, only its SHA-256
  * (PRODUCTION_SUBSTITUTION_REQUIRED: the original kept in the private evidence store). Nothing here logs cell text,
  * file names or file content (§83).
+ *
+ * UX redesign P12-6b-1: the batch's page reads `api.bcp_import_batch_view` (final 2110), row metadata only; a batch
+ * the caller may not see is the uniform not-found, recorded as ACCESS_DENIED.
  */
 import {
   BCP_MAX_WORKBOOK_BYTES,
   type Actor,
   type BcpBatchStatus,
   type BcpImportBatch,
+  type BcpImportBatchPage,
   type BcpImportCounts,
   type BcpPreview,
   type BcpPreviewRow,
@@ -46,6 +50,12 @@ type In<S extends z.ZodType> = z.output<S>;
 
 /** Port over the api.* continuity-import commands and the batches RLS lets the caller read. */
 export interface BcpImportGateway {
+  /**
+   * `api.bcp_import_batch_view` (final 2110) and, in the same transaction, the names of the accounts it names. Row
+   * metadata only, never the cells, the control block or a row about the reader. NOT_FOUND unless the caller may see
+   * the batch.
+   */
+  view(ctx: UserRequestContext, batchId: string): Promise<BcpImportBatchPage>;
   stage(ctx: UserRequestContext, input: In<typeof stageBcpImportSchema>): Promise<string>;
   resolve(ctx: UserRequestContext, input: In<typeof resolveBcpRowSchema>): Promise<void>;
   preview(ctx: UserRequestContext, input: In<typeof bcpBatchSchema>): Promise<BcpPreview>;
@@ -83,6 +93,15 @@ export interface StagedBcpImport {
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const IMPORTER: readonly Permission[] = ["BCP_IMPORT"];
 
+const ROW_FAILED = "CDF_CONFLICT:BCP_ROW_FAILED:";
+
+/** An import that stopped at a row, as one stable code: the row's key and its command's code stay on the server. */
+function rowFailed(cause: unknown, correlationId: string): AppError | null {
+  return cause instanceof Error && cause.message.startsWith(ROW_FAILED)
+    ? new AppError("CONFLICT", correlationId, "BCP_ROW_FAILED", { cause })
+    : null;
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>);
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -119,6 +138,31 @@ export function createBcpImportService(deps: BcpImportDeps) {
     return { ok: false, error: new AppError("INVALID", ctx.requestId, `WORKBOOK_${reason}`) };
   }
 
+  /** A read the caller may not make is the uniform not-found (null), recorded as ACCESS_DENIED. */
+  async function read<T>(
+    ctx: UserRequestContext,
+    objectType: string,
+    name: string,
+    objectId: string,
+    run: () => Promise<T>,
+  ): Promise<T | null> {
+    try {
+      return await run();
+    } catch (cause) {
+      const error = toAppError(cause, ctx.requestId);
+      if (error.kind !== "NOT_FOUND" && error.kind !== "FORBIDDEN") throw error;
+      try {
+        await securityEvents.record(
+          { action: "ACCESS_DENIED", objectType, objectId, metadata: { read: name } },
+          ctx,
+        );
+      } catch {
+        // Recording must never mask the original denial.
+      }
+      return null;
+    }
+  }
+
   async function command<S extends z.ZodType, T>(
     ctx: UserRequestContext,
     actor: Actor,
@@ -148,6 +192,10 @@ export function createBcpImportService(deps: BcpImportDeps) {
   const byBatch = (i: { batchId: string }) => i.batchId;
 
   return {
+    /** The batch's page: null when the caller may not see it, whatever the reason (a forged id included). */
+    view: (ctx: UserRequestContext, batchId: string) =>
+      read(ctx, "bcp_import_batch", "bcp_import_batch_view", batchId, () => gateway.view(ctx, batchId)),
+
     async stage(
       ctx: UserRequestContext,
       actor: Actor,
@@ -279,6 +327,11 @@ export function createBcpImportService(deps: BcpImportDeps) {
         byBatch,
       ),
 
+    /**
+     * The approved rows are imported in one transaction, or none is. A row that fails names itself and its command's
+     * code (CONFLICT:BCP_ROW_FAILED:<row key>:<code>), which can be longer than an error detail may be; the reader is
+     * told that a row failed and nothing was imported, never more.
+     */
     apply: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(
         ctx,
@@ -287,7 +340,10 @@ export function createBcpImportService(deps: BcpImportDeps) {
         applyBcpImportSchema,
         raw,
         IMPORTER,
-        (i) => gateway.apply(ctx, i),
+        (i) =>
+          gateway.apply(ctx, i).catch((cause: unknown) => {
+            throw rowFailed(cause, ctx.requestId) ?? cause;
+          }),
         byBatch,
       ),
 

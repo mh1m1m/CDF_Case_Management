@@ -6,11 +6,18 @@ import type {
   BcpBatchScope,
   BcpBatchStatus,
   BcpImportBatch,
+  BcpImportBatchPage,
+  BcpImportBatchView,
   BcpImportCounts,
   BcpPreview,
   BcpPreviewRow,
+  BcpResolution,
+  BcpRowState,
   BcpSubmitOutcome,
+  SettingStatus,
 } from "@cdf/contracts";
+import { each, iso, isoOrNull, yes } from "./committee-proceedings-gateway";
+import { accountNames } from "./export-gateway";
 import { withUserContext, type Sql, type Tx } from "./security-context";
 
 type P<K extends keyof BcpImportGateway> = Parameters<BcpImportGateway[K]>[1];
@@ -32,11 +39,169 @@ interface BatchRow {
   decided_at: string | null;
 }
 
+/** `api.bcp_import_batch_view` as the database returns it (final 2110:1546-1654): row metadata, never the cells. */
+export interface RawBcpBatchView {
+  batch_id: string;
+  template_version: string;
+  workbook_id: string;
+  scope: BcpBatchScope;
+  committee_proceeding_id: string | null;
+  file_sha256: string;
+  offline_from: string;
+  offline_to: string | null;
+  prepared_by: string;
+  status: BcpBatchStatus;
+  preview_hash: string | null;
+  previewed_at: string | null;
+  preview_clean: boolean | null;
+  submitted_hash: string | null;
+  imported_by: string;
+  decided_by: string | null;
+  decision_reason: string | null;
+  created_at: string;
+  submitted_at: string | null;
+  decided_at: string | null;
+  applied_at: string | null;
+  cancelled_at: string | null;
+  updated_at: string;
+  row_version: number;
+  current_hash: string;
+  workbook_revoked: boolean | null;
+  official_record_required: boolean | null;
+  counts: { rows: number; unresolved: number; by_state: Partial<Record<BcpRowState, number>> | null } | null;
+  rows:
+    | {
+        row_id: string;
+        sheet_code: string;
+        row_number: number;
+        row_key: string | null;
+        state: BcpRowState;
+        detail: string | null;
+        resolution: BcpResolution | null;
+        resolution_reason: string | null;
+        resolved_by: string | null;
+        resolved_at: string | null;
+        outcome: string | null;
+        original_event_at: string | null;
+        recorded_offline_by: string | null;
+        purged_at: string | null;
+        may_resolve: boolean | null;
+      }[]
+    | null;
+  case: { case_id: string | null; case_number: string | null } | null;
+  capabilities: Partial<
+    Record<
+      | "may_resolve_rows"
+      | "may_preview"
+      | "may_submit"
+      | "may_decide"
+      | "may_approve"
+      | "may_apply"
+      | "may_cancel",
+      boolean | null
+    >
+  > | null;
+}
+
+/**
+ * The view, renamed. A flag the database left out or null reads as false and a list it left out is empty (fail
+ * closed); timestamps become ISO instants.
+ */
+export function toBcpImportBatchView(v: RawBcpBatchView): BcpImportBatchView {
+  const k = v.capabilities ?? {};
+  return {
+    batchId: v.batch_id,
+    templateVersion: v.template_version,
+    workbookId: v.workbook_id,
+    scope: v.scope,
+    committeeProceedingId: v.committee_proceeding_id ?? null,
+    fileSha256: v.file_sha256,
+    offlineFrom: iso(v.offline_from),
+    offlineTo: isoOrNull(v.offline_to),
+    preparedBy: v.prepared_by,
+    status: v.status,
+    previewHash: v.preview_hash ?? null,
+    previewedAt: isoOrNull(v.previewed_at),
+    previewClean: yes(v.preview_clean),
+    submittedHash: v.submitted_hash ?? null,
+    importedBy: v.imported_by,
+    decidedBy: v.decided_by ?? null,
+    decisionReason: v.decision_reason ?? null,
+    createdAt: iso(v.created_at),
+    submittedAt: isoOrNull(v.submitted_at),
+    decidedAt: isoOrNull(v.decided_at),
+    appliedAt: isoOrNull(v.applied_at),
+    cancelledAt: isoOrNull(v.cancelled_at),
+    updatedAt: iso(v.updated_at),
+    rowVersion: v.row_version,
+    currentHash: v.current_hash,
+    workbookRevoked: yes(v.workbook_revoked),
+    officialRecordRequired: yes(v.official_record_required),
+    counts: {
+      rows: Number(v.counts?.rows ?? 0),
+      unresolved: Number(v.counts?.unresolved ?? 0),
+      byState: { ...(v.counts?.by_state ?? {}) },
+    },
+    rows: each(v.rows, (r) => ({
+      rowId: r.row_id,
+      sheetCode: r.sheet_code,
+      rowNumber: r.row_number,
+      rowKey: r.row_key ?? null,
+      state: r.state,
+      detail: r.detail ?? null,
+      resolution: r.resolution ?? null,
+      resolutionReason: r.resolution_reason ?? null,
+      resolvedBy: r.resolved_by ?? null,
+      resolvedAt: isoOrNull(r.resolved_at),
+      outcome: r.outcome ?? null,
+      originalEventAt: isoOrNull(r.original_event_at),
+      recordedOfflineBy: r.recorded_offline_by ?? null,
+      purgedAt: isoOrNull(r.purged_at),
+      maySkip: yes(r.may_resolve),
+    })),
+    caseId: v.case?.case_id ?? null,
+    caseNumber: v.case?.case_number ?? null,
+    capabilities: {
+      mayResolveRows: yes(k.may_resolve_rows),
+      mayPreview: yes(k.may_preview),
+      maySubmit: yes(k.may_submit),
+      mayDecide: yes(k.may_decide),
+      mayApprove: yes(k.may_approve),
+      mayApply: yes(k.may_apply),
+      mayCancel: yes(k.may_cancel),
+    },
+  };
+}
+
+/** Every account the view names, once. */
+function namedAccounts(v: BcpImportBatchView): string[] {
+  const ids = new Set<string>([v.importedBy, v.preparedBy]);
+  if (v.decidedBy) ids.add(v.decidedBy);
+  for (const r of v.rows) {
+    if (r.resolvedBy) ids.add(r.resolvedBy);
+    if (r.recordedOfflineBy) ids.add(r.recordedOfflineBy);
+  }
+  return [...ids];
+}
+
 export class PostgresBcpImportGateway implements BcpImportGateway {
   constructor(private readonly sql: Sql) {}
 
   private run<T>(ctx: UserRequestContext, fn: (tx: Tx) => Promise<T>) {
     return withUserContext(this.sql, ctx, fn);
+  }
+
+  /** The batch's purpose read (final 2110) and, in the same transaction, the names of the accounts it names. */
+  view(ctx: UserRequestContext, batchId: string): Promise<BcpImportBatchPage> {
+    return this.run(ctx, async (tx) => {
+      const [r] = await tx<{ v: RawBcpBatchView }[]>`select api.bcp_import_batch_view(${batchId}) as v`;
+      const view = toBcpImportBatchView(r!.v);
+      const people = await accountNames(tx, namedAccounts(view));
+      const [retention] = await tx<{ status: SettingStatus }[]>`
+        select s.status from config.setting s where s.key = 'BCP_STAGING_RETENTION_DAYS'`;
+      // No row reads as not configured: the page never claims a period that is not there (DEC-F31).
+      return { view, people, stagingRetention: retention?.status ?? "SOURCE_REQUIRED" };
+    });
   }
 
   stage(ctx: UserRequestContext, i: P<"stage">): Promise<string> {

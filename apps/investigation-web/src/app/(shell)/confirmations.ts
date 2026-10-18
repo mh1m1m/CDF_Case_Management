@@ -72,7 +72,22 @@ export type ConfirmAct =
   | "submitActionCompletion"
   | "verifyActionCompletion"
   | "returnActionCompletion"
-  | "reopenAction";
+  | "reopenAction"
+  // An export request (Phase 12 P12-6b-1, ADR-026).
+  | "addExternalRecipient"
+  | "submitExport"
+  | "approveExport"
+  | "rejectExport"
+  | "consentToExport"
+  | "refuseExport"
+  | "generateExport"
+  | "cancelExport"
+  // A continuity workbook import (Phase 12 P12-6b-1, ADR-034).
+  | "submitBcpImport"
+  | "approveBcpImport"
+  | "rejectBcpImport"
+  | "applyBcpImport"
+  | "cancelBcpImport";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -114,6 +129,16 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   // the work back.
   "submitActionCompletion",
   "verifyActionCompletion",
+  // An export or an import goes forward to its approvers, is approved, and is sent or applied; a rejection, a refusal
+  // or a cancellation ends it.
+  "addExternalRecipient",
+  "submitExport",
+  "approveExport",
+  "consentToExport",
+  "generateExport",
+  "submitBcpImport",
+  "approveBcpImport",
+  "applyBcpImport",
 ]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */
