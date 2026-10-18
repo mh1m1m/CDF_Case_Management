@@ -48,6 +48,13 @@ export const OFFLINE_BALLOT_STATUSES = ["PROVISIONAL", "CONFIRMED", "SUPERSEDED"
 export type OfflineBallotStatus = (typeof OFFLINE_BALLOT_STATUSES)[number];
 /** What a member confirms: the choice on their own paper ballot (the database refuses any other, BALLOT_CHOICE_MISMATCH). */
 export const OFFLINE_BALLOT_CHOICES = MEMBER_VOTE_CHOICES;
+/**
+ * Who released a provisional paper ballot so that the secretary's record for a member not present may supersede it
+ * (2125, ADR-062): its member (`api.decline_offline_ballot`) or the meeting's chair with a reason
+ * (`api.release_offline_ballot`). Until one of them does, that record is refused (BALLOT_HELD).
+ */
+export const OFFLINE_BALLOT_RELEASES = ["MEMBER", "CHAIR"] as const;
+export type OfflineBallotRelease = (typeof OFFLINE_BALLOT_RELEASES)[number];
 /** What the secretary records for a member who is not present (`api.record_vote_for_member`, Q60, N6). */
 export const RECORDED_FOR_MEMBER_CHOICES = ["ABSENT", "UNABLE_TO_VOTE", "RECUSED"] as const;
 /** The deciding vote on a tie (`api.cast_casting_vote`, DEC-F01, DEC-F03). */
@@ -201,6 +208,9 @@ export interface MeetingVoteItemView {
   myBallot: MyOfflineBallot | null;
   /** For the runner while the item is open: the counting members whose paper ballot still waits (BALLOTS_UNCONFIRMED). */
   ballotsUnconfirmedFor: string[];
+  /** 2125 (ADR-062), for the meeting's chair while the item is open: the members not present whose paper ballot the
+   *  chair may release (`api.release_offline_ballot`); empty for anyone else. */
+  ballotsReleasableFor: string[];
   capabilities: {
     mayVote: boolean;
     mayClose: boolean;
@@ -210,6 +220,8 @@ export interface MeetingVoteItemView {
     mayRecordNote: boolean;
     /** `api.confirm_offline_ballot` (2120): the caller's own provisional ballot on this open item. */
     mayConfirmBallot: boolean;
+    /** `api.decline_offline_ballot` (2125): the caller's own provisional ballot on this open item, not yet released. */
+    mayDeclineBallot: boolean;
   };
 }
 
@@ -227,6 +239,8 @@ export interface MyOfflineBallot {
   ballotReference: string;
   /** When the member signed the paper: the vote's original_event_at once confirmed. */
   originalEventAt: string;
+  /** 2125: who released it for the secretary's record, if anyone; it stays the member's to confirm until then. */
+  release: OfflineBallotRelease | null;
 }
 
 export interface MeetingDeliberationView {

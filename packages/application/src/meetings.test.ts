@@ -43,6 +43,8 @@ function harness(refusal?: string) {
     reviseVote: answer("reviseVote"),
     recuseForConflict: answer("recuseForConflict"),
     confirmOfflineBallot: answer("confirmOfflineBallot"),
+    declineOfflineBallot: answer("declineOfflineBallot"),
+    releaseOfflineBallot: answer("releaseOfflineBallot"),
     recordVoteNote: answer("recordVoteNote", ITEM),
     recordVoteForMember: answer("recordVoteForMember"),
     closeVoteItem: answer("closeVoteItem", "APPROVED"),
@@ -140,6 +142,16 @@ describe("meetings service", () => {
         (s) => s.recuseForConflict(ctx, { voteItemId: ITEM, reason: "Synthetic reason." }),
       ],
       ["confirm_offline_ballot", (s) => s.confirmOfflineBallot(ctx, { voteItemId: ITEM, choice: "APPROVE" })],
+      ["decline_offline_ballot", (s) => s.declineOfflineBallot(ctx, { voteItemId: ITEM })],
+      [
+        "release_offline_ballot",
+        (s) =>
+          s.releaseOfflineBallot(ctx, {
+            voteItemId: ITEM,
+            participantId: PARTICIPANT,
+            reason: "Synthetic reason.",
+          }),
+      ],
       [
         "record_vote_note",
         (s) =>
