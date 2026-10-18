@@ -99,9 +99,9 @@ describe("routes", () => {
       BCP_IMPORT: "/continuity/imports",
     } as const;
     const all = Object.values(roots);
-    // P12-2a (ADR-054): the meeting and minutes pages have shipped; P12-3a (ADR-057) the legal review page; the rest
-    // have not.
-    const shipped: readonly string[] = ["/meetings", "/minutes", "/legal-reviews"];
+    // P12-2a (ADR-054): the meeting and minutes pages have shipped; P12-3a (ADR-057) the legal review page; P12-6a
+    // (ADR-058) the corrective action's page; the rest have not.
+    const shipped: readonly string[] = ["/meetings", "/minutes", "/legal-reviews", "/actions"];
     for (const [targetType, root] of Object.entries(roots) as [keyof typeof roots, string][]) {
       const i = item({ area: "MY_WORK", targetType, targetId: "x", caseId: "c" });
       expect(itemHref(i), targetType).toBe(shipped.includes(root) ? `${root}/x` : null);
@@ -135,7 +135,7 @@ describe("routes", () => {
       ),
     ).toBeNull();
   });
-  it("opens a frozen action's disposition on the action's page, and the owner's and verifier's work only with P12-6", () => {
+  it("opens each corrective-action row at its step on the action's page (P12-3b, P12-6a)", () => {
     const all = ["/meetings", "/minutes", "/legal-reviews", "/actions"];
     // P12-3b (ADR-058): the page serves the case team's disposition, whatever roots are live, at its form.
     for (const live of [all, []])
@@ -150,17 +150,19 @@ describe("routes", () => {
           live,
         ),
       ).toBe("/actions/x#dispose");
-    // The owner's and the verifier's rows open nothing until /actions goes live (P12-6), then the action's page.
-    for (const category of ["ACTION_ASSIGNED", "ACTION_RETURNED", "ACTION_TO_VERIFY"] as const) {
-      const i = item({
-        area: "MY_WORK",
-        category,
-        targetType: "CORRECTIVE_ACTION",
-        targetId: "x",
-        caseId: "c",
-      });
-      expect(itemHref(i), category).toBeNull();
-      expect(itemHref(i, all), category).toBe("/actions/x");
+    // P12-6a: the owner's rows open the report, the verifier's the verification; nothing while /actions is not live.
+    const steps = {
+      ACTION_ASSIGNED: "/actions/x#report",
+      ACTION_RETURNED: "/actions/x#report",
+      ACTION_TO_VERIFY: "/actions/x#verify",
+    } as const;
+    for (const [category, href] of Object.entries(steps) as [keyof typeof steps, string][]) {
+      for (const caseId of [null, "c"]) {
+        const i = item({ area: "MY_WORK", category, targetType: "CORRECTIVE_ACTION", targetId: "x", caseId });
+        expect(itemHref(i), category).toBe(href);
+        expect(itemHref(i, all), category).toBe(href);
+        expect(itemHref(i, ["/meetings"]), category).toBeNull();
+      }
     }
   });
 });

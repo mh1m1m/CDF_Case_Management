@@ -262,6 +262,14 @@ that runs the `api.*` command in the caller's security context, so the database 
   opinion permission, a platform administrator and forged ids. `tests/accessibility/legal-reviews.spec.ts` (6): axe at
   1280 and 390 px and no sideways scroll at 1280, 390 and 320 px, with every disclosure open, on each page and each
   confirmation, in both languages.
+- **The opinion's permission, checked first** (2026-10-17, with P12-6a; AGENT-09's INFO item on the P12-3a pages).
+  The service now asks `@cdf/authorization` for `LEGAL_OPINION_GIVE` before an opinion or a later opinion reaches the
+  database, as every other command does (first enforcement point, §19). A caller without it is refused before any
+  database call, recorded as `COMMAND_DENIED` with the command and the outcome only; the commands (1900 and 2030) still
+  decide who may act on the request. Tests: `packages/application/src/legal-reviews.test.ts` (without the permission
+  either opinion is refused before the gateway is called, and the refusal is recorded with the command and outcome
+  only, never the opinion or its reason) and `tests/integration/legal-reviews.spec.ts` (the reviewer's opinions go
+  through the service with the reviewer's own permissions).
 
 ## Known limitations
 

@@ -1,8 +1,8 @@
 // Every confirmation has its whole copy in both languages (UX-031; Phase 12 consequence preview, ADR-030): a missing
 // message would show its key in the dialog. The meeting and minutes acts (P12-2a, ADR-054), the committee and
 // logistics acts (P12-2b, ADR-055), the package and invite acts (P12-2c, ADR-056), the legal review and authority
-// acts (P12-3a, ADR-057) and the corrective action's dispositions (P12-3b, ADR-058) are listed so that a rename in the
-// catalogue fails here, not on the screen.
+// acts (P12-3a, ADR-057), the corrective action's dispositions (P12-3b, ADR-058) and its completion, verification and
+// reopening (P12-6a, ADR-058) are listed so that a rename in the catalogue fails here, not on the screen.
 import { describe, expect, it } from "vitest";
 import { createTranslator, messagesFor, type Locale } from "@cdf/i18n";
 import { confirmation, type ConfirmAct } from "./confirmations";
@@ -59,6 +59,11 @@ const MEETING_ACTS: ConfirmAct[] = [
   "disposeModify",
   "disposeWaive",
   "disposeReplace",
+  // The owner's completion, its verification and a reopening (P12-6a, ADR-058).
+  "submitActionCompletion",
+  "verifyActionCompletion",
+  "returnActionCompletion",
+  "reopenAction",
 ];
 
 describe("confirmations", () => {
@@ -101,6 +106,11 @@ describe("confirmations", () => {
       "disposeModify",
       "disposeWaive",
       "disposeReplace",
+      // P12-6a: a completion goes to the case's corrective-action managers; a return or a reopening to the owner
+      // (1940, 2040).
+      "submitActionCompletion",
+      "returnActionCompletion",
+      "reopenAction",
     ]) {
       expect(confirmation(t, act as ConfirmAct).notified, act).not.toMatch(/^No one/);
     }
@@ -121,6 +131,8 @@ describe("confirmations", () => {
       "approveRestrictedLegalReview",
       // Re-adopting an action changes nothing its owner sees, so no one is told (2090).
       "disposeReAdopt",
+      // A verified completion tells no one (1940).
+      "verifyActionCompletion",
     ] as ConfirmAct[]) {
       expect(confirmation(t, act).notified, act).toMatch(/^No one/);
     }
@@ -146,10 +158,18 @@ describe("confirmations", () => {
       "approveRestrictedLegalReview",
       "disposeReAdopt",
       "disposeModify",
+      "submitActionCompletion",
+      "verifyActionCompletion",
     ] as ConfirmAct[])
       expect(confirmation(t, act).tone, act).toBe("primary");
-    // Waiving an action, or replacing it with a new one, ends it: not shown as moving work forward.
-    expect(confirmation(t, "disposeWaive").tone).toBeUndefined();
-    expect(confirmation(t, "disposeReplace").tone).toBeUndefined();
+    // Waiving an action, or replacing it with a new one, ends it: not shown as moving work forward. Nor is sending a
+    // completion back to the owner, or reopening a completed action.
+    for (const act of [
+      "disposeWaive",
+      "disposeReplace",
+      "returnActionCompletion",
+      "reopenAction",
+    ] as ConfirmAct[])
+      expect(confirmation(t, act).tone, act).toBeUndefined();
   });
 });

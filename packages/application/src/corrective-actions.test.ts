@@ -33,6 +33,7 @@ const owner = actor(["CORRECTIVE_ACTION_OWN"]);
 function harness(refusal?: string) {
   const calls: string[] = [];
   const events: SecurityEvent[] = [];
+  const inputs: unknown[] = [];
   const step = async (name: string) => {
     calls.push(name);
     if (refusal) throw new Error(refusal);
@@ -42,8 +43,8 @@ function harness(refusal?: string) {
     open: async () => (await step("open"), ACTION),
     assignOwner: () => step("assignOwner"),
     changeDueDate: () => step("changeDueDate"),
-    recordProgress: () => step("recordProgress"),
-    submitCompletion: () => step("submitCompletion"),
+    recordProgress: async (_, i) => (inputs.push(i), await step("recordProgress")),
+    submitCompletion: async (_, i) => (inputs.push(i), await step("submitCompletion")),
     verify: async () => (await step("verify"), "COMPLETED"),
     reopen: () => step("reopen"),
     waive: () => step("waive"),
@@ -59,7 +60,7 @@ function harness(refusal?: string) {
     gateway,
     securityEvents: { record: async (e) => void events.push(e) },
   });
-  return { service, calls, events };
+  return { service, calls, events, inputs };
 }
 
 describe("corrective-action service", () => {
@@ -82,6 +83,50 @@ describe("corrective-action service", () => {
     });
     expect(p.ok).toBe(false);
     expect(calls).toEqual([]);
+  });
+
+  it("hands the owner's report to the gateway as the form sent it: the percentage read, the evidence kind kept", async () => {
+    const { service, calls, inputs } = harness();
+    // P12-6a: the form sends text; the four-argument command takes the kind of evidence with the reference.
+    expect(
+      (
+        await service.recordProgress(ctx, owner, {
+          actionId: ACTION,
+          percentComplete: "40",
+          note: "Synthetic: half the approvers trained.",
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      (
+        await service.submitCompletion(ctx, owner, {
+          actionId: ACTION,
+          note: "Synthetic: the second approver is in place.",
+          evidenceReference: "DOC-DEMO-2026-0007",
+          evidenceType: "REVISED_PROCEDURE",
+        })
+      ).ok,
+    ).toBe(true);
+    // A kind of evidence without a reference never reaches the database.
+    expect(
+      (
+        await service.submitCompletion(ctx, owner, {
+          actionId: ACTION,
+          note: "Synthetic: the second approver is in place.",
+          evidenceType: "DOCUMENT",
+        })
+      ).ok,
+    ).toBe(false);
+    expect(calls).toEqual(["recordProgress", "submitCompletion"]);
+    expect(inputs).toEqual([
+      { actionId: ACTION, percentComplete: 40, note: "Synthetic: half the approvers trained." },
+      {
+        actionId: ACTION,
+        note: "Synthetic: the second approver is in place.",
+        evidenceReference: "DOC-DEMO-2026-0007",
+        evidenceType: "REVISED_PROCEDURE",
+      },
+    ]);
   });
 
   it("a return needs a note; a verification does not", async () => {
