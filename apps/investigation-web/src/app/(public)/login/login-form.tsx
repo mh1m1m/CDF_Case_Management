@@ -1,13 +1,15 @@
 "use client";
 import { useActionState } from "react";
 import { createTranslator, type Locale } from "@cdf/i18n";
-import { CDFAlert, CDFField, buttonClass, inputClass } from "@cdf/ui";
+import { CDFAlert, CDFField, buttonClass, inputClass, useHydrated } from "@cdf/ui";
 import type { ActionState } from "@/server/actions-helpers";
 import { signInAction } from "./actions";
 
 export function LoginForm({ locale, next }: { locale: Locale; next?: string | undefined }) {
   const t = createTranslator(locale);
   const [state, action, pending] = useActionState(signInAction, { status: "idle" } as ActionState);
+  // CDF-255: the button waits until the page is interactive, so the browser never posts the form on its own.
+  const hydrated = useHydrated();
   return (
     <form action={action} data-testid="login-form">
       {next ? <input type="hidden" name="next" value={next} /> : null}
@@ -41,7 +43,12 @@ export function LoginForm({ locale, next }: { locale: Locale; next?: string | un
           className={inputClass}
         />
       </CDFField>
-      <button type="submit" className={buttonClass("primary")} disabled={pending} data-testid="login-submit">
+      <button
+        type="submit"
+        className={buttonClass("primary")}
+        disabled={pending || !hydrated}
+        data-testid="login-submit"
+      >
         {pending ? t("common.working") : t("login.submit")}
       </button>
     </form>

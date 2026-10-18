@@ -325,11 +325,12 @@ requirements:
     title: "A refused command keeps every value and choice; consequential choices are never preselected; controlled acts are confirmed"
     source: [UX audit 2026-10-10 UX-001, UX-019, UX-031]
     external_ids: []
-    linear_issues: [CDF-132, CDF-133, CDF-183, CDF-232]
+    linear_issues: [CDF-132, CDF-133, CDF-183, CDF-232, CDF-255]
     status: COMPLETE
     enforcement:
       [
         packages/ui/src/command-form.tsx,
+        packages/ui/src/hydration.tsx,
         packages/ui/src/confirm-dialog.tsx,
         packages/ui/src/refusal-notice.tsx,
         packages/ui/src/refusal-notice-state.ts,
@@ -343,8 +344,11 @@ requirements:
         packages/ui/src/refusal-notice-state.test.ts,
         tests/e2e/corrective-actions.spec.ts,
         tests/accessibility/corrective-actions.spec.ts,
+        tests/e2e/investigation-no-js.spec.ts,
+        packages/ui/src/hydration.test.ts,
+        apps/investigation-web/src/app/forms-wait-for-hydration.test.ts,
       ]
-    notes: "CDF-232 (2026-10-17, with P12-6a): a form that leaves the page with its command's refusal, because the page read again no longer offers it after another user's action moved its subject on, hands the refusal to a page-level notice at the top of the content: the class of refusal, the command's own words for its code and the reference, nothing about the subject or the other user. In memory only; it takes focus when the form had it and clears on navigation and on the next command's answer. A form still on the page shows its own refusal, so only one ever shows. The form's server-rendered markup still names its command, as before (the positive controls of tests/e2e/security-csrf.spec.ts replay it)."
+    notes: "CDF-232 (2026-10-17, with P12-6a): a form that leaves the page with its command's refusal, because the page read again no longer offers it after another user's action moved its subject on, hands the refusal to a page-level notice at the top of the content: the class of refusal, the command's own words for its code and the reference, nothing about the subject or the other user. In memory only; it takes focus when the form had it and clears on navigation and on the next command's answer. A form still on the page shows its own refusal, so only one ever shows. The form's server-rendered markup still names its command, as before (the positive controls of tests/e2e/security-csrf.spec.ts replay it). CDF-255 (2026-10-18): every submit button of the investigation app, sign-in and sign-out included, waits until the page is interactive, so the browser never posts a form on its own. Such a post carries `Origin: null` under `Referrer-Policy: no-referrer`, and the framework refused it with a bare error page. With JavaScript off the buttons stay disabled and a notice says that signing in, signing out and sending forms need it; pages can still be read. The origin check is unchanged (SECURITY_RULES I-8)."
 
   - id: CDF-UX-005
     title: "Work-led shell: at most five areas from permission and relationship, a landing where the user's work is, and My Work listing only the user's own actionable items"

@@ -32,6 +32,9 @@ export const en = {
     saved: "Saved.",
     working: "Working…",
     mainNavigation: "Main navigation",
+    /** Shown only when JavaScript is off: every submit button waits for it (CDF-255). */
+    noScript:
+      "JavaScript is turned off in this browser. You can still read pages, but you need to turn it on to sign in, sign out or send a form.",
   },
   // Dates on formal generated records (DEC-51): Gregorian first, Hijri (Umm al-Qura) second.
   recordDate: {

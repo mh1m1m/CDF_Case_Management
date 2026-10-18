@@ -30,7 +30,7 @@ export default defineConfig({
   projects: [
     { name: "e2e", testDir: "tests/e2e" },
     // Reduced motion makes every transition instant (tokens.css), so axe never samples a frame mid-fade, such as a
-    // confirm form's button between its disabled-until-hydrated state and its own colours (CDF-249).
+    // form's button between its disabled-until-hydrated state and its own colours (CDF-249, CDF-255).
     { name: "accessibility", testDir: "tests/accessibility", use: { reducedMotion: "reduce" } },
   ],
   webServer: [
