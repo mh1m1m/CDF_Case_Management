@@ -16,7 +16,7 @@ import {
   type Scenario,
   type UserKey,
 } from "../support/db";
-import { committeeIds } from "../support/committee";
+import { REASON as COMMITTEE_REASON, closeAsBefore2117, committeeIds } from "../support/committee";
 import {
   DECIDE_REASON,
   RATIONALE,
@@ -526,6 +526,19 @@ describe("closure readiness on every path (CON-022, AMB-146, AMB-213, AMB-214)",
     await ownerScenario(async (s) => {
       const f = await draftPackage(s, ic, caseB);
       expect(await voteOnPackage(s, f)).toBe("ADOPTED");
+      // From migration 2117 the committee's proceeding cannot conclude while its package is adopted and not yet sent on;
+      // one closed before 2117 can, and closure readiness still refuses the case then.
+      const cp = f.meeting.committeeProceeding;
+      await s.asOwner();
+      const [own] = await s.tx<{ proceeding_id: string }[]>`
+        select proceeding_id from committee.committee_proceeding where id = ${cp}`;
+      await s.as("caseManager");
+      await s.expectError(
+        "CDF_CONFLICT:PACKAGE_ADOPTED",
+        (tx) =>
+          tx`select api.close_proceeding(${own!.proceeding_id}, 'CONCLUDED', 'DECISION_RECORDED', ${COMMITTEE_REASON})`,
+      );
+      await closeAsBefore2117(s, cp, "CONCLUDED");
       await concludeProceedings(s, caseB);
       await s.as("caseManager");
       await s.expectError("CDF_CONFLICT:DECISION_NOT_FINAL", (tx) => close(tx, caseB));

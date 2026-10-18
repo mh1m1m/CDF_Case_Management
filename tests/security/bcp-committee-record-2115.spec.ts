@@ -16,6 +16,7 @@ import {
   type UserKey,
 } from "../support/db";
 import { IC_SEATS, REASON, committeeIds, refer, seat } from "../support/committee";
+import { outcomes } from "../support/capabilities";
 import {
   MINUTES_SHA,
   RECORD_REASON,
@@ -1578,6 +1579,52 @@ describe("E7 and R8: locking, and nobody outside the record", () => {
       await s.as("legalB");
       await s.expectError("CDF_NOT_FOUND", openDocCall(document));
       expect(await s.tx`select id from exchange.bcp_committee_record`).toEqual([]);
+    });
+  });
+});
+
+describe("migration 2117 (CDF-226): a meeting held offline holds its proceeding open", () => {
+  class Undo extends Error {}
+
+  it("the committed record's meeting, not yet opened, holds the proceeding concluded or cancelled; once the secretary opens or cancels it, the proceeding closes", async () => {
+    await ownerScenario(async (s) => {
+      const { batch, opened } = await prepared(s);
+      expect(await submitRecord(s, batch)).toBe("SUBMITTED");
+      await s.as("committeeChair");
+      await decideCall(opened.record, 1, "APPROVE")(s.tx);
+      await attestAll(s, opened, 1);
+      await commitRecord(s, batch);
+      await s.asOwner();
+      const [m] = await s.tx<{ id: string; proceeding_id: string; status: string; held_offline: boolean }[]>`
+        select m.id, cp.proceeding_id, m.status, m.held_offline
+        from exchange.bcp_committee_record r
+        join committee.meeting m on m.id = r.meeting_id
+        join committee.committee_proceeding cp on cp.id = m.committee_proceeding_id
+        where r.id = ${opened.record}`;
+      expect(m).toMatchObject({ status: "SCHEDULED", held_offline: true });
+      const closing = () =>
+        outcomes(s, "caseManager", {
+          CONCLUDED: `select api.close_proceeding('${m!.proceeding_id}', 'CONCLUDED', 'DECISION_RECORDED', '${REASON}')`,
+          CANCELLED: `select api.close_proceeding('${m!.proceeding_id}', 'CANCELLED', null, '${REASON}')`,
+        });
+      const pending = "CDF_CONFLICT:OFFLINE_MEETING_PENDING";
+      expect(await closing()).toEqual({ CONCLUDED: pending, CANCELLED: pending });
+      // Nothing held is cancelled by implication: the secretary opens it to complete it online, or cancels it.
+      for (const step of [
+        `select api.open_meeting('${m!.id}', '${REASON}')`,
+        `select api.cancel_meeting('${m!.id}', '${REASON}')`,
+      ]) {
+        try {
+          await s.tx.savepoint(async () => {
+            await s.as("committeeSecretary");
+            await s.tx.unsafe(step);
+            expect(await closing(), step).toEqual({ CONCLUDED: true, CANCELLED: true });
+            throw new Undo();
+          });
+        } catch (error) {
+          if (!(error instanceof Undo)) throw error;
+        }
+      }
     });
   });
 });

@@ -866,6 +866,15 @@ export const en = {
     PROCEEDING_ALREADY_OPEN: "A proceeding of this type is already open on this case.",
     PROCEEDING_CLOSED: "This proceeding is closed and can no longer change.",
     OPEN_CHILD_PROCEEDINGS: "Close the proceedings that are part of this one first.",
+    // A committee proceeding leaves OPEN only once its work is no longer in flight (migration 2117).
+    PACKAGE_VOTING: "A recommendation package of this committee is still in its vote.",
+    PACKAGE_ADOPTED:
+      "An adopted recommendation package has not gone to the authority. Submit it or return it to the committee first.",
+    LEGAL_REVIEW_OPEN: "A recommendation package of this committee is in legal review.",
+    PACKAGE_WITH_AUTHORITY:
+      "A recommendation package of this committee is waiting for the authority's decision.",
+    OFFLINE_MEETING_PENDING:
+      "A meeting held offline is waiting for its online record. Complete it, or cancel it with a reason, first.",
     ALREADY_SUBJECT: "This person is already named on the case.",
     ALLEGATION_WITHDRAWN: "This allegation is withdrawn.",
     ALLEGATION_SUBJECT_SET: "This allegation is already tied to another person.",
@@ -4247,6 +4256,7 @@ export const en = {
         "The package has moved on from the adoption your opinion is about, so a later opinion can no longer be given.",
       FORBIDDEN:
         "You can no longer give this opinion: your account no longer holds the legal opinion permission, or is no longer cleared for this case. Ask the committee's secretary.",
+      PROCEEDING_CLOSED: "The committee's proceeding is closed, so no opinion can be given on this request.",
     },
     packetBreadcrumb: "Packet",
     packetTitle: "The packet for legal review",
