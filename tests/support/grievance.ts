@@ -102,7 +102,8 @@ export async function setSanctionRule(
   await s.as("platformAdmin");
   const [r] = await s.tx<{ id: string }[]>`
     select api.set_sanction_rule(${code}, ${rank}::int, ${irreversible}, ${rule}, 'SOURCE_REQUIRED',
-      'Synthetic: sanction rule for the test only.') as id`;
+      'Synthetic: sanction rule for the test only.',
+      (select row_version from decision.sanction_catalogue where code = ${code})) as id`;
   return r!.id;
 }
 

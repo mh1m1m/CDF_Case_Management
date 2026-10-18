@@ -1583,7 +1583,7 @@ async function enableOnly(s: Scenario, roles: string[]): Promise<void> {
   await s.as("platformAdmin");
   for (const r of ROLES)
     await s.tx`select api.set_invitee_type_rule(${r}, ${roles.includes(r)}, ${ACKNOWLEDGES[r]!}, null,
-      'SOURCE_REQUIRED', ${REASON})`;
+      'SOURCE_REQUIRED', ${REASON}, (select row_version from committee.invitee_type_rule where invitee_role = ${r}))`;
 }
 
 describe("api.meeting_invite_choices (migration 2086, ADR-056)", () => {
@@ -1697,8 +1697,10 @@ describe("api.meeting_invite_choices (migration 2086, ADR-056)", () => {
 
       // 5. Invitee types: an interpreter enabled (with a conflict declaration), the expert type disabled.
       await s.as("platformAdmin");
-      await s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON})`;
-      await s.tx`select api.set_invitee_type_rule('EXPERT', false, true, null, 'OWNER_DEFAULT', ${REASON})`;
+      await s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON},
+        (select row_version from committee.invitee_type_rule where invitee_role = 'INTERPRETER'))`;
+      await s.tx`select api.set_invitee_type_rule('EXPERT', false, true, null, 'OWNER_DEFAULT', ${REASON},
+        (select row_version from committee.invitee_type_rule where invitee_role = 'EXPERT'))`;
       await invites(s, next);
       list = await runnersList(s, next);
       for (const p of list.persons)
