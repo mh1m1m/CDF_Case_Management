@@ -101,6 +101,7 @@ All in `tests/security/bcp-committee-record-2115.spec.ts`, each named by its num
 - No maximum period for an acting chair (SOURCE_REQUIRED). Who activates is decided (owner's card, 2026-10-18): the one-record scope is structural (each activation carries its record, and the activation in force is looked up by record), and §17 test 6 and the E5 test pin who activates and the chair's ending it.
 - Hosted DEV has no storage credential, so no version completes there and nothing commits (ruled).
 - "Every ballot confirmed": when 2120 brings provisional ballots (DEC-AMB-008), a record whose workbook carries votes must also wait for each member's personal confirmation of their ballot (§6). Not built here; 2120 adds the gate to `exchange.bcp_record_ready`.
+  **Amended by migration 2120 (ADR-048; coordinator ruling F1 B′, 2026-10-18 15:44 UTC):** the record waits for each ballot holder's attestation; the vote becomes final on the member's own confirmation after restoration. The gate is `BALLOT_WITHOUT_ATTENDANCE` in `exchange.bcp_record_discrepancies` (every ballot from an eligible member line the signed minutes show attending, whose holder attests the record) plus this record's attestations; `exchange.bcp_record_ready` is unchanged, and the commit writes provisional ballots, never a vote (§6).
 - Screens (§13, the secretary's six steps, the chair's comparison view, the member's confirmation page) are Phase 12 UX work, together with the read-model migration that serves them (size ruling).
 
 ## Consequences
