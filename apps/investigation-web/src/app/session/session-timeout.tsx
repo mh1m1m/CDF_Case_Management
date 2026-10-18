@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { createTranslator, type Locale } from "@cdf/i18n";
-import { buttonClass } from "@cdf/ui";
+import { CDFSubmitButton, buttonClass } from "@cdf/ui";
 import { extendSessionAction, signOutAction } from "./actions";
 
 /** Seconds of warning before the idle limit (CDF-57: warn and extend, chosen 2026-10-10). */
@@ -122,9 +122,7 @@ export function SessionTimeout({ idleSeconds, locale }: { idleSeconds: number; l
               {t("session.stay")}
             </button>
             <form action={signOutAction}>
-              <button type="submit" className={buttonClass("ghost")}>
-                {t("common.signOut")}
-              </button>
+              <CDFSubmitButton className={buttonClass("ghost")}>{t("common.signOut")}</CDFSubmitButton>
             </form>
           </div>
         </>

@@ -6,7 +6,15 @@
 // top of the content (CDF-232).
 import type { ReactNode } from "react";
 import type { MessageKey } from "@cdf/i18n";
-import { CDFAppShell, CDFEnvironmentStrip, CDFNotificationBell, CDFUserMenu, buttonClass } from "@cdf/ui";
+import {
+  CDFAppShell,
+  CDFEnvironmentStrip,
+  CDFNoScriptNotice,
+  CDFNotificationBell,
+  CDFSubmitButton,
+  CDFUserMenu,
+  buttonClass,
+} from "@cdf/ui";
 import { myShellAreas, myUnreadCount, requireActor } from "@/server/container";
 import { env } from "@/server/env";
 import { getTranslator } from "@/server/locale";
@@ -46,10 +54,13 @@ export default async function ShellLayout({ children }: { children: ReactNode })
     <CDFAppShell
       skipLabel={t("common.skipToContent")}
       environment={
-        <CDFEnvironmentStrip
-          label={t("common.classificationBanner")}
-          detail={t("common.classificationBannerDetail")}
-        />
+        <>
+          <CDFEnvironmentStrip
+            label={t("common.classificationBanner")}
+            detail={t("common.classificationBannerDetail")}
+          />
+          <CDFNoScriptNotice text={t("common.noScript")} />
+        </>
       }
       brand={
         <a href="/" className="flex min-w-0 items-center gap-3">
@@ -99,9 +110,9 @@ export default async function ShellLayout({ children }: { children: ReactNode })
             {t("notifications.settingsLink")}
           </a>
           <form action={signOutAction}>
-            <button type="submit" className={buttonClass("ghost")} data-testid="sign-out">
+            <CDFSubmitButton className={buttonClass("ghost")} testId="sign-out">
               {t("common.signOut")}
-            </button>
+            </CDFSubmitButton>
           </form>
         </CDFUserMenu>
       }
