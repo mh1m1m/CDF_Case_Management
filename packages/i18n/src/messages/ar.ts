@@ -826,6 +826,13 @@ export const ar: Messages = {
     PROCEEDING_ALREADY_OPEN: "يوجد إجراء مفتوح من هذا النوع في هذه القضية.",
     PROCEEDING_CLOSED: "هذا الإجراء مغلق ولا يمكن تغييره.",
     OPEN_CHILD_PROCEEDINGS: "أغلق أولًا الإجراءات التي هي جزء من هذا الإجراء.",
+    // A committee proceeding leaves OPEN only once its work is no longer in flight (migration 2117).
+    PACKAGE_VOTING: "حزمة توصيات لهذه اللجنة لا تزال قيد التصويت.",
+    PACKAGE_ADOPTED: "حزمة توصيات معتمدة لم تُرفع إلى صاحب الصلاحية. ارفعها أو أعدها إلى اللجنة أولاً.",
+    LEGAL_REVIEW_OPEN: "حزمة توصيات لهذه اللجنة قيد المراجعة القانونية.",
+    PACKAGE_WITH_AUTHORITY: "حزمة توصيات لهذه اللجنة بانتظار قرار صاحب الصلاحية.",
+    OFFLINE_MEETING_PENDING:
+      "اجتماع عُقد دون اتصال بانتظار سجله الإلكتروني. أكمله، أو ألغه مع ذكر السبب، أولاً.",
     ALREADY_SUBJECT: "هذا الشخص مسمّى في القضية بالفعل.",
     ALLEGATION_WITHDRAWN: "هذا الادعاء مسحوب.",
     ALLEGATION_SUBJECT_SET: "هذا الادعاء مربوط بشخص آخر.",
@@ -3815,6 +3822,7 @@ export const ar: Messages = {
       PACKAGE_NOT_ADOPTED: "تجاوزت الحزمة الاعتماد الذي يتناوله رأيك، فلم يعد ممكناً إبداء رأي لاحق.",
       FORBIDDEN:
         "لم يعد بإمكانك إبداء هذا الرأي: فحسابك لم يعد يحمل صلاحية إبداء الرأي القانوني، أو لم يعد مصرّحاً له بهذه القضية. راجع أمين سر اللجنة.",
+      PROCEEDING_CLOSED: "أُغلق إجراء اللجنة، فلم يعد ممكناً إبداء رأي في هذا الطلب.",
     },
     packetBreadcrumb: "الملف",
     packetTitle: "ملف المراجعة القانونية",

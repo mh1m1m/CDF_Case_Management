@@ -1,6 +1,7 @@
 // Committee fixtures for the rebase security tests (migrations 1870, 1890 and 2030). Every call runs through the api.*
-// commands as the acting user; nothing is inserted directly.
-import { USERS, admin, type Scenario, type UserKey } from "./db";
+// commands as the acting user; nothing is inserted directly, except by closeAsBefore2117 (at the end), which writes a
+// state no command can reach any more.
+import { USERS, admin, type OwnerScenario, type Scenario, type UserKey } from "./db";
 
 export const REASON = "Synthetic: committee meeting test.";
 
@@ -158,4 +159,24 @@ export async function openItem(
 export async function vote(s: Scenario, user: UserKey, item: string, choice: string): Promise<void> {
   await s.as(user);
   await s.tx`select api.cast_vote(${item}, ${choice}, null)`;
+}
+
+/**
+ * Closes the committee proceeding `cp` with `status` as 1870's api.close_proceeding did before migration 2117: the case
+ * proceeding and its committee row closed by the case manager, without 2117's conclusion guard, and nothing else
+ * touched (its meetings stay as they were). Written as the table owner, since no command can reach this state any more:
+ * only a proceeding closed before 2117 looks like this. Leaves the owner acting.
+ */
+export async function closeAsBefore2117(
+  s: OwnerScenario,
+  cp: string,
+  status: "CONCLUDED" | "CANCELLED",
+): Promise<void> {
+  await s.asOwner();
+  await s.tx`update case_mgmt.proceeding
+                set status = ${status}, outcome_code = ${status === "CONCLUDED" ? "DECISION_RECORDED" : null},
+                    waiting_reason = null, suspension_reason = null, closed_by = ${USERS.caseManager},
+                    closed_at = now(), updated_at = now(), row_version = row_version + 1
+              where id = (select proceeding_id from committee.committee_proceeding where id = ${cp})`;
+  await s.tx`update committee.committee_proceeding set status = ${status}, closed_at = now() where id = ${cp}`;
 }
