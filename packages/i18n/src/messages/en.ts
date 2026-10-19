@@ -2907,9 +2907,8 @@ export const en = {
     COMMITTEE_RECORD_RETURNED: "A committee record you submitted was returned for correction.",
     COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED:
       "A deputy chair was activated as acting chair for a committee record of your committee. You can end the activation before it approves.",
-    RESTRICTION_LIFT_APPROVAL_REQUESTED:
-      "A request to lift a case's restricted status awaits your independent second approval.",
-    RESTRICTION_LIFT_DECIDED: "Your request to lift a case's restricted status was decided.",
+    RESTRICTION_LIFT_APPROVAL_REQUESTED: "A request to lift a case's restricted status awaits your decision.",
+    RESTRICTION_LIFT_DECIDED: "A decision was recorded on your request to lift the case's restricted status.",
   },
   bcpTemplate: {
     readme: {

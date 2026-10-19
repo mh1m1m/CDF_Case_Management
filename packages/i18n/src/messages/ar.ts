@@ -2835,8 +2835,8 @@ export const ar: Messages = {
     COMMITTEE_RECORD_RETURNED: "أُعيد محضر لجنة قدّمته لتصحيحه.",
     COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED:
       "فُعّل نائب الرئيس رئيسًا مكلّفًا لمحضر لجنة تابعة لك، ويمكنك إنهاء التفعيل قبل أن يعتمد المحضر.",
-    RESTRICTION_LIFT_APPROVAL_REQUESTED: "طلب لرفع صفة التقييد عن قضية بانتظار موافقتك الثانية المستقلة.",
-    RESTRICTION_LIFT_DECIDED: "صدر قرار في طلبك رفع صفة التقييد عن قضية.",
+    RESTRICTION_LIFT_APPROVAL_REQUESTED: "يوجد طلب لرفع التقييد عن قضية بانتظار قرارك.",
+    RESTRICTION_LIFT_DECIDED: "سُجّل قرار بشأن طلبك رفع التقييد عن القضية.",
   },
   bcpTemplate: {
     readme: {
