@@ -1212,6 +1212,57 @@ requirements:
       ]
     notes: "No migration (P12-8a). Administration shows where the caller's permissions open one of its pages, in api.my_areas' order; the export policy counts only where authz.is_export_policy_admin would allow it (DEC-F24), so the floor can still only remove an area (gap G1). The area's link and /admin open the caller's first page, and each page lists the caller's other pages (F3). Each page first asks the database for the caller check every command of its register starts with; a caller without it gets the same 404 as a page that does not exist, recorded as ACCESS_DENIED with the page's name only. The registers come from tables whose row-level security returns what that administrator keeps (F2), in the caller's security context; nothing is read past RLS and no table, policy or grant changes. A register carries ids, codes, dates, the reasons administrators wrote and names from the directory, never case content or a count derived from cases (§21), and every page says so. Whether a row is in force is judged by the database's clock with effective_to exclusive; a governed value says whether it is the owner default, provisional awaiting the CDF source (SOURCE_REQUIRED, never a guess) or approved, and a value nobody has set says so. The business calendar's two forms show only where authz.has_permission('BUSINESS_CALENDAR_ADMIN') passes when asked of the database (F1); every other check is the command's, on submit, and its refusal shows in the calendar's own words. Each form validates with the shared schema, pre-checks the permission, runs its api.* command in the caller's context and asks first; a refusal is recorded as COMMAND_DENIED with the command and outcome only. A new week records SOURCE_REQUIRED because the form sends no source (F4). Reading a register records nothing. Not in this change: the P12-8b read-model migration (one read per page with capability flags, then the row-level controls, with the self-appointment refusal F6 CDF-259, LATER_RULE_EXISTS F8 CDF-260 and a fail-closed version check F13); the seat, HEAD and continuity-operator appointment forms (F5) and the seat and position forms until the owner decides on backdated appointments (F7); the COMMITTEE_ADMIN commands with no route (F9); the continuity-operator registry (F10, P12-10 with 2160); Create pool (F12); withdrawing a calendar day. The export purposes' static list stays recorded debt (F11)."
 
+  - id: CDF-UX-027
+    title: "Each Administration page learns from the database which of its commands would accept the caller now, for the page and for each row; nobody appoints themselves to a sector, a notification rule never starts before a later rule of its key, and an in-place change of an export purpose, an invitee type or a sanction rule fails on a stale version"
+    source:
+      [
+        Phase 12 plan P12-8,
+        UX-116,
+        ADR-016 D0,
+        ADR-051 P12-8a amendment,
+        DEC-F02,
+        DEC-F21,
+        DEC-F24,
+        AMB-156,
+        AMB-158,
+        DEC-AMB-004,
+        DEC-AMB-011,
+        DEC-12,
+        coordinator ruling 2026-10-18 12:27 (F1 to F13),
+        coordinator allocation 2026-10-18 19:50,
+        ADR-063,
+      ]
+    external_ids: []
+    linear_issues: [CDF-266, CDF-259, CDF-260]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002127_administration_capabilities.sql,
+        api.my_admin_views,
+        api.admin_calendar_capabilities,
+        api.admin_committee_capabilities,
+        api.admin_sector_capabilities,
+        api.admin_notification_rule_capabilities,
+        api.admin_export_policy_capabilities,
+        api.admin_corrective_action_policy_capabilities,
+        api.appoint_sector_member,
+        api.set_notification_rule,
+        api.set_export_purpose,
+        api.set_invitee_type_rule,
+        api.set_sanction_rule,
+      ]
+    tests:
+      [
+        tests/security/administration-capabilities-2127.spec.ts,
+        tests/security/api-idor.spec.ts,
+        tests/security/audit-bypass.spec.ts,
+        tests/security/export.spec.ts,
+        tests/security/grievance-defence.spec.ts,
+        tests/security/owner-decisions-meetings.spec.ts,
+        tests/security/my-committees-and-meeting-logistics.spec.ts,
+        tests/security/package-builder-and-invite-choices.spec.ts,
+      ]
+    notes: "Database half (P12-8b); the pages follow with no migration: the calendar's withdrawal, creating a sector and revoking a delegation, the notification rule form, the export rule and purpose forms, the corrective-action policy form and the committee rule-set forms. api.my_admin_views lists the caller's Administration pages in api.my_areas' order, each where the caller check its commands start with passes (F3); an account that is not active gets none. Each page's read refuses FORBIDDEN whoever its commands refuse on that check, and otherwise says, for the page and for each row of its register, whether the command would accept the caller now, following the command's own checks in order with no lock, write or audit sequence number; ids and booleans only, never case content or a count derived from cases. The reads are not audited; the commands they answer for are. Narrowings, nothing widened: api.appoint_sector_member refuses CONFLICT:SELF_APPOINTMENT (F6, CDF-259, Security LOW); api.set_notification_rule refuses CONFLICT:LATER_RULE_EXISTS for a start at or before a later rule of its key, under a lock on the key (F8, CDF-260); api.set_export_purpose, api.set_invitee_type_rule and api.set_sanction_rule take the version the administrator read and refuse CONFLICT:STALE_VERSION for any other, a null included, after locking the code or the row, and each success records the new version in its audit event (F13). Not in this change: the seat, head and position forms (F5, F7), deactivation and annotation (F9), the 2160 panels (P12-8c), the continuity-operator registry (F10) and user and role administration (P12-10)."
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

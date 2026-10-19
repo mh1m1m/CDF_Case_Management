@@ -724,7 +724,8 @@ describe("DEC-AMB-004, DEC-AMB-001, DEC-AMB-011 (owner, 2026-10-13)", () => {
         status = "APPROVED",
       ) =>
         s.tx`select api.set_sanction_rule(${code}, ${rank}::int, ${irreversible}::boolean, ${rule}, ${status},
-          'Synthetic: sanction rule for the test only.')`;
+          'Synthetic: sanction rule for the test only.',
+          (select row_version from decision.sanction_catalogue where code = ${code}))`;
       for (const u of ["caseManager", "committeeSecretary", "committee", "lead"] as const) {
         await s.as(u);
         await s.expectError("CDF_FORBIDDEN", () => set("WARNING", 2, false, "PROCEED"));

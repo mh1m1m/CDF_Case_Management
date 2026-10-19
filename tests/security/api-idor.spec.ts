@@ -1851,6 +1851,14 @@ const ADMIN_COMMANDS = [
   "reactivate_committee",
   "flag_external_counsel_account",
   "delegate_preliminary_approval",
+  // Migration 2127 (ADR-063): the Administration pages' capability reads take no argument and name no case; each is
+  // refused (FORBIDDEN) to whoever does not hold its page's permission (administration-capabilities-2127.spec.ts).
+  "admin_calendar_capabilities",
+  "admin_committee_capabilities",
+  "admin_sector_capabilities",
+  "admin_notification_rule_capabilities",
+  "admin_export_policy_capabilities",
+  "admin_corrective_action_policy_capabilities",
 ];
 // Sector-scoped: refused unless the caller holds a current position in the sector (head, for delegation).
 // Covered in referral-preliminary.spec.ts.
@@ -1889,6 +1897,8 @@ const GLOBAL_COMMANDS = [
   "my_sanction_extract_approvals",
   // Migration 2085 (ADR-055): the committees where the caller holds a current seat.
   "my_committees",
+  // Migration 2127 (ADR-063): the caller's own Administration pages.
+  "my_admin_views",
 ];
 
 let caseA: string, caseB: string, caseExec: string;

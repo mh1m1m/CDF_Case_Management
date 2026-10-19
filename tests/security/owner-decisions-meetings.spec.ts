@@ -905,10 +905,12 @@ describe("notice, invitees and the cancellation notice (AMB-061, AMB-156/157/158
       await s.expectError(
         "CDF_FORBIDDEN",
         (tx) =>
-          tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON})`,
+          tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON},
+            (select row_version from committee.invitee_type_rule where invitee_role = 'INTERPRETER'))`,
       );
       await s.as("platformAdmin");
-      await s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON})`;
+      await s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON},
+        (select row_version from committee.invitee_type_rule where invitee_role = 'INTERPRETER'))`;
       await s.as("committeeSecretary");
       await s.expectError(
         "CDF_INVALID:requires_coi",

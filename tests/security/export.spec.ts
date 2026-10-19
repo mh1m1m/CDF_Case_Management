@@ -901,7 +901,7 @@ describe("owner decisions DEC-F21, DEC-F22 and DEC-F24 (migration 2040)", () => 
       // Administrable by the export policy administrator only, never by an approver (DEC-F24).
       const setPurpose = (code: string, active: boolean, requiresJustification = false) =>
         s.tx`select api.set_export_purpose(${code}, 'Synthetic purpose', 'غرض تجريبي', ${requiresJustification},
-          ${active}, 75, ${REASON})`;
+          ${active}, 75, ${REASON}, (select row_version from exchange.export_purpose where code = ${code}))`;
       for (const actor of ["caseManager", "grcDirector", "lead"] as const) {
         await s.as(actor);
         await s.expectError("CDF_FORBIDDEN", () => setPurpose("LEGAL_REVIEW", false));
@@ -913,7 +913,7 @@ describe("owner decisions DEC-F21, DEC-F22 and DEC-F24 (migration 2040)", () => 
         (
           tx,
         ) => tx`select api.set_export_purpose('LEGAL_REVIEW', 'Legal review', 'مراجعة قانونية', false, true, 950,
-          ${REASON})`,
+          ${REASON}, (select row_version from exchange.export_purpose where code = 'LEGAL_REVIEW'))`,
       );
       await s.expectError("CDF_CONFLICT:LEGACY_PURPOSE", () => setPurpose("AUDIT", true));
       await s.expectError("CDF_CONFLICT:OTHER_REQUIRES_JUSTIFICATION", () =>

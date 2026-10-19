@@ -1198,14 +1198,16 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
       // The rule enables the interpreter, then no type at all: may_invite and invitee_roles follow
       // (INVITEE_TYPE_DISABLED). Synthetic rule values for the test only.
       await s.as("platformAdmin");
-      await s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON})`;
+      await s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON},
+        (select row_version from committee.invitee_type_rule where invitee_role = 'INTERPRETER'))`;
       await logistics(s, f.meeting, subject);
       expect(
         (await meetingView(s, "committeeSecretary", f.meeting))!.invitee_roles!.map((r) => r.invitee_role),
       ).toContain("INTERPRETER");
       await s.as("platformAdmin");
       for (const role of ROLES)
-        await s.tx`select api.set_invitee_type_rule(${role}, false, true, null, 'SOURCE_REQUIRED', ${REASON})`;
+        await s.tx`select api.set_invitee_type_rule(${role}, false, true, null, 'SOURCE_REQUIRED', ${REASON},
+          (select row_version from committee.invitee_type_rule where invitee_role = ${role}))`;
       await logistics(s, f.meeting, subject);
       let v = await meetingView(s, "committeeSecretary", f.meeting);
       expect(v!.capabilities!.may_invite).toBe(false);
@@ -1213,7 +1215,8 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
 
       // A role is enabled again, then the meeting closes: no longer active, nothing is offered (MEETING_NOT_ACTIVE).
       await s.as("platformAdmin");
-      await s.tx`select api.set_invitee_type_rule('WITNESS', true, true, null, 'SOURCE_REQUIRED', ${REASON})`;
+      await s.tx`select api.set_invitee_type_rule('WITNESS', true, true, null, 'SOURCE_REQUIRED', ${REASON},
+        (select row_version from committee.invitee_type_rule where invitee_role = 'WITNESS'))`;
       await logistics(s, f.meeting, subject);
       expect((await meetingView(s, "committeeSecretary", f.meeting))!.capabilities!.may_invite).toBe(true);
       await s.as("committeeSecretary");
