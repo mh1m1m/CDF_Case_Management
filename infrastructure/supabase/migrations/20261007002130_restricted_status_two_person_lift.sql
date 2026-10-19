@@ -404,6 +404,8 @@ declare v_case case_mgmt.case_record;
 begin
   select * into v_case from case_mgmt.case_record c where c.id = p_q.case_id;
   if not v_case.is_restricted then return 'CASE_NOT_RESTRICTED'; end if;
+  -- Reclassified since the request: what the requester previewed no longer describes the case.
+  if v_case.classification is distinct from p_q.classification then return 'PREVIEW_CHANGED'; end if;
   if case_mgmt.restriction_lift_window() is null then return 'LIFT_WINDOW_MISCONFIGURED'; end if;
   if case_mgmt.restriction_lift_pending(p_q.case_id) > 0 then return 'RESTRICTED_APPROVALS_PENDING'; end if;
   if case_mgmt.restriction_lift_hash(case_mgmt.restriction_lift_preview(p_q.case_id)) <> p_q.preview_hash then
@@ -432,6 +434,12 @@ begin
   if case_mgmt.restriction_lift_lapsed(p_q) then return 'APPROVAL_LAPSED'; end if;
   if not v_case.is_restricted then return 'CASE_NOT_RESTRICTED'; end if;
   if v_case.records_state not in ('ACTIVE', 'CLOSED') then return 'RECORDS_READ_ONLY'; end if;
+  -- Reclassified since the request: the approval was given on another classification.
+  if v_case.classification is distinct from p_q.classification then return 'PREVIEW_CHANGED'; end if;
+  -- The approver, re-checked now (condition c): not the lifter, the requester or the case's owner, and still eligible
+  -- (case_mgmt.restriction_lift_approver_ok): active, holding the configured role while that role is in force, cleared
+  -- for the case's classification now, not an external account, no declared conflict on the case, no active
+  -- assignment on it.
   if p_q.decided_by in (p_user_id, p_q.requested_by) or p_q.decided_by is not distinct from v_case.owner_id
      or not case_mgmt.restriction_lift_approver_ok(p_q.case_id, p_q.decided_by) then
     return 'APPROVER_NOT_ELIGIBLE';

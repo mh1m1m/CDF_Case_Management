@@ -369,4 +369,38 @@ describe("the two-person lift of a restricted case (2130, ADR-049; DEC-AMB-012 C
       await endRole(role);
     });
   });
+
+  it("(2) and (5) after the approval: a reclassification refuses the lift, and so does the approver joining the case team", async () => {
+    await ownerScenario(async (s) => {
+      const c = await restrictedCase(s);
+      const svc = liftIn(s);
+      const director = ctxFor("grcDirector");
+      const request = await requested(svc, c);
+      expect(value(await decided(svc, request))).toBe("APPROVED");
+      const reclassify = async (to: string) => {
+        await s.as("grcDirector");
+        await s.tx`select api.change_case_classification(${c}, ${to}::core.classification_level, true, ${REASON})`;
+      };
+      await reclassify("SECRET");
+      expect(outcome(await svc.lift(director, { requestId: request }))).toBe("CONFLICT:PREVIEW_CHANGED");
+      await reclassify("CONFIDENTIAL");
+      await s.asOwner();
+      const [team] = await s.tx<{ id: string }[]>`
+        insert into case_mgmt.case_assignment (case_id, user_id, assignment_role, reason, assigned_by)
+        values (${c}, ${USERS.grcDeputy}, 'REVIEWER', 'Synthetic: on the team after approving.', ${USERS.grcDirector})
+        returning id`;
+      expect(outcome(await svc.lift(director, { requestId: request }))).toBe(
+        "CONFLICT:APPROVER_NOT_ELIGIBLE",
+      );
+      expect((await svc.status(director, c))?.request).toMatchObject({
+        capabilities: { mayLift: false },
+        liftRefusal: "APPROVER_NOT_ELIGIBLE",
+      });
+      expect(await isRestricted(s, c)).toBe(true);
+      await s.asOwner();
+      await s.tx`update case_mgmt.case_assignment set status = 'ENDED', ended_at = now() where id = ${team!.id}`;
+      expect(outcome(await svc.lift(director, { requestId: request }))).toBe("ok");
+      expect(await isRestricted(s, c)).toBe(false);
+    });
+  });
 });

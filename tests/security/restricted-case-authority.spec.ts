@@ -1029,6 +1029,143 @@ describe("the two-person lift of a restricted case (2130, ADR-049; DEC-AMB-012 C
     });
   });
 
+  it("T-AMB-145: a reclassification after the request refuses the approval, and after the approval refuses the lift (PREVIEW_CHANGED)", async () => {
+    await ownerScenario(async (s) => {
+      const c = await liftableCase(s);
+      const request = await requestLift(s, c);
+      const reclassify = async (to: string) => {
+        await s.as("grcDirector");
+        await s.tx`select api.change_case_classification(${c}, ${to}::core.classification_level, true, ${LIFT_REASON})`;
+      };
+      // Raised before the approval: refused on the snapshot's hash and on a fresh preview's alike.
+      await reclassify("SECRET");
+      const row = (await liftQueue(s, "grcDeputy"))[0]!;
+      expect(row).toMatchObject({
+        id: request,
+        classification: "CONFIDENTIAL",
+        may_decide: true,
+        approve_refusal: "PREVIEW_CHANGED",
+      });
+      const fresh = (await previewLift(s, "grcDirector", c)).preview_hash;
+      expect(
+        await outcomes(s, "grcDeputy", {
+          snapshot: DECIDE(request, row.preview_hash),
+          fresh: DECIDE(request, fresh),
+        }),
+      ).toEqual({ snapshot: "CDF_CONFLICT:PREVIEW_CHANGED", fresh: "CDF_CONFLICT:PREVIEW_CHANGED" });
+      // Back at the requested classification, the approval is given.
+      await reclassify("CONFIDENTIAL");
+      expect(await decideLift(s, "grcDeputy", request)).toBe("APPROVED");
+      // Raised after the approval: the lift is refused and the case stays restricted, at SECRET.
+      await reclassify("SECRET");
+      expect(await outcomes(s, "grcDirector", { lift: LIFT(request) })).toEqual({
+        lift: "CDF_CONFLICT:PREVIEW_CHANGED",
+      });
+      expect((await liftStatus(s, "grcDirector", c)).request).toMatchObject({
+        may_lift: false,
+        lift_refusal: "PREVIEW_CHANGED",
+      });
+      expect((await facts(s, c)).case).toMatchObject({ isRestricted: true, classification: "SECRET" });
+    });
+  });
+
+  it("T-AMB-145: at the lift the approver is re-checked (condition c): on the team, without the role, the role not in force, cleared below the case, suspended or external, the lift is refused", async () => {
+    await ownerScenario(async (s) => {
+      const c = await liftableCase(s);
+      const request = await requestLift(s, c);
+      expect(await decideLift(s, "grcDeputy", request)).toBe("APPROVED");
+      const deputy = USERS.grcDeputy;
+      // Each change happens after the approval and is rolled back before the next one.
+      const changes: Record<string, () => Promise<unknown>> = {
+        "on the case team": () =>
+          s.tx`insert into case_mgmt.case_assignment (case_id, user_id, assignment_role, reason, assigned_by)
+               values (${c}, ${deputy}, 'REVIEWER', 'Synthetic: on the team after approving.', ${USERS.grcDirector})`,
+        "the role revoked": () =>
+          s.tx`update iam.user_role_assignment set status = 'REVOKED', revoked_at = now()
+               where user_id = ${deputy} and role_code = 'GRC_DIRECTOR' and status = 'ACTIVE'`,
+        "another role configured": () => liftSettings(s, "CASE_MANAGER"),
+        "the setting unset (SOURCE_REQUIRED)": () => liftSettings(s, null),
+        "the role held but not in force (setting not CONFIGURED)": () =>
+          s.tx`update config.setting set status = 'SOURCE_REQUIRED', source_reference = null
+               where key = 'RESTRICTION_LIFT_SECOND_APPROVER'`,
+        "the role held but not in force (made technical)": () =>
+          s.tx`update iam.role set is_technical = true where code = 'GRC_DIRECTOR'`,
+        "cleared below the case": () =>
+          s.tx`update iam.user_profile set clearance = 'RESTRICTED' where id = ${deputy}`,
+        suspended: () => s.tx`update iam.user_profile set status = 'SUSPENDED' where id = ${deputy}`,
+        "an external account": () =>
+          s.tx`insert into iam.external_account (user_id, engagement_reference, reason, flagged_by)
+               values (${deputy}, 'SYN-ENG-2130', 'Synthetic: flagged as external counsel.', ${USERS.platformAdmin})`,
+      };
+      const refused: Record<string, unknown[]> = {};
+      for (const [name, change] of Object.entries(changes)) {
+        await s.asOwner();
+        await s.tx.unsafe("savepoint approver_change");
+        await change();
+        await s.asOwner();
+        const [still] = await s.tx<{ ok: boolean }[]>`
+          select case_mgmt.restriction_lift_rca(${c}, ${USERS.grcDirector}) as ok`;
+        const { lift } = await outcomes(s, "grcDirector", { lift: LIFT(request) });
+        const q = (await liftStatus(s, "grcDirector", c)).request;
+        refused[name] = [still!.ok, lift, q?.may_lift, q?.lift_refusal];
+        await s.tx.unsafe("rollback to savepoint approver_change");
+      }
+      const expected = [true, "CDF_CONFLICT:APPROVER_NOT_ELIGIBLE", false, "APPROVER_NOT_ELIGIBLE"];
+      expect(refused).toEqual(Object.fromEntries(Object.keys(changes).map((k) => [k, expected])));
+      // Every change undone: the same approval lifts the restriction.
+      await s.as("grcDirector");
+      await s.tx`select api.lift_case_restriction(${request})`;
+      expect((await facts(s, c)).case.isRestricted).toBe(false);
+    });
+  });
+
+  it("T-AMB-145: a command on a request locks its row before it reads its status; the lift locks the case, then the request, then checks", async () => {
+    const body = async (fn: string) => {
+      const [r] = await admin<{ src: string }[]>`select pg_get_functiondef(${fn}::regprocedure) as src`;
+      return r!.src.replace(/\s+/g, " ");
+    };
+    const at = (src: string, text: string) => {
+      const i = src.indexOf(text);
+      expect(i, text).toBeGreaterThan(-1);
+      return i;
+    };
+    // The lock: a party check (NOT_FOUND otherwise), then the row FOR UPDATE.
+    const lock = await body("case_mgmt.lock_restriction_lift(uuid)");
+    expect(at(lock, "case_mgmt.restriction_lift_party(p_request_id")).toBeLessThan(
+      at(lock, "where q.id = p_request_id for update"),
+    );
+    // Deciding, expiring and withdrawing take the lock first: two approvers deciding at once queue on the row, and the
+    // second reads the first's decision (ALREADY_DECIDED).
+    for (const fn of [
+      "api.decide_restriction_lift(uuid, text, text, text)",
+      "api.expire_restriction_lift(uuid)",
+      "api.withdraw_restriction_lift(uuid)",
+    ]) {
+      const src = await body(fn);
+      const locked = at(src, "v_q := case_mgmt.lock_restriction_lift(p_request_id);");
+      const reads = ["v_q.", "from case_mgmt.restriction_lift_request"]
+        .map((t) => src.indexOf(t, src.indexOf("begin ")))
+        .filter((i) => i > -1 && i < locked);
+      expect(reads, fn).toEqual([]);
+    }
+    const lift = await body("api.lift_case_restriction(uuid)");
+    const caseLock = at(
+      lift,
+      "from case_mgmt.case_record c where c.id = (select q.case_id from case_mgmt.restriction_lift_request q where q.id = p_request_id) for update",
+    );
+    const requestLock = at(
+      lift,
+      "select * into v_q from case_mgmt.restriction_lift_request q where q.id = p_request_id for update",
+    );
+    const check = at(lift, "case_mgmt.restriction_lift_lift_refusal(v_q, v_actor)");
+    expect([caseLock < requestLock, requestLock < check]).toEqual([true, true]);
+    // The sweep's string stays in the one function that refuses true → false by reclassification.
+    const holders = await admin<{ fn: string }[]>`
+      select n.nspname || '.' || p.proname as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where p.prosrc like '%RESTRICTION_LIFT_NOT_DECIDED%' order by 1`;
+    expect(holders.map((h) => h.fn)).toEqual(["api.change_case_classification"]);
+  });
+
   it("T-AMB-145: request ids answer NOT_FOUND outside the request, the case's commands answer NOT_FOUND or FORBIDDEN outside its authority, and nobody else lifts", async () => {
     await ownerScenario(async (s) => {
       const c = await liftableCase(s);

@@ -41,6 +41,7 @@ Before CDF-206, `api.change_case_classification` set `is_restricted` from its ar
   - **At the request:** it is snapshotted, and the requester passes the hash they previewed.
   - **At the approval:** it is recomputed and snapshotted again; the approver passes the hash they saw, which must equal both.
   - **At the lift:** it is recomputed and must equal the approval's hash.
+  - **The classification** must still be the one the request snapshotted, at the approval and at the lift. A case reclassified since the request is refused with `PREVIEW_CHANGED` even before the hashes are compared. The approver's clearance is always checked against the classification the case has now.
 
 ### 5. Commands (SECURITY DEFINER, `search_path = ''`, the actor from `api._actor()`, no user-id argument)
 
@@ -54,11 +55,13 @@ Before CDF-206, `api.change_case_classification` set `is_restricted` from its ar
 3. **`api.decide_restriction_lift(request, APPROVE|REJECT, reason, preview_hash)`**: the second approver, on a `PENDING` request that has not lapsed.
    - Refusals: `REQUESTER_CANNOT_APPROVE`, `RCA_CANNOT_APPROVE`, `ALREADY_DECIDED`, `REQUEST_CLOSED`, `REQUEST_LAPSED`.
    - An approval is also refused for `CASE_NOT_RESTRICTED`, `RESTRICTED_APPROVALS_PENDING` and `PREVIEW_CHANGED`. A rejection is never blocked by those.
+   - It takes the request row `FOR UPDATE` (`case_mgmt.lock_restriction_lift`, after the party check) before it reads the status. Two approvers deciding at once queue on the row, and the second reads the first's decision (`ALREADY_DECIDED`). Expiring and withdrawing lock the row the same way.
    - It audits `RESTRICTION_LIFT_APPROVED` or `RESTRICTION_LIFT_REJECTED` and notifies the requester.
 4. **`api.lift_case_restriction(request)`**: the requester, still the RCA. It locks the case, then the request, and re-checks everything in one transaction (condition c):
    - the case is still restricted and writable;
    - the request is `APPROVED`, not consumed (`APPROVAL_CONSUMED`) and not lapsed (`APPROVAL_LAPSED`);
-   - the approver is still eligible and still not the lifter, the requester or the owner (`APPROVER_NOT_ELIGIBLE`);
+   - the classification is still the requested one (`PREVIEW_CHANGED`);
+   - the approver, checked again now, is still not the lifter, the requester or the owner, and is still eligible (`APPROVER_NOT_ELIGIBLE`): active, holding the configured role while that role is in force, cleared for the case's current classification, not an external account, with no declared conflict on the case and no active assignment on it;
    - nothing is pending, and the preview is unchanged.
 
    Then the single new writer of `is_restricted` sets it false, and the request becomes `LIFTED` in the same transaction. It audits `RESTRICTION_LIFTED` with the ids, the hash, the classification and `restricted_from: true`, `restricted_to: false`.
@@ -105,6 +108,7 @@ A request id answers `NOT_FOUND` to anyone who is not its requester (while they 
 - **No page yet.** UX owns the RCA's panel and the approver's queue page (the inbox shows the notices without a link until `/restriction-lifts` ships). The commands, flags and gateway are ready, and there is no end-to-end test until the page exists.
 - **The events are not in the case history.** `RESTRICTION_LIFT_*` events are on the audit ledger (readable by auditors) but are not in `api.case_history`'s action-audience catalogue, so the case team's history tab does not show them. Adding them is a read-model change for UX's page.
 - **Restricting the case again** is still the existing `api.change_case_classification` with `RESTRICTED_CASE_GRANT` (A-3). A consumed request is never reused (`APPROVAL_CONSUMED`).
+- **The race between two approvers is pinned statically.** The lock order is checked in the function bodies, not by a two-session lock-wait test: lift requests exist only in rolled-back test transactions, and committing one would write rows to the append-only ledger.
 - **One window for both stages.** The 24-hour window is an engineering default until CDF security policy sets one.
 
 ## Production mapping
@@ -113,7 +117,7 @@ None new. The rule lives in database command functions and their tests and carri
 
 ## Tests
 
-- **`tests/security/restricted-case-authority.spec.ts`** (T-AMB-145), the static test plus 9 tests:
+- **`tests/security/restricted-case-authority.spec.ts`** (T-AMB-145), the static test plus 12 tests:
   - the full path, with counts and role codes only, an ids-only ledger and ids-only notices;
   - the setting unset or misconfigured, and no eligible approver;
   - self approval, approval by the requester or the RCA, a second decision, a handover, and lifting or withdrawing by the approver;
@@ -121,14 +125,17 @@ None new. The rule lives in database command functions and their tests and carri
   - lapsed requests and approvals, expiry, and reuse of a consumed approval;
   - pending restricted approvals;
   - `PREVIEW_CHANGED` at the request, the approval and the lift;
+  - a reclassification after the request (the approval is refused) and after the approval (the lift is refused);
+  - the approver re-checked at the lift after approving: on the team, the role revoked, another role configured, the setting unset or not configured, the role made technical, clearance lowered, suspended, flagged external. Each is refused, and the same approval lifts once every change is undone;
+  - the lock order (static): deciding, expiring and withdrawing lock the request before reading it; the lift locks the case, then the request, then checks. The string `RESTRICTION_LIFT_NOT_DECIDED` stays in `api.change_case_classification` alone;
   - outsiders and random ids;
   - the table's integrity.
 
-  Seventeen mutations of the controls were each caught.
+  Seventeen mutations of the controls were each caught. Removing the approver re-check from the lift fails the re-check test: the four changes to the configured role then lift, and the other five are refused only because the preview changed.
 
 - **`tests/security/api-idor.spec.ts`:** `NOT_FOUND` probes for the case-id commands (in the main outsider sweep) and the request-id commands (their own describe, with a check that the probes are not vacuous). The T-AMB-142 pinned list is unchanged: no command takes a user id.
 - **`tests/security/audit-bypass.spec.ts`:** a walk step for each of the six audited commands. The two read models are in its read-only list.
-- **`tests/integration/restriction-lift.spec.ts`:** the service and gateway against the database, with the negatives for the coordinator's points (1) to (5).
+- **`tests/integration/restriction-lift.spec.ts`:** the service and gateway against the database, with the negatives for the coordinator's points (1) to (5), and a reclassification and a team assignment after the approval.
 - **Unit tests:** the service, the schemas, the gateway mapping and the i18n catalogues.
 - **`tests/integration/mirrors.spec.ts`:** the templates and object types.
 
