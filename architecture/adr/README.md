@@ -60,6 +60,7 @@
 | [ADR-061](ADR-061-committee-workbook-official-record.md)            | The committee workbook's official record and attestation (migration 2115)       | Proposed |
 | [ADR-062](ADR-062-paper-ballot-release-before-supersession.md)      | A bound paper ballot is superseded only after a release (migration 2125)        | Proposed |
 | [ADR-063](ADR-063-administration-capabilities.md)                   | The Administration pages' capabilities and three narrowings (migration 2127)    | Proposed |
+| [ADR-064](ADR-064-seat-and-position-end-references.md)              | Seat and position end references and capability flags (migration 2128)          | Proposed |
 
 **Decision IDs DEC-61 and DEC-62 (CON-011).** Each ID names two different things. In ADR-018 §7 and ADR-022 they are owner card decisions: DEC-61 (owner card, restricted referral) and DEC-62 (owner card, restricted legal review). In the UX audit register O17 §17.7, the source of ADR-016, they are audit items, cited here as UX DEC-61 (the Stitch project) and UX DEC-62 (new case entities).
 
