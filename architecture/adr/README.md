@@ -50,6 +50,7 @@
 | [ADR-046](ADR-046-people-and-access.md)                             | People and access without widening anyone's reach                               | Proposed |
 | [ADR-047](ADR-047-continuity-committee-workbook.md)                 | The committee continuity workbook and restore notices (migration 2110)          | Proposed |
 | [ADR-048](ADR-048-paper-ballots.md)                                 | Paper ballots of a committee meeting held offline (migration 2120)              | Proposed |
+| [ADR-049](ADR-049-restricted-status-two-person-lift.md)             | Two-person lift of a case's restricted status (migration 2130)                  | Proposed |
 | [ADR-051](ADR-051-areas-and-my-work-phase-12.md)                    | Areas and My Work for Phase 12                                                  | Proposed |
 | [ADR-054](ADR-054-meeting-screen-capabilities.md)                   | The meeting screen's capabilities                                               | Proposed |
 | [ADR-055](ADR-055-my-committees-and-meeting-logistics.md)           | My Committees and the meeting's logistics                                       | Proposed |
