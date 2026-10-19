@@ -204,10 +204,16 @@ describe("meeting and minutes screens through the service (Phase 12 P12-2a)", ()
         unballotedItem.offlineBallots,
         unballotedItem.myBallot,
         unballotedItem.capabilities.mayConfirmBallot,
-      ]).toEqual([false, { provisional: 0, confirmed: 0, superseded: 0, lapsed: 0 }, null, false]);
+        unballotedItem.capabilities.mayDeclineBallot,
+        unballotedItem.ballotsReleasableFor,
+      ]).toEqual([false, { provisional: 0, confirmed: 0, superseded: 0, lapsed: 0 }, null, false, false, []]);
       expect(
         outcome(await ms.confirmOfflineBallot(ctxFor("lead"), { voteItemId: item, choice: "APPROVE" })),
       ).toBe("CONFLICT:NO_PROVISIONAL_BALLOT");
+      // 2125 (ADR-062): nothing to decline either.
+      expect(outcome(await ms.declineOfflineBallot(ctxFor("lead"), { voteItemId: item }))).toBe(
+        "CONFLICT:NO_PROVISIONAL_BALLOT",
+      );
       expect(outcome(await ms.castVote(ctxFor("lead"), { voteItemId: item, choice: "APPROVE" }))).toBe("ok");
       // A member who voted may revise while the item is open; the screen offers it.
       const leadView = full(await ms.meeting(ctxFor("lead"), f.meeting));

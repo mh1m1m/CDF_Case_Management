@@ -40,6 +40,7 @@ import {
   outcomes,
   without2085,
   without2120,
+  without2125,
 } from "../support/capabilities";
 import { concludeProceedings } from "../support/closure";
 
@@ -843,7 +844,7 @@ async function sameAs2065(s: OwnerScenario, user: UserKey, meeting: string): Pro
   const after = await runAs(s, "api.meeting_view", meeting);
   expect(after.error, `${user}: the same refusal`).toBe(before.error);
   if (before.error === undefined)
-    expect(without2085(without2120(after.view)), `${user}: 2065's view`).toEqual(before.view);
+    expect(without2085(without2120(without2125(after.view))), `${user}: 2065's view`).toEqual(before.view);
 }
 
 /** Callers of the meeting sweeps: the runner, the chair, a member, the deputy, the alternates, a witness with an

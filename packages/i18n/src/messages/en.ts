@@ -938,9 +938,12 @@ export const en = {
       "The meeting's signed record does not show this member attending, so they cannot be recorded as present.",
     NO_PROVISIONAL_BALLOT: "You have no paper ballot on this item waiting for your confirmation.",
     BALLOT_CHOICE_MISMATCH:
-      "That is not the choice the record shows on your paper ballot, so nothing was recorded. If the record is wrong, do not confirm it: tell the committee's secretary.",
+      "That is not the choice the record shows on your paper ballot, so nothing was recorded. If the record is wrong, do not confirm it: decline your ballot and tell the committee's secretary.",
     BALLOTS_UNCONFIRMED:
-      "A paper ballot on this item still waits for its member's confirmation. If the member cannot confirm it, record them as absent or unable to vote, with a reason.",
+      "A paper ballot on this item still waits for its member's confirmation. If the member cannot confirm it, they or the chair must release it; then record them as absent or unable to vote, with a reason.",
+    BALLOT_HELD:
+      "This member's paper ballot still stands. You can record them as absent or unable to vote only after the member declines it or the chair releases it, with a reason.",
+    BALLOT_RELEASED: "This paper ballot has already been released.",
     MINUTES_EXIST:
       "Minutes already exist for this meeting. A new version follows only a request for changes.",
     MINUTES_NOT_IN_REVIEW: "These minutes are not in review.",

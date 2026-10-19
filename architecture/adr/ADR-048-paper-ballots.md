@@ -43,6 +43,7 @@ DEC-AMB-008 lets the committee vote on signed individual paper ballots during an
 - **Binding:** a vote item opened in the meeting held offline on a ballot's target (in the same round, for a package) binds the provisional ballot (`OFFLINE_BALLOTS_BOUND`, ids and the count).
 - **Confirming (`api.confirm_offline_ballot(vote_item_id, choice)`):** the member's own act, in their own transaction (DEC-AMB-008). It applies every check `api.cast_vote` makes (a voting or activated alternate member, not replaced, seat current, declared no conflict, present, the item open, no vote yet), then requires their own provisional ballot bound to that item (`NO_PROVISIONAL_BALLOT`) and the choice they read on it (`BALLOT_CHOICE_MISMATCH`; the ballot stays provisional). It writes the member's own `SELF` vote with the ballot's choice and the paper time as `original_event_at`, and the ballot becomes `CONFIRMED` (`OFFLINE_BALLOT_CONFIRMED`, ids only). The caller is the member by construction: the secretary has no path to it.
 - **Superseding:** another vote of the member's on the item settles the ballot `SUPERSEDED` (`OFFLINE_BALLOT_SUPERSEDED`): their recusal for a conflict, or the secretary's N6 record for a member not present (`ABSENT`, `UNABLE_TO_VOTE` or `RECUSED`, with its reason; never `APPROVE` or `REJECT`).
+- **Amended by migration 2125 (ADR-062; coordinator ruling of 2026-10-18 19:08 UTC):** the secretary's N6 record supersedes a ballot only after a second actor has released it: its member (`api.decline_offline_ballot`) or the meeting's chair with a reason (`api.release_offline_ballot`). Until then N6 refuses `BALLOT_HELD`, and the ballot stays the member's to confirm until a vote settles it.
 - **Lapsing:** a ballot still provisional when its item closes, or when its meeting closes or is cancelled, becomes `LAPSED` and never counts (`OFFLINE_BALLOTS_LAPSED`, ids and the count).
 
 ### 6. The vote is final only when every ballot is settled
@@ -85,7 +86,7 @@ DEC-AMB-008 lets the committee vote on signed individual paper ballots during an
 
 - There is no page to confirm a ballot yet. The command, its flag and the view fields are complete; the control on the meeting page is UX work. Until then a member confirms only through the API, and a meeting held offline with ballots completes only that way.
 - My Work's `VOTE_OPEN` row is unchanged: it does not yet say that a ballot waits for confirmation.
-- A member present without a ballot on an item can only recuse there (F2); a member who disputes their ballot simply does not confirm it, and the secretary records them under N6 when they are not present.
+- A member present without a ballot on an item can only recuse there (F2); a member who disputes their ballot simply does not confirm it, and the secretary records them under N6 when they are not present (since 2125, ADR-062, after the member declines it or the chair releases it).
 - A ballot whose target is never opened as a vote item in the meeting lapses when the meeting closes.
 - A tie is broken by the chair's casting vote online, as for any vote.
 - A meeting held offline without a committed record cannot record its members present (F2), so it holds no vote.

@@ -167,3 +167,22 @@ export function without2120<V>(view: V): V {
   }
   return v as V;
 }
+
+// ---- api.meeting_view: the keys migration 2125 adds (ADR-062) ------------------------------------------------------
+
+/** On each vote item, beside its capabilities. */
+export const VOTE_ITEM_KEYS_2125 = ["ballots_releasable_for"] as const;
+/** On each vote item's capabilities. */
+export const VOTE_ITEM_FLAGS_2125 = ["may_decline_ballot"] as const;
+
+/** A meeting view without the keys 2125 adds: what 2120's api.meeting_view returned (my_ballot.release goes with
+ *  my_ballot, which without2120 drops). Where no paper ballot is bound, 2125 narrows no flag. Null stays null. */
+export function without2125<V>(view: V): V {
+  if (view === null || view === undefined) return view;
+  const v = structuredClone(view) as ViewWith2120Keys;
+  for (const i of v.deliberation?.vote_items ?? []) {
+    for (const k of VOTE_ITEM_KEYS_2125) delete i[k];
+    for (const f of VOTE_ITEM_FLAGS_2125) delete i.capabilities?.[f];
+  }
+  return v as V;
+}
