@@ -707,6 +707,19 @@ const MEETING_PROBES: Probe<MeetingTargets>[] = [
     call: (tx, t) => tx`select api.confirm_offline_ballot(${t.voteItem}, 'APPROVE')`,
   },
   {
+    // Migration 2125 (ADR-062): a member's decline of their own paper ballot.
+    fn: "decline_offline_ballot",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decline_offline_ballot(${t.voteItem})`,
+  },
+  {
+    // Migration 2125 (ADR-062): the meeting chair's release of an absent member's paper ballot.
+    fn: "release_offline_ballot",
+    outcome: "NOT_FOUND",
+    call: (tx, t) =>
+      tx`select api.release_offline_ballot(${t.voteItem}, ${t.participant}, 'Synthetic: probe.')`,
+  },
+  {
     fn: "record_vote_for_member",
     outcome: "NOT_FOUND",
     call: (tx, t) =>

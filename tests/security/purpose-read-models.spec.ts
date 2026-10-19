@@ -32,7 +32,7 @@ import {
   vote,
   type MeetingFixture,
 } from "../support/committee";
-import { without2085, without2120 } from "../support/capabilities";
+import { without2085, without2120, without2125 } from "../support/capabilities";
 
 const CONCERN = "Synthetic: unique-concern-marker-2036, reports to the subject.";
 const DECISION = "Synthetic: unique-decision-marker-2036, the link is direct.";
@@ -193,7 +193,7 @@ function expectBooleans(caps: Caps, where: string) {
 async function meetingView(s: Scenario, user: UserKey, meeting: string): Promise<MeetingView> {
   await s.as(user);
   const [r] = await s.tx<{ v: MeetingView }[]>`select api.meeting_view(${meeting}) as v`;
-  const v = without2085(without2120(r!.v));
+  const v = without2085(without2120(without2125(r!.v)));
   expect(Object.keys(v).sort(), user).toEqual(TOP_KEYS);
   expect(Object.keys(v.capabilities).sort(), user).toEqual(MEETING_CAPABILITIES);
   expectBooleans(v.capabilities, user);

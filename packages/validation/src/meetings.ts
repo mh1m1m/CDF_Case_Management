@@ -159,6 +159,13 @@ export const confirmOfflineBallotSchema = z.object({
   voteItemId: uuid,
   choice: choice(OFFLINE_BALLOT_CHOICES),
 });
+/**
+ * 2125 (ADR-062): the member lets their own paper ballot go, so that the secretary's record for a member not present
+ * may supersede it. It names no member: nobody declines for another.
+ */
+export const declineOfflineBallotSchema = z.object({ voteItemId: uuid });
+/** 2125 (ADR-062): the meeting's chair releases the paper ballot of a member who is not present, with a reason. */
+export const releaseOfflineBallotSchema = z.object({ voteItemId: uuid, participantId: uuid, reason });
 export const recordVoteNoteSchema = z.object({
   voteItemId: uuid,
   note: requiredText(10, 4000),
