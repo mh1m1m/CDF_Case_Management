@@ -44,6 +44,10 @@ const USERS = {
   financeEmployee: "a0000000-0000-4000-8000-000000000028",
   // GRC Deputy Mu, who asks for an export of a restricted case (Phase 12 P12-6b-1)
   grcDeputy: "a0000000-0000-4000-8000-000000000014",
+  // Sector Head Sigma, who delegates referral approval in OPS to Employee Phi, an OPS member (Phase 12 P12-8b; no
+  // other browser spec uses either)
+  sectorHead: "a0000000-0000-4000-8000-000000000024",
+  employeePhi: "a0000000-0000-4000-8000-000000000025",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -1560,5 +1564,115 @@ export async function withdrawCalendarDay(date: string): Promise<void> {
       select id from config.business_calendar_day where calendar_date = ${date}::date and withdrawn_at is null`;
     if (d)
       await tx`select api.withdraw_business_calendar_day(${d.id}, ${"Synthetic: withdrawn after the e2e journey."})`;
+  });
+}
+
+// ---- Administration's other forms (Phase 12 P12-8b) --------------------------------------------------------------
+// Sectors, rules and purposes cannot be removed, and a version of a rule or a policy is never withdrawn, so each
+// journey adds a code of its own and starts each version after the last one recorded: it can run again on the same
+// database. Every version starts at least `fromDays` ahead, so nothing in force today changes.
+
+/** A suffix for the codes a journey adds (letters and digits, as every code allows). */
+export const codeSuffix = (): string => randomBytes(4).toString("hex").toUpperCase();
+
+/** The later of today + `fromDays` and the day after the last start of the platform-wide rule for a notice. */
+export async function notificationRuleFrom(
+  template: string,
+  channel: string,
+  fromDays: number,
+): Promise<string> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ d: string }[]>`
+      select greatest((now() at time zone 'Asia/Riyadh')::date + ${fromDays}::int,
+                      (select (max(r.effective_from) at time zone 'Asia/Riyadh')::date + 1
+                         from notify.rule r
+                        where r.layer = 'EVENT_RULE' and r.template_code = ${template} and r.channel = ${channel}
+                          and r.committee_id is null))::text as d`;
+    return r!.d;
+  });
+}
+
+/** The later of today + `fromDays` and the day after the last start of a type's corrective-action policy. */
+export async function actionPolicyFrom(actionType: string, fromDays: number): Promise<string> {
+  return as("grcDirector", async (tx) => {
+    const [r] = await tx<{ d: string }[]>`
+      select greatest((now() at time zone 'Asia/Riyadh')::date + ${fromDays}::int,
+                      (select (max(p.effective_from) at time zone 'Asia/Riyadh')::date + 1
+                         from decision.corrective_action_policy p where p.action_type = ${actionType}))::text as d`;
+    return r!.d;
+  });
+}
+
+/** The later of today + `fromDays` and the day after the last start of a committee's rules. */
+export async function ruleSetFrom(committeeCode: string, fromDays: number): Promise<string> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ d: string }[]>`
+      select greatest((now() at time zone 'Asia/Riyadh')::date + ${fromDays}::int,
+                      (select (max(r.effective_from) at time zone 'Asia/Riyadh')::date + 1
+                         from committee.rule_set r join committee.committee c on c.id = r.committee_id
+                        where c.code = ${committeeCode}))::text as d`;
+    return r!.d;
+  });
+}
+
+/**
+ * A referral-approval delegation in force in OPS, from Sector Head Sigma to Employee Phi for a week: the one already
+ * in force if there is one (a second would overlap it), else a new one.
+ */
+export async function delegationInForce(): Promise<string> {
+  const [ops] = await as(
+    "platformAdmin",
+    (tx) => tx<{ id: string }[]>`select id from iam.sector where code = 'OPS'`,
+  );
+  const [held] = await as(
+    "platformAdmin",
+    (tx) => tx<{ id: string }[]>`
+      select d.id from iam.sector_delegation d
+       where d.sector_id = ${ops!.id} and d.delegate_id = ${USERS.employeePhi} and d.revoked_at is null
+         and d.effective_to > now()
+       order by d.effective_from limit 1`,
+  );
+  if (held) return held.id;
+  return as("sectorHead", async (tx) => {
+    const [d] = await tx<{ id: string }[]>`
+      select api.delegate_referral_approval(${ops!.id}, ${USERS.employeePhi}, now(), now() + interval '7 days',
+        'DEMO-DELEGATION-E2E', 'Synthetic: a delegation for the Administration journey.') as id`;
+    return d!.id;
+  });
+}
+
+/** The sector administrator revokes a delegation the journey made, if it is still in force. */
+export async function revokeDelegation(id: string): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    const [d] = await tx<{ id: string }[]>`
+      select id from iam.sector_delegation where id = ${id} and revoked_at is null and effective_to > now()`;
+    if (d)
+      await tx`select api.revoke_referral_delegation(${d.id}, ${"Synthetic: revoked after the e2e journey."})`;
+  });
+}
+
+/** The id of a date's entry in force, if it has one. */
+export async function calendarDayId(date: string): Promise<string | undefined> {
+  return as("platformAdmin", async (tx) => {
+    const [d] = await tx<{ id: string }[]>`
+      select id from config.business_calendar_day where calendar_date = ${date}::date and withdrawn_at is null`;
+    return d?.id;
+  });
+}
+
+/** The calendar administrator adds a working day on a date with no entry, for a journey to withdraw. */
+export async function calendarDayAdded(date: string): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    await tx`select api.set_business_calendar_day(${date}::date, 'WORKING_DAY', null,
+      ${"Synthetic: a day for the e2e journey to withdraw."})`;
+  });
+}
+
+/** The export-policy administrator changes a purpose the journey added, as another administrator would. */
+export async function exportPurposeChanged(code: string, expectedVersion: number): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    await tx`select api.set_export_purpose(${code}, ${"Synthetic purpose (changed elsewhere)"},
+      ${"غرض اصطناعي (غُيّر في مكان آخر)"}, false, false, 890, ${"Synthetic: changed while the page was open."},
+      ${expectedVersion}::int)`;
   });
 }

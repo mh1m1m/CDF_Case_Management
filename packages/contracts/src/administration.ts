@@ -1,10 +1,12 @@
 /**
- * Administration (UX redesign Phase 12, slice P12-8a; ADR-051's P12-8a amendment): the registers each business
- * administrator reads on their own page. Each register is read in the administrator's security context from tables
- * whose row-level security returns exactly the register that administrator keeps (coordinator ruling F2, 2026-10-18),
- * and each page opens only where the database says the caller holds its permission. The registers carry ids, codes,
- * dates and the reasons administrators wrote, never case content or a count derived from cases (§21). Types and
- * literal lists only.
+ * Administration (UX redesign Phase 12, slices P12-8a and P12-8b; ADR-051's P12-8a amendment, ADR-063): the registers
+ * each business administrator reads on their own page, and the controls offered there. Each register is read in the
+ * administrator's security context from tables whose row-level security returns exactly the register that
+ * administrator keeps (coordinator ruling F2, 2026-10-18), and each page opens only where the database says the caller
+ * holds its permission. The registers carry ids, codes, dates and the reasons administrators wrote, never case content
+ * or a count derived from cases (§21). Since P12-8b the list of pages comes from the database (`api.my_admin_views`,
+ * F3), and each control shows only where the page's capability read (`api.admin_*_capabilities`, migration 2127) says
+ * its command would accept the caller now. Types and literal lists only.
  */
 import type {
   BallotSecrecy,
@@ -181,7 +183,24 @@ export interface AdminCommitteesPage {
   statusChanges: AdminCommitteeStatusChange[];
   /** `api.authority_rule_coverage` (2030): who decides each kind of recommendation, and where no rule is in force. */
   coverage: PackageAuthorityRule[];
+  /** `api.admin_committee_capabilities` (2127): per committee, whether each rule-set command accepts the caller. */
+  ruleControls: AdminRuleSetControls[];
+  /** Today in Riyadh by the database's clock: a new version of the rules starts after it. */
+  today: string;
   people: AccountName[];
+  views: AdminView[];
+}
+
+/**
+ * A committee's rule-set controls, as `api.admin_committee_capabilities` (2127) answers them: a whole new version
+ * (`api.set_committee_rule_set`) and a revision of the version open now (`api.revise_committee_rule_set`, which needs
+ * one). The page offers the revision only: each committee has had a version open since 1870, and the revision carries
+ * every option. Every option and the start date are inputs the command answers at submit.
+ */
+export interface AdminRuleSetControls {
+  committeeId: string;
+  maySetRuleSet: boolean;
+  mayReviseRuleSet: boolean;
 }
 
 // ---- /admin/sectors (SECTOR_ADMIN) -------------------------------------------------------------------------------
@@ -219,6 +238,8 @@ export interface AdminSectorDelegation {
   state: AdminPeriodState;
   evidenceReference: string;
   revokedAt: string | null;
+  /** `api.admin_sector_capabilities` (2127): whether `api.revoke_referral_delegation` would accept the caller now. */
+  mayRevoke: boolean;
 }
 
 export interface AdminSectorsPage {
@@ -227,7 +248,10 @@ export interface AdminSectorsPage {
   delegations: AdminSectorDelegation[];
   /** MAX_SECTOR_APPROVAL_DELEGATION_DAYS (2040): SOURCE_REQUIRED until the CDF source sets it. */
   delegationLimit: { status: SettingStatus; value: string | null };
+  /** `api.admin_sector_capabilities` (2127): whether `api.create_sector` would accept the caller now. */
+  capabilities: { mayCreateSector: boolean };
   people: AccountName[];
+  views: AdminView[];
 }
 
 // ---- /admin/notification-rules (NOTIFICATION_ADMIN) --------------------------------------------------------------
@@ -256,8 +280,17 @@ export interface AdminNotificationRulesPage {
   templates: AdminNotificationTemplate[];
   rules: AdminNotificationRule[];
   committees: AdminCommittee[];
+  /** `api.admin_notification_rule_capabilities` (2127): whether `api.set_notification_rule` would accept the caller. */
+  capabilities: { maySetRule: boolean };
+  /** The database's clock: the start of a rule a form schedules is judged against it. */
+  today: string;
   people: AccountName[];
+  views: AdminView[];
 }
+
+/** The layers an administrator sets (`api.set_notification_rule`); the mandatory layer comes from migrations only. */
+export const SETTABLE_NOTIFICATION_LAYERS = ["EVENT_RULE", "COMMITTEE_DEFAULT"] as const;
+export type SettableNotificationLayer = (typeof SETTABLE_NOTIFICATION_LAYERS)[number];
 
 // ---- /admin/export-policy (authz.is_export_policy_admin) ---------------------------------------------------------
 
@@ -283,6 +316,11 @@ export interface AdminExportPurpose {
   isActive: boolean;
   isLegacy: boolean;
   sourceStatus: AdminSourceStatus;
+  sortOrder: number;
+  /** The version an edit must name (F13, migration 2127): a change made since is refused, never overwritten. */
+  rowVersion: number;
+  /** `api.admin_export_policy_capabilities` (2127): whether `api.set_export_purpose` would accept the caller for it. */
+  maySet: boolean;
 }
 
 /** A member of a stage's approver pool (DEC-F24). Read only until dual control (2160). */
@@ -314,8 +352,24 @@ export interface AdminExportPolicyPage {
   approvedDomains: { status: SettingStatus; domains: string[] };
   pool: AdminApproverPoolMember[];
   warnings: AdminExportWarnings;
+  /** `api.admin_export_policy_capabilities` (2127): adding a rule and adding a purpose. */
+  capabilities: { maySetRule: boolean; mayAddPurpose: boolean };
+  today: string;
   people: AccountName[];
+  views: AdminView[];
 }
+
+/**
+ * The actions a new export rule may take on this page (coordinator ruling on F4, 2026-10-18 21:17): every action
+ * `api.set_export_rule` accepts but NONE. Rules add up, so a new rule only ever adds a requirement or a refusal; a new
+ * version of an existing rule, which could loosen it, waits for the CDF source and dual control (2160).
+ */
+export const EXPORT_RULE_ADD_ACTIONS = [
+  "REQUIRE_SECOND_APPROVAL",
+  "REQUIRE_AUTHORITY_APPROVAL",
+  "REFUSE",
+] as const satisfies readonly ExportRuleAction[];
+export type ExportRuleAddAction = (typeof EXPORT_RULE_ADD_ACTIONS)[number];
 
 /** Where a governed value comes from (exchange.*, decision.* and config.* source_status). */
 export type AdminSourceStatus = "OWNER_DEFAULT" | "SOURCE_REQUIRED" | "APPROVED";
@@ -368,7 +422,19 @@ export interface AdminCorrectiveActionPolicyPage {
   policies: AdminCorrectiveActionPolicy[];
   evidenceTypes: AdminEvidenceType[];
   pools: AdminActionPool[];
+  /** The roles an escalation step may name (`iam.role`, readable by every signed-in user). */
+  roles: AdminRole[];
+  /** `api.admin_corrective_action_policy_capabilities` (2127): whether `api.set_corrective_action_policy` would. */
+  capabilities: { maySetPolicy: boolean };
+  today: string;
   people: AccountName[];
+  views: AdminView[];
+}
+
+export interface AdminRole {
+  code: string;
+  nameEn: string;
+  nameAr: string;
 }
 
 // ---- /admin/calendar (BUSINESS_CALENDAR_ADMIN; DEC-F02) ----------------------------------------------------------
@@ -397,6 +463,8 @@ export interface AdminCalendarDay {
   withdrawnBy: string | null;
   withdrawnAt: string | null;
   withdrawReason: string | null;
+  /** `api.admin_calendar_capabilities` (2127): whether `api.withdraw_business_calendar_day` would accept the caller. */
+  mayWithdraw: boolean;
 }
 
 export interface AdminCalendarPage {
@@ -407,9 +475,10 @@ export interface AdminCalendarPage {
   /** Today in Riyadh by the database's clock: the first date a day may be added for, the day before a week's start. */
   today: string;
   /**
-   * The page-level forms' gates (coordinator ruling F1, 2026-10-18): each command's exact caller check,
-   * `authz.has_permission('BUSINESS_CALENDAR_ADMIN')`, asked of the database. Every other check is answered at submit.
+   * `api.admin_calendar_capabilities` (2127): whether `api.set_business_calendar_day` and
+   * `api.set_business_week_pattern` would accept the caller now. Every input is answered at submit.
    */
   capabilities: { maySetDay: boolean; maySetWeekPattern: boolean };
   people: AccountName[];
+  views: AdminView[];
 }

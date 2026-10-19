@@ -3,7 +3,7 @@
 - **Status:** Proposed (2026-10-18). Linear CDF-266, with CDF-259 and CDF-260. Migration
   `20261007002127_administration_capabilities.sql`, number and ADR allocated by the project coordinator
   (2026-10-18 19:50) with the conditions below. UX redesign Phase 12, step P12-8 (slice P12-8b). It merges after 2125
-  (ADR-062) and before 2130.
+  (ADR-062) and before 2130. The pages that use it follow with no migration (the P12-8b pages amendment, at the end).
 - **Protocol:** §18 (RLS), §19 (authorization twice), §20 (security tests for an authorization change), §21
   (administration never implies case content), §87; ADR-016 D0; ADR-051 and its P12-8a amendment; UX-116.
 
@@ -254,3 +254,132 @@ CDF corporate IdP in production (PRODUCTION_SUBSTITUTION_REQUIRED, CDF-35).
   AMB-158 (the invitee types); DEC-AMB-004 and DEC-AMB-011 (the sanction rules); DEC-12 (dual control on grants;
   every comparable grant already refuses a self-grant, ADR-040).
 - Linear CDF-266, CDF-259 and CDF-260.
+
+## P12-8b pages amendment: the Administration forms (2026-10-18)
+
+UX redesign Phase 12, slice P12-8b's pages (Linear CDF-266, CDF-UX-028), with no migration. The forms run on this
+migration's reads and on commands that already exist. The coordinator ruled on the forms' narrowings on 2026-10-18 at
+21:17 (F4), confirmed the five page defaults at 21:53, ruled at 23:20 that a committee option that follows an owner
+decision is shown read-only, and ruled at 23:50 on the options left open then and on the committee's safeguards. Who may
+run a command and what it accepts are unchanged.
+
+- **The page list (F3).** Each page lists the caller's other pages from `api.my_admin_views`, and `/admin` opens the
+  first of them. The application's permission check stays each page's first gate and the database's check its second;
+  neither can add a page.
+- **What every form does.**
+  - It shows only where its page's read says the command would accept the caller now (§2). A row's control offers
+    only the rows whose flag says so.
+  - It validates with the command's own schema, pre-checks the page's permission and runs its `api.*` command in the
+    caller's context. The command decides every input again.
+  - It asks first. The confirmation says what changes, whether it can be undone, who is affected and that no one is
+    sent a message.
+  - A refusal shows in the register's own words. A form that leaves the page with its refusal, because the page read
+    again no longer offers it, hands the refusal to the top of the page (CDF-232).
+  - It sends no source status. Every change it records is provisional (SOURCE_REQUIRED), awaiting the CDF source,
+    except an export purpose (below).
+- **Business calendar.** An entry dated today or later may be withdrawn (`api.withdraw_business_calendar_day`). Only
+  the entries whose `may_withdraw` is true are offered. A withdrawn entry stays on record with who withdrew it and why,
+  and the date may be added again.
+- **Sectors.** A sector is created with its code and names (`api.create_sector`). A delegation in force or not yet
+  started is revoked with a reason (`api.revoke_referral_delegation`). Appointments wait (F5, F7).
+- **Notification rules.** A notice is turned on or off on one channel from a date after today, platform-wide or as one
+  committee's default (`api.set_notification_rule`). A mandatory notice is shown and never offered: it is always sent.
+  The service refuses one before the command is asked (`MANDATORY_NOTICE`). The command refuses a start at or before a
+  later rule of its key (F8).
+- **Export policy (F4, F11, F13).**
+  - A rule is added only for a new code. Its effect is second approval, authority approval or refusal, never `NONE`
+    (`EXPORT_RULE_ADD_ACTIONS`), and it is always SOURCE_REQUIRED. A code that already has a rule is refused
+    (`RULE_CODE_EXISTS`). The check runs in the command's transaction, under `api.set_export_rule`'s own lock on the
+    code. A new version of a recorded rule could loosen it, so that form waits for the CDF source and 2160.
+  - A purpose is added for a code not in the catalogue and changed at the version read (F13), through
+    `api.set_export_purpose`. The command records it as APPROVED: the administrator's own catalogue entry under
+    DEC-F21, as the page says in plain words. The page offers no control over a purpose's status and no path to a
+    legacy SOURCE_REQUIRED purpose. The command refuses both.
+- **Corrective-action policy (G8).** A new version of an action type's policy from a later date, with all twelve of the
+  command's values, always SOURCE_REQUIRED (`api.set_corrective_action_policy`).
+  - Its completion evidence is never looser than a version in force or scheduled. So NOTE_ONLY is not offered while a
+    version requires a reference, and the kinds of evidence are never widened.
+  - The check uses the completion command's own comparison (`LOOSER_COMPLETION_EVIDENCE`, `LOOSER_EVIDENCE_TYPES`). It
+    runs in the command's transaction, under the command's own lock on the action type.
+  - An escalation step names a role only from those that are not technical, since a technical role never sees a case
+    (§21).
+- **Committees.** A new version of a committee's rules from a later date, with only the options changed
+  (`api.revise_committee_rule_set`). It is offered only where a version is open to revision (`may_revise_rule_set`).
+  - An option whose value follows a decision is shown read-only, with a label naming the decision, and is never
+    offered for change (the coordinator's ruling of 23:20). A new version keeps it as it is. The ruling names the
+    acting chair's casting vote (DEC-F03), the conflict decider (DEC-F04), and the grievance window, its basis and who
+    decides non-admission (DEC-F14, DEC-F15, DEC-F17).
+  - Five more were treated as decided while their status was unclear, and the coordinator confirmed them read-only at
+    23:50: the chair's casting vote (DEC-F01) and who decides admissibility (DEC-F17) are owner decisions; the quorum's
+    kind and value (Q51) and the minutes review period and deemed approval (Q98) are REBASE v1.0 answers, which rank
+    with owner decisions here; and what an item no one votes on records (AMB-076) is recorded as not configurable.
+    That makes twelve options read-only.
+  - The service refuses a revision that names a decided option, whatever its value, before the command is asked
+    (`DECIDED_OPTION`), so a form changed in the browser records nothing. `api.revise_committee_rule_set` is not
+    narrowed: the page gates more strictly than the command, as the 12:27 ruling allows.
+  - Seven options stay open to the page, each a configurable ambiguity-register row with no owner decision. Of these,
+    the safeguards are kept or made stricter, never loosened (the coordinator's ruling of 23:50, as for the
+    corrective-action evidence): whether a sanction needs a defence notice (AMB-026) and whether an open objection
+    blocks deemed approval (AMB-092), both the ruling's own; and, as this page reads the ruling, the minimum notice
+    (AMB-061: short notice can exclude members and invalidate quorum) and ballot secrecy (AMB-083: once secret,
+    individual choices stay hidden), both listed for the coordinator's ruling. Loosening a safeguard is a widening, so
+    it waits for the CDF source and 2160, and the page says so in plain words next to the option.
+    - The page offers each safeguard at its floor, the strictest value among the versions in force or scheduled, or
+      stricter. One already at its strictest (a guard that is on, a secret ballot, 60 days' notice) has no control and
+      is shown as kept. Where the version open now is looser than one in force (possible only for a version recorded
+      before this page), the page sends the floor, so the new version is never the looser one.
+    - The service checks every safeguard of the new version, as sent or as carried from the version open now, against
+      every version in force or scheduled, and refuses a looser one (`LOOSER_RULE_OPTION`) before the command is asked.
+      The check runs in the command's transaction under a lock on the committee's page revisions
+      (`committee.rule_set_revision:<committee>`), since the command's own lock is a row lock an application role
+      cannot take first; so two revisions from the page cannot each pass against the version the other replaces.
+  - Vote revision (AMB-081), dissent notes (AMB-082) and the grievance completion period (AMB-141) stay freely editable:
+    none of their values blocks an act or withholds a disclosure to protect someone. A dissent note is a member's own
+    record of disagreement; switching notes off removes that record rather than disclosing anything, so it is listed
+    for the coordinator in case the ruling should cover it. Each new version is provisional.
+  - A revision that changes nothing is refused before the command is asked.
+  - A proceeding keeps the rules it was referred with.
+  - The full setter (`api.set_committee_rule_set`) is not offered.
+- **Audit.** Each command records its own event, as before. A refusal is recorded as COMMAND_DENIED with the command and
+  outcome only, never the reason typed. Reading a page records nothing.
+- **Not in this change.**
+  - Seat, head and position forms (F5, F7). The F7 card is open with the owner, and the default stands.
+  - Deactivation and annotation (F9), and the 2160 panels (P12-8c).
+  - The continuity-operator registry (F10, P12-10) and Create pool (F12).
+  - User and role administration (P12-10).
+  - A new version of a recorded export rule (the CDF source and 2160).
+- **Tests.**
+  - Unit:
+    - each form's schema, with the command's lengths and shapes (`validation/src/administration.test.ts`);
+    - the service (`application/src/administration.test.ts`): the pre-check and COMMAND_DENIED for every command,
+      the mandatory notice refused before the gateway, a revision with no change refused, each decided committee
+      option refused at its own value (`DECIDED_OPTION`) with nothing sent, "never looser" against the completion
+      command's own comparison, and each committee safeguard refused when looser than any version in force or
+      scheduled, as sent or as carried from the open version (`LOOSER_RULE_OPTION`), with nothing sent;
+    - which committee options are decided, which are safeguards and which are editable, all of them covered once; the
+      order of each safeguard's values, its floor and what the page offers (`validation/src/administration.test.ts`);
+    - the gateway's static guards: the tables it reads, the database functions it calls, which are the pages' reads
+      and one command per form, and each register check taken under its lock before its command
+      (`administration-gateway.test.ts`);
+    - every new code's words in both languages (`admin/labels.test.ts`) and each confirmation
+      (`confirmations.test.ts`).
+  - Integration, `tests/integration/administration.spec.ts` (+10), against the database:
+    - each page carries the database's list of pages, the same as the application's, and its controls' flags;
+    - each form records and refuses as its command does, with nothing written on a refusal;
+    - the offered export actions are exactly the command's narrowing set, a recorded code is refused under the
+      command's lock, and a stale version and a legacy purpose are refused;
+    - "never looser" is checked against what the completion command accepts, version by version;
+    - every decided committee option is refused, nothing is written, and a new version carries the decided values of
+      the version in force unchanged;
+    - each safeguard loosened, alone or beside a free change, is refused on both committees with nothing written, a
+      stricter one is recorded, and every new version carries both guards as the version in force has them;
+    - every form is refused by the database to a caller the application pre-check would let through, recorded with
+      the command and outcome only.
+  - `tests/e2e/administration.spec.ts` (+10, and the calendar journey extended): each form's journey in Arabic at 390
+    px and in English at 1280 px, with its refusals. Each journey runs again on the same database. The committee form
+    offers exactly the editable options, less the safeguards it can only keep, and shows each decided one with its
+    decision; the two guards are shown as kept, the ballot and the notice say they are never loosened, and the notice
+    is never offered below its floor; a decided value, or a guard switched off, added to the form in the browser is
+    refused and records nothing.
+  - `tests/accessibility/administration.spec.ts` (+4): each new form refused with its error summary, which takes the
+    focus, and its confirmation, in both languages; every register with its forms at 1280, 390 and 320 px.

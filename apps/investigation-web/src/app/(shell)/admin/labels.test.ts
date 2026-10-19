@@ -1,7 +1,7 @@
-// How the Administration pages name what their registers give them, in both languages (UX redesign Phase 12 P12-8a;
-// ADR-051's P12-8a amendment). Every code the contracts declare for a register has its message, and only those, so
-// that a new code fails here rather than showing its key on the screen; every refusal the business calendar's two
-// commands give has the calendar's own words, never only the generic one; and the helpers name a person, a period, a
+// How the Administration pages name what their registers give them, in both languages (UX redesign Phase 12 P12-8a and
+// P12-8b; ADR-051's P12-8a amendment, ADR-063). Every code the contracts declare for a register or a form's choices has
+// its message, and only those, so that a new code fails here rather than showing its key on the screen; every refusal
+// the pages' commands give has its own words, never only the generic one; and the helpers name a person, a period, a
 // state and a source the way the pages say them: dates are Riyadh dates, and a provisional default never reads as
 // configured.
 import { describe, expect, it } from "vitest";
@@ -32,6 +32,7 @@ import {
   period,
   personName,
   plusDays,
+  riyadhDate,
   sourceLabel,
   stateLabel,
   stateTone,
@@ -76,6 +77,13 @@ describe("the Administration codes", () => {
         // ISO days of the week, 1 Monday … 7 Sunday, as config.business_week_pattern stores them.
         ["calendar.isoDay", admin.calendar.isoDay, ["1", "2", "3", "4", "5", "6", "7"]],
         ["calendar.type", admin.calendar.type, BUSINESS_CALENDAR_DAY_TYPES],
+        // The forms' choices (P12-8b).
+        // Whose decision a committee rule the revision keeps follows (coordinator ruling of 2026-10-18 23:20).
+        ["committees.decidedBy", admin.committees.decidedBy, ["OWNER", "RECORDED"]],
+        ["committees.windowBasisOption", admin.committees.windowBasisOption, GRIEVANCE_WINDOW_BASES],
+        ["actions.recipientOption", admin.actions.recipientOption, ESCALATION_RECIPIENT_KINDS],
+        // A new purpose's own words for a code already in the catalogue (its form names no version).
+        ["exports.addPurposeCodes", admin.exports.addPurposeCodes, ["STALE_VERSION"]],
       ];
       for (const [name, messages, codes] of sections) {
         expect(sorted(Object.keys(messages)), name).toEqual(sorted(codes));
@@ -105,41 +113,127 @@ describe("the Administration codes", () => {
   });
 });
 
-describe("the refusals the business calendar's forms explain", () => {
-  /** What api.set_business_calendar_day and api.set_business_week_pattern answer besides FORBIDDEN (2030). */
-  const conflicts = ["CALENDAR_DAY_EXISTS", "PATTERN_SCHEDULED"];
-  const fields = [
-    "calendar_date",
-    "day_type",
-    "source_reference",
-    "reason",
-    "effective_from",
-    "non_working_isodow",
-    "source_status",
-  ];
+/**
+ * What each Administration command answers besides FORBIDDEN and NOT_FOUND (which read as their class): its conflicts
+ * and the fields it names when a value is invalid, as its final definition raises them (2030, 2040, 2127), and the
+ * refusals the service and the gateway add (MANDATORY_NOTICE, RULE_CODE_EXISTS, LOOSER_*; coordinator ruling on F4;
+ * DECIDED_OPTION, ruling of 2026-10-18 23:20; LOOSER_RULE_OPTION, ruling of 23:50).
+ */
+const REFUSALS: Record<string, { conflicts: string[]; fields: string[] }> = {
+  set_business_calendar_day: {
+    conflicts: ["CALENDAR_DAY_EXISTS"],
+    fields: ["calendar_date", "day_type", "source_reference", "reason"],
+  },
+  set_business_week_pattern: {
+    conflicts: ["PATTERN_SCHEDULED"],
+    fields: ["effective_from", "non_working_isodow", "source_status", "reason"],
+  },
+  withdraw_business_calendar_day: {
+    conflicts: ["CALENDAR_DAY_WITHDRAWN", "CALENDAR_DAY_PAST"],
+    fields: ["reason"],
+  },
+  create_sector: { conflicts: ["SECTOR_CODE_TAKEN"], fields: ["code", "name_en", "name_ar"] },
+  revoke_referral_delegation: { conflicts: ["DELEGATION_NOT_ACTIVE"], fields: ["reason"] },
+  set_notification_rule: {
+    conflicts: ["LATER_RULE_EXISTS", "MANDATORY_NOTICE"],
+    fields: ["layer", "template_code", "committee_id", "channel", "enabled", "effective_from", "reason"],
+  },
+  set_export_rule: {
+    conflicts: ["RULE_CODE_EXISTS", "LATER_RULE_EXISTS"],
+    fields: [
+      "code",
+      "audience",
+      "object_type",
+      "restricted_only",
+      "action",
+      "effective_from",
+      "source_status",
+      "reason",
+    ],
+  },
+  set_export_purpose: {
+    conflicts: ["STALE_VERSION", "LEGACY_PURPOSE", "OTHER_REQUIRES_JUSTIFICATION"],
+    fields: ["code", "name_en", "name_ar", "requires_justification", "is_active", "sort_order", "reason"],
+  },
+  set_corrective_action_policy: {
+    conflicts: ["LATER_POLICY_EXISTS", "LOOSER_COMPLETION_EVIDENCE", "LOOSER_EVIDENCE_TYPES"],
+    fields: [
+      "action_type",
+      "default_due_days",
+      "reminder_days_before",
+      "reminder_repeat_days",
+      "overdue_after_days",
+      "escalate_after_days",
+      "completion_evidence",
+      "allowed_evidence_types",
+      "escalation_steps",
+      "effective_from",
+      "source_status",
+      "reason",
+    ],
+  },
+  revise_committee_rule_set: {
+    conflicts: ["RULE_SET_SCHEDULED", "NO_RULE_SET", "DECIDED_OPTION", "LOOSER_RULE_OPTION"],
+    fields: [
+      "effective_from",
+      "changes",
+      "grievance_rules",
+      "quorum",
+      "minutes_review_business_days",
+      "minimum_notice_days",
+      "no_substantive_vote_outcome",
+      "conflict_decider",
+      "decision_rule",
+      "ballot_secrecy",
+      "grievance_window_days",
+      "grievance_window_start_basis",
+      "admissibility_decider",
+      "non_admission_decider",
+      "grievance_completion_days",
+      "source_status",
+      "reason",
+    ],
+  },
+};
 
+describe("the refusals the Administration forms explain", () => {
   for (const locale of LOCALES) {
     const t = createTranslator(locale);
 
-    it(`each refusal has the calendar's own words, never only the generic one, in ${locale}`, () => {
-      for (const code of conflicts) {
-        expect(refusalMessage(t, "CONFLICT", code, ADMIN_CODES), code).toBe(
-          t(`admin.codes.${code}` as MessageKey),
-        );
-        expect(refusalMessage(t, "CONFLICT", code, ADMIN_CODES), code).not.toBe(t("errors.CONFLICT"));
+    it(`each refusal has its own words, never only the generic one, in ${locale}`, () => {
+      for (const [command, { conflicts, fields }] of Object.entries(REFUSALS)) {
+        for (const code of conflicts) {
+          expect(refusalMessage(t, "CONFLICT", code, ADMIN_CODES), `${command} ${code}`).toBe(
+            t(`admin.codes.${code}` as MessageKey),
+          );
+          expect(refusalMessage(t, "CONFLICT", code, ADMIN_CODES), `${command} ${code}`).not.toBe(
+            t("errors.CONFLICT"),
+          );
+        }
+        for (const field of fields) {
+          expect(refusalMessage(t, "INVALID", field, ADMIN_CODES), `${command} ${field}`).toBe(
+            t(`admin.codes.${field}` as MessageKey),
+          );
+          expect(refusalMessage(t, "INVALID", field, ADMIN_CODES), `${command} ${field}`).not.toBe(
+            t("errors.INVALID"),
+          );
+        }
       }
-      for (const field of fields) {
-        expect(refusalMessage(t, "INVALID", field, ADMIN_CODES), field).toBe(
-          t(`admin.codes.${field}` as MessageKey),
-        );
-        expect(refusalMessage(t, "INVALID", field, ADMIN_CODES), field).not.toBe(t("errors.INVALID"));
-      }
-      expect(Object.keys(messagesFor(locale).admin.codes).sort()).toEqual([...conflicts, ...fields].sort());
+      const all = Object.values(REFUSALS).flatMap(({ conflicts, fields }) => [...conflicts, ...fields]);
+      expect(Object.keys(messagesFor(locale).admin.codes).sort()).toEqual([...new Set(all)].sort());
+    });
+
+    it(`a new purpose's code already in the catalogue says so, not that the page is out of date, in ${locale}`, () => {
+      expect(
+        refusalMessage(t, "CONFLICT", "STALE_VERSION", ["admin.exports.addPurposeCodes", ...ADMIN_CODES]),
+      ).toBe(t("admin.exports.addPurposeCodes.STALE_VERSION"));
+      expect(t("admin.exports.addPurposeCodes.STALE_VERSION")).not.toBe(t("admin.codes.STALE_VERSION"));
     });
 
     it(`a refusal nobody gave words to reads as its class, never as the code, in ${locale}`, () => {
       expect(refusalMessage(t, "CONFLICT", "SOMETHING_NEW", ADMIN_CODES)).toBe(t("errors.CONFLICT"));
       expect(refusalMessage(t, "FORBIDDEN", undefined, ADMIN_CODES)).toBe(t("errors.FORBIDDEN"));
+      expect(refusalMessage(t, "NOT_FOUND", undefined, ADMIN_CODES)).toBe(t("errors.NOT_FOUND"));
     });
   }
 });
@@ -204,5 +298,15 @@ describe("the calendar date after a date", () => {
     expect(plusDays("2028-02-29", 1)).toBe("2028-03-01");
     expect(plusDays("2026-10-18", 60)).toBe("2026-12-17");
     expect(plusDays("2026-11-01", -1)).toBe("2026-10-31");
+  });
+});
+
+describe("the Riyadh date of a moment", () => {
+  it("is the date in Riyadh, which is three hours ahead of UTC all year", () => {
+    expect(riyadhDate("2026-10-18T20:59:59Z")).toBe("2026-10-18");
+    expect(riyadhDate("2026-10-18T21:00:00Z")).toBe("2026-10-19");
+    expect(riyadhDate("2026-12-31T21:30:00Z")).toBe("2027-01-01");
+    expect(riyadhDate("2027-06-30T12:00:00+00:00")).toBe("2027-06-30");
+    expect(riyadhDate("2026-10-19T00:00:00+03:00")).toBe("2026-10-19");
   });
 });

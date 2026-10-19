@@ -1,10 +1,12 @@
-// Administration › Business calendar (UX redesign Phase 12 P12-8a; ADR-051's P12-8a amendment; DEC-F02). The calendar
-// administrator's register and its two forms: the working week, version by version, and the dated days (holidays,
-// closures and working days on a weekend), withdrawn ones included. Every business-day count reads them; a due date
-// already computed never moves. Read in the administrator's own context after the database confirms
-// BUSINESS_CALENDAR_ADMIN; anyone else gets the uniform not-found, recorded as ACCESS_DENIED. Each form shows only
-// where its command's own caller check, asked of the database, passes (coordinator ruling F1); the command decides
-// every input again. A new week is always provisional, awaiting the CDF source (F4).
+// Administration › Business calendar (UX redesign Phase 12 P12-8a and P12-8b; ADR-051's P12-8a amendment, ADR-063;
+// DEC-F02). The calendar administrator's register and its three forms: the working week, version by version, and the
+// dated days (holidays, closures and working days on a weekend), withdrawn ones included. Every business-day count
+// reads them; a due date already computed never moves. Read in the administrator's own context after the database
+// confirms BUSINESS_CALENDAR_ADMIN; anyone else gets the uniform not-found, recorded as ACCESS_DENIED. Each form shows
+// only where its command's own caller check, asked of the database, passes (coordinator ruling F1;
+// api.admin_calendar_capabilities, 2127), and a day can be withdrawn only where the database says that day's
+// withdrawal would be accepted now; the command decides every input again. A new week is always provisional, awaiting
+// the CDF source (F4).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BUSINESS_CALENDAR_DAY_TYPES, type AdminCalendarDay, type AdminCalendarPage } from "@cdf/contracts";
@@ -35,7 +37,7 @@ import {
   stateLabel,
   stateTone,
 } from "../labels";
-import { setCalendarDayAction, setWeekPatternAction } from "./actions";
+import { setCalendarDayAction, setWeekPatternAction, withdrawCalendarDayAction } from "./actions";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -62,7 +64,7 @@ export default async function AdminCalendarRegister() {
   const me = actor.userId;
   const who = (id: string | null) => personName(t, page.people, id, me);
   return (
-    <AdminFrame t={t} actor={actor} view="calendar" intro={t("admin.calendar.intro")}>
+    <AdminFrame t={t} views={page.views} view="calendar" intro={t("admin.calendar.intro")}>
       <CDFCard title={t("admin.calendar.sourceTitle")} testId="admin-calendar-source">
         <p className="text-sm">
           <CDFConfiguredValue
@@ -128,11 +130,8 @@ export default async function AdminCalendarRegister() {
         <p className="mb-3 text-sm text-cdf-text-secondary">{t("admin.calendar.daysIntro")}</p>
         <DayTable t={t} page={page} who={who} />
         {page.capabilities.maySetDay ? <DayForm t={t} page={page} /> : null}
+        {page.days.some((d) => d.mayWithdraw) ? <WithdrawForm t={t} page={page} /> : null}
       </CDFCard>
-
-      <p className="text-sm text-cdf-text-secondary" data-testid="admin-calendar-later">
-        {t("admin.calendar.later")}
-      </p>
     </AdminFrame>
   );
 }
@@ -268,7 +267,12 @@ function DayForm({ t, page }: { t: Translator; page: AdminCalendarPage }) {
         }}
         confirm={confirmation(t, "setBusinessCalendarDay")}
       >
-        <CDFField id={`${id}-date`} label={t("admin.calendar.date")} hint={t("admin.calendar.dateHint")}>
+        <CDFField
+          id={`${id}-date`}
+          label={t("admin.calendar.date")}
+          hint={t("admin.calendar.dateHint")}
+          requiredLabel={t("common.required")}
+        >
           <input
             id={`${id}-date`}
             name="calendarDate"
@@ -279,7 +283,7 @@ function DayForm({ t, page }: { t: Translator; page: AdminCalendarPage }) {
             required
           />
         </CDFField>
-        <CDFField id={`${id}-type`} label={t("admin.calendar.dayType")}>
+        <CDFField id={`${id}-type`} label={t("admin.calendar.dayType")} requiredLabel={t("common.required")}>
           <select id={`${id}-type`} name="dayType" className={inputClass} defaultValue="" required>
             <option value="" disabled>
               {t("common.choose")}
@@ -311,6 +315,7 @@ function DayForm({ t, page }: { t: Translator; page: AdminCalendarPage }) {
           id={`${id}-reason`}
           label={t("admin.calendar.reason")}
           hint={t("admin.calendar.reasonHint")}
+          requiredLabel={t("common.required")}
         >
           <textarea
             id={`${id}-reason`}
@@ -377,7 +382,12 @@ function WeekForm({ t, page }: { t: Translator; page: AdminCalendarPage }) {
           </div>
           <CDFFieldError id={`${id}-day-1`} />
         </fieldset>
-        <CDFField id={`${id}-from`} label={t("admin.calendar.from")} hint={t("admin.calendar.fromHint")}>
+        <CDFField
+          id={`${id}-from`}
+          label={t("admin.calendar.from")}
+          hint={t("admin.calendar.fromHint")}
+          requiredLabel={t("common.required")}
+        >
           <input
             id={`${id}-from`}
             name="effectiveFrom"
@@ -392,6 +402,75 @@ function WeekForm({ t, page }: { t: Translator; page: AdminCalendarPage }) {
           id={`${id}-reason`}
           label={t("admin.calendar.reason")}
           hint={t("admin.calendar.reasonHint")}
+          requiredLabel={t("common.required")}
+        >
+          <textarea
+            id={`${id}-reason`}
+            name="reason"
+            className={textareaClass}
+            aria-describedby={`${id}-reason-hint`}
+            minLength={5}
+            maxLength={2000}
+            required
+          />
+        </CDFField>
+      </CDFCommandForm>
+    </section>
+  );
+}
+
+/**
+ * Withdraw a day's entry, today's or a later one: only the entries the database says may be withdrawn now are offered
+ * (`may_withdraw`). The entry stays on record with who withdrew it and why; the date may then be added again.
+ */
+function WithdrawForm({ t, page }: { t: Translator; page: AdminCalendarPage }) {
+  const id = "admin-withdraw-form";
+  const days = page.days.filter((d) => d.mayWithdraw);
+  return (
+    <section className="mt-6 border-t border-cdf-border pt-4" aria-labelledby={`${id}-title`}>
+      <h3 id={`${id}-title`} className="mb-2 font-semibold">
+        {t("admin.calendar.withdrawTitle")}
+      </h3>
+      <p className="mb-3 text-sm text-cdf-text-secondary">{t("admin.calendar.withdrawIntro")}</p>
+      <CDFCommandForm
+        action={withdrawCalendarDayAction}
+        locale={t.locale}
+        submitLabel={t("admin.calendar.withdraw")}
+        variant="danger"
+        testId={id}
+        successMessage={t("admin.calendar.dayWithdrawn")}
+        leaveWarning={t("common.leaveWarning")}
+        codeSections={ADMIN_CODES}
+        fieldLabels={{
+          dayId: t("admin.calendar.withdrawDay"),
+          reason: t("admin.calendar.withdrawReason"),
+        }}
+        confirm={confirmation(t, "withdrawBusinessCalendarDay")}
+      >
+        <CDFField
+          id={`${id}-day`}
+          label={t("admin.calendar.withdrawDay")}
+          requiredLabel={t("common.required")}
+        >
+          <select id={`${id}-day`} name="dayId" className={inputClass} defaultValue="" required>
+            <option value="" disabled>
+              {t("common.choose")}
+            </option>
+            {days.map((d) => (
+              <option key={d.dayId} value={d.dayId}>
+                {t("admin.calendar.withdrawOption", {
+                  date: day(t, d.calendarDate),
+                  type: t(`admin.calendar.type.${d.dayType}` as MessageKey),
+                })}
+              </option>
+            ))}
+          </select>
+        </CDFField>
+        <CDFField
+          id={`${id}-reason`}
+          label={t("admin.calendar.withdrawReason")}
+          hint={t("admin.calendar.reasonHint")}
+          requiredLabel={t("common.required")}
         >
           <textarea
             id={`${id}-reason`}

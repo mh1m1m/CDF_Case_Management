@@ -90,7 +90,17 @@ export type ConfirmAct =
   | "cancelBcpImport"
   // The business calendar (Phase 12 P12-8a, ADR-051; DEC-F02).
   | "setBusinessCalendarDay"
-  | "setBusinessWeekPattern";
+  | "setBusinessWeekPattern"
+  // The Administration pages' other forms (Phase 12 P12-8b, ADR-063).
+  | "withdrawBusinessCalendarDay"
+  | "createSector"
+  | "revokeReferralDelegation"
+  | "setNotificationRule"
+  | "addExportRule"
+  | "addExportPurpose"
+  | "editExportPurpose"
+  | "setCorrectiveActionPolicy"
+  | "reviseCommitteeRuleSet";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -145,6 +155,15 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   // Recording a day or a working week sets the calendar up; neither ends or removes anything.
   "setBusinessCalendarDay",
   "setBusinessWeekPattern",
+  // Adding a sector, a rule, a purpose or a version of a policy or of a committee's rules records something new; nothing
+  // already recorded is removed. Withdrawing a calendar entry or revoking a delegation ends something, so those stay red.
+  "createSector",
+  "setNotificationRule",
+  "addExportRule",
+  "addExportPurpose",
+  "editExportPurpose",
+  "setCorrectiveActionPolicy",
+  "reviseCommitteeRuleSet",
 ]);
 
 /** Case transitions that close, archive or return a case. Any other step into Closure or Archive also confirms. */

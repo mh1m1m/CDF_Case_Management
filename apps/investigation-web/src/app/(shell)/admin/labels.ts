@@ -57,3 +57,15 @@ export function plusDays(date: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/** The Riyadh calendar date (YYYY-MM-DD) of a moment. */
+export function riyadhDate(value: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}

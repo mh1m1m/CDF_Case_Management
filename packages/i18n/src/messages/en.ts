@@ -782,7 +782,7 @@ export const en = {
         action: "Add the day",
         title: "Add this day to the business calendar?",
         body: "The date is recorded as the kind of day you chose, with your reason. Periods counted in business days from now on take it into account, such as the review of minutes generated after this. A due date already set does not move.",
-        undo: "Not on this page. Each date has one entry, and withdrawing an entry is not offered here yet.",
+        undo: "Yes, while the date is today or later: withdraw the entry on this page, with a reason. A withdrawn entry stays on record.",
         affected:
           "Committee members reviewing minutes generated from now on, and anyone else whose period is counted in business days.",
         notified: "No one is sent a message.",
@@ -794,6 +794,81 @@ export const en = {
         undo: "No. A week stays on record once recorded. To change it again, record another week from a later date.",
         affected:
           "Committee members reviewing minutes generated from that date, and anyone else whose period is counted in business days.",
+        notified: "No one is sent a message.",
+      },
+      // The Administration pages' other forms (Phase 12 P12-8b, ADR-063).
+      withdrawBusinessCalendarDay: {
+        action: "Withdraw the entry",
+        title: "Withdraw this day's entry?",
+        body: "From now on the date counts as the working week has it, and periods counted in business days from now on take that into account. A due date already set does not move. The entry stays on record, with your reason.",
+        undo: "Not as such: the withdrawn entry stays on record. To record the date again, add it as a new day while it is today or later.",
+        affected:
+          "Committee members reviewing minutes generated from now on, and anyone else whose period is counted in business days.",
+        notified: "No one is sent a message.",
+      },
+      createSector: {
+        action: "Create the sector",
+        title: "Create this sector?",
+        body: "The sector is recorded as active with this code and these names. It has no head or members until they are appointed, which is not offered on this page yet.",
+        undo: "No. A sector stays on record once created, and its code and names cannot be changed.",
+        affected: "No one until someone is appointed to it: only a sector's members refer cases from it.",
+        notified: "No one is sent a message.",
+      },
+      revokeReferralDelegation: {
+        action: "Revoke the delegation",
+        title: "Revoke this delegation?",
+        body: "The delegate stops approving the sector's referrals at once. The delegation stays on record as revoked, with your reason. Referral decisions the delegate already recorded stand.",
+        undo: "No. A revoked delegation cannot be restored; the sector head can delegate again.",
+        affected: "The delegate, and the sector's referrals waiting for approval.",
+        notified: "No one is sent a message.",
+      },
+      setNotificationRule: {
+        action: "Record the rule",
+        title: "Record this notice rule?",
+        body: "From the start of that date in Riyadh, the notice is sent or not on that channel as you chose, for the whole platform or as the committee's default. The rule of the same kind for that notice and channel ends there. Anyone may still mute a notice that is not mandatory.",
+        undo: "Not as such: the rule stays on record. To change it, record another rule from a later date.",
+        affected: "Everyone who would receive this notice on that channel from that date.",
+        notified: "No one is sent a message about the change.",
+      },
+      addExportRule: {
+        action: "Add the rule",
+        title: "Add this export rule?",
+        body: "From the start of that date in Riyadh, every export the rule applies to is checked against it when submitted: it needs the approval you chose, or is refused. The rule is recorded as provisional, awaiting the CDF source.",
+        undo: "No. A rule stays on record once added, and changing it waits for the CDF source.",
+        affected: "Everyone who submits an export the rule applies to from that date, and its approvers.",
+        notified: "No one is sent a message.",
+      },
+      addExportPurpose: {
+        action: "Add the purpose",
+        title: "Add this purpose?",
+        body: "The purpose is added to the catalogue as your own entry, recorded as approved. If you left it offered, requesters can choose it from now on.",
+        undo: "Partly: you can change it on this page later, or stop offering it. It stays in the catalogue.",
+        affected: "Everyone who requests an export.",
+        notified: "No one is sent a message.",
+      },
+      editExportPurpose: {
+        action: "Save the purpose",
+        title: "Save this purpose?",
+        body: "The purpose changes as you set it from now on, and is recorded as approved, as your own entry. Exports already requested keep the purpose they named.",
+        undo: "Yes: change it again on this page. Each change is recorded.",
+        affected: "Everyone who requests an export.",
+        notified: "No one is sent a message.",
+      },
+      setCorrectiveActionPolicy: {
+        action: "Record the version",
+        title: "Record this version of the policy?",
+        body: "From the start of that date in Riyadh, this version applies: a new action's default due date, the reminders, overdue notices and escalations sent from then on, including for open actions, and what completing an action needs. A due date already set does not move. It is recorded as provisional, awaiting the CDF source, and the version in force ends there.",
+        undo: "No. A version stays on record once recorded. To change it, record another version from a later date.",
+        affected:
+          "Owners of corrective actions of this type, their cases' corrective-action managers, and anyone a further step names.",
+        notified: "No one is sent a message about the change.",
+      },
+      reviseCommitteeRuleSet: {
+        action: "Record the new version",
+        title: "Record this version of the committee's rules?",
+        body: "From the start of that date in Riyadh, the committee's rules change as you set them; every other option stays as in the version shown. The version before it ends there. A proceeding keeps the rules it was referred with. The new version is recorded as provisional, awaiting the CDF source.",
+        undo: "No. A version stays on record once recorded. To change the rules again, record another version from a later date.",
+        affected: "The committee's members and secretaries, in proceedings referred to it from that date.",
         notified: "No one is sent a message.",
       },
     },
@@ -1039,6 +1114,16 @@ export const en = {
     emailExternalOnly: "An email export goes to external addresses: choose External, or another format.",
     // The business calendar's working week (Phase 12 P12-8a; DEC-F02).
     oneWorkingDay: "Leave at least one working day: tick at most six days.",
+    // The Administration pages' forms (Phase 12 P12-8b; ADR-063).
+    sectorCode: "Use capital letters, digits and underscores: 2 to 20 characters, starting with a letter.",
+    noCommittee: "Only a committee's default names a committee. Leave this empty.",
+    otherJustification: "The purpose Other always needs a justification.",
+    repeatNeedsReminder: "A reminder repeats only after a first reminder: set the reminder too.",
+    noRole: "Only a role is named for role holders. Leave this empty.",
+    quorumNumber: "Give a whole number of members, 1 or more.",
+    quorumPercentage: "Give a percentage above 0, up to 100.",
+    noQuorumValue: "This kind of quorum takes no value. Leave it empty.",
+    grievanceOnly: "Only the grievance committee has this option.",
   },
   category: {
     FINANCIAL_MISCONDUCT: "Financial misconduct",
@@ -2545,6 +2630,8 @@ export const en = {
     inactive: "Inactive",
     notConfigured: "Not configured yet",
     notSet: "Not set",
+    startsOn: "Starts on",
+    startsOnHint: "A date after today. It starts at the beginning of that day in Riyadh.",
     periodFrom: "From {from}",
     periodBetween: "{from} to {to}",
     recordedBy: "Recorded by {name} on {date}.",
@@ -2609,8 +2696,41 @@ export const en = {
       coverageTitle: "Who decides each kind of recommendation",
       coverageIntro:
         "The authority rule in force for each kind of recommendation item, and where it comes from.",
+      reviseSummary: "New version of the rules of the {committee}",
+      reviseIntro:
+        "The form shows the version that applies from {date}. Change only what should change; every other option stays as it is. The new version is recorded as provisional, awaiting the CDF source, and a proceeding keeps the rules it was referred with.",
+      revise: "Record the new version",
+      reviseFor: "Record the new version for the {committee}",
+      revised: "The new version of the rules is recorded.",
+      decidedTitle: "Kept as decided",
+      decidedIntro:
+        "These options follow a decision, so this form does not change them: the new version keeps them as they are.",
+      decidedBy: {
+        OWNER: "Owner decision {ref}",
+        RECORDED: "Recorded decision {ref}",
+      },
+      meetingsGroup: "Meetings and votes",
+      minutesGroup: "Minutes",
+      decisionsGroup: "Decisions",
+      grievancesGroup: "Grievances",
+      quorumValue: "Number or percentage for the quorum",
+      noticeHint: "In days, from 0 to 60. Empty: no minimum.",
+      noticeHintFrom: "In days, from {min} to 60.",
+      safeguard:
+        "A safeguard: on this page it can be kept or made stricter, never loosened. Loosening it waits for the CDF source and dual control.",
+      safeguardKept:
+        "A safeguard, already at its strictest: the new version keeps it. Loosening it waits for the CDF source and dual control.",
+      windowStartLabel: "The time to raise a grievance counts from",
+      windowBasisOption: {
+        ISSUE: "The decision's issue",
+        DELIVERY: "The decision's delivery",
+        ACKNOWLEDGEMENT: "The acknowledgement of the decision",
+      },
+      completionHint: "In days, from 1 to 90. Empty: not set.",
+      fromHint:
+        "A date after today and after the start of the version shown. It starts at the beginning of that day in Riyadh.",
       later:
-        "Appointing to a seat, correcting a seat, appointing an independent authority and changing the rules are not on this page yet.",
+        "Appointing to a seat, correcting a seat and appointing an independent authority are not on this page yet.",
     },
     sectors: {
       intro:
@@ -2633,6 +2753,26 @@ export const en = {
       evidence: "Evidence reference",
       noDelegations: "No delegation is recorded.",
       revokedOn: "Revoked on {date}.",
+      revokeTitle: "Revoke a delegation",
+      revokeIntro:
+        "A delegation that has not ended. It ends at once and stays on record as revoked; what the delegate already decided stands.",
+      revoke: "Revoke the delegation",
+      revokeIn: "Revoke the delegation in {sector}",
+      revoked: "The delegation is revoked.",
+      revokeDelegation: "Delegation",
+      revokeOption: "{delegator} to {delegate}, {period}",
+      revokeReason: "Reason for revoking",
+      createTitle: "Create a sector",
+      createIntro:
+        "The sector is recorded as active, with no head or members until they are appointed. Its code and names cannot be changed afterwards.",
+      create: "Create the sector",
+      created: "The sector is created.",
+      code: "Code",
+      codeHint:
+        "2 to 20 capital letters, digits or underscores, starting with a letter, such as FIN_AUDIT. Each sector has its own.",
+      nameEn: "English name",
+      nameAr: "Arabic name",
+      nameHint: "2 to 120 characters.",
       later: "Appointing to a position and delegating are not on this page yet.",
     },
     notifications: {
@@ -2664,7 +2804,18 @@ export const en = {
       },
       setting: "Setting",
       fromMigrations: "Shipped with the platform.",
-      later: "Changing a rule is not on this page yet.",
+      formTitle: "Change a notice",
+      formIntro:
+        "Turn a notice on or off on one channel from a date after today, for the whole platform or as one committee's default. The rule of the same kind for that notice and channel ends where the new one starts. A mandatory notice is always sent and is not offered.",
+      noticeHint: "Mandatory notices are not listed: they are always sent.",
+      committeeLabel: "Committee",
+      committeeHint:
+        "For a committee's default, choose the committee. For a platform-wide rule, choose none.",
+      noCommittee: "None (platform-wide)",
+      from: "Starts on",
+      fromHint: "A date after today. The rule starts at the beginning of that day in Riyadh.",
+      record: "Record the rule",
+      recorded: "The rule is recorded.",
     },
     exports: {
       intro:
@@ -2713,7 +2864,48 @@ export const en = {
       raised: "Raised",
       stillBlocked: "Still blocked",
       noWarnings: "No warning is recorded.",
-      later: "Changing a rule, a purpose, a pool or the domains is not on this page yet.",
+      addRuleTitle: "Add a rule",
+      addRuleIntro:
+        "A rule for a new code, from a date after today. A rule added here only adds a requirement or a refusal; changing a rule already recorded waits for the CDF source. The rule is recorded as provisional, awaiting the CDF source.",
+      ruleCode: "Rule code",
+      ruleCodeHint:
+        "3 to 60 capital letters, digits or underscores, starting with a letter. A code that already has a rule is refused.",
+      classificationLabel: "Lowest classification",
+      classificationHint: "The rule applies to cases of this classification and above.",
+      anyClassification: "Any classification",
+      contentLabel: "Content",
+      contentHint: "The rule applies to exports holding this content.",
+      anyContent: "Any content",
+      addRule: "Add the rule",
+      ruleAdded: "The rule is added.",
+      ownEntry:
+        "A purpose added or changed here is recorded as approved: it is your own entry in the catalogue (DEC-F21), not a value from a CDF source document.",
+      editTitle: "Change a purpose",
+      editIntro:
+        "A purpose is saved only as you read it on this page: if someone changed it since, your change is refused. A legacy purpose is not offered.",
+      editSummary: "Change {purpose}",
+      savePurpose: "Save the purpose",
+      savePurposeIn: "Save the purpose {purpose}",
+      purposeSaved: "The purpose is saved.",
+      otherAlwaysJustified: "This purpose always needs a justification from the requester.",
+      offered: "Offered to requesters",
+      sortOrder: "Place in the list",
+      sortOrderHint: "From 1 to 899. Purposes are listed from the lowest number.",
+      purposeNameHint: "3 to 200 characters.",
+      addPurposeTitle: "Add a purpose",
+      addPurposeIntro: "A purpose for a code not yet in the catalogue.",
+      purposeCode: "Purpose code",
+      purposeCodeHint:
+        "3 to 60 capital letters, digits or underscores, starting with a letter. A code already in the catalogue is refused.",
+      addPurpose: "Add the purpose",
+      purposeAdded: "The purpose is added.",
+      // The add form's own refusals, before the page's: a code already in the catalogue is changed from its row.
+      addPurposeCodes: {
+        STALE_VERSION:
+          "A purpose with this code is already in the catalogue. Change it from its own entry instead.",
+      },
+      later:
+        "Changing a rule already recorded, an approver pool or the approved domains is not on this page yet.",
     },
     actions: {
       intro:
@@ -2753,7 +2945,49 @@ export const en = {
         "Shared pools that may own an action. Members act only while they may own actions and see the case; each action keeps one accountable person.",
       noPools: "No action pool is recorded.",
       poolNoMembers: "No one is in this pool.",
-      later: "Changing a policy and creating a pool are not on this page yet.",
+      formTitle: "Record a new version",
+      formIntro:
+        "A new version of a type's policy from a date after today. Every value is recorded as you leave it; an empty period is not set. A new version never asks less to complete an action than a version in force or scheduled. The version is recorded as provisional, awaiting the CDF source.",
+      formSummary: "New version for {type}",
+      startsFromLatest: "The form shows the version that applies from {date}. Change what should change.",
+      startsFromNone: "No version is in force or scheduled for this type.",
+      record: "Record the version",
+      recordFor: "Record the version for {type}",
+      recorded: "The new version is recorded.",
+      defaultDueHint: "In days, from 1 to 730. Empty: a new action has no default due date.",
+      reminderBeforeHint: "Days before the due date, from 1 to 90. Empty: no reminder.",
+      reminderRepeatHint:
+        "Every so many days until the due date, from 1 to 90, after a first reminder. Empty: not repeated.",
+      overdueAfterHint: "Days after the due date, from 0 to 365. Empty: no overdue notice.",
+      escalateAfterHint: "Days after the due date, from 1 to 365. Empty: no escalation.",
+      completionHint: "What the owner must give to complete an action.",
+      completionFixed:
+        "An evidence reference stays required: a version in force or scheduled requires one, and a new version never asks for less.",
+      kindsHint:
+        "The kinds of evidence a completion may name. None ticked: any active kind in the catalogue.",
+      kindsLimited:
+        "Only kinds that every version in force or scheduled accepts are offered, and at least one must be ticked.",
+      noKindsOffered:
+        "No active kind of evidence is accepted by every version in force or scheduled, so a new version cannot be recorded here.",
+      stepsHint:
+        "Who else is told after the due date, and when. Leave a row empty to skip it. A role's holders are told only if they may see the case.",
+      stepTitle: "Step {step}",
+      stepDays: "Step {step}: days after the due date",
+      stepRecipient: "Step {step}: who is told",
+      stepRole: "Step {step}: role",
+      stepDaysLabel: "Days after the due date",
+      stepRecipientLabel: "Who is told",
+      stepRoleLabel: "Role",
+      noStep: "No one (no step)",
+      noRole: "No role",
+      recipientOption: {
+        OWNER: "The owner",
+        CASE_MANAGERS: "The case's corrective-action managers",
+        ROLE: "Holders of a role",
+      },
+      fromHint:
+        "A date after today and after the start of the last version shown. It starts at the beginning of that day in Riyadh.",
+      later: "Creating a pool is not on this page yet.",
     },
     calendar: {
       intro:
@@ -2809,7 +3043,14 @@ export const en = {
       daysOffHint: "Tick the days that are not working days. At least one day stays a working day.",
       from: "Starts on",
       fromHint: "A date after today. The week starts at the beginning of that day in Riyadh.",
-      later: "Withdrawing a day is not on this page yet.",
+      withdrawTitle: "Withdraw a day",
+      withdrawIntro:
+        "An entry for today or a later date. It stays on record with who withdrew it and why, and the date can then be added again.",
+      withdrawDay: "Entry",
+      withdrawOption: "{date}: {type}",
+      withdrawReason: "Reason for withdrawing",
+      withdraw: "Withdraw the entry",
+      dayWithdrawn: "The entry is withdrawn.",
     },
     // The business calendar commands' refusals (DEC-F02, migration 2030).
     codes: {
@@ -2822,7 +3063,74 @@ export const en = {
       reason: "Give a reason of 5 to 2,000 characters.",
       effective_from: "Choose a date after today.",
       non_working_isodow: "Tick at most six days: at least one day stays a working day.",
-      source_status: "The week's source is not valid.",
+      source_status: "The source recorded for this change is not valid.",
+      // The Administration pages' other commands (P12-8b, ADR-063).
+      CALENDAR_DAY_WITHDRAWN: "This entry is already withdrawn.",
+      CALENDAR_DAY_PAST: "This entry's date has passed, so it can no longer be withdrawn.",
+      SECTOR_CODE_TAKEN: "A sector already has this code. Choose another.",
+      DELEGATION_NOT_ACTIVE: "This delegation has already ended or been revoked.",
+      code: "The code is not in the form asked for.",
+      name_en: "The English name is too short or too long.",
+      name_ar: "The Arabic name is too short or too long.",
+      LATER_RULE_EXISTS:
+        "A rule of this kind already starts on or after this date. Choose a date after the start of the last rule shown.",
+      MANDATORY_NOTICE: "This notice is mandatory: it is always sent, and no rule changes it.",
+      layer: "Choose the kind of rule.",
+      template_code: "Choose a notice.",
+      committee_id: "Choose a committee for a committee's default, and none for a platform-wide rule.",
+      channel: "Choose a channel.",
+      enabled: "Choose whether the notice is sent.",
+      RULE_CODE_EXISTS:
+        "A rule with this code is already recorded. A new version of a rule is not offered on this page.",
+      audience: "Choose whom the rule applies to.",
+      action: "Choose the rule's effect.",
+      object_type: "Choose the content from the list.",
+      restricted_only: "The restricted-cases choice is not valid.",
+      STALE_VERSION:
+        "Someone changed this since you opened the page, so your change was not saved. Reload the page to see it, then try again.",
+      LEGACY_PURPOSE: "A legacy purpose cannot be changed.",
+      OTHER_REQUIRES_JUSTIFICATION: "This purpose always needs a justification from the requester.",
+      requires_justification: "The justification choice is not valid.",
+      is_active: "The offered choice is not valid.",
+      sort_order: "Give a place in the list from 1 to 899.",
+      LATER_POLICY_EXISTS:
+        "A version for this type already starts on or after this date. Choose a date after the start of the last version shown.",
+      LOOSER_COMPLETION_EVIDENCE:
+        "A version in force or scheduled requires an evidence reference, so a new version must require one too.",
+      LOOSER_EVIDENCE_TYPES:
+        "A version in force or scheduled accepts only some kinds of evidence, so a new version may accept only kinds it accepts.",
+      action_type: "Choose a type of action.",
+      default_due_days: "Give a default time of 1 to 730 days, or leave it empty.",
+      reminder_days_before: "Give a reminder of 1 to 90 days before the due date, or leave it empty.",
+      reminder_repeat_days: "Give a repeat of 1 to 90 days after a first reminder, or leave it empty.",
+      overdue_after_days: "Give an overdue notice of 0 to 365 days after the due date, or leave it empty.",
+      escalate_after_days: "Give an escalation of 1 to 365 days after the due date, or leave it empty.",
+      completion_evidence: "Choose what completing an action needs.",
+      allowed_evidence_types: "Tick only active kinds of evidence, each once.",
+      escalation_steps:
+        "Each further step needs its days after the due date (0 to 365) and who is told, and a role step needs a role. At most ten steps.",
+      RULE_SET_SCHEDULED:
+        "A version of these rules already starts on or after this date. Choose a date after the start of the version shown.",
+      NO_RULE_SET: "This committee has no version of its rules to change.",
+      DECIDED_OPTION:
+        "An option that follows a decision cannot be changed on this page, so nothing was recorded.",
+      LOOSER_RULE_OPTION:
+        "A safeguard can be kept or made stricter on this page, never loosened, so nothing was recorded.",
+      changes: "Change at least one option: a new version needs a change.",
+      grievance_rules: "Only a grievance committee has grievance options.",
+      quorum:
+        "The quorum's kind and value do not fit: a fixed number needs a whole number from 1, a percentage more than 0 and at most 100, and the other kinds no value.",
+      minutes_review_business_days: "Give a minutes review of 1 to 30 business days.",
+      minimum_notice_days: "Give a minimum notice of 0 to 60 days, or leave it empty.",
+      no_substantive_vote_outcome: "Choose how an item no one votes on is recorded.",
+      conflict_decider: "Choose who decides a raised conflict.",
+      decision_rule: "The decision rule is not valid.",
+      ballot_secrecy: "Choose the kind of ballot.",
+      grievance_window_days: "Give a time to raise a grievance of 1 to 365 days.",
+      grievance_window_start_basis: "Choose what the time to raise a grievance counts from.",
+      admissibility_decider: "Choose who decides whether a grievance is admissible.",
+      non_admission_decider: "Choose who decides not to admit a grievance.",
+      grievance_completion_days: "Give a time to complete a grievance of 1 to 90 days, or leave it empty.",
     },
   },
   // Notification templates (ADR-025): fixed wording only, never case content (§39, N18).

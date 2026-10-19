@@ -7,7 +7,7 @@ import { notFound } from "next/navigation";
 import { adminViews } from "@cdf/authorization";
 import type { MessageKey } from "@cdf/i18n";
 import { CDFTable } from "@cdf/ui";
-import { investigationService, requireActor } from "@/server/container";
+import { administrationService, investigationService, requireActor } from "@/server/container";
 import { getTranslator } from "@/server/locale";
 import { AdminFrame } from "../admin-frame";
 
@@ -21,8 +21,9 @@ export default async function AdminUsersPage() {
   if (!adminViews(actor).includes("users")) notFound();
   const t = await getTranslator();
   const users = await investigationService().userRegister(ctx, actor);
+  const views = await administrationService().views(ctx);
   return (
-    <AdminFrame t={t} actor={actor} view="users" intro={t("admin.usersIntro")}>
+    <AdminFrame t={t} views={views} view="users" intro={t("admin.usersIntro")}>
       <CDFTable
         caption={t("admin.tableLabel")}
         testId="user-register"
