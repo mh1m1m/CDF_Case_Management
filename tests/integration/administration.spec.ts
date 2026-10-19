@@ -1,16 +1,18 @@
 // Phase 12 P12-8a and P12-8b Administration (ADR-051's P12-8a amendment, ADR-063) through the real service, gateway,
-// database, RLS and audit, the way the pages call them. Each test runs in one owner-connection transaction that is rolled back: the
-// gateway runs its security context inside a savepoint of that transaction, so no calendar day or week reaches the
-// seed. These pin that each page opens exactly where its own permission does, in the application pre-check and again
-// in the database; that a refused page is the uniform not-found recorded as ACCESS_DENIED with the page's name only;
-// that each register is the seed as recorded, with ids, codes and dates and nothing from a case, not even the count of
-// proceedings a seat correction recorded; and that the calendar's two forms run their commands, whose refusals are
-// COMMAND_DENIED with the command and outcome only. Since P12-8b: the page list and every control's flag come from
-// the database (2127); each form records exactly what its command records, provisional where the form says so; the
-// five page rules that narrow a command (a mandatory notice takes no rule, an export rule is for a new code only, a
-// policy version is never looser, a committee's rules never change an option that follows a decision, and a
-// committee's safeguards are never loosened; coordinator rulings of 2026-10-18 21:17, 23:20 and 23:50) refuse with
-// nothing written; and "never looser" is the completion command's own comparison.
+// database, RLS and audit, the way the pages call them. Each test runs in one owner-connection transaction that is
+// rolled back: the gateway runs its security context inside a savepoint of that transaction, so no calendar day or week
+// reaches the seed. These pin that each page opens exactly where its own permission does, in the application pre-check
+// and again in the database; that a refused page is the uniform not-found recorded as ACCESS_DENIED with the page's
+// name only; that each register is the seed as recorded, with ids, codes and dates and nothing from a case, not even
+// the count of proceedings a seat correction recorded; and that the calendar's two forms run their commands, whose
+// refusals are COMMAND_DENIED with the command and outcome only. Since P12-8b: the page list and every control's flag
+// come from the database (2127); each form records exactly what its command records, provisional where the form says
+// so; the five page rules that narrow a command (a mandatory notice takes no rule, an export rule is for a new code
+// only, a policy version is never looser, a committee's rules never change an option that follows a decision, and a
+// committee's safeguards are never loosened; coordinator rulings of 2026-10-18 21:17, 23:20 and 23:50, and of
+// 2026-10-19 02:10) refuse with nothing written; and "never looser" is the completion command's own comparison. Since
+// 2128: a seat or a position is ended once, now or from a date, and an end dated before now only with its decree or
+// source reference (the owner's decision F7 = B), recorded on the row and never in the audit event's metadata.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -236,8 +238,10 @@ describe("Administration through the service (Phase 12 P12-8a)", () => {
           "effectiveFrom",
           "effectiveTo",
           "endReason",
+          "endReference",
           "endedAt",
           "endedBy",
+          "mayEnd",
           "membershipId",
           "seat",
           "state",
@@ -1027,20 +1031,23 @@ describe("Administration's other forms through the service (Phase 12 P12-8b)", (
       expect(
         outcome(await revise({ ...base, grievanceCompletionDays: "45", effectiveFrom: plusDays(today, 60) })),
       ).toBe("fieldErrors");
-      // Coordinator ruling of 2026-10-18 23:50: a safeguard is never loosened below a version in force or scheduled,
-      // alone or beside a change the page may make, on either committee; refused before the command, so nothing is
-      // written. The investigation committee's floor is now the version from day 30: five days' notice, a secret
-      // ballot, both guards on; the grievance committee's is the version in force: both guards on.
+      // Coordinator rulings of 2026-10-18 23:50 and 2026-10-19 02:10: a safeguard is never loosened below a version in
+      // force or scheduled, alone or beside a change the page may make, on either committee; refused before the
+      // command, so nothing is written. The investigation committee's floor is now the version from day 30: five days'
+      // notice, a secret ballot, dissent notes allowed, both guards on; the grievance committee's is the version in
+      // force: dissent notes allowed, both guards on.
       for (const [committee, loosen] of [
         [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { sanctionRequiresDefenceNotice: "off" }],
         [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { minutesObjectionBlocksDeemed: "off" }],
         [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { ballotSecrecy: "COMMITTEE_AFTER_CLOSE" }],
         [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { minimumNoticeDays: "4" }],
         [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { minimumNoticeDays: null }],
+        [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { dissentNoteAllowed: "off" }],
         [{ committeeId: gc, committeeKind: "GRIEVANCE" }, { sanctionRequiresDefenceNotice: "off" }],
         [{ committeeId: gc, committeeKind: "GRIEVANCE" }, { minutesObjectionBlocksDeemed: "off" }],
+        [{ committeeId: gc, committeeKind: "GRIEVANCE" }, { dissentNoteAllowed: "off" }],
       ] as const)
-        for (const extra of [{}, { dissentNoteAllowed: "off" }])
+        for (const extra of [{}, { voteRevisionAllowed: "off" }])
           expect(
             outcome(
               await revise({
@@ -1061,6 +1068,7 @@ describe("Administration's other forms through the service (Phase 12 P12-8b)", (
             ...base,
             minimumNoticeDays: "7",
             ballotSecrecy: "SECRET_BALLOT",
+            dissentNoteAllowed: "on",
             effectiveFrom: plusDays(today, 60),
           }),
         ),
@@ -1071,7 +1079,7 @@ describe("Administration's other forms through the service (Phase 12 P12-8b)", (
             committeeId: gc,
             committeeKind: "GRIEVANCE",
             grievanceCompletionDays: "20",
-            dissentNoteAllowed: "off",
+            voteRevisionAllowed: "off",
             effectiveFrom: plusDays(today, 30),
             reason: REASON_8B,
           }),
@@ -1087,20 +1095,22 @@ describe("Administration's other forms through the service (Phase 12 P12-8b)", (
           r.sourceStatus,
           r.minimumNoticeDays,
           r.ballotSecrecy,
+          r.voteRevisionAllowed,
           r.dissentNoteAllowed,
           r.grievanceCompletionDays,
           r.minutesObjectionBlocksDeemed,
           r.sanctionRequiresDefenceNotice,
         ]);
-      // Every new version carries both guards as the version in force has them.
+      // Every new version carries dissent notes and both guards as the version in force has them; vote revision is
+      // free (AMB-081).
       expect(of(ic)).toEqual([
-        ["IN_FORCE", "OWNER_DEFAULT", null, "COMMITTEE_AFTER_CLOSE", true, null, true, true],
-        ["SCHEDULED", "SOURCE_REQUIRED", 5, "SECRET_BALLOT", true, null, true, true],
-        ["SCHEDULED", "SOURCE_REQUIRED", 7, "SECRET_BALLOT", true, null, true, true],
+        ["IN_FORCE", "OWNER_DEFAULT", null, "COMMITTEE_AFTER_CLOSE", true, true, null, true, true],
+        ["SCHEDULED", "SOURCE_REQUIRED", 5, "SECRET_BALLOT", true, true, null, true, true],
+        ["SCHEDULED", "SOURCE_REQUIRED", 7, "SECRET_BALLOT", true, true, null, true, true],
       ]);
       expect(of(gc)).toEqual([
-        ["IN_FORCE", "OWNER_DEFAULT", null, "COMMITTEE_AFTER_CLOSE", true, null, true, true],
-        ["SCHEDULED", "SOURCE_REQUIRED", null, "COMMITTEE_AFTER_CLOSE", false, 20, true, true],
+        ["IN_FORCE", "OWNER_DEFAULT", null, "COMMITTEE_AFTER_CLOSE", true, true, null, true, true],
+        ["SCHEDULED", "SOURCE_REQUIRED", null, "COMMITTEE_AFTER_CLOSE", false, true, 20, true, true],
       ]);
       // Each new version keeps every option that follows a decision as the version in force has it.
       const decided = (r: (typeof after.ruleSets)[number]) => [
@@ -1136,17 +1146,165 @@ describe("Administration's other forms through the service (Phase 12 P12-8b)", (
         "DELIVERY",
         "COMMITTEE",
       ]);
-      // The ledger records the options changed, by the command's names, and nothing typed in the reason.
+      // The ledger records the options sent, by the command's names (dissent notes sent as kept are recorded as sent),
+      // and nothing typed in the reason.
       await s.asOwner();
       const events = await s.tx<{ changes: Record<string, unknown>; metadata: Record<string, unknown> }[]>`
         select metadata->'changes' as changes, metadata from audit.audit_event
         where action = 'COMMITTEE_RULE_SET_CHANGED' and metadata->>'committee_id' in (${ic}, ${gc}) order by seq`;
       expect(events.map((e) => e.changes)).toEqual([
         { minimum_notice_days: 5, ballot_secrecy: "SECRET_BALLOT" },
-        { minimum_notice_days: 7, ballot_secrecy: "SECRET_BALLOT" },
-        { grievance_completion_days: 20, dissent_note_allowed: false },
+        { minimum_notice_days: 7, ballot_secrecy: "SECRET_BALLOT", dissent_note_allowed: true },
+        { grievance_completion_days: 20, vote_revision_allowed: false },
       ]);
       expect(JSON.stringify(events.map((e) => e.metadata))).not.toContain(REASON_8B);
+    });
+  });
+
+  it("the seats and positions: ended once, now or from a date; an end before now only with its decree or source reference, else refused with nothing written (2128, F7 = B)", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const eta = actors.platformAdmin;
+      const { gc } = await committeeIds();
+      const DECREE = "DEMO-DECREE-8B";
+      let committees = (await admin.committees(ctxFor("platformAdmin"), eta))!;
+      let sectors = (await admin.sectors(ctxFor("platformAdmin"), eta))!;
+      // Flag == command for their administrator: every row not yet ended may be ended, and no other.
+      expect(committees.seats.map((x) => [x.membershipId, x.mayEnd])).toEqual(
+        committees.seats.map((x) => [x.membershipId, x.endedAt === null]),
+      );
+      expect(sectors.positions.map((x) => [x.membershipId, x.mayEnd])).toEqual(
+        sectors.positions.map((x) => [x.membershipId, x.endedAt === null]),
+      );
+      const today = committees.today;
+      // The start of today in Riyadh: a date's end, before now, so it needs its reference.
+      const startOfToday = Date.parse(`${today}T00:00:00+03:00`);
+      const ledger = (action: string) => count(s, `audit.audit_event where action = '${action}'`);
+
+      // ---- A seat: the Grievance Committee's demo chair (with a date) and secretary (now), from 2026-01-01.
+      const seat = (code: string) => committees.seats.find((x) => x.committeeId === gc && x.seat === code)!;
+      const [chair, secretary] = [seat("CHAIR"), seat("SECRETARY")];
+      expect([chair.mayEnd, secretary.mayEnd]).toEqual([true, true]);
+      const endSeat = (input: Record<string, unknown>) =>
+        admin.endCommitteeMembership(ctxFor("platformAdmin"), eta, { reason: REASON_8B, ...input });
+      const seatsEnded = await ledger("COMMITTEE_MEMBERSHIP_ENDED");
+      // Dated before now with no reference: refused, fail closed. Before the seat's start: refused, reference or not.
+      expect(outcome(await endSeat({ membershipId: chair.membershipId, effectiveTo: today }))).toBe(
+        "INVALID:end_reference",
+      );
+      expect(
+        outcome(
+          await endSeat({
+            membershipId: chair.membershipId,
+            effectiveTo: "2025-12-31",
+            endReference: DECREE,
+          }),
+        ),
+      ).toBe("INVALID:effective_to");
+      expect(await ledger("COMMITTEE_MEMBERSHIP_ENDED")).toBe(seatsEnded);
+      committees = (await admin.committees(ctxFor("platformAdmin"), eta))!;
+      expect(committees.seats.find((x) => x.membershipId === chair.membershipId)).toMatchObject({
+        endedAt: null,
+        endReference: null,
+        mayEnd: true,
+      });
+      // With its reference (trimmed): ended from the start of the date. Now: no reference needed. Then never again.
+      expect(
+        outcome(
+          await endSeat({
+            membershipId: chair.membershipId,
+            effectiveTo: today,
+            endReference: ` ${DECREE} `,
+          }),
+        ),
+      ).toBe("ok");
+      expect(outcome(await endSeat({ membershipId: secretary.membershipId }))).toBe("ok");
+      expect(outcome(await endSeat({ membershipId: chair.membershipId, endReference: DECREE }))).toBe(
+        "CONFLICT:MEMBERSHIP_ENDED",
+      );
+      committees = (await admin.committees(ctxFor("platformAdmin"), eta))!;
+      const endedSeat = (id: string) => committees.seats.find((x) => x.membershipId === id)!;
+      expect(endedSeat(chair.membershipId)).toMatchObject({
+        endReference: DECREE,
+        endReason: REASON_8B,
+        endedBy: USERS.platformAdmin,
+        mayEnd: false,
+      });
+      expect(Date.parse(endedSeat(chair.membershipId).effectiveTo!)).toBe(startOfToday);
+      expect(endedSeat(secretary.membershipId)).toMatchObject({ endReference: null, mayEnd: false });
+      expect(Date.parse(endedSeat(secretary.membershipId).effectiveTo!)).toBeGreaterThan(startOfToday);
+
+      // ---- A position: Operations' head (with a date) and Employee Phi's membership (now), from 2026-01-01.
+      const ops = sectors.sectors.find((x) => x.code === "OPS")!;
+      const position = (user: UserKey) =>
+        sectors.positions.find((x) => x.sectorId === ops.sectorId && x.userId === USERS[user] && x.mayEnd)!;
+      const [head, member] = [position("sectorHead"), position("employeeB")];
+      expect([head.position, member.position]).toEqual(["HEAD", "MEMBER"]);
+      const endPosition = (input: Record<string, unknown>) =>
+        admin.endSectorMembership(ctxFor("platformAdmin"), eta, { reason: REASON_8B, ...input });
+      const positionsEnded = await ledger("SECTOR_MEMBERSHIP_ENDED");
+      expect(outcome(await endPosition({ membershipId: head.membershipId, effectiveTo: today }))).toBe(
+        "INVALID:end_reference",
+      );
+      expect(
+        outcome(
+          await endPosition({
+            membershipId: head.membershipId,
+            effectiveTo: "2025-12-31",
+            endReference: DECREE,
+          }),
+        ),
+      ).toBe("INVALID:effective_to");
+      expect(await ledger("SECTOR_MEMBERSHIP_ENDED")).toBe(positionsEnded);
+      expect(
+        outcome(
+          await endPosition({ membershipId: head.membershipId, effectiveTo: today, endReference: DECREE }),
+        ),
+      ).toBe("ok");
+      expect(outcome(await endPosition({ membershipId: member.membershipId }))).toBe("ok");
+      expect(outcome(await endPosition({ membershipId: head.membershipId }))).toBe(
+        "CONFLICT:MEMBERSHIP_ALREADY_ENDED",
+      );
+      sectors = (await admin.sectors(ctxFor("platformAdmin"), eta))!;
+      const endedPosition = (id: string) => sectors.positions.find((x) => x.membershipId === id)!;
+      expect(endedPosition(head.membershipId)).toMatchObject({
+        endReference: DECREE,
+        endReason: REASON_8B,
+        mayEnd: false,
+      });
+      expect(Date.parse(endedPosition(head.membershipId).effectiveTo!)).toBe(startOfToday);
+      expect(endedPosition(member.membershipId)).toMatchObject({ endReference: null, mayEnd: false });
+
+      // One ledger event per end, with ids, the seat or position and the end only: never the reason or the reference.
+      await s.asOwner();
+      const events = await s.tx<{ action: string; object_id: string; metadata: Record<string, string> }[]>`
+        select action, object_id, metadata from audit.audit_event
+         where action in ('COMMITTEE_MEMBERSHIP_ENDED', 'SECTOR_MEMBERSHIP_ENDED')
+           and object_id in (${chair.membershipId}, ${secretary.membershipId}, ${head.membershipId},
+                             ${member.membershipId})
+         order by seq`;
+      expect(events.map((e) => [e.action, e.object_id, Object.keys(e.metadata).sort()])).toEqual([
+        [
+          "COMMITTEE_MEMBERSHIP_ENDED",
+          chair.membershipId,
+          ["committee_id", "effective_to", "seat", "user_id"],
+        ],
+        [
+          "COMMITTEE_MEMBERSHIP_ENDED",
+          secretary.membershipId,
+          ["committee_id", "effective_to", "seat", "user_id"],
+        ],
+        ["SECTOR_MEMBERSHIP_ENDED", head.membershipId, ["effective_to", "position", "sector_id", "user_id"]],
+        [
+          "SECTOR_MEMBERSHIP_ENDED",
+          member.membershipId,
+          ["effective_to", "position", "sector_id", "user_id"],
+        ],
+      ]);
+      for (const e of events) {
+        expect(JSON.stringify(e.metadata)).not.toContain(DECREE);
+        expect(JSON.stringify(e.metadata)).not.toContain(REASON_8B);
+      }
     });
   });
 
@@ -1167,6 +1325,12 @@ describe("Administration's other forms through the service (Phase 12 P12-8b)", (
       };
       const { ic } = await committeeIds();
       const from = plusDays(new Date().toISOString().slice(0, 10), 30);
+      // A seat and a position not yet ended: the caller check comes first, whatever the row.
+      await s.asOwner();
+      const [openSeat] = await s.tx<{ id: string }[]>`
+        select id from committee.membership where ended_at is null order by id limit 1`;
+      const [openPosition] = await s.tx<{ id: string }[]>`
+        select id from iam.sector_membership where ended_at is null order by id limit 1`;
       const forms: [string, string, (c: ReturnType<typeof ctxFor>) => Promise<{ ok: boolean }>][] = [
         [
           "withdraw_business_calendar_day",
@@ -1246,6 +1410,16 @@ describe("Administration's other forms through the service (Phase 12 P12-8b)", (
               effectiveFrom: from,
               reason: REASON_8B,
             }),
+        ],
+        [
+          "end_committee_membership",
+          "FORBIDDEN",
+          (c) => admin.endCommitteeMembership(c, forged, { membershipId: openSeat!.id, reason: REASON_8B }),
+        ],
+        [
+          "end_sector_membership",
+          "FORBIDDEN",
+          (c) => admin.endSectorMembership(c, forged, { membershipId: openPosition!.id, reason: REASON_8B }),
         ],
       ];
       const ledger = await count(s, "audit.audit_event where category <> 'SECURITY'");

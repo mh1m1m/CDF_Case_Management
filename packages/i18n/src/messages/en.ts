@@ -871,6 +871,24 @@ export const en = {
         affected: "The committee's members and secretaries, in proceedings referred to it from that date.",
         notified: "No one is sent a message.",
       },
+      // Ending a seat or a position (Phase 12 P12-8b, ADR-064; the owner's decision F7 = B).
+      endCommitteeMembership: {
+        action: "End the seat",
+        title: "End this seat?",
+        body: "The seat ends now, or at the start of the date you gave, and stays on record with your reason and, for today or an earlier date, its decree or source reference. From then on its holder no longer sits on the committee in this seat.",
+        undo: "No. An ended seat cannot be reopened, and its reference cannot be changed. Appointing to a seat is not on this page yet.",
+        affected: "The seat's holder.",
+        notified:
+          "The holder is told their committee seat is ending, unless that notice is turned off for them. The message carries no reason.",
+      },
+      endSectorMembership: {
+        action: "End the position",
+        title: "End this position?",
+        body: "The position ends now, or at the start of the date you gave, and stays on record with your reason and, for today or an earlier date, its decree or source reference. From then on its holder no longer holds this position in the sector.",
+        undo: "No. An ended position cannot be reopened, and its reference cannot be changed. Appointing to a position is not on this page yet.",
+        affected: "The position's holder.",
+        notified: "No one is sent a message.",
+      },
     },
   },
   /** Idle-session warning (CDF-57, WCAG 2.2.1). */
@@ -2637,6 +2655,17 @@ export const en = {
     recordedBy: "Recorded by {name} on {date}.",
     recordedByOnly: "Recorded by {name}.",
     endedOn: "Ended on {date}.",
+    // Ending a seat or a position (Phase 12 P12-8b, migration 2128; the owner's decision F7 = B).
+    endsOn: "Ends on",
+    endsOnHint:
+      "Leave it empty to end it now. A date ends it at the start of that day in Riyadh: after the start of the period, and not after an end it already has. Today or an earlier date needs the decree or source reference.",
+    endReferenceLabel: "Decree or source reference",
+    endReferenceMarker: "Required for today or an earlier date",
+    endReferenceHint:
+      "3 to 200 characters, such as the decree's number. It is recorded with the end and cannot be changed.",
+    endReference: "Decree or source reference:",
+    endReason: "Reason for ending",
+    endReasonHint: "5 to 2,000 characters. Shown with the end on this register.",
     state: { IN_FORCE: "In force", SCHEDULED: "Starts later", ENDED: "Ended" },
     settingStatus: { SOURCE_REQUIRED: "Awaiting the CDF source", CONFIGURED: "Configured" },
     committees: {
@@ -2731,6 +2760,15 @@ export const en = {
         "A date after today and after the start of the version shown. It starts at the beginning of that day in Riyadh.",
       later:
         "Appointing to a seat, correcting a seat and appointing an independent authority are not on this page yet.",
+      // Ending a seat (2128; the owner's decision F7 = B).
+      endTitle: "End a seat",
+      endIntro:
+        "A seat that has not been ended. It stays on record with who ended it, when and why. An ended seat cannot be reopened, and appointing to a seat is not on this page yet.",
+      endSeat: "Seat to end",
+      endOption: "{holder}, {seat}, {period}",
+      end: "End the seat",
+      endIn: "End the seat in the {committee}",
+      endDone: "The seat is ended.",
     },
     sectors: {
       intro:
@@ -2774,6 +2812,15 @@ export const en = {
       nameAr: "Arabic name",
       nameHint: "2 to 120 characters.",
       later: "Appointing to a position and delegating are not on this page yet.",
+      // Ending a position (2128; the owner's decision F7 = B).
+      endTitle: "End a position",
+      endIntro:
+        "A position that has not been ended. It stays on record with when and why it ended. An ended position cannot be reopened, and appointing to a position is not on this page yet.",
+      endPosition: "Position to end",
+      endOption: "{holder}, {position}, {period}",
+      end: "End the position",
+      endIn: "End the position in {sector}",
+      endDone: "The position is ended.",
     },
     notifications: {
       intro:
@@ -3131,6 +3178,12 @@ export const en = {
       admissibility_decider: "Choose who decides whether a grievance is admissible.",
       non_admission_decider: "Choose who decides not to admit a grievance.",
       grievance_completion_days: "Give a time to complete a grievance of 1 to 90 days, or leave it empty.",
+      // Ending a seat or a position (2128; the owner's decision F7 = B).
+      MEMBERSHIP_ENDED: "This seat is already ended.",
+      MEMBERSHIP_ALREADY_ENDED: "This position is already ended.",
+      effective_to: "Choose an end after the start of the period and not after an end it already has.",
+      end_reference:
+        "An end dated today or earlier is recorded only with its decree or source reference: give one of 3 to 200 characters.",
     },
   },
   // Notification templates (ADR-025): fixed wording only, never case content (§39, N18).

@@ -100,7 +100,10 @@ export type ConfirmAct =
   | "addExportPurpose"
   | "editExportPurpose"
   | "setCorrectiveActionPolicy"
-  | "reviseCommitteeRuleSet";
+  | "reviseCommitteeRuleSet"
+  // Ending a seat or a position (Phase 12 P12-8b, ADR-064; the owner's decision F7 = B).
+  | "endCommitteeMembership"
+  | "endSectorMembership";
 
 /** Acts that move work forward rather than close, end or remove something: their confirm button is not red. */
 const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
@@ -156,7 +159,8 @@ const FORWARD_ACTS: ReadonlySet<ConfirmAct> = new Set([
   "setBusinessCalendarDay",
   "setBusinessWeekPattern",
   // Adding a sector, a rule, a purpose or a version of a policy or of a committee's rules records something new; nothing
-  // already recorded is removed. Withdrawing a calendar entry or revoking a delegation ends something, so those stay red.
+  // already recorded is removed. Withdrawing a calendar entry, revoking a delegation and ending a seat or a position end
+  // something, so those stay red.
   "createSector",
   "setNotificationRule",
   "addExportRule",

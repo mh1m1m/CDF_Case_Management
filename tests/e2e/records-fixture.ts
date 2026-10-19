@@ -38,7 +38,9 @@ const USERS = {
   icSecretary: "a0000000-0000-4000-8000-000000000103",
   icMemberA: "a0000000-0000-4000-8000-000000000104",
   icMemberB: "a0000000-0000-4000-8000-000000000105",
-  // Appointed to the demo committee after a referral, then ended (Phase 12 P12-2b; no other browser spec uses it)
+  // Appointed to the demo committee after a referral, then ended (Phase 12 P12-2b), and given a seat on the Grievance
+  // Committee and a position in Operations, each for three days long ago, for the Administration end forms to end
+  // (P12-8b, 2128); no other browser spec uses it
   dpo: "a0000000-0000-4000-8000-000000000012",
   // Employee Chi, a corrective action's owner (Phase 12 P12-3b; no other browser spec uses it)
   financeEmployee: "a0000000-0000-4000-8000-000000000028",
@@ -1648,6 +1650,52 @@ export async function revokeDelegation(id: string): Promise<void> {
       select id from iam.sector_delegation where id = ${id} and revoked_at is null and effective_to > now()`;
     if (d)
       await tx`select api.revoke_referral_delegation(${d.id}, ${"Synthetic: revoked after the e2e journey."})`;
+  });
+}
+
+/**
+ * A seat the DPO held on the Grievance Committee for three days long ago, never ended: the committee administrator may
+ * still end it (2128's may_end), from its second day, which is before now, so the end needs its decree or source
+ * reference (the owner's decision F7 = B). The three days run from noon in Riyadh, five years ago or thirty days before
+ * the DPO's earliest seat there, whichever is earlier, so they overlap none of the DPO's seats and each run has its
+ * own. Appointed in the past with its reference, as every appointment is.
+ */
+export async function lapsedSeat(): Promise<{ membershipId: string; endDate: string }> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ id: string; end_date: string }[]>`
+      with c as (select id from committee.committee where code = 'GC'),
+      w as (
+        select least(((now() at time zone 'Asia/Riyadh') - interval '5 years')::date,
+                     (select min((m.effective_from at time zone 'Asia/Riyadh')::date) - 30
+                        from committee.membership m, c
+                       where m.committee_id = c.id and m.user_id = ${USERS.dpo})) as d)
+      select api.appoint_committee_member(c.id, ${USERS.dpo}, 'MEMBER',
+               (w.d + time '12:00') at time zone 'Asia/Riyadh',
+               (w.d + 3 + time '12:00') at time zone 'Asia/Riyadh',
+               ${`DEMO-E2E-LAPSED-SEAT-${codeSuffix()}`}) as id,
+             (w.d + 1)::text as end_date
+        from c, w`;
+    return { membershipId: r!.id, endDate: r!.end_date };
+  });
+}
+
+/** The same for a member's position in Operations, which the sector administrator ends from its second day. */
+export async function lapsedPosition(): Promise<{ membershipId: string; endDate: string }> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ id: string; end_date: string }[]>`
+      with s as (select id from iam.sector where code = 'OPS'),
+      w as (
+        select least(((now() at time zone 'Asia/Riyadh') - interval '5 years')::date,
+                     (select min((m.effective_from at time zone 'Asia/Riyadh')::date) - 30
+                        from iam.sector_membership m, s
+                       where m.sector_id = s.id and m.user_id = ${USERS.dpo})) as d)
+      select api.appoint_sector_member(s.id, ${USERS.dpo}, 'MEMBER',
+               (w.d + time '12:00') at time zone 'Asia/Riyadh',
+               (w.d + 3 + time '12:00') at time zone 'Asia/Riyadh',
+               ${`DEMO-E2E-LAPSED-POSITION-${codeSuffix()}`}) as id,
+             (w.d + 1)::text as end_date
+        from s, w`;
+    return { membershipId: r!.id, endDate: r!.end_date };
   });
 }
 

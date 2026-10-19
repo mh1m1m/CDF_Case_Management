@@ -98,6 +98,8 @@ describe("what the registers read", () => {
     // One command per form.
     const commands = [
       "create_sector",
+      "end_committee_membership",
+      "end_sector_membership",
       "revise_committee_rule_set",
       "revoke_referral_delegation",
       "set_business_calendar_day",

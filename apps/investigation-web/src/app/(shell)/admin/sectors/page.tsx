@@ -1,10 +1,12 @@
 // Administration › Sectors (UX redesign Phase 12 P12-8a and P12-8b; ADR-051's P12-8a amendment, ADR-063). The sector
 // administrator's register: who holds each sector position, and the referral approvals sector heads have delegated
 // (Q1–Q4), as recorded, revoked ones included. Read in the administrator's own context after the database confirms
-// SECTOR_ADMIN; anyone else gets the uniform not-found, recorded as ACCESS_DENIED. Two forms, each shown only where
-// the database says its command would accept the caller now (api.admin_sector_capabilities, 2127): creating a sector,
-// and revoking a delegation that has not ended. Position appointments wait (coordinator rulings F5 and F7); since 2127
-// nobody appoints themselves (F6, CDF-259).
+// SECTOR_ADMIN; anyone else gets the uniform not-found, recorded as ACCESS_DENIED. Three forms, each shown only where
+// the database says its command would accept the caller now (api.admin_sector_capabilities, 2127 and 2128): creating a
+// sector, ending a position not yet ended (now or from a date, with the decree or source reference an end dated before
+// now requires: 2128, the owner's decision F7 = B; shown on the register once recorded), and revoking a delegation that
+// has not ended. Position appointments wait for the owner's F5 card; since 2127 nobody appoints themselves (F6,
+// CDF-259).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
@@ -29,7 +31,8 @@ import { getTranslator } from "@/server/locale";
 import { confirmation } from "../../confirmations";
 import { AdminFrame } from "../admin-frame";
 import { ADMIN_CODES, day, period, personName, stateLabel, stateTone } from "../labels";
-import { createSectorAction, revokeDelegationAction } from "./actions";
+import { EndForm } from "../end-form";
+import { createSectorAction, endSectorMembershipAction, revokeDelegationAction } from "./actions";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -95,6 +98,8 @@ function SectorCard({
         SECTOR_POSITIONS.indexOf(a.position) - SECTOR_POSITIONS.indexOf(b.position) ||
         a.effectiveFrom.localeCompare(b.effectiveFrom),
     );
+  // The positions the database says may be ended now (2128): not yet ended, whatever their period.
+  const endable = positions.filter((p) => p.mayEnd);
   const delegations = page.delegations.filter((d) => d.sectorId === s.sectorId);
   const testId = `admin-sector-${s.code}`;
   return (
@@ -146,6 +151,12 @@ function SectorCard({
                           <bdi>{p.endReason}</bdi>
                         </>
                       ) : null}
+                      {p.endReference ? (
+                        <>
+                          {" "}
+                          {t("admin.endReference")} <bdi className="break-words">{p.endReference}</bdi>
+                        </>
+                      ) : null}
                     </p>
                   ) : null}
                 </>
@@ -153,6 +164,28 @@ function SectorCard({
             },
           ]}
         />
+        {endable.length > 0 ? (
+          <EndForm
+            t={t}
+            id={`admin-end-position-form-${s.code}`}
+            title={t("admin.sectors.endTitle")}
+            intro={t("admin.sectors.endIntro")}
+            rowLabel={t("admin.sectors.endPosition")}
+            rows={endable.map((p) => ({
+              membershipId: p.membershipId,
+              label: t("admin.sectors.endOption", {
+                holder: isolate(who(p.userId)),
+                position: t(`admin.sectors.positionValue.${p.position}` as MessageKey),
+                period: period(t, p.effectiveFrom, p.effectiveTo),
+              }),
+            }))}
+            action={endSectorMembershipAction}
+            act="endSectorMembership"
+            submitLabel={t("admin.sectors.end")}
+            submitName={t("admin.sectors.endIn", { sector: isolate(name) })}
+            done={t("admin.sectors.endDone")}
+          />
+        ) : null}
       </section>
       <section aria-labelledby={`${testId}-delegations`}>
         <h3 id={`${testId}-delegations`} className="mb-2 font-semibold">

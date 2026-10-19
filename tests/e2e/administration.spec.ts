@@ -16,22 +16,27 @@
 // Phase 12 P12-8b (ADR-063): each form is offered where the database says its command would accept the caller now
 // (2127's reads), and a refusal is said in the register's own words. The calendar administrator withdraws an entry from
 // today on, and an entry withdrawn meanwhile is refused. The sector administrator creates a sector once per code and
-// revokes a delegation in force. The notification administrator records a rule from a later date; a mandatory notice
-// is never offered, and a start on or before a later rule of the same kind is refused (F8). The export-policy
+// revokes a delegation in force. The notification administrator records a rule from a later date; a mandatory notice is
+// never offered, and a start on or before a later rule of the same kind is refused (F8). The export-policy
 // administrator adds a rule for a new code only, with an effect that only adds a requirement or a refusal, recorded as
 // provisional; adds a purpose (not offered to requesters, so the purposes offered stay the seeded ones) and changes it
 // at the version the page read, so a purpose changed meanwhile is refused (F13); no control changes a purpose's source,
-// and a legacy purpose has no form (coordinator ruling of 2026-10-18 21:17). The GRC Director records a new version of a
-// corrective-action policy from a later date, never looser than the versions in force or scheduled: a note alone is not
-// offered while they need an evidence reference. The committee administrator records a new version of a committee's
+// and a legacy purpose has no form (coordinator ruling of 2026-10-18 21:17). The GRC Director records a new version of
+// a corrective-action policy from a later date, never looser than the versions in force or scheduled: a note alone is
+// not offered while they need an evidence reference. The committee administrator records a new version of a committee's
 // rules with only the options changed; no change, and a start on or before a later version, are refused. The options
 // that follow a decision (DEC-F03, F04, F14, F15 and F17, and DEC-F01, DEC-F17, Q51, Q98 and AMB-076, confirmed by the
 // coordinator's ruling of 23:50) are shown with their decision and have no control, and a form altered to carry one is
-// refused with nothing recorded. A safeguard is offered only as it is or stricter (ruling of 23:50): both guards, on in
-// every version, are shown as kept with no control, and a form altered to switch one off is refused with nothing
-// recorded. Codes carry a random suffix and every version starts after the last one recorded, so each journey can run
-// again on the same database (it changes only options the page may change either way); every version starts at least
-// 60 days ahead, so nothing in force today changes.
+// refused with nothing recorded. A safeguard is offered only as it is or stricter (rulings of 23:50 and of 2026-10-19
+// 02:10): dissent notes and both guards, on in every version, are shown as kept with no control, and a form altered to
+// switch one off is refused with nothing recorded. Codes carry a random suffix and every version starts after the last
+// one recorded, so each journey can run again on the same database (it changes only options the page may change either
+// way); every version starts at least 60 days ahead, so nothing in force today changes.
+//
+// Since 2128 (ADR-064; the owner's decision F7 = B): the committee and sector administrator ends a seat and a position
+// from a past date. Without its decree or source reference the end is refused in the register's own words, with
+// nothing recorded; with it, the end is recorded, the register shows the reference, and the row is no longer offered.
+// The seat and the position are the DPO's, each held for three days long ago, so nothing in force changes.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { EXPORT_RULE_ADD_ACTIONS } from "@cdf/contracts";
 import {
@@ -48,6 +53,8 @@ import {
   codeSuffix,
   delegationInForce,
   exportPurposeChanged,
+  lapsedPosition,
+  lapsedSeat,
   notificationRuleFrom,
   revokeDelegation,
   ruleSetFrom,
@@ -160,6 +167,9 @@ const TEXT = {
     kept: "A safeguard, already at its strictest: the new version keeps it.",
     looserOption:
       "A safeguard can be kept or made stricter on this page, never loosened, so nothing was recorded.",
+    endReference: "is recorded only with its decree or source reference",
+    seatEnded: "The seat is ended.",
+    positionEnded: "The position is ended.",
   },
   ar: {
     title: {
@@ -203,6 +213,9 @@ const TEXT = {
     safeguard: "يمكن في هذه الصفحة إبقاؤها أو تشديدها، دون تخفيفها",
     kept: "ضمانة في أشد حالاتها: تحتفظ بها النسخة الجديدة.",
     looserOption: "يمكن في هذه الصفحة إبقاء الضمانة أو تشديدها، دون تخفيفها، لذا لم يُسجَّل شيء.",
+    endReference: "إلا مع مرجع القرار أو المصدر",
+    seatEnded: "أُنهي المقعد.",
+    positionEnded: "أُنهي المنصب.",
   },
 } as const;
 
@@ -733,10 +746,11 @@ for (const locale of ["ar", "en"] as const) {
       if (key === "quorumValue" || !applies(key as RuleSetRevisionKey)) continue;
       await expect(decided.getByTestId(`${id}-decided-${key}`), key).toContainText(ref);
     }
-    // Ruling of 23:50: a safeguard is offered only as it is or stricter. Both guards are on in every version, their
-    // strictest, so each is shown as kept and has no control; the ballot and the minimum notice say next to them that
-    // they can only be kept or made stricter, and the notice is never offered below the version it starts from.
-    const KEPT = ["minutesObjectionBlocksDeemed", "sanctionRequiresDefenceNotice"];
+    // Rulings of 23:50 and of 2026-10-19 02:10: a safeguard is offered only as it is or stricter. Dissent notes and
+    // both guards are on in every version, their strictest, so each is shown as kept and has no control; the ballot and
+    // the minimum notice say next to them that they can only be kept or made stricter, and the notice is never offered
+    // below the version it starts from.
+    const KEPT = ["dissentNoteAllowed", "minutesObjectionBlocksDeemed", "sanctionRequiresDefenceNotice"];
     for (const key of KEPT) {
       await expect(form.getByTestId(`${id}-kept-${key}`), key).toContainText(text.kept);
       await expect(form.locator(`[name="${key}"]`), key).toHaveCount(0);
@@ -793,6 +807,15 @@ for (const locale of ["ar", "en"] as const) {
     await expect(form.getByTestId("action-error")).toContainText(text.looserOption);
     await expect(later).toHaveCount(before + 1);
 
+    // Altered to withdraw dissent notes (ruling of 2026-10-19 02:10): refused the same way, and nothing more is
+    // recorded.
+    await alter("dissentNoteAllowed", "off");
+    await change("voteRevisionAllowed");
+    await when(dayAfter(from));
+    await submitConfirmed(admin, form);
+    await expect(form.getByTestId("action-error")).toContainText(text.looserOption);
+    await expect(later).toHaveCount(before + 1);
+
     // The form altered to carry a decided option, with a change it may make: refused before the command is asked,
     // whatever the date, and nothing more is recorded.
     const [key, value] = code === "GC" ? ["nonAdmissionDecider", "CHAIR"] : ["conflictDecider", "SECRETARY"];
@@ -803,6 +826,51 @@ for (const locale of ["ar", "en"] as const) {
     await expect(form.getByTestId("action-error")).toContainText(text.decidedOption);
     await expect(later).toHaveCount(before + 1);
     await expectNoOverflow(admin, `/admin/committees at ${width}px`);
+    await admin.context().close();
+  });
+
+  test(`${locale}: the committee and sector administrator ends a seat and a position from a past date only with its decree or source reference`, async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const [seat, position] = [await lapsedSeat(), await lapsedPosition()];
+    const reference = `DEMO-DECREE-E2E-${codeSuffix()}`;
+    const admin = await signIn(browser, ADMIN, locale);
+    await admin.setViewportSize({ width, height: 900 });
+    /** Ends the row from the date given, with the reference if one is given, after the confirmation. */
+    const end = async (id: string, membershipId: string, date: string, withReference: boolean) => {
+      const form = admin.getByTestId(id);
+      await form.locator(`#${id}-row`).selectOption(membershipId);
+      await form.locator(`#${id}-to`).fill(date);
+      await form.locator(`#${id}-reference`).fill(withReference ? reference : "");
+      await form.locator(`#${id}-reason`).fill("Synthetic: it ended earlier, by decree.");
+      await submitConfirmed(admin, form);
+      return form;
+    };
+
+    for (const [path, id, list, row, ended] of [
+      ["/admin/committees", "admin-end-seat-form-GC", "admin-committee-GC-seat-list", seat, text.seatEnded],
+      [
+        "/admin/sectors",
+        "admin-end-position-form-OPS",
+        "admin-sector-OPS-position-list",
+        position,
+        text.positionEnded,
+      ],
+    ] as const) {
+      await admin.goto(path);
+      const recorded = admin.getByTestId(list).locator("tbody tr").filter({ hasText: reference });
+      // From its second day, before now, with no reference: refused in the register's own words, nothing recorded.
+      let form = await end(id, row.membershipId, row.endDate, false);
+      await expect(form.getByTestId("action-error")).toContainText(text.endReference);
+      await expect(recorded).toHaveCount(0);
+      // With its reference: recorded and shown on the register, and the row is no longer offered.
+      form = await end(id, row.membershipId, row.endDate, true);
+      await expect(form.getByRole("status")).toContainText(ended);
+      await expect(recorded).toHaveCount(1);
+      await expect(admin.locator(`#${id}-row option[value="${row.membershipId}"]`)).toHaveCount(0);
+      await expectNoOverflow(admin, `${path} at ${width}px`);
+    }
     await admin.context().close();
   });
 }

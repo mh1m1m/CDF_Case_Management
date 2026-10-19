@@ -126,14 +126,25 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
   /** COMMITTEE_ADMIN: the committee registry (1870, 2030, 2090, 2100) and the authority-rule coverage (2030). */
   committees(ctx: UserRequestContext): Promise<AdminCommitteesPage> {
     return this.run(ctx, async (tx) => {
-      // Refuses CDF_FORBIDDEN where the rule-set commands refuse the caller.
+      // Refuses CDF_FORBIDDEN where the rule-set commands refuse the caller. Each committee also lists its seats with
+      // may_end (2128); may_appoint is not read while the appointment forms wait for the owner's F5 card.
       const [cap] = await tx<
         {
           v: {
-            committees: { committee_id: string; may_set_rule_set: boolean; may_revise_rule_set: boolean }[];
+            committees: {
+              committee_id: string;
+              may_set_rule_set: boolean;
+              may_revise_rule_set: boolean;
+              seats?: { membership_id: string; may_end: boolean }[];
+            }[];
           };
         }[]
       >`select api.admin_committee_capabilities() as v`;
+      const endable = new Map(
+        (cap?.v.committees ?? []).flatMap((c) =>
+          (c.seats ?? []).map((m) => [m.membership_id, m.may_end] as const),
+        ),
+      );
       const { now, today } = await clock(tx);
       const committees = await committeesOf(tx);
       const seats = await tx<
@@ -150,11 +161,13 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           ended_by: string | null;
           ended_at: string | null;
           end_reason: string | null;
+          end_reference: string | null;
         }[]
       >`
         select m.id, m.committee_id, m.user_id, m.seat, m.effective_from::text as effective_from,
                m.effective_to::text as effective_to, m.appointment_reference, m.appointed_by,
-               m.appointed_at::text as appointed_at, m.ended_by, m.ended_at::text as ended_at, m.end_reason
+               m.appointed_at::text as appointed_at, m.ended_by, m.ended_at::text as ended_at, m.end_reason,
+               m.end_reference
           from committee.membership m
          order by m.committee_id, m.effective_from, m.id`;
       const corrections = await tx<
@@ -286,6 +299,8 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           endedBy: s.ended_by,
           endedAt: isoOrNull(s.ended_at),
           endReason: s.end_reason,
+          endReference: s.end_reference,
+          mayEnd: yes(endable.get(s.id)),
         })),
         corrections: corrections.map((c) => ({
           correctionId: c.id,
@@ -371,11 +386,23 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
   /** SECTOR_ADMIN: sectors, every position and every delegation (1880), and the delegation limit (2040). */
   sectors(ctx: UserRequestContext): Promise<AdminSectorsPage> {
     return this.run(ctx, async (tx) => {
-      // Refuses CDF_FORBIDDEN where the sector commands refuse the caller.
+      // Refuses CDF_FORBIDDEN where the sector commands refuse the caller. Each sector also lists its positions with
+      // may_end (2128); may_appoint is not read while the appointment forms wait for the owner's F5 card.
       const [cap] = await tx<
-        { v: { may_create_sector: boolean; delegations: { delegation_id: string; may_revoke: boolean }[] } }[]
+        {
+          v: {
+            may_create_sector: boolean;
+            delegations: { delegation_id: string; may_revoke: boolean }[];
+            sectors?: { sector_id: string; positions: { membership_id: string; may_end: boolean }[] }[];
+          };
+        }[]
       >`select api.admin_sector_capabilities() as v`;
       const revocable = new Map((cap?.v.delegations ?? []).map((d) => [d.delegation_id, d.may_revoke]));
+      const endable = new Map(
+        (cap?.v.sectors ?? []).flatMap((x) =>
+          (x.positions ?? []).map((m) => [m.membership_id, m.may_end] as const),
+        ),
+      );
       const { now } = await clock(tx);
       const sectors = await tx<
         { id: string; code: string; name_en: string; name_ar: string; is_active: boolean }[]
@@ -393,11 +420,12 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           appointed_by: string | null;
           ended_at: string | null;
           end_reason: string | null;
+          end_reference: string | null;
         }[]
       >`
         select m.id, m.sector_id, m.user_id, m.position, m.effective_from::text as effective_from,
                m.effective_to::text as effective_to, m.appointment_reference, m.appointed_by,
-               m.ended_at::text as ended_at, m.end_reason
+               m.ended_at::text as ended_at, m.end_reason, m.end_reference
           from iam.sector_membership m
          order by m.sector_id, m.effective_from, m.id`;
       const delegations = await tx<
@@ -445,6 +473,8 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           appointedBy: p.appointed_by,
           endedAt: isoOrNull(p.ended_at),
           endReason: p.end_reason,
+          endReference: p.end_reference,
+          mayEnd: yes(endable.get(p.id)),
         })),
         delegations: delegations.map((d) => ({
           delegationId: d.id,
@@ -936,6 +966,29 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
     });
   }
 
+  /**
+   * An end now, or from the start of the date in Riyadh (2128). The committee's command takes no empty end, so an end
+   * now is now() itself, in the command's own transaction: never before now(), so it needs no reference.
+   */
+  endCommitteeMembership(ctx: UserRequestContext, input: P<"endCommitteeMembership">): Promise<void> {
+    const to = input.effectiveTo === undefined ? null : riyadhMidnight(input.effectiveTo);
+    return this.run(ctx, async (tx) => {
+      await tx`
+        select api.end_committee_membership(${input.membershipId}::uuid, coalesce(${to}::timestamptz, now()),
+                                            ${input.reason}, ${input.endReference ?? null})`;
+    });
+  }
+
+  /** An end now (the command's own default for no date), or from the start of the date in Riyadh (2128). */
+  endSectorMembership(ctx: UserRequestContext, input: P<"endSectorMembership">): Promise<void> {
+    const to = input.effectiveTo === undefined ? null : riyadhMidnight(input.effectiveTo);
+    return this.run(ctx, async (tx) => {
+      await tx`
+        select api.end_sector_membership(${input.membershipId}::uuid, ${to}::timestamptz, ${input.reason},
+                                         ${input.endReference ?? null})`;
+    });
+  }
+
   setNotificationRule(ctx: UserRequestContext, input: P<"setNotificationRule">): Promise<string> {
     return this.run(ctx, async (tx) => {
       const [r] = await tx<{ id: string }[]>`
@@ -1039,11 +1092,12 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           open: boolean;
           minimum_notice_days: number | null;
           ballot_secrecy: RuleSetSafeguards["ballotSecrecy"];
+          dissent_note_allowed: boolean;
           minutes_objection_blocks_deemed: boolean;
           sanction_requires_defence_notice: boolean;
         }[]
       >`
-        select r.effective_to is null as open, r.minimum_notice_days, r.ballot_secrecy,
+        select r.effective_to is null as open, r.minimum_notice_days, r.ballot_secrecy, r.dissent_note_allowed,
                r.minutes_objection_blocks_deemed, r.sanction_requires_defence_notice
           from committee.rule_set r
          where r.committee_id = ${input.committeeId}::uuid and (r.effective_to is null or r.effective_to > now())`;
@@ -1052,6 +1106,7 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
           open: v.open,
           minimumNoticeDays: v.minimum_notice_days,
           ballotSecrecy: v.ballot_secrecy,
+          dissentNoteAllowed: v.dissent_note_allowed,
           minutesObjectionBlocksDeemed: v.minutes_objection_blocks_deemed,
           sanctionRequiresDefenceNotice: v.sanction_requires_defence_notice,
         })),

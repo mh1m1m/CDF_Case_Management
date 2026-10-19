@@ -103,6 +103,13 @@ export interface AdminCommitteeSeat {
   endedBy: string | null;
   endedAt: string | null;
   endReason: string | null;
+  /**
+   * The decree or source reference of the end (2128): recorded with an end dated before the moment it was recorded
+   * (the owner's decision F7 = B), and with any end given one. Never changed once recorded.
+   */
+  endReference: string | null;
+  /** `api.admin_committee_capabilities` (2128): whether `api.end_committee_membership` would accept the caller now. */
+  mayEnd: boolean;
 }
 
 /** A correction recorded against a seat (AMB-045): the seat stands as appointed; the correction is read beside it. */
@@ -225,6 +232,10 @@ export interface AdminSectorPosition {
   appointedBy: string | null;
   endedAt: string | null;
   endReason: string | null;
+  /** The decree or source reference of the end (2128), as for a seat. */
+  endReference: string | null;
+  /** `api.admin_sector_capabilities` (2128): whether `api.end_sector_membership` would accept the caller now. */
+  mayEnd: boolean;
 }
 
 /** A sector head's delegation of referral approval (Q1–Q4), as recorded; revoked ones stay. */

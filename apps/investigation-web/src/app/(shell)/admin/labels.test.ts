@@ -115,9 +115,9 @@ describe("the Administration codes", () => {
 
 /**
  * What each Administration command answers besides FORBIDDEN and NOT_FOUND (which read as their class): its conflicts
- * and the fields it names when a value is invalid, as its final definition raises them (2030, 2040, 2127), and the
- * refusals the service and the gateway add (MANDATORY_NOTICE, RULE_CODE_EXISTS, LOOSER_*; coordinator ruling on F4;
- * DECIDED_OPTION, ruling of 2026-10-18 23:20; LOOSER_RULE_OPTION, ruling of 23:50).
+ * and the fields it names when a value is invalid, as its final definition raises them (2030, 2040, 2127, 2128), and
+ * the refusals the service and the gateway add (MANDATORY_NOTICE, RULE_CODE_EXISTS, LOOSER_*; coordinator ruling on
+ * F4; DECIDED_OPTION, ruling of 2026-10-18 23:20; LOOSER_RULE_OPTION, ruling of 23:50).
  */
 const REFUSALS: Record<string, { conflicts: string[]; fields: string[] }> = {
   set_business_calendar_day: {
@@ -193,6 +193,15 @@ const REFUSALS: Record<string, { conflicts: string[]; fields: string[] }> = {
       "source_status",
       "reason",
     ],
+  },
+  // 2128 (the owner's decision F7 = B): an end dated before now needs its reference, checked when given.
+  end_committee_membership: {
+    conflicts: ["MEMBERSHIP_ENDED"],
+    fields: ["effective_to", "reason", "end_reference"],
+  },
+  end_sector_membership: {
+    conflicts: ["MEMBERSHIP_ALREADY_ENDED"],
+    fields: ["effective_to", "reason", "end_reference"],
   },
 };
 

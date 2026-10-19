@@ -7,8 +7,9 @@
 // Phase 12 P12-8b (ADR-063): every other form the registers offer, each submitted with nothing chosen (or a required
 // value cleared), confirmed, and refused with its error summary, which takes the focus; each confirmation and each
 // summary passes axe. A day and a delegation are added first, so the withdrawal and the revocation are offered, and
-// are withdrawn and revoked afterwards; the forms record nothing. Each form has a page of its own, so a refused form
-// left with its entries never stands in the way of the next page.
+// are withdrawn and revoked afterwards; the forms record nothing. Each page is opened on its own, so a refused form
+// left with its entries never stands in the way of the next page. Since 2128 (ADR-064) the end of a seat and of a
+// position too, each with no seat or position chosen.
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { audit } from "./axe";
 import {
@@ -122,7 +123,7 @@ for (const locale of ["ar", "en"] as const) {
     await admin.context().close();
   });
 
-  test(`${locale}: a day's withdrawal, a sector, a delegation's revocation and a notice rule, refused with their error summaries, pass axe`, async ({
+  test(`${locale}: a day's withdrawal, a sector, a delegation's revocation, a position's end and a notice rule, refused with their error summaries, pass axe`, async ({
     browser,
   }) => {
     test.setTimeout(180_000);
@@ -139,12 +140,15 @@ for (const locale of ["ar", "en"] as const) {
       await withdraw.locator("#admin-withdraw-form-reason").fill(REASON);
       await refused(page, withdraw);
 
-      // A sector with no code and no names; a revocation with no delegation chosen.
+      // A sector with no code and no names; a revocation with no delegation chosen; an end with no position chosen.
       page = await opened(context, "/admin/sectors");
       await refused(page, page.getByTestId("admin-sector-form"));
       const revoke = page.getByTestId("admin-revoke-form-OPS");
       await revoke.locator("#admin-revoke-form-OPS-reason").fill(REASON);
       await refused(page, revoke);
+      const endPosition = page.getByTestId("admin-end-position-form-OPS");
+      await endPosition.locator("#admin-end-position-form-OPS-reason").fill(REASON);
+      await refused(page, endPosition);
 
       // A notice rule with no notice, channel, setting or date.
       page = await opened(context, "/admin/notification-rules");
@@ -158,7 +162,7 @@ for (const locale of ["ar", "en"] as const) {
     }
   });
 
-  test(`${locale}: an export rule, an export purpose, a corrective-action policy version and a committee's rules, refused with their error summaries, pass axe`, async ({
+  test(`${locale}: an export rule, an export purpose, a corrective-action policy version, a committee's rules and a seat's end, refused with their error summaries, pass axe`, async ({
     browser,
   }) => {
     test.setTimeout(180_000);
@@ -179,12 +183,15 @@ for (const locale of ["ar", "en"] as const) {
     await editForm.locator(`#${edit}-reason`).fill(REASON);
     await refused(page, editForm);
 
-    // A version of the committee's rules with no start date.
+    // A version of the committee's rules with no start date; an end with no seat chosen.
     page = await opened(context, "/admin/committees");
     const rules = "admin-rules-form-IC";
     await page.getByTestId(`${rules}-details`).locator("summary").click();
     await page.getByTestId(rules).locator(`#${rules}-reason`).fill(REASON);
     await refused(page, page.getByTestId(rules));
+    const endSeat = page.getByTestId("admin-end-seat-form-IC");
+    await endSeat.locator("#admin-end-seat-form-IC-reason").fill(REASON);
+    await refused(page, endSeat);
     await context.close();
 
     // A version of a corrective-action policy with no start date: the GRC Director's.

@@ -7,14 +7,16 @@
  * list of pages comes from the database (`api.my_admin_views`, F3), and each page carries its capability read: which
  * of its controls the database would accept from the caller now.
  *
- * Each form runs one command with its own schema and the page's permission as the pre-check; the database decides
- * every input again. Five page rules narrow what a command would take (coordinator rulings on F4, 2026-10-18 21:17,
- * and of 23:20 and 23:50): a new export rule is for a new code only, never a new version of an existing one; a
- * mandatory notice takes no rule; a corrective-action policy's completion rule is never looser than a version in force
- * or scheduled; a committee's rules never change an option that follows a decision (`DECIDED_RULE_KEYS`); and a
- * committee's safeguards are kept or made stricter, never loosened (`TIGHTEN_ONLY_RULE_KEYS`). Every change
- * a form records is provisional (SOURCE_REQUIRED), awaiting the CDF source, except an export purpose, which its
- * command records as the administrator's own catalogue entry (DEC-F21). A refusal is recorded as COMMAND_DENIED with
+ * Each form runs one command with its own schema and the page's permission as the pre-check; the database decides every
+ * input again. Five page rules narrow what a command would take (coordinator rulings on F4, 2026-10-18 21:17, of 23:20
+ * and 23:50, and of 2026-10-19 02:10): a new export rule is for a new code only, never a new version of an existing
+ * one; a mandatory notice takes no rule; a corrective-action policy's completion rule is never looser than a version in
+ * force or scheduled; a committee's rules never change an option that follows a decision (`DECIDED_RULE_KEYS`); and a
+ * committee's safeguards are kept or made stricter, never loosened (`TIGHTEN_ONLY_RULE_KEYS`). Every rule or version a
+ * form records is provisional (SOURCE_REQUIRED), awaiting the CDF source, except an export purpose, which its command
+ * records as the administrator's own catalogue entry (DEC-F21). Since 2128 a seat or a position can be ended: an end
+ * dated before now is recorded only with its decree or source reference (the owner's decision F7 = B, 2026-10-19),
+ * which the command requires; appointing waits for the owner's F5 card. A refusal is recorded as COMMAND_DENIED with
  * the command and the outcome only, never the reason typed.
  */
 import type {
@@ -36,6 +38,8 @@ import {
   createSectorSchema,
   editExportPurposeSchema,
   EDITABLE_RULE_KEYS,
+  endCommitteeMembershipSchema,
+  endSectorMembershipSchema,
   isDecidedRuleKey,
   RULE_SET_REVISION_KEYS,
   reviseCommitteeRuleSetSchema,
@@ -114,9 +118,10 @@ export interface RuleSetSafeguards extends RuleSafeguards {
 }
 
 /**
- * "Never looser" for a committee's safeguards (coordinator ruling of 2026-10-18 23:50; `TIGHTEN_ONLY_RULE_KEYS`): each
- * safeguard of the new version, as sent or as carried from the version open now, is at least as strict as in every
- * version in force or scheduled. Null when it is, else the first safeguard that would be looser.
+ * "Never looser" for a committee's safeguards (coordinator rulings of 2026-10-18 23:50 and 2026-10-19 02:10;
+ * `TIGHTEN_ONLY_RULE_KEYS`): each safeguard of the new version, as sent or as carried from the version open now, is at
+ * least as strict as in every version in force or scheduled. Null when it is, else the first safeguard that would be
+ * looser.
  */
 export function looserRuleSafeguard(
   input: In<typeof reviseCommitteeRuleSetSchema>,
@@ -163,6 +168,16 @@ export interface AdministrationGateway {
   createSector(ctx: UserRequestContext, input: In<typeof createSectorSchema>): Promise<string>;
   /** `api.revoke_referral_delegation`. */
   revokeDelegation(ctx: UserRequestContext, input: In<typeof revokeReferralDelegationSchema>): Promise<void>;
+  /**
+   * `api.end_committee_membership` (2128) now, or from the start of the date in Riyadh, with the reference if one is
+   * given. The command takes no empty end, so an end now is the transaction's own now().
+   */
+  endCommitteeMembership(
+    ctx: UserRequestContext,
+    input: In<typeof endCommitteeMembershipSchema>,
+  ): Promise<void>;
+  /** `api.end_sector_membership` (2128) now (no date), or from the start of the date in Riyadh, as above. */
+  endSectorMembership(ctx: UserRequestContext, input: In<typeof endSectorMembershipSchema>): Promise<void>;
   /** `api.set_notification_rule`, from the start of the date in Riyadh: the new rule's id. */
   setNotificationRule(ctx: UserRequestContext, input: In<typeof setNotificationRuleSchema>): Promise<string>;
   /**
@@ -346,7 +361,7 @@ export function createAdministrationService(deps: AdministrationDeps) {
         (input) => gateway.withdrawCalendarDay(ctx, input),
       ),
 
-    /** Creates a sector; its positions are appointed later (F5, F7). */
+    /** Creates a sector; appointing to its positions waits for the owner's F5 card. */
     createSector: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(ctx, actor, "create_sector", createSectorSchema, raw, sectorAdmin, (input) =>
         gateway.createSector(ctx, input),
@@ -361,6 +376,28 @@ export function createAdministrationService(deps: AdministrationDeps) {
         raw,
         sectorAdmin,
         (input) => gateway.revokeDelegation(ctx, input),
+      ),
+
+    /**
+     * Ends a seat now or from a date (2128). An end dated before now is recorded only with its decree or source
+     * reference (the owner's decision F7 = B): the command refuses one without it, and the form asks for it. The seat
+     * stays on record with its end, who ended it, why, and the reference. Appointing to a seat waits for the owner's
+     * F5 card.
+     */
+    endCommitteeMembership: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(
+        ctx,
+        actor,
+        "end_committee_membership",
+        endCommitteeMembershipSchema,
+        raw,
+        committeeAdmin,
+        (input) => gateway.endCommitteeMembership(ctx, input),
+      ),
+    /** Ends a sector position now or from a date, as a seat (2128, F7 = B); appointing to one waits (F5). */
+    endSectorMembership: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
+      command(ctx, actor, "end_sector_membership", endSectorMembershipSchema, raw, sectorAdmin, (input) =>
+        gateway.endSectorMembership(ctx, input),
       ),
 
     /**
@@ -417,7 +454,8 @@ export function createAdministrationService(deps: AdministrationDeps) {
      * a decision is never changed here, whatever the value sent: the page shows it read-only, and a revision that names
      * one is refused before the command is asked (CONFLICT DECIDED_OPTION; coordinator rulings of 2026-10-18 23:20 and
      * 23:50). A safeguard is kept or made stricter, never loosened: in the command's transaction, before the command
-     * is asked, a new version looser than one in force or scheduled is refused (CONFLICT LOOSER_RULE_OPTION; 23:50).
+     * is asked, a new version looser than one in force or scheduled is refused (CONFLICT LOOSER_RULE_OPTION; rulings
+     * of 23:50 and 2026-10-19 02:10).
      */
     reviseCommitteeRuleSet: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(

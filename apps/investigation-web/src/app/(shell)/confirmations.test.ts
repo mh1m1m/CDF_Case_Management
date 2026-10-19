@@ -94,6 +94,9 @@ const MEETING_ACTS: ConfirmAct[] = [
   "editExportPurpose",
   "setCorrectiveActionPolicy",
   "reviseCommitteeRuleSet",
+  // Ending a seat or a position (P12-8b, ADR-064; the owner's decision F7 = B).
+  "endCommitteeMembership",
+  "endSectorMembership",
 ];
 
 /** The Administration acts of P12-8b: none of their commands enqueues a notice (ADR-063). */
@@ -166,6 +169,8 @@ describe("confirmations", () => {
       "approveBcpImport",
       "rejectBcpImport",
       "applyBcpImport",
+      // P12-8b: an ended seat tells its holder the seat is ending (1920, notify.on_membership).
+      "endCommitteeMembership",
     ]) {
       expect(confirmation(t, act as ConfirmAct).notified, act).not.toMatch(/^No one/);
     }
@@ -195,8 +200,10 @@ describe("confirmations", () => {
       // Nor does recording a day or a working week in the business calendar (2030 sends no notice for them).
       "setBusinessCalendarDay",
       "setBusinessWeekPattern",
-      // Nor does any other Administration form (P12-8b): their commands write no notice.
+      // Nor does any other Administration form (P12-8b): their commands write no notice. An ended position tells no
+      // one either (2128 sends no notice for it, as 1880 did not).
       ...ADMIN_FORM_ACTS,
+      "endSectorMembership",
     ] as ConfirmAct[]) {
       expect(confirmation(t, act).notified, act).toMatch(/^No one/);
     }
@@ -257,9 +264,11 @@ describe("confirmations", () => {
       "cancelExport",
       "rejectBcpImport",
       "cancelBcpImport",
-      // Withdrawing a calendar entry or revoking a delegation ends it (P12-8b).
+      // Withdrawing a calendar entry or revoking a delegation ends it (P12-8b), as ending a seat or a position does.
       "withdrawBusinessCalendarDay",
       "revokeReferralDelegation",
+      "endCommitteeMembership",
+      "endSectorMembership",
     ] as ConfirmAct[])
       expect(confirmation(t, act).tone, act).toBeUndefined();
     expect(confirmation(t, "cancelExport").cancelLabel).toBe("Keep the request");

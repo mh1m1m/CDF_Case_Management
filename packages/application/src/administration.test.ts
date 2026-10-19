@@ -115,6 +115,8 @@ function harness(fail?: Error, options: HarnessOptions = {}) {
     withdrawCalendarDay: run("withdrawCalendarDay", undefined),
     createSector: run("createSector", NEW_ID),
     revokeDelegation: run("revokeDelegation", undefined),
+    endCommitteeMembership: run("endCommitteeMembership", undefined),
+    endSectorMembership: run("endSectorMembership", undefined),
     setNotificationRule: run("setNotificationRule", NEW_ID),
     addExportRule: run("addExportRule", NEW_ID),
     setExportPurpose: run("setExportPurpose", undefined),
@@ -301,6 +303,7 @@ const FROM = "2027-01-03";
 const DAY_ID = "66666666-6666-4666-8666-666666666666";
 const DELEGATION_ID = "77777777-7777-4777-8777-777777777777";
 const COMMITTEE_ID = "88888888-8888-4888-8888-888888888888";
+const MEMBERSHIP_ID = "99999999-9999-4999-8999-999999999999";
 const PURPOSE = {
   code: "DEMO_PURPOSE",
   nameEn: "Demo purpose",
@@ -325,6 +328,8 @@ type FormMethod =
   | "withdrawCalendarDay"
   | "createSector"
   | "revokeDelegation"
+  | "endCommitteeMembership"
+  | "endSectorMembership"
   | "setNotificationRule"
   | "addExportRule"
   | "addExportPurpose"
@@ -354,6 +359,20 @@ const FORMS: readonly (readonly [string, FormMethod, string, Permission, Record<
     "revokeDelegation",
     "SECTOR_ADMIN",
     { delegationId: DELEGATION_ID, reason: REASON },
+  ],
+  [
+    "end_committee_membership",
+    "endCommitteeMembership",
+    "endCommitteeMembership",
+    "COMMITTEE_ADMIN",
+    { membershipId: MEMBERSHIP_ID, reason: REASON },
+  ],
+  [
+    "end_sector_membership",
+    "endSectorMembership",
+    "endSectorMembership",
+    "SECTOR_ADMIN",
+    { membershipId: MEMBERSHIP_ID, reason: REASON },
   ],
   ["set_notification_rule", "setNotificationRule", "setNotificationRule", "NOTIFICATION_ADMIN", NOTICE],
   [
@@ -489,6 +508,62 @@ describe("the P12-8b forms", () => {
     const { service, calls } = harness();
     expect(await service.views(ctx)).toEqual(["calendar"]);
     expect(calls).toEqual([{ name: "views" }]);
+  });
+});
+
+describe("ending a seat or a position (2128; the owner's decision F7 = B)", () => {
+  const ENDS = [
+    ["endCommitteeMembership", "COMMITTEE_ADMIN"],
+    ["endSectorMembership", "SECTOR_ADMIN"],
+  ] as const;
+
+  it("an end now sends no date and no reference; a dated end sends its date and the reference trimmed", async () => {
+    for (const [method, permission] of ENDS) {
+      const { service, calls } = harness();
+      const now = { membershipId: MEMBERSHIP_ID, effectiveTo: "", endReference: "", reason: ` ${REASON} ` };
+      const dated = { ...now, effectiveTo: "2026-10-01", endReference: " DEMO-DECREE-1 " };
+      expect((await service[method](ctx, actor([permission]), now)).ok, method).toBe(true);
+      expect((await service[method](ctx, actor([permission]), dated)).ok, method).toBe(true);
+      expect(calls, method).toEqual([
+        { name: method, input: { membershipId: MEMBERSHIP_ID, reason: REASON } },
+        {
+          name: method,
+          input: {
+            membershipId: MEMBERSHIP_ID,
+            effectiveTo: "2026-10-01",
+            endReference: "DEMO-DECREE-1",
+            reason: REASON,
+          },
+        },
+      ]);
+    }
+  });
+
+  it("a past end without its reference, refused by the command, comes back with the field and is not a denial", async () => {
+    for (const [method, permission] of ENDS) {
+      const { service, events } = harness(new Error("CDF_INVALID:end_reference"));
+      expect(
+        await service[method](ctx, actor([permission]), {
+          membershipId: MEMBERSHIP_ID,
+          effectiveTo: "2026-10-01",
+          reason: REASON,
+        }),
+        method,
+      ).toMatchObject({ ok: false, error: { kind: "INVALID", detail: "end_reference" } });
+      expect(events, method).toEqual([]);
+    }
+  });
+
+  it("each end needs its own page's permission: the committee administrator never ends a position, nor the reverse", async () => {
+    for (const [method, permission] of ENDS) {
+      const other = permission === "COMMITTEE_ADMIN" ? "SECTOR_ADMIN" : "COMMITTEE_ADMIN";
+      const { service, calls } = harness();
+      expect(
+        await service[method](ctx, actor([other]), { membershipId: MEMBERSHIP_ID, reason: REASON }),
+        method,
+      ).toMatchObject({ ok: false, error: { kind: "FORBIDDEN" } });
+      expect(calls, method).toEqual([]);
+    }
   });
 });
 
@@ -805,7 +880,7 @@ describe("a new version of a committee's rules", () => {
     for (const [key, value] of Object.entries(VALUES)) {
       for (const input of [
         { ...base, [key]: value },
-        { ...base, dissentNoteAllowed: "off", [key]: value },
+        { ...base, voteRevisionAllowed: "off", [key]: value },
       ])
         expect(await service.reviseCommitteeRuleSet(ctx, admin, input), key).toMatchObject({
           ok: false,
@@ -816,7 +891,7 @@ describe("a new version of a committee's rules", () => {
     expect(events).toEqual([]);
     // The same revision without the decided option is recorded.
     expect(
-      (await service.reviseCommitteeRuleSet(ctx, admin, { ...base, dissentNoteAllowed: "off" })).ok,
+      (await service.reviseCommitteeRuleSet(ctx, admin, { ...base, voteRevisionAllowed: "off" })).ok,
     ).toBe(true);
     expect(calls).toHaveLength(1);
   });
@@ -967,18 +1042,19 @@ describe("a new version of a committee's rules", () => {
   });
 });
 
-// Coordinator ruling of 2026-10-18 23:50: a committee's safeguards are kept or made stricter, never loosened (AMB-026
-// and AMB-092, the ruling's own, and AMB-061 and AMB-083, this page's reading of it, listed for a ruling). The gateway
-// gives the guard the committee's versions in force or scheduled, the open one marked, under a lock on the committee's
-// revisions, before the command is asked; a looser value is refused with nothing sent, and is not a denial.
+// Coordinator rulings of 2026-10-18 23:50 and 2026-10-19 02:10: a committee's safeguards are kept or made stricter,
+// never loosened (AMB-026 and AMB-092 at 23:50; AMB-061, AMB-083 and AMB-082 at 02:10). The gateway gives the guard the
+// committee's versions in force or scheduled, the open one marked, under a lock on the committee's revisions, before
+// the command is asked; a looser value is refused with nothing sent, and is not a denial.
 describe("a committee's safeguards: kept or made stricter, never loosened", () => {
   const admin = actor(["COMMITTEE_ADMIN"]);
   const base = { committeeId: COMMITTEE_ID, committeeKind: "GRIEVANCE", effectiveFrom: FROM, reason: REASON };
-  /** The version open now: both guards on, the ballot seen after close, five days' notice. */
+  /** The version open now: both guards on, dissent notes allowed, the ballot seen after close, five days' notice. */
   const OPEN: RuleSetSafeguards = {
     open: true,
     minimumNoticeDays: 5,
     ballotSecrecy: "COMMITTEE_AFTER_CLOSE",
+    dissentNoteAllowed: true,
     minutesObjectionBlocksDeemed: true,
     sanctionRequiresDefenceNotice: true,
   };
@@ -988,6 +1064,7 @@ describe("a committee's safeguards: kept or made stricter, never loosened", () =
     for (const [loosen, versions] of [
       [{ sanctionRequiresDefenceNotice: "off" }, [OPEN]],
       [{ minutesObjectionBlocksDeemed: "off" }, [OPEN]],
+      [{ dissentNoteAllowed: "off" }, [OPEN]],
       [{ minimumNoticeDays: "4" }, [OPEN]],
       [{ minimumNoticeDays: "0" }, [OPEN]],
       [{ minimumNoticeDays: null }, [OPEN]],
@@ -997,7 +1074,7 @@ describe("a committee's safeguards: kept or made stricter, never loosened", () =
       // Alone, and beside a change the page may make.
       for (const input of [
         { ...base, ...loosen },
-        { ...base, dissentNoteAllowed: "off", voteRevisionAllowed: "off", ...loosen },
+        { ...base, voteRevisionAllowed: "off", grievanceCompletionDays: null, ...loosen },
       ])
         expect(await service.reviseCommitteeRuleSet(ctx, admin, input), JSON.stringify(loosen)).toMatchObject(
           LOOSER,
@@ -1015,8 +1092,8 @@ describe("a committee's safeguards: kept or made stricter, never loosened", () =
       { minimumNoticeDays: String(MAX_MINIMUM_NOTICE_DAYS) },
       { ballotSecrecy: "SECRET_BALLOT" },
       { ballotSecrecy: "COMMITTEE_AFTER_CLOSE" },
-      { sanctionRequiresDefenceNotice: "on", minutesObjectionBlocksDeemed: "on" },
-      { dissentNoteAllowed: "off", voteRevisionAllowed: "off", grievanceCompletionDays: null },
+      { sanctionRequiresDefenceNotice: "on", minutesObjectionBlocksDeemed: "on", dissentNoteAllowed: "on" },
+      { voteRevisionAllowed: "off", grievanceCompletionDays: null },
     ])
       expect(
         (await service.reviseCommitteeRuleSet(ctx, admin, { ...base, ...input })).ok,
@@ -1034,14 +1111,14 @@ describe("a committee's safeguards: kept or made stricter, never loosened", () =
       ],
     });
     expect(
-      await carried.service.reviseCommitteeRuleSet(ctx, admin, { ...base, dissentNoteAllowed: "off" }),
+      await carried.service.reviseCommitteeRuleSet(ctx, admin, { ...base, voteRevisionAllowed: "off" }),
     ).toMatchObject(LOOSER);
     expect(carried.calls).toEqual([]);
     expect(
       (
         await carried.service.reviseCommitteeRuleSet(ctx, admin, {
           ...base,
-          dissentNoteAllowed: "off",
+          voteRevisionAllowed: "off",
           sanctionRequiresDefenceNotice: "on",
         })
       ).ok,
@@ -1070,6 +1147,7 @@ describe("a committee's safeguards: kept or made stricter, never loosened", () =
     const ORDER: { [K in TightenOnlyRuleKey]: RuleSafeguards[K][] } = {
       minimumNoticeDays: [null, 0, 1, 5, 59, MAX_MINIMUM_NOTICE_DAYS],
       ballotSecrecy: ["COMMITTEE_AFTER_CLOSE", "SECRET_BALLOT"],
+      dissentNoteAllowed: [false, true],
       minutesObjectionBlocksDeemed: [false, true],
       sanctionRequiresDefenceNotice: [false, true],
     };
@@ -1078,6 +1156,7 @@ describe("a committee's safeguards: kept or made stricter, never loosened", () =
       open: true,
       minimumNoticeDays: null,
       ballotSecrecy: "COMMITTEE_AFTER_CLOSE",
+      dissentNoteAllowed: false,
       minutesObjectionBlocksDeemed: false,
       sanctionRequiresDefenceNotice: false,
     };

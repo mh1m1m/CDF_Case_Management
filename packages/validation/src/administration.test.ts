@@ -14,6 +14,8 @@ import {
   DECIDED_RULE_KEYS,
   EDITABLE_RULE_KEYS,
   editExportPurposeSchema,
+  endCommitteeMembershipSchema,
+  endSectorMembershipSchema,
   GRIEVANCE_ONLY_RULE_KEYS,
   isDecidedRuleKey,
   isStrictestSafeguard,
@@ -169,6 +171,61 @@ describe("withdrawing a day and revoking a delegation", () => {
     expect(problems(revokeReferralDelegationSchema.safeParse({ delegationId: ID }))).toEqual({
       reason: "validation.invalid",
     });
+  });
+});
+
+describe("ending a seat or a position (2128; the owner's decision F7 = B)", () => {
+  const END = { membershipId: ID, reason: REASON };
+  const SCHEMAS = [
+    ["a seat", endCommitteeMembershipSchema],
+    ["a position", endSectorMembershipSchema],
+  ] as const;
+
+  it("ends now when no date is given, and takes a date as the day it ends", () => {
+    for (const [what, schema] of SCHEMAS) {
+      expect(schema.parse({ ...END, effectiveTo: "", endReference: "" }), what).toEqual(END);
+      expect(schema.parse({ ...END, effectiveTo: " " }), what).toEqual(END);
+      expect(schema.parse({ ...END, effectiveTo: "2026-10-01" }), what).toEqual({
+        ...END,
+        effectiveTo: "2026-10-01",
+      });
+      expect(problems(schema.safeParse({ ...END, effectiveTo: "01/10/2026" })), what).toEqual({
+        effectiveTo: "validation.invalid",
+      });
+    }
+  });
+
+  it("takes the decree or source reference as the command does, 3 to 200 characters, trimmed", () => {
+    for (const [what, schema] of SCHEMAS) {
+      expect(schema.parse({ ...END, endReference: " DEMO-DECREE-1 " }), what).toEqual({
+        ...END,
+        endReference: "DEMO-DECREE-1",
+      });
+      expect(schema.parse({ ...END, endReference: "x".repeat(200) }).endReference, what).toHaveLength(200);
+      expect(problems(schema.safeParse({ ...END, endReference: "ab" })), what).toEqual({
+        endReference: "validation.tooShort",
+      });
+      expect(problems(schema.safeParse({ ...END, endReference: "x".repeat(201) })), what).toEqual({
+        endReference: "validation.tooLong",
+      });
+    }
+  });
+
+  it("names the row by its id, always says why, and takes nothing else", () => {
+    for (const [what, schema] of SCHEMAS) {
+      expect(problems(schema.safeParse({ membershipId: "CDF-DEMO-1", reason: "abc" })), what).toEqual({
+        membershipId: "validation.invalid",
+        reason: "validation.tooShort",
+      });
+      expect(problems(schema.safeParse({ membershipId: ID })), what).toEqual({
+        reason: "validation.invalid",
+      });
+      // Whether the end needs its reference is the database's to decide at submit: a past date without one parses.
+      expect(
+        schema.parse({ ...END, effectiveTo: "2020-01-01", endedBy: ID, sourceStatus: "APPROVED" }),
+        what,
+      ).toEqual({ ...END, effectiveTo: "2020-01-01" });
+    }
   });
 });
 
@@ -576,22 +633,26 @@ describe("the options a committee's rules keep as decided", () => {
   });
 });
 
-// Coordinator ruling of 2026-10-18 23:50: a safeguard is kept or made stricter on the page, never loosened. The service
-// refuses a looser value (application tests); here, which options are safeguards, their order and what the page offers.
+// Coordinator rulings of 2026-10-18 23:50 and 2026-10-19 02:10: a safeguard is kept or made stricter on the page, never
+// loosened. The service refuses a looser value (application tests); here, which options are safeguards, their order and
+// what the page offers.
 describe("a committee's safeguards", () => {
   const ALL_ON: RuleSafeguards = {
     minimumNoticeDays: 5,
     ballotSecrecy: "COMMITTEE_AFTER_CLOSE",
+    dissentNoteAllowed: true,
     minutesObjectionBlocksDeemed: true,
     sanctionRequiresDefenceNotice: true,
   };
 
-  it("are the two the ruling names and the two this page reads into it, each an option the page may change", () => {
+  it("are the two the 23:50 ruling names and the three the 02:10 ruling adds, each an option the page may change", () => {
     expect(TIGHTEN_ONLY_RULE_KEYS).toEqual({
-      // Listed for a ruling: short notice can exclude members (AMB-061); a secret ballot keeps choices hidden (AMB-083).
+      // 02:10: notice may only lengthen (AMB-061), secrecy only increase (AMB-083), and dissent notes, once allowed, are
+      // never withdrawn (AMB-082).
       minimumNoticeDays: { ref: "AMB-061" },
       ballotSecrecy: { ref: "AMB-083" },
-      // The ruling's own.
+      dissentNoteAllowed: { ref: "AMB-082" },
+      // 23:50.
       minutesObjectionBlocksDeemed: { ref: "AMB-092" },
       sanctionRequiresDefenceNotice: { ref: "AMB-026" },
     });
@@ -599,8 +660,8 @@ describe("a committee's safeguards", () => {
       expect(EDITABLE_RULE_KEYS, key).toContain(key);
       expect(isTightenOnlyRuleKey(key), key).toBe(true);
     }
-    // Vote revision (AMB-081), dissent notes (AMB-082) and the time to complete a grievance (AMB-141) stay free.
-    for (const key of ["voteRevisionAllowed", "dissentNoteAllowed", "grievanceCompletionDays"])
+    // Vote revision (AMB-081) and the time to complete a grievance (AMB-141) stay free.
+    for (const key of ["voteRevisionAllowed", "grievanceCompletionDays"])
       expect(isTightenOnlyRuleKey(key), key).toBe(false);
     for (const key of [...Object.keys(DECIDED_RULE_KEYS), "toString", "__proto__", "constructor"])
       expect(isTightenOnlyRuleKey(key), key).toBe(false);
@@ -610,6 +671,7 @@ describe("a committee's safeguards", () => {
     const ORDER: { [K in TightenOnlyRuleKey]: RuleSafeguards[K][] } = {
       minimumNoticeDays: [null, 0, 1, 30, 59, MAX_MINIMUM_NOTICE_DAYS],
       ballotSecrecy: ["COMMITTEE_AFTER_CLOSE", "SECRET_BALLOT"],
+      dissentNoteAllowed: [false, true],
       minutesObjectionBlocksDeemed: [false, true],
       sanctionRequiresDefenceNotice: [false, true],
     };
@@ -671,7 +733,11 @@ describe("a committee's safeguards", () => {
       keptOnly: false,
       sendFloor: false,
     });
-    for (const key of ["minutesObjectionBlocksDeemed", "sanctionRequiresDefenceNotice"] as const)
+    for (const key of [
+      "dissentNoteAllowed",
+      "minutesObjectionBlocksDeemed",
+      "sanctionRequiresDefenceNotice",
+    ] as const)
       expect(safeguardOffer(key, ALL_ON, [ALL_ON]), key).toEqual({
         floor: true,
         keptOnly: true,
@@ -684,6 +750,18 @@ describe("a committee's safeguards", () => {
         [],
       ),
     ).toEqual({ floor: false, keptOnly: false, sendFloor: false });
+    // Dissent notes not allowed in any version: both answers are offered; allowed in one, they can only be kept.
+    expect(safeguardOffer("dissentNoteAllowed", { ...ALL_ON, dissentNoteAllowed: false }, [])).toEqual({
+      floor: false,
+      keptOnly: false,
+      sendFloor: false,
+    });
+    expect(
+      safeguardOffer("dissentNoteAllowed", { ...ALL_ON, dissentNoteAllowed: false }, [
+        { ...ALL_ON, dissentNoteAllowed: false },
+        ALL_ON,
+      ]),
+    ).toEqual({ floor: true, keptOnly: true, sendFloor: true });
     // The version open now (starting later, recorded before this page) is looser than the one in force: the floor is
     // the one in force's, and it is sent.
     const open = { ...ALL_ON, minimumNoticeDays: 2, sanctionRequiresDefenceNotice: false };

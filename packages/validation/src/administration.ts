@@ -126,6 +126,28 @@ export const createSectorSchema = z.object({
 /** Active and not ended: the database decides. */
 export const revokeReferralDelegationSchema = z.object({ delegationId: uuid, reason: text(5, 2000) });
 
+// ---- Seats and positions: an end (api.end_committee_membership, api.end_sector_membership; 2128, ADR-064) ---------
+/** A date from a form, or none: a blank field is no date. */
+const optionalCalendarDate = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  calendarDate.optional(),
+);
+/**
+ * An end now (no date) or from the start of a date in Riyadh, with a reason and the decree or source reference that
+ * records it. The owner's decision F7 = B (2026-10-19): an end dated before now is recorded only with its reference, so
+ * the command refuses one without it (CDF_INVALID:end_reference); a reference given with any end is checked the same
+ * way, 3 to 200 characters. The database decides the rest at submit: the date (after the start, and not after an end
+ * already set) and whether the seat or the position is still open.
+ */
+const endFields = {
+  membershipId: uuid,
+  effectiveTo: optionalCalendarDate,
+  endReference: optionalText(3, 200),
+  reason: text(5, 2000),
+};
+export const endCommitteeMembershipSchema = z.object(endFields);
+export const endSectorMembershipSchema = z.object(endFields);
+
 // ---- Notification rules (api.set_notification_rule; F8 since 2127) ------------------------------------------------
 /**
  * A platform-wide rule or a committee's default for one notice and channel, on or off, from the start of a date after
@@ -379,14 +401,16 @@ export const EDITABLE_RULE_KEYS: readonly RuleSetRevisionKey[] = (
  * the command is asked (`LOOSER_RULE_OPTION`); `api.revise_committee_rule_set` itself is not narrowed.
  *
  * AMB-026 (a sanction needs a defence notice) and AMB-092 (an open objection blocks deemed approval) are the ruling's
- * own. AMB-061 (the minimum notice: short notice can exclude members and invalidate quorum) and AMB-083 (a secret ballot
- * keeps individual choices from the committee for good) are this page's reading of the ruling's last sentence, listed
- * for a ruling. Vote revision (AMB-081), dissent notes (AMB-082) and the time to complete a grievance (AMB-141) block
- * nothing in order to protect someone, so they stay freely editable.
+ * own. The coordinator's ruling of 2026-10-19 02:10 added three: AMB-061 (the minimum notice may only lengthen: short
+ * notice can exclude members and invalidate quorum), AMB-083 (secrecy may only increase: a secret ballot keeps
+ * individual choices from the committee for good) and AMB-082 (dissent notes may be allowed, never withdrawn: removing
+ * a member's own record of disagreement weakens a protection with no replacement). Vote revision (AMB-081) and the time
+ * to complete a grievance (AMB-141) stay freely editable.
  */
 export const TIGHTEN_ONLY_RULE_KEYS = {
   minimumNoticeDays: { ref: "AMB-061" },
   ballotSecrecy: { ref: "AMB-083" },
+  dissentNoteAllowed: { ref: "AMB-082" },
   minutesObjectionBlocksDeemed: { ref: "AMB-092" },
   sanctionRequiresDefenceNotice: { ref: "AMB-026" },
 } as const satisfies Partial<Record<RuleSetRevisionKey, { ref: string }>>;
@@ -402,6 +426,7 @@ export interface RuleSafeguards {
   /** Null: no minimum is enforced. */
   minimumNoticeDays: number | null;
   ballotSecrecy: (typeof BALLOT_SECRECY)[number];
+  dissentNoteAllowed: boolean;
   minutesObjectionBlocksDeemed: boolean;
   sanctionRequiresDefenceNotice: boolean;
 }
@@ -412,7 +437,7 @@ export const MAX_MINIMUM_NOTICE_DAYS = 60;
 /**
  * How strict a safeguard's value is: a higher number is stricter. A minimum notice not set enforces nothing, the
  * loosest; a longer notice is stricter than a shorter one. A secret ballot is stricter than choices the committee sees
- * after close. A guard that is on is stricter than one that is off.
+ * after close. A guard that is on is stricter than one that is off, and dissent notes allowed are stricter than none.
  */
 export function safeguardStrictness<K extends TightenOnlyRuleKey>(key: K, value: RuleSafeguards[K]): number {
   switch (key) {
@@ -433,6 +458,7 @@ export function isStrictestSafeguard<K extends TightenOnlyRuleKey>(
   const strictest: RuleSafeguards = {
     minimumNoticeDays: MAX_MINIMUM_NOTICE_DAYS,
     ballotSecrecy: "SECRET_BALLOT",
+    dissentNoteAllowed: true,
     minutesObjectionBlocksDeemed: true,
     sanctionRequiresDefenceNotice: true,
   };

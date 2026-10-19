@@ -3,12 +3,14 @@
 // authorities and changes of status, as recorded, and who decides each kind of recommendation
 // (api.authority_rule_coverage). Read in the administrator's own context, after the database confirms COMMITTEE_ADMIN,
 // from tables whose row-level security returns exactly this register; anyone else gets the uniform not-found, recorded
-// as ACCESS_DENIED. One control: a new version of a committee's rules from a later date, shown only where the database
-// says api.revise_committee_rule_set would accept the caller now (api.admin_committee_capabilities, 2127), always
-// provisional. An option that follows a decision is shown read-only with the decision it follows and never sent
+// as ACCESS_DENIED. Two controls, each shown only where the database says its command would accept the caller now
+// (api.admin_committee_capabilities, 2127 and 2128). A new version of a committee's rules from a later date, always
+// provisional: an option that follows a decision is shown read-only with the decision it follows and never sent
 // (coordinator rulings of 2026-10-18 23:20 and 23:50), and a safeguard is offered only as it is or stricter, never
-// looser (ruling of 23:50). Appointment forms wait (coordinator rulings F5 and F7), and conflict authorities change only
-// with dual control (DEC-12).
+// looser (rulings of 23:50 and 2026-10-19 02:10). And the end of a seat not yet ended, now or from a date, with the
+// decree or source reference an end dated before now requires (2128; the owner's decision F7 = B), shown on the
+// register once recorded. Appointment forms wait for the owner's F5 card, and conflict authorities change only with
+// dual control (DEC-12).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
@@ -64,7 +66,8 @@ import {
   stateLabel,
   stateTone,
 } from "../labels";
-import { reviseCommitteeRuleSetAction } from "./actions";
+import { EndForm } from "../end-form";
+import { endCommitteeMembershipAction, reviseCommitteeRuleSetAction } from "./actions";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslator();
@@ -122,6 +125,8 @@ function CommitteeCard({
         COMMITTEE_SEATS.indexOf(a.seat) - COMMITTEE_SEATS.indexOf(b.seat) ||
         a.effectiveFrom.localeCompare(b.effectiveFrom),
     );
+  // The seats the database says may be ended now (2128): not yet ended, whatever their period.
+  const endable = seats.filter((s) => s.mayEnd);
   const corrections = page.corrections.filter((x) => x.committeeId === c.committeeId);
   const versions = page.ruleSets.filter((r) => r.committeeId === c.committeeId);
   const current = versions.filter((r) => r.state !== "ENDED");
@@ -180,6 +185,12 @@ function CommitteeCard({
                           <bdi>{s.endReason}</bdi>
                         </>
                       ) : null}
+                      {s.endReference ? (
+                        <>
+                          {" "}
+                          {t("admin.endReference")} <bdi className="break-words">{s.endReference}</bdi>
+                        </>
+                      ) : null}
                     </p>
                   ) : null}
                 </>
@@ -187,6 +198,28 @@ function CommitteeCard({
             },
           ]}
         />
+        {endable.length > 0 ? (
+          <EndForm
+            t={t}
+            id={`admin-end-seat-form-${c.code}`}
+            title={t("admin.committees.endTitle")}
+            intro={t("admin.committees.endIntro")}
+            rowLabel={t("admin.committees.endSeat")}
+            rows={endable.map((s) => ({
+              membershipId: s.membershipId,
+              label: t("admin.committees.endOption", {
+                holder: isolate(who(s.userId)),
+                seat: t(`committeeSeat.${s.seat}` as MessageKey),
+                period: period(t, s.effectiveFrom, s.effectiveTo),
+              }),
+            }))}
+            action={endCommitteeMembershipAction}
+            act="endCommitteeMembership"
+            submitLabel={t("admin.committees.end")}
+            submitName={t("admin.committees.endIn", { committee: isolate(name) })}
+            done={t("admin.committees.endDone")}
+          />
+        ) : null}
       </section>
 
       <section className="mb-6" aria-labelledby={`${testId}-corrections`}>
@@ -569,8 +602,9 @@ function YesNo({
 }
 
 /**
- * A safeguard already at its strictest (coordinator ruling of 2026-10-18 23:50): no control, only its value and why it
- * stays. `send` is the value sent whatever the administrator does, where the version open now is looser than it.
+ * A safeguard already at its strictest (coordinator rulings of 2026-10-18 23:50 and 2026-10-19 02:10): no control, only
+ * its value and why it stays. `send` is the value sent whatever the administrator does, where the version open now is
+ * looser than it.
  */
 function KeptSafeguard({
   id,
@@ -659,9 +693,10 @@ function NumberField({
  * its value and the decision it follows, so the new version keeps it (ruling of 23:20). The service refuses a revision
  * that names one.
  *
- * A safeguard (`TIGHTEN_ONLY_RULE_KEYS`, ruling of 23:50) is offered only at its floor, the strictest value among the
- * versions in force or scheduled (`versions`), or stricter, with a note next to it saying why; one already at its
- * strictest has no control. The service refuses a looser value under a lock on the committee's revisions.
+ * A safeguard (`TIGHTEN_ONLY_RULE_KEYS`, rulings of 23:50 and 2026-10-19 02:10) is offered only at its floor, the
+ * strictest value among the versions in force or scheduled (`versions`), or stricter, with a note next to it saying
+ * why; one already at its strictest has no control. The service refuses a looser value under a lock on the committee's
+ * revisions.
  */
 function ReviseForm({
   t,
@@ -684,10 +719,11 @@ function ReviseForm({
   const applies = (k: RuleSetRevisionKey) => grievance || !GRIEVANCE_ONLY_RULE_KEYS.includes(k);
   // The options the form may change; every other option follows a decision and is shown read-only.
   const options = EDITABLE_RULE_KEYS.filter(applies);
-  // Each safeguard as far as the page may take it: never below its floor (coordinator ruling of 2026-10-18 23:50).
+  // Each safeguard as far as the page may take it: never below its floor (coordinator rulings of 23:50 and 02:10).
   const offer = {
     minimumNoticeDays: safeguardOffer("minimumNoticeDays", r, versions),
     ballotSecrecy: safeguardOffer("ballotSecrecy", r, versions),
+    dissentNoteAllowed: safeguardOffer("dissentNoteAllowed", r, versions),
     minutesObjectionBlocksDeemed: safeguardOffer("minutesObjectionBlocksDeemed", r, versions),
     sanctionRequiresDefenceNotice: safeguardOffer("sanctionRequiresDefenceNotice", r, versions),
   };
@@ -859,13 +895,25 @@ function ReviseForm({
             legend={fieldLabels.voteRevisionAllowed}
             value={r.voteRevisionAllowed}
           />
-          <YesNo
-            t={t}
-            id={id}
-            name="dissentNoteAllowed"
-            legend={fieldLabels.dissentNoteAllowed}
-            value={r.dissentNoteAllowed}
-          />
+          {offer.dissentNoteAllowed.keptOnly ? (
+            <KeptSafeguard
+              id={id}
+              name="dissentNoteAllowed"
+              label={fieldLabels.dissentNoteAllowed}
+              value={yesNo(true)}
+              note={keptNote}
+              {...(offer.dissentNoteAllowed.sendFloor ? { send: "on" } : {})}
+            />
+          ) : (
+            <YesNo
+              t={t}
+              id={id}
+              name="dissentNoteAllowed"
+              legend={fieldLabels.dissentNoteAllowed}
+              hint={safeguardNote}
+              value={r.dissentNoteAllowed}
+            />
+          )}
 
           <h4 className="mb-2 font-semibold">{t("admin.committees.minutesGroup")}</h4>
           {offer.minutesObjectionBlocksDeemed.keptOnly ? (
