@@ -13,17 +13,20 @@ export async function committeeIds(): Promise<{ ic: string; gc: string }> {
 /** Appointment-reference prefix of the demo seats in infrastructure/supabase/seed/30_synthetic_committee_seats.sql. */
 export const DEMO_SEAT_REFERENCE = "SEED-DEMO-COMMITTEE-";
 
+/** The reference the demo seats' end carries: it is dated in the past, which migration 2128 allows only with one. */
+export const DEMO_SEAT_END_REFERENCE = "SEED-DEMO-COMMITTEE-END";
+
 /**
  * Ends the seeded demo seats on IC and GC inside the test's own transaction, which rolls back with it, so every test
  * starts with both committees unseated as before the demo seed. Each seat ends one second after it began, through
- * api.end_committee_membership as the platform admin, so it overlaps no seat a test appoints. Leaves the platform
- * admin acting; a no-op once the seats are ended.
+ * api.end_committee_membership as the platform admin, so it overlaps no seat a test appoints; that end is in the past,
+ * so it carries a synthetic reference (2128). Leaves the platform admin acting; a no-op once the seats are ended.
  */
 export async function unseatDemoSeats(s: Scenario): Promise<void> {
   await s.as("platformAdmin");
   await s.tx`
     select api.end_committee_membership(m.id, m.effective_from + interval '1 second',
-      'Synthetic: the test starts with the committee unseated.')
+      'Synthetic: the test starts with the committee unseated.', ${DEMO_SEAT_END_REFERENCE})
     from committee.membership m
     where m.appointment_reference like ${DEMO_SEAT_REFERENCE + "%"} and m.ended_at is null
     order by m.id`;
