@@ -127,7 +127,8 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
   committees(ctx: UserRequestContext): Promise<AdminCommitteesPage> {
     return this.run(ctx, async (tx) => {
       // Refuses CDF_FORBIDDEN where the rule-set commands refuse the caller. Each committee also lists its seats with
-      // may_end (2128); may_appoint is not read while the appointment forms wait for the owner's F5 card.
+      // may_end (2128); may_appoint is not read while the appointment forms wait for migration 2160 (the owner's F5
+      // decision).
       const [cap] = await tx<
         {
           v: {
@@ -387,7 +388,8 @@ export class PostgresAdministrationGateway implements AdministrationGateway {
   sectors(ctx: UserRequestContext): Promise<AdminSectorsPage> {
     return this.run(ctx, async (tx) => {
       // Refuses CDF_FORBIDDEN where the sector commands refuse the caller. Each sector also lists its positions with
-      // may_end (2128); may_appoint is not read while the appointment forms wait for the owner's F5 card.
+      // may_end (2128); may_appoint is not read while the appointment forms wait for migration 2160 (the owner's F5
+      // decision).
       const [cap] = await tx<
         {
           v: {

@@ -16,8 +16,8 @@
  * form records is provisional (SOURCE_REQUIRED), awaiting the CDF source, except an export purpose, which its command
  * records as the administrator's own catalogue entry (DEC-F21). Since 2128 a seat or a position can be ended: an end
  * dated before now is recorded only with its decree or source reference (the owner's decision F7 = B, 2026-10-19),
- * which the command requires; appointing waits for the owner's F5 card. A refusal is recorded as COMMAND_DENIED with
- * the command and the outcome only, never the reason typed.
+ * which the command requires; appointing waits for migration 2160 (the owner's F5 decision). A refusal is recorded as
+ * COMMAND_DENIED with the command and the outcome only, never the reason typed.
  */
 import type {
   Actor,
@@ -361,7 +361,7 @@ export function createAdministrationService(deps: AdministrationDeps) {
         (input) => gateway.withdrawCalendarDay(ctx, input),
       ),
 
-    /** Creates a sector; appointing to its positions waits for the owner's F5 card. */
+    /** Creates a sector; appointing to its positions waits for migration 2160 (the owner's F5 decision). */
     createSector: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(ctx, actor, "create_sector", createSectorSchema, raw, sectorAdmin, (input) =>
         gateway.createSector(ctx, input),
@@ -381,8 +381,8 @@ export function createAdministrationService(deps: AdministrationDeps) {
     /**
      * Ends a seat now or from a date (2128). An end dated before now is recorded only with its decree or source
      * reference (the owner's decision F7 = B): the command refuses one without it, and the form asks for it. The seat
-     * stays on record with its end, who ended it, why, and the reference. Appointing to a seat waits for the owner's
-     * F5 card.
+     * stays on record with its end, who ended it, why, and the reference. Appointing to a seat waits for migration 2160
+     * (the owner's F5 decision).
      */
     endCommitteeMembership: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(
@@ -394,7 +394,7 @@ export function createAdministrationService(deps: AdministrationDeps) {
         committeeAdmin,
         (input) => gateway.endCommitteeMembership(ctx, input),
       ),
-    /** Ends a sector position now or from a date, as a seat (2128, F7 = B); appointing to one waits (F5). */
+    /** Ends a sector position now or from a date, as a seat (2128, F7 = B); appointing waits for 2160 (F5). */
     endSectorMembership: (ctx: UserRequestContext, actor: Actor, raw: unknown) =>
       command(ctx, actor, "end_sector_membership", endSectorMembershipSchema, raw, sectorAdmin, (input) =>
         gateway.endSectorMembership(ctx, input),

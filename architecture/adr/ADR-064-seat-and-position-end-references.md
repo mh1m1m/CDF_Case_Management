@@ -37,7 +37,8 @@ refusing a past end without it, fail-closed; `may_appoint` per committee and per
 position, each flag its command's answer; audit events with ids only. The same note kept F5: the owner's F7 tap
 answered the date question only, so the appointment forms stay held while the owner's F5 card ("Ship the seat and
 head appointment forms before migration 2160, under dual control?", 2026-10-19 01:31) is open. Ending a seat or a
-position is a revocation, which DEC-12 never delays.
+position is a revocation, which DEC-12 never delays. The owner answered that card at 05:22 UTC (option A, "Wait for
+2160"): every appointment form waits for migration 2160.
 
 ## Decision
 
@@ -105,8 +106,9 @@ members, 1870), the positions to SECTOR_ADMIN (1880). The reads carry ids and bo
 
 - **The pages.** The end forms ("End a seat", "End a position") join the P12-8b pages PR, with no migration: a past
   date asks for the decree or source reference, as the command does.
-- **The appointment forms** wait for the owner's F5 card, which covers every one of them: seat, head and member (the
-  coordinator's ruling of 2026-10-19 02:10). No page reads `may_appoint` until it is answered.
+- **The appointment forms** wait for migration 2160, by the owner's F5 decision (2026-10-19 05:22 UTC, "Wait for 2160"),
+  which covers every one of them: seat, head and member (the coordinator's ruling of 02:10). No page reads `may_appoint`
+  before 2160.
 - Deactivation and annotation (F9), the 2160 panels (P12-8c), the continuity-operator registry (F10) and user and
   role administration (P12-10), as in ADR-063.
 
@@ -164,6 +166,7 @@ CDF corporate IdP in production (PRODUCTION_SUBSTITUTION_REQUIRED, CDF-35).
 
 - The owner's decision on the P12-8 F7 card (2026-10-19 01:22 UTC, option B).
 - The coordinator's allocation of 2026-10-19 (01:30), and the ruling of 2026-10-18 (12:27) on F5.
+- The owner's decision on the P12-8 F5 card (2026-10-19 05:22 UTC, option A "Wait for 2160").
 - DEC-12 (dual control on grants that widen access; revocation is never delayed).
 - ADR-016 D0; ADR-063; UX-116; Phase 12 plan §4 (P12-8).
 - Linear CDF-269, under CDF-266. Requirement CDF-UX-029.

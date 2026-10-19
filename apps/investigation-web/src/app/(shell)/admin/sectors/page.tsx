@@ -5,8 +5,8 @@
 // the database says its command would accept the caller now (api.admin_sector_capabilities, 2127 and 2128): creating a
 // sector, ending a position not yet ended (now or from a date, with the decree or source reference an end dated before
 // now requires: 2128, the owner's decision F7 = B; shown on the register once recorded), and revoking a delegation that
-// has not ended. Position appointments wait for the owner's F5 card; since 2127 nobody appoints themselves (F6,
-// CDF-259).
+// has not ended. Position appointments wait for migration 2160 (the owner's F5 decision); since 2127 nobody appoints
+// themselves (F6, CDF-259).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {

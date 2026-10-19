@@ -9,8 +9,8 @@
 // (coordinator rulings of 2026-10-18 23:20 and 23:50), and a safeguard is offered only as it is or stricter, never
 // looser (rulings of 23:50 and 2026-10-19 02:10). And the end of a seat not yet ended, now or from a date, with the
 // decree or source reference an end dated before now requires (2128; the owner's decision F7 = B), shown on the
-// register once recorded. Appointment forms wait for the owner's F5 card, and conflict authorities change only with
-// dual control (DEC-12).
+// register once recorded. Appointment forms wait for migration 2160 (the owner's F5 decision), and conflict authorities
+// change only with dual control (DEC-12).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {

@@ -4,7 +4,7 @@
 // F7 = B), and revoke a delegated referral approval. Each goes through the administration service, which validates
 // with the shared schema, pre-checks SECTOR_ADMIN and runs the api.* command in the caller's security context; the
 // database decides every input again (a code already taken, a position already ended, a past end without its
-// reference, a delegation no longer active). Appointing to a position waits for the owner's F5 card.
+// reference, a delegation no longer active). Appointing to a position waits for migration 2160 (owner's F5 decision).
 import { revalidatePath } from "next/cache";
 import { administrationService, requireActor } from "@/server/container";
 import { formObject, toActionState, type ActionState } from "@/server/actions-helpers";

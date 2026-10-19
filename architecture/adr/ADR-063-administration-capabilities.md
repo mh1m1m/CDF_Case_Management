@@ -265,7 +265,8 @@ committee's safeguards. On 2026-10-19 the owner answered F7 (option B: a past ef
 source reference recorded on the row and an audit event with ids only, fail-closed otherwise), which migration 2128
 enforces on the end commands (ADR-064). The coordinator then ruled at 02:10 that the minimum notice, ballot secrecy and
 dissent notes are only kept or made stricter, that the two end forms join these pages, and that the owner's F5 card
-covers every appointment form. These pages change neither who may run a command nor what it accepts.
+covers every appointment form. The owner answered that card at 05:22 (option A, "Wait for 2160"): every appointment form
+waits for migration 2160. These pages change neither who may run a command nor what it accepts.
 
 - **The page list (F3).** Each page lists the caller's other pages from `api.my_admin_views`, and `/admin` opens the
   first of them. The application's permission check stays each page's first gate and the database's check its second;
@@ -287,7 +288,7 @@ covers every appointment form. These pages change neither who may run a command 
   and the date may be added again.
 - **Sectors.** A sector is created with its code and names (`api.create_sector`). A delegation in force or not yet
   started is revoked with a reason (`api.revoke_referral_delegation`). A position is ended (below). Appointments wait
-  for the owner's F5 card.
+  for migration 2160 (the owner's F5 decision).
 - **Notification rules.** A notice is turned on or off on one channel from a date after today, platform-wide or as one
   committee's default (`api.set_notification_rule`). A mandatory notice is shown and never offered: it is always sent.
   The service refuses one before the command is asked (`MANDATORY_NOTICE`). The command refuses a start at or before a
@@ -363,12 +364,13 @@ covers every appointment form. These pages change neither who may run a command 
     reason, unless that notice is off for them (`COMMITTEE_SEAT_ENDED`, 1920); nobody is told about a position. A
     refusal (`MEMBERSHIP_ENDED`, `MEMBERSHIP_ALREADY_ENDED`, `effective_to`, `reason`, `end_reference`) shows in the
     register's words.
-  - The appointment forms (seat, head and member) wait for the owner's F5 card, which covers every one of them (the
-    coordinator's ruling of 02:10). No page reads `may_appoint`.
+  - The appointment forms (seat, head and member) wait for migration 2160: the owner's F5 decision (2026-10-19 05:22,
+    "Wait for 2160"), which covers every one of them (the coordinator's ruling of 02:10). No page reads `may_appoint`.
 - **Audit.** Each command records its own event, as before. A refusal is recorded as COMMAND_DENIED with the command and
   outcome only, never the reason typed. Reading a page records nothing.
 - **Not in this change.**
-  - The appointment forms: seat, head and member (F5). The owner's F5 card is open, and the default stands.
+  - The appointment forms: seat, head and member (F5). They wait for migration 2160, as the owner decided on 2026-10-19
+    at 05:22.
   - Deactivation and annotation (F9), and the 2160 panels (P12-8c).
   - The continuity-operator registry (F10, P12-10) and Create pool (F12).
   - User and role administration (P12-10).

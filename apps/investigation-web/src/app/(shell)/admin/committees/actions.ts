@@ -7,7 +7,7 @@
 // has no field on the form, and the service refuses a revision that names one, whatever its value (DECIDED_OPTION;
 // coordinator ruling of 2026-10-18 23:20). The end of a seat: now, or from a date with the decree or source reference
 // that an end dated before now requires (api.end_committee_membership, 2128; the owner's decision F7 = B). Appointing
-// to seats waits for the owner's F5 card.
+// to seats waits for migration 2160 (the owner's F5 decision).
 import { revalidatePath } from "next/cache";
 import { RULE_SET_REVISION_KEYS } from "@cdf/validation";
 import { administrationService, requireActor } from "@/server/container";
