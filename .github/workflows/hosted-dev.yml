@@ -57,20 +57,21 @@ jobs:
     name: Migrate, seed and test DEV (part ${{ matrix.shard }})
     runs-on: ubuntu-latest
     # Every statement of the suites is one round trip from the runner to the Tokyo pooler, and a round trip took
-    # 0.108 to 0.155 s on DEV, depending on the run. Counted on a local database, the 1,229 tests of main 5dc652c
-    # (migration 2095) make 218,048 round trips: 418 to 563 minutes in one job at 0.115 to 0.155 s, and
-    # GitHub-hosted jobs stop at 360. So the suites run as three Vitest shards (two until a shard came within about
-    # 5,000 round trips of 300 minutes at 0.155 s), jobs of the same run one after the other, each with its own
-    # report and its own limit. Never side by side: two sessions running the suites on DEV at once wait on each
-    # other at the audit ledger's chain lock and deadlock (compliance/evidence/HOSTED_DEV_VALIDATION.md §12). Each
-    # job repeats the migration, seed and drift steps, which find nothing more to do after the first.
+    # 0.108 to 0.176 s on DEV, depending on the run. Counted on a local database, the 1,344 tests of
+    # main 483c321 (migration 2120) make 242,979 round trips: 441 to 713 minutes in one job at 0.109 to
+    # 0.176 s, and GitHub-hosted jobs stop at 360. So the suites run as four Vitest shards (two until a shard came
+    # within about 5,000 round trips of 300 minutes at 0.155 s, three until one came within 18 minutes of the
+    # limit at 0.176 s), jobs of the same run one after the other, each with its own report and its own limit.
+    # Never side by side: two sessions running the suites on DEV at once wait on each other at the audit ledger's
+    # chain lock and deadlock (compliance/evidence/HOSTED_DEV_VALIDATION.md §12). Each job repeats the migration,
+    # seed and drift steps, which find nothing more to do after the first.
     timeout-minutes: 330
     strategy:
       max-parallel: 1
       fail-fast: false
       matrix:
         # A dispatch without the suites migrates once.
-        shard: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.test) && '[1, 2, 3]' || '[1]') }}
+        shard: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.test) && '[1, 2, 3, 4]' || '[1]') }}
     environment: Subapase
     env:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

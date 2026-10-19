@@ -143,6 +143,15 @@ const NOT_STATE_CHANGING = new Set([
   // Migration 2096 (P12-3b, ADR-058): the case's corrective actions, read like corrective_action_view; the disposition
   // command is audited.
   "case_corrective_actions",
+  // Migration 2127 (P12-8b, ADR-063): the caller's Administration pages and each page's capabilities, ids and flags
+  // only. Not audited: the commands they answer for are.
+  "my_admin_views",
+  "admin_calendar_capabilities",
+  "admin_committee_capabilities",
+  "admin_sector_capabilities",
+  "admin_notification_rule_capabilities",
+  "admin_export_policy_capabilities",
+  "admin_corrective_action_policy_capabilities",
   // Migration 2130 (ADR-049): the case authority's lift status and the second approver's queue; the preview, the
   // request and every decision are audited commands.
   "restriction_lift_status",
@@ -1295,7 +1304,8 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "set_invitee_type_rule",
         actor: "platformAdmin",
         run: (s) =>
-          s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON})`,
+          s.tx`select api.set_invitee_type_rule('INTERPRETER', true, true, null, 'SOURCE_REQUIRED', ${REASON},
+            (select row_version from committee.invitee_type_rule where invitee_role = 'INTERPRETER'))`,
       },
       {
         fn: "appoint_conflict_authority",
@@ -2141,7 +2151,8 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "set_sanction_rule",
         actor: "platformAdmin",
         run: (s) =>
-          s.tx`select api.set_sanction_rule('WARNING', null, false, 'PROCEED', 'SOURCE_REQUIRED', ${REASON})`,
+          s.tx`select api.set_sanction_rule('WARNING', null, false, 'PROCEED', 'SOURCE_REQUIRED', ${REASON},
+            (select row_version from decision.sanction_catalogue where code = 'WARNING'))`,
       },
       {
         fn: "flag_subject_left_employment",
@@ -2336,7 +2347,7 @@ describe("every state-changing command writes its audit event in the same transa
         actor: "platformAdmin",
         run: (s) =>
           s.tx`select api.set_export_purpose('WALK_PURPOSE', 'Walk purpose (synthetic)', 'غرض تجريبي', false, false, 99,
-            ${REASON})`,
+            ${REASON}, (select row_version from exchange.export_purpose where code = 'WALK_PURPOSE'))`,
       },
       {
         fn: "add_export_approver",
