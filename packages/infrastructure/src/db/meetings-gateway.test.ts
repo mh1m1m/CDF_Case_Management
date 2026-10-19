@@ -209,11 +209,12 @@ describe("meeting read model mapping", () => {
     const item = v.deliberation?.voteItems[0];
     expect(item).toMatchObject({ iHaveVoted: false, iHaveNoted: true, recordVoteFor: [], tally: null });
     // Before 2120 (or with its keys left out) an item has no paper ballots, and nothing to confirm.
-    expect([item?.offlineBallots, item?.myBallot, item?.ballotsUnconfirmedFor]).toEqual([
-      { provisional: 0, confirmed: 0, superseded: 0, lapsed: 0 },
-      null,
-      [],
-    ]);
+    expect([
+      item?.offlineBallots,
+      item?.myBallot,
+      item?.ballotsUnconfirmedFor,
+      item?.ballotsReleasableFor,
+    ]).toEqual([{ provisional: 0, confirmed: 0, superseded: 0, lapsed: 0 }, null, [], []]);
     expect(item?.capabilities).toEqual({
       mayVote: true,
       mayClose: false,
@@ -222,11 +223,12 @@ describe("meeting read model mapping", () => {
       mayRecuseForConflict: false,
       mayRecordNote: false,
       mayConfirmBallot: false,
+      mayDeclineBallot: false,
     });
     expect(v.deliberation?.witnessExclusions).toEqual([]);
   });
 
-  it("2120's paper ballots map through: counts by state, the caller's own ballot, the runner's waiting list (ADR-048)", () => {
+  it("2120's paper ballots map through: counts by state, the caller's own ballot, the runner's waiting list (ADR-048), and 2125's release (ADR-062)", () => {
     const item = {
       vote_item_id: M,
       sequence_no: 1,
@@ -252,9 +254,16 @@ describe("meeting read model mapping", () => {
         choice: "APPROVE",
         ballot_reference: "PAPER-BALLOT-DEMO-1",
         original_event_at: AT,
+        release: "CHAIR",
       },
       ballots_unconfirmed_for: [P],
-      capabilities: { may_vote: false, may_revise: false, may_confirm_ballot: true },
+      ballots_releasable_for: [M],
+      capabilities: {
+        may_vote: false,
+        may_revise: false,
+        may_confirm_ballot: true,
+        may_decline_ballot: false,
+      },
     };
     const raw = {
       meeting_id: M,
@@ -300,9 +309,17 @@ describe("meeting read model mapping", () => {
       choice: "APPROVE",
       ballotReference: "PAPER-BALLOT-DEMO-1",
       originalEventAt: "2026-10-14T06:30:00.000Z",
+      release: "CHAIR",
     });
     expect(i?.ballotsUnconfirmedFor).toEqual([P]);
-    expect(i?.capabilities).toMatchObject({ mayVote: false, mayRevise: false, mayConfirmBallot: true });
+    // 2125 (ADR-062): the chair's releasable list and the member's decline flag.
+    expect(i?.ballotsReleasableFor).toEqual([M]);
+    expect(i?.capabilities).toMatchObject({
+      mayVote: false,
+      mayRevise: false,
+      mayConfirmBallot: true,
+      mayDeclineBallot: false,
+    });
   });
 
   it("2085's logistics map through: accommodations, arrangements, alternates, invitee roles and the new flags", () => {

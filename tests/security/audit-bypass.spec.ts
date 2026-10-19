@@ -3008,7 +3008,11 @@ describe("every state-changing command writes its audit event in the same transa
                 "BCP-WALK-2115",
                 "IC",
                 "committeeSecretary",
-                [{ voter: "investigatorB", kind: "PACKAGE", target: ids.ballotPkg, choice: "APPROVE" }],
+                [
+                  { voter: "investigatorB", kind: "PACKAGE", target: ids.ballotPkg, choice: "APPROVE" },
+                  // Migration 2125 (ADR-062): a member's ballot the chair releases once they are recorded absent.
+                  { voter: "committee", kind: "PACKAGE", target: ids.ballotPkg, choice: "REJECT" },
+                ],
               );
             },
             "committeeSecretary",
@@ -3121,12 +3125,13 @@ describe("every state-changing command writes its audit event in the same transa
       },
       // Migration 2120 (ADR-048): the remaining lines attest, the secretary commits, opens the meeting held on paper,
       // records the members present as the attested roster shows and opens the package's vote, which binds the
-      // deputy chair's ballot; they confirm it.
+      // members' ballots. Migration 2125 (ADR-062): the member is recorded absent; the deputy chair declines their own
+      // ballot, the chair releases the absent member's, and the deputy chair still confirms theirs.
       {
-        fn: "confirm_offline_ballot",
+        fn: "decline_offline_ballot",
         actor: "investigatorB",
         run: async (s) => {
-          const item = await apart(
+          ids.ballotItem = await apart(
             s,
             async () => {
               const o = s as OwnerScenario;
@@ -3156,6 +3161,13 @@ describe("every state-changing command writes its audit event in the same transa
               await s.as("committeeSecretary");
               await s.tx`select api.open_meeting(${m}, ${REASON})`;
               for (const v of voters) await s.tx`select api.record_attendance(${v.id}, 'PRESENT')`;
+              // The member whose ballot the chair releases is not among them, and is recorded absent.
+              ids.absentBallotSeat = await one(
+                s,
+                s.tx`select id from committee.meeting_participant where meeting_id = ${m} and user_id = ${USERS.committee}`,
+              );
+              expect(voters.map((v) => v.id)).not.toContain(ids.absentBallotSeat);
+              await s.tx`select api.record_attendance(${ids.absentBallotSeat}, 'ABSENT')`;
               await s.tx`select api.open_package_vote(${m}, ${ids.ballotPkg!})`;
               return one(
                 s,
@@ -3164,8 +3176,20 @@ describe("every state-changing command writes its audit event in the same transa
             },
             "investigatorB",
           );
-          return s.tx`select api.confirm_offline_ballot(${item}, 'APPROVE')`;
+          return s.tx`select api.decline_offline_ballot(${ids.ballotItem})`;
         },
+      },
+      {
+        fn: "release_offline_ballot",
+        actor: "committeeChair",
+        run: (s) =>
+          s.tx`select api.release_offline_ballot(${ids.ballotItem!}, ${ids.absentBallotSeat!},
+            'Synthetic: the member was absent and did not join the online completion.')`,
+      },
+      {
+        fn: "confirm_offline_ballot",
+        actor: "investigatorB",
+        run: (s) => s.tx`select api.confirm_offline_ballot(${ids.ballotItem!}, 'APPROVE')`,
       },
     ];
 

@@ -123,8 +123,12 @@ interface RawVoteItem {
     choice: MyOfflineBallot["choice"];
     ballot_reference: string;
     original_event_at: Stamp;
+    /** 2125 (ADR-062); absent before it, which reads as not released. */
+    release?: MyOfflineBallot["release"];
   } | null;
   ballots_unconfirmed_for?: string[] | null;
+  /** 2125 (ADR-062); absent before it, which reads as none. */
+  ballots_releasable_for?: string[] | null;
   capabilities: Caps<
     | "may_vote"
     | "may_close"
@@ -133,6 +137,7 @@ interface RawVoteItem {
     | "may_recuse_for_conflict"
     | "may_record_note"
     | "may_confirm_ballot"
+    | "may_decline_ballot"
   > | null;
 }
 
@@ -492,9 +497,11 @@ function voteItem(v: RawVoteItem): MeetingVoteItemView {
           choice: v.my_ballot.choice,
           ballotReference: v.my_ballot.ballot_reference,
           originalEventAt: isoReq(v.my_ballot.original_event_at),
+          release: v.my_ballot.release ?? null,
         }
       : null,
     ballotsUnconfirmedFor: v.ballots_unconfirmed_for ?? [],
+    ballotsReleasableFor: v.ballots_releasable_for ?? [],
     capabilities: {
       mayVote: yes(c?.may_vote),
       mayClose: yes(c?.may_close),
@@ -503,6 +510,7 @@ function voteItem(v: RawVoteItem): MeetingVoteItemView {
       mayRecuseForConflict: yes(c?.may_recuse_for_conflict),
       mayRecordNote: yes(c?.may_record_note),
       mayConfirmBallot: yes(c?.may_confirm_ballot),
+      mayDeclineBallot: yes(c?.may_decline_ballot),
     },
   };
 }
@@ -921,6 +929,20 @@ export class PostgresMeetingsGateway implements MeetingsGateway {
 
   async confirmOfflineBallot(ctx: UserRequestContext, i: { voteItemId: string; choice: string }) {
     await this.run(ctx, (tx) => tx`select api.confirm_offline_ballot(${i.voteItemId}, ${i.choice})`);
+  }
+
+  async declineOfflineBallot(ctx: UserRequestContext, i: { voteItemId: string }) {
+    await this.run(ctx, (tx) => tx`select api.decline_offline_ballot(${i.voteItemId})`);
+  }
+
+  async releaseOfflineBallot(
+    ctx: UserRequestContext,
+    i: { voteItemId: string; participantId: string; reason: string },
+  ) {
+    await this.run(
+      ctx,
+      (tx) => tx`select api.release_offline_ballot(${i.voteItemId}, ${i.participantId}, ${i.reason})`,
+    );
   }
 
   recordVoteNote(ctx: UserRequestContext, i: { voteItemId: string; note: string; annexToMinutes: boolean }) {

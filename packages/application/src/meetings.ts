@@ -26,6 +26,7 @@ import {
   closeVoteItemSchema,
   confirmOfflineBallotSchema,
   declareMeetingConflictSchema,
+  declineOfflineBallotSchema,
   decideMeetingConflictSchema,
   excludeMeetingWitnessSchema,
   generateMinutesSchema,
@@ -41,6 +42,7 @@ import {
   recordVoteForMemberSchema,
   recordVoteNoteSchema,
   recuseForConflictSchema,
+  releaseOfflineBallotSchema,
   reverseMeetingConflictSchema,
   reviewMinutesSchema,
   reviseVoteSchema,
@@ -79,6 +81,10 @@ export interface MeetingsGateway {
   recuseForConflict(ctx: UserRequestContext, input: In<typeof recuseForConflictSchema>): Promise<void>;
   /** 2120 (ADR-048): the caller's own paper ballot becomes their vote. */
   confirmOfflineBallot(ctx: UserRequestContext, input: In<typeof confirmOfflineBallotSchema>): Promise<void>;
+  /** 2125 (ADR-062): the caller lets their own paper ballot go, for the secretary's record of their absence. */
+  declineOfflineBallot(ctx: UserRequestContext, input: In<typeof declineOfflineBallotSchema>): Promise<void>;
+  /** 2125 (ADR-062): the meeting's chair releases the paper ballot of a member who is not present, with a reason. */
+  releaseOfflineBallot(ctx: UserRequestContext, input: In<typeof releaseOfflineBallotSchema>): Promise<void>;
   recordVoteNote(ctx: UserRequestContext, input: In<typeof recordVoteNoteSchema>): Promise<string>;
   recordVoteForMember(ctx: UserRequestContext, input: In<typeof recordVoteForMemberSchema>): Promise<void>;
   /** The item's result (or AWAITING_CASTING_VOTE on a tie the casting voter may break). */
@@ -330,6 +336,24 @@ export function createMeetingsService(deps: MeetingsDeps) {
         confirmOfflineBallotSchema,
         raw,
         (i) => gateway.confirmOfflineBallot(ctx, i),
+        (i) => i.voteItemId,
+      ),
+    declineOfflineBallot: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "decline_offline_ballot",
+        declineOfflineBallotSchema,
+        raw,
+        (i) => gateway.declineOfflineBallot(ctx, i),
+        (i) => i.voteItemId,
+      ),
+    releaseOfflineBallot: (ctx: UserRequestContext, raw: unknown) =>
+      command(
+        ctx,
+        "release_offline_ballot",
+        releaseOfflineBallotSchema,
+        raw,
+        (i) => gateway.releaseOfflineBallot(ctx, i),
         (i) => i.voteItemId,
       ),
     recordVoteNote: (ctx: UserRequestContext, raw: unknown) =>
