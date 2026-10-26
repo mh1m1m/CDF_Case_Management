@@ -960,6 +960,30 @@ export const ar: Messages = {
     CLOSURE_APPROVAL_REQUIRED: "يحتاج إغلاق هذه القضية إلى موافقة صاحب صلاحية الإغلاق.",
     CASE_CLOSURE_APPROVAL_RULE_REQUIRED:
       "لا تسمّي قاعدة الإغلاق صاحب صلاحية سارياً، فلا يمكن إغلاق القضية. راجع مسؤول القواعد.",
+    // رفع صفة التقييد عن قضية بموافقة شخصين (الترحيل 2130، ADR-049؛ DEC-AMB-012).
+    RESTRICTION_LIFT_NOT_DECIDED:
+      "لا تُرفع صفة التقييد عن قضية إلا بموافقة شخصين: يطلبها صاحب صلاحية القضية ويوافق عليها معتمد مستقل.",
+    LIFT_APPROVER_NOT_CONFIGURED: "لم يُحدَّد في جدول الصلاحيات معتمد ثانٍ لرفع التقييد، فلا يمكن طلب رفعه.",
+    LIFT_WINDOW_MISCONFIGURED:
+      "المدة المسموح بها لطلب رفع التقييد غير مضبوطة، فلا يمكن طلب الرفع ولا اعتماده. راجع مسؤول المنصة.",
+    RESTRICTED_APPROVALS_PENDING:
+      "في هذه القضية طلب تصدير بانتظار موافقتك أو ملف دفاع بانتظار اعتمادك. اتخذ قرارك فيه قبل رفع التقييد.",
+    LIFT_ALREADY_REQUESTED: "يوجد طلب مفتوح لرفع تقييد هذه القضية.",
+    NO_ELIGIBLE_APPROVER:
+      "لا يوجد من يمكنه منح الموافقة الثانية: كل من يحمل دور المعتمد عضو في فريق القضية أو لا يملك التصريح اللازم أو لديه تعارض.",
+    REQUESTER_CANNOT_APPROVE: "أنت مقدّم هذا الطلب، فلا يمكنك منح موافقته الثانية.",
+    RCA_CANNOT_APPROVE: "أنت صاحب صلاحية هذه القضية، فلا يمكنك منح الموافقة الثانية.",
+    ALREADY_DECIDED: "صدر قرار في هذا الطلب.",
+    REQUEST_CLOSED: "هذا الطلب مغلق.",
+    REQUEST_LAPSED: "لم يُتخذ قرار في هذا الطلب في الوقت المحدد، فانقضى.",
+    PREVIEW_CHANGED:
+      "تغيّر من سيحصلون على صلاحية الاطلاع منذ المعاينة. أعد المعاينة؛ يلزم طلب أو موافقة جديدة.",
+    APPROVAL_CONSUMED: "سبق استخدام هذه الموافقة.",
+    NOT_APPROVED: "لم تصدر موافقة على هذا الطلب.",
+    APPROVAL_LAPSED: "لم تُستخدم الموافقة في الوقت المحدد فانقضت. اطلب رفع التقييد من جديد.",
+    APPROVER_NOT_ELIGIBLE:
+      "لم يعد المعتمد مؤهلاً لمنح الموافقة الثانية (انضم إلى فريق القضية، أو فقد الدور أو التصريح، أو لديه تعارض). اطلب رفع التقييد من جديد.",
+    NOT_LAPSED: "لم ينقضِ هذا الطلب بعد.",
     participant: "لا يُستبعد إلا شاهد مدعو.",
   },
   validation: {
@@ -2421,6 +2445,8 @@ export const ar: Messages = {
     COMMITTEE_RECORD_ATTESTATION_REQUESTED: "محضر لجنة يتطلب تأكيدك",
     COMMITTEE_RECORD_RETURNED: "إعادة محضر لجنة",
     COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED: "تفعيل رئيس مكلّف لمحضر لجنة",
+    RESTRICTION_LIFT_APPROVAL_REQUESTED: "طلب رفع تقييد للموافقة",
+    RESTRICTION_LIFT_DECIDED: "قرار في طلب رفع تقييد",
   },
   oversight: {
     title: "الرقابة",
@@ -2809,6 +2835,8 @@ export const ar: Messages = {
     COMMITTEE_RECORD_RETURNED: "أُعيد محضر لجنة قدّمته لتصحيحه.",
     COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED:
       "فُعّل نائب الرئيس رئيسًا مكلّفًا لمحضر لجنة تابعة لك، ويمكنك إنهاء التفعيل قبل أن يعتمد المحضر.",
+    RESTRICTION_LIFT_APPROVAL_REQUESTED: "يوجد طلب لرفع التقييد عن قضية بانتظار قرارك.",
+    RESTRICTION_LIFT_DECIDED: "سُجّل قرار بشأن طلبك رفع التقييد عن القضية.",
   },
   bcpTemplate: {
     readme: {

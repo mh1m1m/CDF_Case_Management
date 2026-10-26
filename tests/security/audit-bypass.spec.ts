@@ -152,10 +152,21 @@ const NOT_STATE_CHANGING = new Set([
   "admin_notification_rule_capabilities",
   "admin_export_policy_capabilities",
   "admin_corrective_action_policy_capabilities",
+  // Migration 2130 (ADR-049): the case authority's lift status and the second approver's queue; the preview, the
+  // request and every decision are audited commands.
+  "restriction_lift_status",
+  "my_restriction_lift_approvals",
 ]);
 
 /** Stages a two-row continuity workbook for case 0001, recorded offline by the lead investigator at the case's
  *  creation (ADR-034): a subject to import and a recorded-only row to skip. */
+/** The case authority's lift request on the preview it is shown (migration 2130). */
+function liftRequest(s: Scenario, caseId: string) {
+  return s.tx`
+    select api.request_restriction_lift(${caseId}, ${REASON},
+      api.preview_restriction_lift(${caseId}) ->> 'preview_hash') as id`;
+}
+
 function stageWalkWorkbook(s: Scenario, workbookId: string) {
   return s.tx`
     with c as (
@@ -3190,6 +3201,96 @@ describe("every state-changing command writes its audit event in the same transa
         fn: "confirm_offline_ballot",
         actor: "investigatorB",
         run: (s) => s.tx`select api.confirm_offline_ballot(${ids.ballotItem!}, 'APPROVE')`,
+      },
+      // Migration 2130 (ADR-049): the two-person lift of a case's restricted status (DEC-AMB-012 C), on a fresh
+      // restricted case whose authority is the GRC Director. GRC_DIRECTOR gives the second approval (the GRC Deputy,
+      // not on the case's team). The authority previews, requests and withdraws; a second request lapses and is
+      // expired; a third is approved and lifted.
+      {
+        fn: "preview_restriction_lift",
+        actor: "grcDirector",
+        run: async (s) => {
+          ids.liftCase = await apart(
+            s,
+            async () => {
+              const o = s as OwnerScenario;
+              await o.asOwner();
+              await o.tx`update config.setting set value = 'GRC_DIRECTOR', status = 'CONFIGURED',
+                                source_reference = 'Synthetic: test Delegation of Authority'
+                         where key = 'RESTRICTION_LIFT_SECOND_APPROVER'`;
+              const report = await one(
+                s,
+                o.tx`select id from intake.report where report_ref = 'WB-SEED00000007'`,
+              );
+              await s.as("triage");
+              await s.tx`select api.triage_report(${report}, 'OPEN_CASE', ${REASON}, null, null)`;
+              return one(
+                s,
+                s.tx`select api.create_case_from_report(${report}, 'Lift walk case (synthetic)', 'Synthetic lift walk summary.',
+                  'CONFIDENTIAL'::core.classification_level, true, ${USERS.grcDirector}::uuid) as id`,
+              );
+            },
+            "grcDirector",
+          );
+          return s.tx`select api.preview_restriction_lift(${ids.liftCase})`;
+        },
+      },
+      {
+        fn: "request_restriction_lift",
+        actor: "grcDirector",
+        run: async (s) => (ids.liftRequest = await one(s, liftRequest(s, ids.liftCase!))),
+      },
+      {
+        fn: "withdraw_restriction_lift",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.withdraw_restriction_lift(${ids.liftRequest!})`,
+      },
+      {
+        fn: "expire_restriction_lift",
+        actor: "grcDirector",
+        run: async (s) => {
+          const lapsed = await apart(
+            s,
+            async () => {
+              const id = await one(s, liftRequest(s, ids.liftCase!));
+              // Owner fixture: the request was made two days ago (the integrity trigger is off for the fixture only).
+              const o = s as OwnerScenario;
+              await o.asOwner();
+              await o.tx`alter table case_mgmt.restriction_lift_request disable trigger restriction_lift_request_protect`;
+              await o.tx`update case_mgmt.restriction_lift_request
+                         set requested_at = now() - interval '2 days', expires_at = now() - interval '1 day'
+                         where id = ${id}`;
+              await o.tx`alter table case_mgmt.restriction_lift_request enable trigger restriction_lift_request_protect`;
+              return id;
+            },
+            "grcDirector",
+          );
+          return s.tx`select api.expire_restriction_lift(${lapsed})`;
+        },
+      },
+      {
+        fn: "decide_restriction_lift",
+        actor: "grcDeputy",
+        run: async (s) => {
+          ids.liftRequest = await apart(
+            s,
+            async () => {
+              await s.as("grcDirector");
+              return one(s, liftRequest(s, ids.liftCase!));
+            },
+            "grcDeputy",
+          );
+          // The approver approves the preview their queue shows.
+          return s.tx`
+            select api.decide_restriction_lift(${ids.liftRequest}, 'APPROVE', ${REASON},
+              (select q ->> 'preview_hash' from jsonb_array_elements(api.my_restriction_lift_approvals()) q
+               where q ->> 'id' = ${ids.liftRequest}))`;
+        },
+      },
+      {
+        fn: "lift_case_restriction",
+        actor: "grcDirector",
+        run: (s) => s.tx`select api.lift_case_restriction(${ids.liftRequest!})`,
       },
     ];
 

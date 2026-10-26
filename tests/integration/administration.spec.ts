@@ -312,9 +312,10 @@ describe("Administration through the service (Phase 12 P12-8a)", () => {
 
       const rules = await admin.notificationRules(ctxFor("platformAdmin"), actors.platformAdmin);
       if (!rules) throw new Error("expected the notification rules");
-      expect(rules.templates).toHaveLength(46);
-      expect(rules.templates.filter((t) => t.isMandatory)).toHaveLength(38);
-      expect(rules.rules).toHaveLength(92);
+      // Migration 2130 (ADR-049) adds two mandatory templates, each with its two SYSTEM_MANDATORY rules.
+      expect(rules.templates).toHaveLength(48);
+      expect(rules.templates.filter((t) => t.isMandatory)).toHaveLength(40);
+      expect(rules.rules).toHaveLength(96);
       const count = (layer: string, channel: string, enabled: boolean) =>
         rules.rules.filter((r) => r.layer === layer && r.channel === channel && r.enabled === enabled).length;
       expect([
@@ -322,7 +323,7 @@ describe("Administration through the service (Phase 12 P12-8a)", () => {
         count("SYSTEM_MANDATORY", "EMAIL", true),
         count("EVENT_RULE", "IN_APP", true),
         count("EVENT_RULE", "EMAIL", false),
-      ]).toEqual([38, 38, 8, 8]);
+      ]).toEqual([40, 40, 8, 8]);
       expect(rules.committees.map((c) => c.code)).toEqual(["GC", "IC"]);
 
       const exports = await admin.exportPolicy(ctxFor("platformAdmin"), actors.platformAdmin);

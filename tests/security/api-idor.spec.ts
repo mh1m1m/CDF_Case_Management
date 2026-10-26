@@ -128,6 +128,23 @@ const PROBES: Probe[] = [
     call: (tx, t) =>
       tx`select api.change_case_classification(${t.case}, 'INTERNAL'::core.classification_level, false, ${REASON})`,
   },
+  // Migration 2130 (ADR-049): the restricted-status lift's case-scoped commands; the request-id ones have their
+  // own describe below (RESTRICTION_LIFT_2130_PROBES).
+  {
+    fn: "preview_restriction_lift",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.preview_restriction_lift(${t.case})`,
+  },
+  {
+    fn: "request_restriction_lift",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.request_restriction_lift(${t.case}, ${REASON}, ${SHA})`,
+  },
+  {
+    fn: "restriction_lift_status",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.restriction_lift_status(${t.case})`,
+  },
   {
     fn: "complete_evidence_version",
     outcome: "NOT_FOUND",
@@ -1787,6 +1804,35 @@ const PEOPLE_ACCESS_2100_PROBES: Probe<PeopleAccessTargets>[] = [
   },
 ];
 
+// Migration 2130 (ADR-049): a request to lift a case's restricted status (DEC-AMB-012 C). Its id answers NOT_FOUND
+// to anyone who is not the requester, the case's authority or an eligible second approver.
+interface RestrictionLiftTargets {
+  request: string;
+}
+
+const RESTRICTION_LIFT_2130_PROBES: Probe<RestrictionLiftTargets>[] = [
+  {
+    fn: "decide_restriction_lift",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.decide_restriction_lift(${t.request}, 'APPROVE', ${REASON}, ${SHA})`,
+  },
+  {
+    fn: "lift_case_restriction",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.lift_case_restriction(${t.request})`,
+  },
+  {
+    fn: "expire_restriction_lift",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.expire_restriction_lift(${t.request})`,
+  },
+  {
+    fn: "withdraw_restriction_lift",
+    outcome: "NOT_FOUND",
+    call: (tx, t) => tx`select api.withdraw_restriction_lift(${t.request})`,
+  },
+];
+
 // Functions that take no case-scoped object: covered by permission tests below and elsewhere.
 // Committee registry maintenance (ADR-019) needs COMMITTEE_ADMIN and touches no case: refused as FORBIDDEN.
 const ADMIN_COMMANDS = [
@@ -1899,6 +1945,8 @@ const GLOBAL_COMMANDS = [
   "my_committees",
   // Migration 2127 (ADR-063): the caller's own Administration pages.
   "my_admin_views",
+  // Migration 2130 (ADR-049): the lift requests awaiting the caller as an eligible second approver (no case id).
+  "my_restriction_lift_approvals",
 ];
 
 let caseA: string, caseB: string, caseExec: string;
@@ -2122,6 +2170,7 @@ describe("catalog guard", () => {
       ...CASE_CONFLICT_2080_PROBES.map((p) => p.fn),
       ...CASE_STRUCTURE_2090_PROBES.map((p) => p.fn),
       ...PEOPLE_ACCESS_2100_PROBES.map((p) => p.fn),
+      ...RESTRICTION_LIFT_2130_PROBES.map((p) => p.fn),
       ...ADMIN_COMMANDS,
       ...SECTOR_COMMANDS,
       ...GLOBAL_COMMANDS,
@@ -3394,6 +3443,90 @@ describe("IDOR: people and access (migration 2100)", () => {
       expect(await s.tx`select revoked_at from iam.preliminary_approval_delegation`).toEqual([
         { revoked_at: null },
       ]);
+    });
+  });
+});
+
+describe("IDOR: restricted-status lift requests (migration 2130)", () => {
+  // A lift request on the restricted SECRET case: the GRC Director (its authority) requests, and with GRC_DIRECTOR as
+  // the second approver's role the GRC Deputy (cleared, not on the team) is the one eligible approver. Nobody else
+  // is a party, the case manager and the case's own investigators included.
+  const OUTSIDERS: UserKey[] = [
+    "investigatorA",
+    "investigatorB",
+    "committee",
+    "intake",
+    "triage",
+    "caseManager",
+    "platformAdmin",
+    "internalAudit",
+    "soc",
+    "dpo",
+  ];
+
+  async function liftRequest(s: OwnerScenario): Promise<string> {
+    await s.asOwner();
+    await s.tx`update config.setting set value = 'GRC_DIRECTOR', status = 'CONFIGURED',
+                      source_reference = 'Synthetic: test Delegation of Authority'
+               where key = 'RESTRICTION_LIFT_SECOND_APPROVER'`;
+    await s.as("grcDirector");
+    const [p] = await s.tx<{ h: string }[]>`
+      select api.preview_restriction_lift(${caseExec}) ->> 'preview_hash' as h`;
+    const [r] = await s.tx<{ id: string }[]>`
+      select api.request_restriction_lift(${caseExec}, ${REASON}, ${p!.h}) as id`;
+    return r!.id;
+  }
+
+  it.each(OUTSIDERS)("%s", async (actor) => {
+    await ownerScenario(async (s) => {
+      const request = await liftRequest(s);
+      await s.as(actor);
+      await s.tx`select set_config('cdf.request_id', ${randomUUID()}, true)`;
+      const mismatches: string[] = [];
+      for (const probe of RESTRICTION_LIFT_2130_PROBES) {
+        const onReal = await outcomeOf(s, probe, { request }, USERS[actor]);
+        const onRandom = await outcomeOf(s, probe, { request: randomUUID() }, USERS[actor]);
+        if (onReal !== probe.outcome || onRandom !== probe.outcome)
+          mismatches.push(`${probe.fn}: real=${onReal} random=${onRandom} expected=${probe.outcome}`);
+      }
+      expect(mismatches).toEqual([]);
+      const [queue] = await s.tx<{ q: unknown[] }[]>`select api.my_restriction_lift_approvals() as q`;
+      expect(queue!.q).toEqual([]);
+      // Nothing moved, and every audit event the outsider caused is a SECURITY denial.
+      await s.asOwner();
+      expect(await s.tx`select status from case_mgmt.restriction_lift_request where id = ${request}`).toEqual(
+        [{ status: "PENDING" }],
+      );
+      expect(await s.tx`select is_restricted from case_mgmt.case_record where id = ${caseExec}`).toEqual([
+        { is_restricted: true },
+      ]);
+      const events = await s.tx<{ category: string; outcome: string }[]>`
+        select category, outcome from audit.audit_event
+        where actor_id = ${USERS[actor]} and request_id = nullif(current_setting('cdf.request_id', true), '')::uuid`;
+      expect(events.filter((e) => e.category !== "SECURITY" || e.outcome !== "DENIED")).toEqual([]);
+    });
+  });
+
+  it("the parties get real answers from the same probes (the probes are not vacuous)", async () => {
+    await ownerScenario(async (s) => {
+      const request = await liftRequest(s);
+      await s.as("grcDeputy");
+      await s.expectError(
+        "CDF_CONFLICT:PREVIEW_CHANGED",
+        (tx) => tx`select api.decide_restriction_lift(${request}, 'APPROVE', ${REASON}, ${SHA})`,
+      );
+      await s.expectError("CDF_FORBIDDEN", (tx) => tx`select api.withdraw_restriction_lift(${request})`);
+      const [queue] = await s.tx<{ q: { id: string }[] }[]>`select api.my_restriction_lift_approvals() as q`;
+      expect(queue!.q.map((q) => q.id)).toEqual([request]);
+      await s.as("grcDirector");
+      await s.expectError(
+        "CDF_CONFLICT:NOT_APPROVED",
+        (tx) => tx`select api.lift_case_restriction(${request})`,
+      );
+      await s.expectError(
+        "CDF_CONFLICT:NOT_LAPSED",
+        (tx) => tx`select api.expire_restriction_lift(${request})`,
+      );
     });
   });
 });

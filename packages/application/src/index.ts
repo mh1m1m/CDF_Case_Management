@@ -46,6 +46,8 @@ export type {
   RegisterCommitteeMinutes,
   UploadedCommitteeMinutes,
 } from "./committee-record";
+export { createRestrictionLiftService } from "./restriction-lift";
+export type { RestrictionLiftDeps, RestrictionLiftGateway, RestrictionLiftService } from "./restriction-lift";
 export { INBOX_PAGE, createInboxService } from "./inbox";
 export type { InboxDeps, InboxGateway, InboxService } from "./inbox";
 export { createCaseStructureService } from "./case-structure";
