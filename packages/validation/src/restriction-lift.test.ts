@@ -63,7 +63,10 @@ describe("restriction-lift schemas", () => {
       decideRestrictionLiftSchema,
       restrictionLiftRequestSchema,
     ]) {
-      expect(Object.keys(schema.shape).filter((k) => /user|actor|approver|by$/i.test(k))).toEqual([]);
+      const actorKeys = Object.keys(schema.shape).filter(
+        (k) => /(?:user|actor|approver)/i.test(k) || /by$/i.test(k),
+      );
+      expect(actorKeys).toEqual([]);
     }
   });
 });
