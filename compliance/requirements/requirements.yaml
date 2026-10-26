@@ -1263,6 +1263,41 @@ requirements:
         tests/security/package-builder-and-invite-choices.spec.ts,
       ]
     notes: "Database half (P12-8b); the pages follow with no migration: the calendar's withdrawal, creating a sector and revoking a delegation, the notification rule form, the export rule and purpose forms, the corrective-action policy form and the committee rule-set forms. api.my_admin_views lists the caller's Administration pages in api.my_areas' order, each where the caller check its commands start with passes (F3); an account that is not active gets none. Each page's read refuses FORBIDDEN whoever its commands refuse on that check, and otherwise says, for the page and for each row of its register, whether the command would accept the caller now, following the command's own checks in order with no lock, write or audit sequence number; ids and booleans only, never case content or a count derived from cases. The reads are not audited; the commands they answer for are. Narrowings, nothing widened: api.appoint_sector_member refuses CONFLICT:SELF_APPOINTMENT (F6, CDF-259, Security LOW); api.set_notification_rule refuses CONFLICT:LATER_RULE_EXISTS for a start at or before a later rule of its key, under a lock on the key (F8, CDF-260); api.set_export_purpose, api.set_invitee_type_rule and api.set_sanction_rule take the version the administrator read and refuse CONFLICT:STALE_VERSION for any other, a null included, after locking the code or the row, and each success records the new version in its audit event (F13). Not in this change: the seat, head and position forms (F5, F7), deactivation and annotation (F9), the 2160 panels (P12-8c), the continuity-operator registry (F10) and user and role administration (P12-10)."
+
+  - id: CDF-UX-029
+    title: "A seat or a position ended with a date in the past records its decree or source reference on the row, fail-closed, and the committees and sectors pages learn from the database where an appointment or an end would be accepted"
+    source:
+      [
+        Phase 12 plan P12-8,
+        UX-116,
+        ADR-016 D0,
+        owner decision on the P12-8 F7 card (option B 2026-10-19 01:22 UTC),
+        DEC-12,
+        coordinator ruling 2026-10-18 12:27 (F5),
+        coordinator allocation 2026-10-19 01:30,
+        ADR-063,
+        ADR-064,
+      ]
+    external_ids: []
+    linear_issues: [CDF-269, CDF-266]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        infrastructure/supabase/migrations/20261007002128_seat_and_position_end_references.sql,
+        api.end_committee_membership,
+        api.end_sector_membership,
+        committee.protect_registry,
+        iam.protect_sector_registry,
+        api.admin_committee_capabilities,
+        api.admin_sector_capabilities,
+      ]
+    tests:
+      [
+        tests/security/seat-and-position-ends-2128.spec.ts,
+        tests/security/my-committees-and-meeting-logistics.spec.ts,
+        tests/support/committee.ts,
+      ]
+    notes: "Migration 2128 (ADR-064) applies the owner's F7 decision: a past effective date only with a decree or source reference recorded on the row and an audit event with ids only, fail-closed otherwise. Appointments already met it: both appointment commands require appointment_reference on the row (1870, 1880) and their events carry ids and codes only. committee.membership and iam.sector_membership gain end_reference (3 to 200 characters), allowed only on an ended row and never changed once set (both registry triggers, otherwise exactly as built); a table check, added NOT VALID so that rows ended before it stay as written, refuses a row ended in the past without it. api.end_committee_membership and api.end_sector_membership take it as a new last argument (default null; the old signatures are dropped) and refuse CDF_INVALID:end_reference for an end before now without it, after every check they made before; a reference given with an end now or later is checked and recorded. The end events are unchanged: ids, the seat or position and the new end, never the reference. api.admin_committee_capabilities adds may_appoint per committee and may_end per seat, and api.admin_sector_capabilities adds each sector with may_appoint and may_end per position; each flag follows its command's checks in order with no lock or write. Not in this change: the end forms (the P12-8b pages PR, no migration) and every appointment form (seat, head and member), which waits for the owner's F5 card (coordinator ruling 2026-10-19 02:10)."
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]
