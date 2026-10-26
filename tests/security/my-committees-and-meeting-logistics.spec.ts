@@ -1362,7 +1362,7 @@ describe("api.meeting_view logistics (migration 2085, ADR-055)", () => {
         where committee_id = ${ic} and user_id = ${USERS.employee} and ended_at is null`;
       await s.as("platformAdmin");
       await s.tx`select api.end_committee_membership(${alt!.id}, now() - interval '12 hours',
-        'Synthetic: the seat ends for the test.')`;
+        'Synthetic: the seat ends for the test.', 'DEMO-END-2128')`;
       await logistics(s, f.meeting, subject, callers);
       expect((await caps("committeeSecretary")).may_activate_acting_secretary).toBe(false);
       await s.as("platformAdmin");
