@@ -1,27 +1,26 @@
-// What every Administration page shares (UX redesign Phase 12 P12-8a): its title and purpose, the pages this caller's
-// permissions open, and the reminder that nothing here is case content (§21). Rendered by each page only after its own
-// access check has passed, so a refused page is the same not-found as a page that does not exist: nothing of the
-// area shows before that check.
+// What every Administration page shares (UX redesign Phase 12 P12-8a and P12-8b): its title and purpose, the pages the
+// database opens to this caller (`api.my_admin_views`, F3; ADR-063), and the reminder that nothing here is case content
+// (§21). Rendered by each page only after its own access check has passed, so a refused page is the same not-found as
+// a page that does not exist: nothing of the area shows before that check.
 import type { ReactNode } from "react";
-import { adminViews } from "@cdf/authorization";
-import type { Actor, AdminView } from "@cdf/contracts";
+import type { AdminView } from "@cdf/contracts";
 import type { MessageKey, Translator } from "@cdf/i18n";
 import { CDFPageHeader, CDFViewTabs } from "@cdf/ui";
 
 export function AdminFrame({
   t,
-  actor,
+  views,
   view,
   intro,
   children,
 }: {
   t: Translator;
-  actor: Actor;
+  /** The pages the database opens to the caller, in its order (F3). */
+  views: readonly AdminView[];
   view: AdminView;
   intro: string;
   children: ReactNode;
 }) {
-  const views = adminViews(actor);
   return (
     <>
       <CDFPageHeader title={t(`admin.views.${view}` as MessageKey)} intro={intro} />

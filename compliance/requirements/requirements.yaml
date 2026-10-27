@@ -1264,6 +1264,105 @@ requirements:
       ]
     notes: "Database half (P12-8b); the pages follow with no migration: the calendar's withdrawal, creating a sector and revoking a delegation, the notification rule form, the export rule and purpose forms, the corrective-action policy form and the committee rule-set forms. api.my_admin_views lists the caller's Administration pages in api.my_areas' order, each where the caller check its commands start with passes (F3); an account that is not active gets none. Each page's read refuses FORBIDDEN whoever its commands refuse on that check, and otherwise says, for the page and for each row of its register, whether the command would accept the caller now, following the command's own checks in order with no lock, write or audit sequence number; ids and booleans only, never case content or a count derived from cases. The reads are not audited; the commands they answer for are. Narrowings, nothing widened: api.appoint_sector_member refuses CONFLICT:SELF_APPOINTMENT (F6, CDF-259, Security LOW); api.set_notification_rule refuses CONFLICT:LATER_RULE_EXISTS for a start at or before a later rule of its key, under a lock on the key (F8, CDF-260); api.set_export_purpose, api.set_invitee_type_rule and api.set_sanction_rule take the version the administrator read and refuse CONFLICT:STALE_VERSION for any other, a null included, after locking the code or the row, and each success records the new version in its audit event (F13). Not in this change: the seat, head and position forms (F5, F7), deactivation and annotation (F9), the 2160 panels (P12-8c), the continuity-operator registry (F10) and user and role administration (P12-10)."
 
+  - id: CDF-UX-028
+    title: "Each Administration form shows only where the database says its command would accept the administrator now, and offers only what narrows: a calendar day withdrawn, a sector created, a delegation revoked, a notice turned on or off, an export rule for a new code, an export purpose added or changed at the version read, a corrective-action policy version never looser, a committee's rules revised with every option that follows a decision kept as decided and every safeguard kept or made stricter, never loosened, and a seat or a position ended, from a past date only with its decree or source reference"
+    source:
+      [
+        Phase 12 plan P12-8,
+        UX-024,
+        UX-028,
+        UX-105,
+        UX-116,
+        ADR-016 D0,
+        ADR-063,
+        ADR-063 P12-8b pages amendment,
+        ADR-064,
+        DEC-F01,
+        DEC-F02,
+        DEC-F03,
+        DEC-F04,
+        DEC-F14,
+        DEC-F15,
+        DEC-F17,
+        DEC-F21,
+        DEC-F24,
+        DEC-F25,
+        DEC-F26,
+        DEC-F27,
+        Q51,
+        Q98,
+        AMB-026,
+        AMB-061,
+        AMB-076,
+        AMB-082,
+        AMB-083,
+        AMB-092,
+        coordinator ruling 2026-10-18 12:27 (F1 to F13),
+        coordinator ruling 2026-10-18 21:17 (F4),
+        coordinator confirmation 2026-10-18 21:53,
+        coordinator ruling 2026-10-18 23:20 (decided committee options read-only),
+        coordinator ruling 2026-10-18 23:50 (five decided options confirmed; committee safeguards never loosened),
+        owner decision on the P12-8 F7 card (option B 2026-10-19 01:22 UTC),
+        coordinator ruling 2026-10-19 02:10 (AMB-061 and AMB-083 and AMB-082 never loosened; the end forms join the pages; the F5 card covers every appointment form),
+        owner decision on the P12-8 F5 card (option A Wait for 2160; 2026-10-19 05:22 UTC),
+        CDF-232,
+      ]
+    external_ids: []
+    linear_issues: [CDF-266]
+    status: IN_PROGRESS
+    enforcement:
+      [
+        api.my_admin_views,
+        api.admin_calendar_capabilities,
+        api.admin_committee_capabilities,
+        api.admin_sector_capabilities,
+        api.admin_notification_rule_capabilities,
+        api.admin_export_policy_capabilities,
+        api.admin_corrective_action_policy_capabilities,
+        api.withdraw_business_calendar_day,
+        api.create_sector,
+        api.revoke_referral_delegation,
+        api.set_notification_rule,
+        api.set_export_rule,
+        api.set_export_purpose,
+        api.set_corrective_action_policy,
+        api.revise_committee_rule_set,
+        api.end_committee_membership,
+        api.end_sector_membership,
+        packages/application/src/administration.ts,
+        packages/validation/src/administration.ts,
+        packages/infrastructure/src/db/administration-gateway.ts,
+        "apps/investigation-web/src/app/(shell)/admin/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/admin-frame.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/calendar/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/calendar/actions.ts",
+        "apps/investigation-web/src/app/(shell)/admin/sectors/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/sectors/actions.ts",
+        "apps/investigation-web/src/app/(shell)/admin/notification-rules/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/notification-rules/actions.ts",
+        "apps/investigation-web/src/app/(shell)/admin/export-policy/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/export-policy/actions.ts",
+        "apps/investigation-web/src/app/(shell)/admin/corrective-action-policy/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/corrective-action-policy/actions.ts",
+        "apps/investigation-web/src/app/(shell)/admin/committees/page.tsx",
+        "apps/investigation-web/src/app/(shell)/admin/committees/actions.ts",
+        "apps/investigation-web/src/app/(shell)/admin/end-form.tsx",
+      ]
+    tests:
+      [
+        tests/integration/administration.spec.ts,
+        tests/e2e/administration.spec.ts,
+        tests/accessibility/administration.spec.ts,
+        packages/application/src/administration.test.ts,
+        packages/validation/src/administration.test.ts,
+        packages/infrastructure/src/db/administration-gateway.test.ts,
+        "apps/investigation-web/src/app/(shell)/admin/labels.test.ts",
+        "apps/investigation-web/src/app/(shell)/confirmations.test.ts",
+        tests/security/administration-capabilities-2127.spec.ts,
+        tests/security/seat-and-position-ends-2128.spec.ts,
+      ]
+    notes: "No migration (P12-8b's pages, on 2127's reads). Each page lists the caller's other pages from api.my_admin_views, and /admin opens the first (F3). Each form shows only where its page's capability read says the command would accept the caller now, and a row's control offers only the rows whose flag says so; it validates with the command's own schema, pre-checks the page's permission, runs its api.* command in the caller's security context and asks first, and the command decides every input again. A refusal shows in the register's own words, at the top of the page when its form has left the page (CDF-232), and is recorded as COMMAND_DENIED with the command and outcome only. No form sends a source status: every rule or policy value is provisional (SOURCE_REQUIRED) except an export purpose, which the command records as the administrator's own catalogue entry under DEC-F21, as the page says; a withdrawn day, a new sector, a revoked delegation and an end take no source status. Narrowings (coordinator ruling on F4, 21:17): an export rule only for a new code, with second approval, authority approval or refusal and never NONE, refused as RULE_CODE_EXISTS under the command's own lock on the code; no control over a purpose's status and no path to a legacy purpose; a corrective-action policy version with all twelve values whose completion evidence is never looser than a version in force or scheduled, by the completion command's own comparison under the command's own lock; a mandatory notice shown, never offered (MANDATORY_NOTICE); escalation steps name non-technical roles only; the committee rules' revision only, never the full setter. Committee options (coordinator rulings, 23:20 and 23:50): the twelve whose value follows a decision are shown read-only with the decision they follow and never sent, so a new version keeps them (DEC-F03, DEC-F04, DEC-F14, DEC-F15 and DEC-F17 as ruled at 23:20; the chair's casting vote DEC-F01, who decides admissibility DEC-F17, the quorum Q51, the minutes review and deemed approval Q98 and AMB-076's no-vote outcome confirmed at 23:50), and a revision that names one is refused before the command is asked (DECIDED_OPTION). Safeguards are kept or made stricter, never loosened: AMB-026 and AMB-092 (ruled at 23:50), and AMB-061 (the minimum notice only lengthens), AMB-083 (ballot secrecy only increases) and AMB-082 (dissent notes may be allowed, never withdrawn), ruled on 2026-10-19 at 02:10. The page offers each at its floor, the strictest value in force or scheduled, or stricter, says next to it that loosening waits for the CDF source and 2160, and shows one at its strictest as kept; the service refuses a looser value, sent or carried from the open version, as LOOSER_RULE_OPTION before the command, under a lock on the committee's page revisions. Vote revision (AMB-081) and the grievance completion period (AMB-141) stay freely editable. api.revise_committee_rule_set is not narrowed. Ends (the owner's F7 decision, option B; ADR-064, migration 2128; joined to these pages by the coordinator's ruling of 02:10): the committees and sectors pages end a seat or a position whose may_end is true, now or from the start of a date in Riyadh, with a reason; an end dated before now, today included, is recorded only with its decree or source reference, which api.end_committee_membership and api.end_sector_membership require (end_reference) and keep on the row, never changed, and the register shows it; the confirmation says the end cannot be undone and that a seat's holder is told, without the reason (1920's optional notice), while nobody is told of a position. Not in this change: every appointment form, seat, head and member, which waits for migration 2160 (the owner's F5 decision of 2026-10-19 05:22, which covers all three, as ruled at 02:10), deactivation and annotation (F9), the 2160 panels (P12-8c), the continuity-operator registry (F10), Create pool (F12), user and role administration (P12-10), and a new version of a recorded export rule (the CDF source and 2160)."
+
   - id: CDF-UX-029
     title: "A seat or a position ended with a date in the past records its decree or source reference on the row, fail-closed, and the committees and sectors pages learn from the database where an appointment or an end would be accepted"
     source:
@@ -1274,6 +1373,7 @@ requirements:
         owner decision on the P12-8 F7 card (option B 2026-10-19 01:22 UTC),
         DEC-12,
         coordinator ruling 2026-10-18 12:27 (F5),
+        owner decision on the P12-8 F5 card (option A Wait for 2160; 2026-10-19 05:22 UTC),
         coordinator allocation 2026-10-19 01:30,
         ADR-063,
         ADR-064,
@@ -1297,7 +1397,7 @@ requirements:
         tests/security/my-committees-and-meeting-logistics.spec.ts,
         tests/support/committee.ts,
       ]
-    notes: "Migration 2128 (ADR-064) applies the owner's F7 decision: a past effective date only with a decree or source reference recorded on the row and an audit event with ids only, fail-closed otherwise. Appointments already met it: both appointment commands require appointment_reference on the row (1870, 1880) and their events carry ids and codes only. committee.membership and iam.sector_membership gain end_reference (3 to 200 characters), allowed only on an ended row and never changed once set (both registry triggers, otherwise exactly as built); a table check, added NOT VALID so that rows ended before it stay as written, refuses a row ended in the past without it. api.end_committee_membership and api.end_sector_membership take it as a new last argument (default null; the old signatures are dropped) and refuse CDF_INVALID:end_reference for an end before now without it, after every check they made before; a reference given with an end now or later is checked and recorded. The end events are unchanged: ids, the seat or position and the new end, never the reference. api.admin_committee_capabilities adds may_appoint per committee and may_end per seat, and api.admin_sector_capabilities adds each sector with may_appoint and may_end per position; each flag follows its command's checks in order with no lock or write. Not in this change: the end forms (the P12-8b pages PR, no migration) and every appointment form (seat, head and member), which waits for the owner's F5 card (coordinator ruling 2026-10-19 02:10)."
+    notes: "Migration 2128 (ADR-064) applies the owner's F7 decision: a past effective date only with a decree or source reference recorded on the row and an audit event with ids only, fail-closed otherwise. Appointments already met it: both appointment commands require appointment_reference on the row (1870, 1880) and their events carry ids and codes only. committee.membership and iam.sector_membership gain end_reference (3 to 200 characters), allowed only on an ended row and never changed once set (both registry triggers, otherwise exactly as built); a table check, added NOT VALID so that rows ended before it stay as written, refuses a row ended in the past without it. api.end_committee_membership and api.end_sector_membership take it as a new last argument (default null; the old signatures are dropped) and refuse CDF_INVALID:end_reference for an end before now without it, after every check they made before; a reference given with an end now or later is checked and recorded. The end events are unchanged: ids, the seat or position and the new end, never the reference. api.admin_committee_capabilities adds may_appoint per committee and may_end per seat, and api.admin_sector_capabilities adds each sector with may_appoint and may_end per position; each flag follows its command's checks in order with no lock or write. Not in this change: the end forms (the P12-8b pages PR, no migration) and every appointment form (seat, head and member), which waits for migration 2160 (the owner's F5 decision of 2026-10-19 05:22; coordinator ruling of 02:10)."
   - id: CDF-DEVSECOPS-001
     title: "CI pipeline with lint, typecheck, unit, database, security, e2e, dependency audit, SBOM, secret scan, SAST"
     source: [protocol §49]

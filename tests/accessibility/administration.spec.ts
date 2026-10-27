@@ -3,9 +3,26 @@
 // their pages and every disclosure open, and the GRC Director's corrective-action policy; and the business calendar's
 // two forms: a day with nothing chosen and a week with no working day, each confirmed and then refused with its error
 // summary, and the new week's confirmation, cancelled. Nothing is recorded.
-import { expect, test, type Locator, type Page } from "@playwright/test";
+//
+// Phase 12 P12-8b (ADR-063): every other form the registers offer, each submitted with nothing chosen (or a required
+// value cleared), confirmed, and refused with its error summary, which takes the focus; each confirmation and each
+// summary passes axe. A day and a delegation are added first, so the withdrawal and the revocation are offered, and
+// are withdrawn and revoked afterwards; the forms record nothing. Each page is opened on its own, so a refused form
+// left with its entries never stands in the way of the next page. Since 2128 (ADR-064) the end of a seat and of a
+// position too, each with no seat or position chosen.
+import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { audit } from "./axe";
+import {
+  calendarDates,
+  calendarDayAdded,
+  closeFixtureConnections,
+  delegationInForce,
+  revokeDelegation,
+  withdrawCalendarDay,
+} from "../e2e/records-fixture";
 import { signIn } from "../e2e/support";
+
+test.afterAll(closeFixtureConnections);
 
 const WIDTHS = [1280, 390, 320] as const;
 const ADMIN = "admin@example.test";
@@ -46,6 +63,21 @@ async function confirmation(page: Page, form: Locator, then: "confirm-submit" | 
   await audit(page);
   await dialog.getByTestId(then).click();
   await expect(dialog).toBeHidden();
+}
+
+/** A page of its own at a desktop width, open at `path`. */
+async function opened(context: BrowserContext, path: string): Promise<Page> {
+  const page = await context.newPage();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(path);
+  return page;
+}
+
+/** Confirmed, then refused: the error summary takes the focus, and the page with it passes axe. */
+async function refused(page: Page, form: Locator) {
+  await confirmation(page, form, "confirm-submit");
+  await expect(form.getByTestId("error-summary")).toBeFocused();
+  await audit(page);
 }
 
 for (const locale of ["ar", "en"] as const) {
@@ -89,5 +121,86 @@ for (const locale of ["ar", "en"] as const) {
     for (const d of [1, 2, 3, 4, 7]) await weekForm.getByTestId(`admin-week-form-day-${d}`).uncheck();
     await confirmation(admin, weekForm, "confirm-cancel");
     await admin.context().close();
+  });
+
+  test(`${locale}: a day's withdrawal, a sector, a delegation's revocation, a position's end and a notice rule, refused with their error summaries, pass axe`, async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    // Far enough ahead that the e2e journeys never reach for the same date.
+    const { day } = await calendarDates(locale === "ar" ? 180 : 240);
+    await calendarDayAdded(day);
+    const delegation = await delegationInForce();
+    try {
+      const context = (await signIn(browser, ADMIN, locale)).context();
+
+      // A withdrawal with no entry chosen.
+      let page = await opened(context, "/admin/calendar");
+      const withdraw = page.getByTestId("admin-withdraw-form");
+      await withdraw.locator("#admin-withdraw-form-reason").fill(REASON);
+      await refused(page, withdraw);
+
+      // A sector with no code and no names; a revocation with no delegation chosen; an end with no position chosen.
+      page = await opened(context, "/admin/sectors");
+      await refused(page, page.getByTestId("admin-sector-form"));
+      const revoke = page.getByTestId("admin-revoke-form-OPS");
+      await revoke.locator("#admin-revoke-form-OPS-reason").fill(REASON);
+      await refused(page, revoke);
+      const endPosition = page.getByTestId("admin-end-position-form-OPS");
+      await endPosition.locator("#admin-end-position-form-OPS-reason").fill(REASON);
+      await refused(page, endPosition);
+
+      // A notice rule with no notice, channel, setting or date.
+      page = await opened(context, "/admin/notification-rules");
+      const rule = page.getByTestId("admin-notice-form");
+      await rule.locator("#admin-notice-form-reason").fill(REASON);
+      await refused(page, rule);
+      await context.close();
+    } finally {
+      await withdrawCalendarDay(day);
+      await revokeDelegation(delegation);
+    }
+  });
+
+  test(`${locale}: an export rule, an export purpose, a corrective-action policy version, a committee's rules and a seat's end, refused with their error summaries, pass axe`, async ({
+    browser,
+  }) => {
+    test.setTimeout(180_000);
+    const context = (await signIn(browser, ADMIN, locale)).context();
+
+    // A rule with no code, audience or effect; a purpose with no code or names; a purpose's English name cleared.
+    let page = await opened(context, "/admin/export-policy");
+    const rule = page.getByTestId("admin-export-rule-form");
+    await rule.locator("#admin-export-rule-form-reason").fill(REASON);
+    await refused(page, rule);
+    const purpose = page.getByTestId("admin-export-purpose-form");
+    await purpose.locator("#admin-export-purpose-form-reason").fill(REASON);
+    await refused(page, purpose);
+    const edit = "admin-export-purpose-form-OTHER";
+    await page.getByTestId(`${edit}-details`).locator("summary").click();
+    const editForm = page.getByTestId(edit);
+    await editForm.locator(`#${edit}-name-en`).fill("");
+    await editForm.locator(`#${edit}-reason`).fill(REASON);
+    await refused(page, editForm);
+
+    // A version of the committee's rules with no start date; an end with no seat chosen.
+    page = await opened(context, "/admin/committees");
+    const rules = "admin-rules-form-IC";
+    await page.getByTestId(`${rules}-details`).locator("summary").click();
+    await page.getByTestId(rules).locator(`#${rules}-reason`).fill(REASON);
+    await refused(page, page.getByTestId(rules));
+    const endSeat = page.getByTestId("admin-end-seat-form-IC");
+    await endSeat.locator("#admin-end-seat-form-IC-reason").fill(REASON);
+    await refused(page, endSeat);
+    await context.close();
+
+    // A version of a corrective-action policy with no start date: the GRC Director's.
+    const director = (await signIn(browser, DIRECTOR, locale)).context();
+    page = await opened(director, "/admin/corrective-action-policy");
+    const policy = "admin-action-policy-form-CORRECTIVE_ACTION";
+    await page.getByTestId(`${policy}-details`).locator("summary").click();
+    await page.getByTestId(policy).locator(`#${policy}-reason`).fill(REASON);
+    await refused(page, page.getByTestId(policy));
+    await director.close();
   });
 }

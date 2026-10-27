@@ -38,12 +38,18 @@ const USERS = {
   icSecretary: "a0000000-0000-4000-8000-000000000103",
   icMemberA: "a0000000-0000-4000-8000-000000000104",
   icMemberB: "a0000000-0000-4000-8000-000000000105",
-  // Appointed to the demo committee after a referral, then ended (Phase 12 P12-2b; no other browser spec uses it)
+  // Appointed to the demo committee after a referral, then ended (Phase 12 P12-2b), and given a seat on the Grievance
+  // Committee and a position in Operations, each for three days long ago, for the Administration end forms to end
+  // (P12-8b, 2128); no other browser spec uses it
   dpo: "a0000000-0000-4000-8000-000000000012",
   // Employee Chi, a corrective action's owner (Phase 12 P12-3b; no other browser spec uses it)
   financeEmployee: "a0000000-0000-4000-8000-000000000028",
   // GRC Deputy Mu, who asks for an export of a restricted case (Phase 12 P12-6b-1)
   grcDeputy: "a0000000-0000-4000-8000-000000000014",
+  // Sector Head Sigma, who delegates referral approval in OPS to Employee Phi, an OPS member (Phase 12 P12-8b; no
+  // other browser spec uses either)
+  sectorHead: "a0000000-0000-4000-8000-000000000024",
+  employeePhi: "a0000000-0000-4000-8000-000000000025",
 } as const;
 
 export const TEST_CLASS = "TEST_ETE_RETENTION";
@@ -1560,5 +1566,161 @@ export async function withdrawCalendarDay(date: string): Promise<void> {
       select id from config.business_calendar_day where calendar_date = ${date}::date and withdrawn_at is null`;
     if (d)
       await tx`select api.withdraw_business_calendar_day(${d.id}, ${"Synthetic: withdrawn after the e2e journey."})`;
+  });
+}
+
+// ---- Administration's other forms (Phase 12 P12-8b) --------------------------------------------------------------
+// Sectors, rules and purposes cannot be removed, and a version of a rule or a policy is never withdrawn, so each
+// journey adds a code of its own and starts each version after the last one recorded: it can run again on the same
+// database. Every version starts at least `fromDays` ahead, so nothing in force today changes.
+
+/** A suffix for the codes a journey adds (letters and digits, as every code allows). */
+export const codeSuffix = (): string => randomBytes(4).toString("hex").toUpperCase();
+
+/** The later of today + `fromDays` and the day after the last start of the platform-wide rule for a notice. */
+export async function notificationRuleFrom(
+  template: string,
+  channel: string,
+  fromDays: number,
+): Promise<string> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ d: string }[]>`
+      select greatest((now() at time zone 'Asia/Riyadh')::date + ${fromDays}::int,
+                      (select (max(r.effective_from) at time zone 'Asia/Riyadh')::date + 1
+                         from notify.rule r
+                        where r.layer = 'EVENT_RULE' and r.template_code = ${template} and r.channel = ${channel}
+                          and r.committee_id is null))::text as d`;
+    return r!.d;
+  });
+}
+
+/** The later of today + `fromDays` and the day after the last start of a type's corrective-action policy. */
+export async function actionPolicyFrom(actionType: string, fromDays: number): Promise<string> {
+  return as("grcDirector", async (tx) => {
+    const [r] = await tx<{ d: string }[]>`
+      select greatest((now() at time zone 'Asia/Riyadh')::date + ${fromDays}::int,
+                      (select (max(p.effective_from) at time zone 'Asia/Riyadh')::date + 1
+                         from decision.corrective_action_policy p where p.action_type = ${actionType}))::text as d`;
+    return r!.d;
+  });
+}
+
+/** The later of today + `fromDays` and the day after the last start of a committee's rules. */
+export async function ruleSetFrom(committeeCode: string, fromDays: number): Promise<string> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ d: string }[]>`
+      select greatest((now() at time zone 'Asia/Riyadh')::date + ${fromDays}::int,
+                      (select (max(r.effective_from) at time zone 'Asia/Riyadh')::date + 1
+                         from committee.rule_set r join committee.committee c on c.id = r.committee_id
+                        where c.code = ${committeeCode}))::text as d`;
+    return r!.d;
+  });
+}
+
+/**
+ * A referral-approval delegation in force in OPS, from Sector Head Sigma to Employee Phi for a week: the one already
+ * in force if there is one (a second would overlap it), else a new one.
+ */
+export async function delegationInForce(): Promise<string> {
+  const [ops] = await as(
+    "platformAdmin",
+    (tx) => tx<{ id: string }[]>`select id from iam.sector where code = 'OPS'`,
+  );
+  const [held] = await as(
+    "platformAdmin",
+    (tx) => tx<{ id: string }[]>`
+      select d.id from iam.sector_delegation d
+       where d.sector_id = ${ops!.id} and d.delegate_id = ${USERS.employeePhi} and d.revoked_at is null
+         and d.effective_to > now()
+       order by d.effective_from limit 1`,
+  );
+  if (held) return held.id;
+  return as("sectorHead", async (tx) => {
+    const [d] = await tx<{ id: string }[]>`
+      select api.delegate_referral_approval(${ops!.id}, ${USERS.employeePhi}, now(), now() + interval '7 days',
+        'DEMO-DELEGATION-E2E', 'Synthetic: a delegation for the Administration journey.') as id`;
+    return d!.id;
+  });
+}
+
+/** The sector administrator revokes a delegation the journey made, if it is still in force. */
+export async function revokeDelegation(id: string): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    const [d] = await tx<{ id: string }[]>`
+      select id from iam.sector_delegation where id = ${id} and revoked_at is null and effective_to > now()`;
+    if (d)
+      await tx`select api.revoke_referral_delegation(${d.id}, ${"Synthetic: revoked after the e2e journey."})`;
+  });
+}
+
+/**
+ * A seat the DPO held on the Grievance Committee for three days long ago, never ended: the committee administrator may
+ * still end it (2128's may_end), from its second day, which is before now, so the end needs its decree or source
+ * reference (the owner's decision F7 = B). The three days run from noon in Riyadh, five years ago or thirty days before
+ * the DPO's earliest seat there, whichever is earlier, so they overlap none of the DPO's seats and each run has its
+ * own. Appointed in the past with its reference, as every appointment is.
+ */
+export async function lapsedSeat(): Promise<{ membershipId: string; endDate: string }> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ id: string; end_date: string }[]>`
+      with c as (select id from committee.committee where code = 'GC'),
+      w as (
+        select least(((now() at time zone 'Asia/Riyadh') - interval '5 years')::date,
+                     (select min((m.effective_from at time zone 'Asia/Riyadh')::date) - 30
+                        from committee.membership m, c
+                       where m.committee_id = c.id and m.user_id = ${USERS.dpo})) as d)
+      select api.appoint_committee_member(c.id, ${USERS.dpo}, 'MEMBER',
+               (w.d + time '12:00') at time zone 'Asia/Riyadh',
+               (w.d + 3 + time '12:00') at time zone 'Asia/Riyadh',
+               ${`DEMO-E2E-LAPSED-SEAT-${codeSuffix()}`}) as id,
+             (w.d + 1)::text as end_date
+        from c, w`;
+    return { membershipId: r!.id, endDate: r!.end_date };
+  });
+}
+
+/** The same for a member's position in Operations, which the sector administrator ends from its second day. */
+export async function lapsedPosition(): Promise<{ membershipId: string; endDate: string }> {
+  return as("platformAdmin", async (tx) => {
+    const [r] = await tx<{ id: string; end_date: string }[]>`
+      with s as (select id from iam.sector where code = 'OPS'),
+      w as (
+        select least(((now() at time zone 'Asia/Riyadh') - interval '5 years')::date,
+                     (select min((m.effective_from at time zone 'Asia/Riyadh')::date) - 30
+                        from iam.sector_membership m, s
+                       where m.sector_id = s.id and m.user_id = ${USERS.dpo})) as d)
+      select api.appoint_sector_member(s.id, ${USERS.dpo}, 'MEMBER',
+               (w.d + time '12:00') at time zone 'Asia/Riyadh',
+               (w.d + 3 + time '12:00') at time zone 'Asia/Riyadh',
+               ${`DEMO-E2E-LAPSED-POSITION-${codeSuffix()}`}) as id,
+             (w.d + 1)::text as end_date
+        from s, w`;
+    return { membershipId: r!.id, endDate: r!.end_date };
+  });
+}
+
+/** The id of a date's entry in force, if it has one. */
+export async function calendarDayId(date: string): Promise<string | undefined> {
+  return as("platformAdmin", async (tx) => {
+    const [d] = await tx<{ id: string }[]>`
+      select id from config.business_calendar_day where calendar_date = ${date}::date and withdrawn_at is null`;
+    return d?.id;
+  });
+}
+
+/** The calendar administrator adds a working day on a date with no entry, for a journey to withdraw. */
+export async function calendarDayAdded(date: string): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    await tx`select api.set_business_calendar_day(${date}::date, 'WORKING_DAY', null,
+      ${"Synthetic: a day for the e2e journey to withdraw."})`;
+  });
+}
+
+/** The export-policy administrator changes a purpose the journey added, as another administrator would. */
+export async function exportPurposeChanged(code: string, expectedVersion: number): Promise<void> {
+  await as("platformAdmin", async (tx) => {
+    await tx`select api.set_export_purpose(${code}, ${"Synthetic purpose (changed elsewhere)"},
+      ${"غرض اصطناعي (غُيّر في مكان آخر)"}, false, false, 890, ${"Synthetic: changed while the page was open."},
+      ${expectedVersion}::int)`;
   });
 }

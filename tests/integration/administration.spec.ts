@@ -1,17 +1,27 @@
-// Phase 12 P12-8a Administration (ADR-051's P12-8a amendment) through the real service, gateway, database, RLS and
-// audit, the way the pages call them. Each test runs in one owner-connection transaction that is rolled back: the
-// gateway runs its security context inside a savepoint of that transaction, so no calendar day or week reaches the
-// seed. These pin that each page opens exactly where its own permission does, in the application pre-check and again
-// in the database; that a refused page is the uniform not-found recorded as ACCESS_DENIED with the page's name only;
-// that each register is the seed as recorded, with ids, codes and dates and nothing from a case, not even the count of
-// proceedings a seat correction recorded; and that the calendar's two forms run their commands, whose refusals are
-// COMMAND_DENIED with the command and outcome only.
+// Phase 12 P12-8a and P12-8b Administration (ADR-051's P12-8a amendment, ADR-063) through the real service, gateway,
+// database, RLS and audit, the way the pages call them. Each test runs in one owner-connection transaction that is
+// rolled back: the gateway runs its security context inside a savepoint of that transaction, so no calendar day or week
+// reaches the seed. These pin that each page opens exactly where its own permission does, in the application pre-check
+// and again in the database; that a refused page is the uniform not-found recorded as ACCESS_DENIED with the page's
+// name only; that each register is the seed as recorded, with ids, codes and dates and nothing from a case, not even
+// the count of proceedings a seat correction recorded; and that the calendar's two forms run their commands, whose
+// refusals are COMMAND_DENIED with the command and outcome only. Since P12-8b: the page list and every control's flag
+// come from the database (2127); each form records exactly what its command records, provisional where the form says
+// so; the five page rules that narrow a command (a mandatory notice takes no rule, an export rule is for a new code
+// only, a policy version is never looser, a committee's rules never change an option that follows a decision, and a
+// committee's safeguards are never loosened; coordinator rulings of 2026-10-18 21:17, 23:20 and 23:50, and of
+// 2026-10-19 02:10) refuse with nothing written; and "never looser" is the completion command's own comparison. Since
+// 2128: a seat or a position is ended once, now or from a date, and an end dated before now only with its decree or
+// source reference (the owner's decision F7 = B), recorded on the row and never in the audit event's metadata.
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  acceptsEvidenceKind,
   createAdministrationService,
   createInvestigationService,
+  needsEvidenceReference,
   type AdministrationService,
+  type CompletionRule,
 } from "@cdf/application";
 import { adminViews } from "@cdf/authorization";
 import type { Actor, AdminView } from "@cdf/contracts";
@@ -22,6 +32,7 @@ import {
   type Sql,
 } from "@cdf/infrastructure";
 import { IC_SEATS, committeeIds, refer, seat } from "../support/committee";
+import { draftPackage, voteOnPackage } from "../support/decision";
 import { USERS, bff, caseId, ownerScenario, type OwnerScenario, type UserKey } from "../support/db";
 
 const ctxFor = (user: UserKey) => ({ userId: USERS[user], requestId: randomUUID() });
@@ -227,8 +238,10 @@ describe("Administration through the service (Phase 12 P12-8a)", () => {
           "effectiveFrom",
           "effectiveTo",
           "endReason",
+          "endReference",
           "endedAt",
           "endedBy",
+          "mayEnd",
           "membershipId",
           "seat",
           "state",
@@ -485,6 +498,944 @@ describe("Administration through the service (Phase 12 P12-8a)", () => {
           },
         ]);
       }
+    });
+  });
+});
+
+// ---- P12-8b (ADR-063): the pages' other forms --------------------------------------------------------------------
+
+const REASON_8B = "Synthetic administration test (P12-8b).";
+
+class Undo extends Error {}
+
+/** True when `run` succeeds, with whatever it wrote undone; else the CDF code the database refused it with. */
+async function triedThenUndone(s: OwnerScenario, run: () => Promise<unknown>): Promise<true | string> {
+  let refused: string | undefined;
+  try {
+    await s.tx.savepoint(async () => {
+      await run();
+      throw new Undo();
+    });
+  } catch (error) {
+    if (!(error instanceof Undo)) refused = (error as Error).message;
+  }
+  if (refused === undefined) return true;
+  if (!refused.startsWith("CDF_")) throw new Error(refused);
+  return refused;
+}
+
+/** Rows of a table, counted on the owner connection. */
+async function count(s: OwnerScenario, table: string): Promise<number> {
+  await s.asOwner();
+  const [r] = await s.tx.unsafe<{ n: number }[]>(`select count(*)::int as n from ${table}`);
+  return r!.n;
+}
+
+describe("Administration's other forms through the service (Phase 12 P12-8b)", () => {
+  it("each page carries the database's list of pages, the same as the application's (F3), and its controls' flags", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      for (const user of PEOPLE)
+        expect(await admin.views(ctxFor(user)), user).toEqual(adminViews(actors[user]));
+      const eta = actors.platformAdmin;
+      const mine = adminViews(eta);
+      const calendar = await admin.calendar(ctxFor("platformAdmin"), eta);
+      const sectors = await admin.sectors(ctxFor("platformAdmin"), eta);
+      const rules = await admin.notificationRules(ctxFor("platformAdmin"), eta);
+      const exports = await admin.exportPolicy(ctxFor("platformAdmin"), eta);
+      for (const page of [calendar, sectors, rules, exports]) expect(page!.views).toEqual(mine);
+      expect(calendar!.capabilities).toEqual({ maySetDay: true, maySetWeekPattern: true });
+      expect(sectors!.capabilities).toEqual({ mayCreateSector: true });
+      expect(rules!.capabilities).toEqual({ maySetRule: true });
+      expect(exports!.capabilities).toEqual({ maySetRule: true, mayAddPurpose: true });
+      // A purpose in the catalogue may be changed from its row; a legacy one never (the command's LEGACY_PURPOSE).
+      expect(exports!.purposes.map((p) => [p.code, p.maySet])).toEqual(
+        exports!.purposes.map((p) => [p.code, !p.isLegacy]),
+      );
+      const policy = await admin.correctiveActionPolicy(ctxFor("grcDeputy"), actors.grcDeputy);
+      expect(policy!.views).toEqual(adminViews(actors.grcDeputy));
+      expect(policy!.capabilities).toEqual({ maySetPolicy: true });
+      // The roles an escalation step may name: none technical (§21).
+      expect(policy!.roles.map((r) => r.code)).not.toEqual(expect.arrayContaining(["PLATFORM_ADMIN"]));
+      expect(policy!.roles.map((r) => r.code)).toContain("CASE_MANAGER");
+      const committees = await admin.committees(ctxFor("complianceManager"), actors.complianceManager);
+      expect(committees!.views).toEqual(adminViews(actors.complianceManager));
+      expect(committees!.ruleControls.map((r) => r.mayReviseRuleSet)).toEqual([true, true]);
+      expect(committees!.ruleControls.map((r) => r.committeeId).sort()).toEqual(
+        committees!.committees.map((c) => c.committeeId).sort(),
+      );
+    });
+  });
+
+  it("the calendar: a day is withdrawn from today on, once, with a reason; a day already past is not", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const eta = actors.platformAdmin;
+      const today = (await admin.calendar(ctxFor("platformAdmin"), eta))!.today;
+      const date = plusDays(today, 300);
+      expect(
+        outcome(
+          await admin.setCalendarDay(ctxFor("platformAdmin"), eta, {
+            calendarDate: date,
+            dayType: "HOLIDAY",
+            reason: REASON_8B,
+          }),
+        ),
+      ).toBe("ok");
+      await s.asOwner();
+      const [past] = await s.tx<{ id: string }[]>`
+        insert into config.business_calendar_day (calendar_date, day_type, reason, recorded_by)
+        values (${plusDays(today, -3)}::date, 'HOLIDAY', ${REASON_8B}, ${USERS.platformAdmin}) returning id`;
+      let page = (await admin.calendar(ctxFor("platformAdmin"), eta))!;
+      const day = page.days.find((d) => d.calendarDate === date)!;
+      expect(day.mayWithdraw).toBe(true);
+      expect(page.days.find((d) => d.dayId === past!.id)!.mayWithdraw).toBe(false);
+
+      const withdraw = (dayId: string) =>
+        admin.withdrawCalendarDay(ctxFor("platformAdmin"), eta, { dayId, reason: REASON_8B });
+      expect(outcome(await withdraw(past!.id))).toBe("CONFLICT:CALENDAR_DAY_PAST");
+      expect(outcome(await withdraw(day.dayId))).toBe("ok");
+      expect(outcome(await withdraw(day.dayId))).toBe("CONFLICT:CALENDAR_DAY_WITHDRAWN");
+      page = (await admin.calendar(ctxFor("platformAdmin"), eta))!;
+      const after = page.days.find((d) => d.dayId === day.dayId)!;
+      expect([after.withdrawnBy, after.withdrawReason, after.mayWithdraw]).toEqual([
+        USERS.platformAdmin,
+        REASON_8B,
+        false,
+      ]);
+      expect(page.days.find((d) => d.dayId === past!.id)!.withdrawnAt).toBeNull();
+      // An id the calendar does not have is the not-found, recorded with the command and outcome only.
+      const c = ctxFor("platformAdmin");
+      expect(
+        outcome(await admin.withdrawCalendarDay(c, eta, { dayId: randomUUID(), reason: REASON_8B })),
+      ).toBe("NOT_FOUND");
+      expect(await eventsOf(s, c.requestId)).toEqual([
+        {
+          action: "COMMAND_DENIED",
+          object_type: "command",
+          object_id: null,
+          metadata: { command: "withdraw_business_calendar_day", outcome: "NOT_FOUND" },
+        },
+      ]);
+    });
+  });
+
+  it("the sectors: a sector is created once per code; a delegation in force is revoked once, with a reason", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const eta = actors.platformAdmin;
+      const sector = { code: "SYN8B", nameEn: "Synthetic sector", nameAr: "قطاع اصطناعي" };
+      expect(outcome(await admin.createSector(ctxFor("platformAdmin"), eta, sector))).toBe("ok");
+      expect(
+        outcome(
+          await admin.createSector(ctxFor("platformAdmin"), eta, { ...sector, nameEn: "Another synthetic" }),
+        ),
+      ).toBe("CONFLICT:SECTOR_CODE_TAKEN");
+      let page = (await admin.sectors(ctxFor("platformAdmin"), eta))!;
+      expect(
+        page.sectors.filter((x) => x.code === "SYN8B").map((x) => [x.nameEn, x.nameAr, x.isActive]),
+      ).toEqual([["Synthetic sector", "قطاع اصطناعي", true]]);
+
+      await s.asOwner();
+      const [ops] = await s.tx<{ id: string }[]>`select id from iam.sector where code = 'OPS'`;
+      await s.as("sectorHead");
+      const [d] = await s.tx<{ id: string }[]>`
+        select api.delegate_referral_approval(${ops!.id}, ${USERS.employeeB}, now(), now() + interval '7 days',
+          'DEMO-DELEGATION-8B', ${REASON_8B}) as id`;
+      page = (await admin.sectors(ctxFor("platformAdmin"), eta))!;
+      expect(page.delegations.map((x) => [x.delegationId, x.state, x.mayRevoke])).toEqual([
+        [d!.id, "IN_FORCE", true],
+      ]);
+      const revoke = () =>
+        admin.revokeDelegation(ctxFor("platformAdmin"), eta, { delegationId: d!.id, reason: REASON_8B });
+      expect(outcome(await revoke())).toBe("ok");
+      expect(outcome(await revoke())).toBe("CONFLICT:DELEGATION_NOT_ACTIVE");
+      page = (await admin.sectors(ctxFor("platformAdmin"), eta))!;
+      expect(page.delegations.map((x) => [x.state, x.mayRevoke, x.revokedAt !== null])).toEqual([
+        ["ENDED", false, true],
+      ]);
+    });
+  });
+
+  it("the notification rules: a notice is turned on or off from a later date; a mandatory notice and a start before a later rule are refused, with nothing written", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const eta = actors.platformAdmin;
+      const before = (await admin.notificationRules(ctxFor("platformAdmin"), eta))!;
+      const today = before.today;
+      const gc = before.committees.find((c) => c.code === "GC")!.committeeId;
+      const rule = {
+        layer: "EVENT_RULE",
+        templateCode: "GRIEVANCE_RECEIVED",
+        channel: "EMAIL",
+        enabled: "on",
+        effectiveFrom: plusDays(today, 30),
+        reason: REASON_8B,
+      };
+      const set = (input: Record<string, unknown>) =>
+        admin.setNotificationRule(ctxFor("platformAdmin"), eta, input);
+      expect(outcome(await set(rule))).toBe("ok");
+      expect(
+        outcome(
+          await set({
+            ...rule,
+            layer: "COMMITTEE_DEFAULT",
+            committeeId: gc,
+            channel: "IN_APP",
+            enabled: "off",
+          }),
+        ),
+      ).toBe("ok");
+      const rows = await count(s, "notify.rule");
+      // F8: a start at or before a later rule of the same notice and channel.
+      expect(outcome(await set({ ...rule, effectiveFrom: plusDays(today, 20) }))).toBe(
+        "CONFLICT:LATER_RULE_EXISTS",
+      );
+      // A mandatory notice is always sent: no rule changes it.
+      const mandatory = before.templates.find((t) => t.isMandatory)!.code;
+      expect(
+        outcome(await set({ ...rule, templateCode: mandatory, effectiveFrom: plusDays(today, 90) })),
+      ).toBe("CONFLICT:MANDATORY_NOTICE");
+      expect(outcome(await set({ ...rule, effectiveFrom: today }))).toBe("INVALID:effective_from");
+      expect(await count(s, "notify.rule")).toBe(rows);
+
+      const after = (await admin.notificationRules(ctxFor("platformAdmin"), eta))!;
+      const of = (layer: string, channel: string) =>
+        after.rules
+          .filter((r) => r.template === "GRIEVANCE_RECEIVED" && r.layer === layer && r.channel === channel)
+          .map((r) => [r.enabled, r.state, r.committeeId]);
+      expect(of("EVENT_RULE", "EMAIL")).toEqual([
+        [false, "IN_FORCE", null],
+        [true, "SCHEDULED", null],
+      ]);
+      expect(of("COMMITTEE_DEFAULT", "IN_APP")).toEqual([[false, "SCHEDULED", gc]]);
+    });
+  });
+
+  it("the export rules: a rule for a new code only, provisional; a code already recorded is refused under the command's own lock", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const eta = actors.platformAdmin;
+      const today = (await admin.exportPolicy(ctxFor("platformAdmin"), eta))!.today;
+      const rule = {
+        code: "SYN_8B_RULE",
+        audience: "EXTERNAL",
+        minClassification: "CONFIDENTIAL",
+        objectType: "MINUTES",
+        restrictedOnly: false,
+        action: "REFUSE",
+        effectiveFrom: plusDays(today, 30),
+        reason: REASON_8B,
+      };
+      const add = (input: Record<string, unknown>) =>
+        admin.addExportRule(ctxFor("platformAdmin"), eta, input);
+      expect(outcome(await add(rule))).toBe("ok");
+      const rows = await count(s, "exchange.approval_rule");
+      for (const code of ["SYN_8B_RULE", "EXTERNAL_SECRET"])
+        expect(outcome(await add({ ...rule, code, effectiveFrom: plusDays(today, 60) })), code).toBe(
+          "CONFLICT:RULE_CODE_EXISTS",
+        );
+      // NONE would switch a code off: never offered (coordinator ruling on F4).
+      expect(outcome(await add({ ...rule, code: "SYN_8B_OFF", action: "NONE" }))).toBe("fieldErrors");
+      expect(await count(s, "exchange.approval_rule")).toBe(rows);
+      const page = (await admin.exportPolicy(ctxFor("platformAdmin"), eta))!;
+      expect(
+        page.rules
+          .filter((r) => r.code === "SYN_8B_RULE")
+          .map((r) => [r.audience, r.minClassification, r.objectType, r.action, r.sourceStatus, r.state]),
+      ).toEqual([["EXTERNAL", "CONFIDENTIAL", "MINUTES", "REFUSE", "SOURCE_REQUIRED", "SCHEDULED"]]);
+      // The lock the gateway takes before its check is the command's own.
+      await s.asOwner();
+      const [def] = await s.tx<{ src: string }[]>`
+        select pg_get_functiondef('api.set_export_rule(text,text,core.classification_level,text,boolean,text,timestamptz,text,text)'::regprocedure) as src`;
+      expect(def!.src).toContain("pg_advisory_xact_lock(hashtext('exchange.approval_rule:' || p_code))");
+    });
+  });
+
+  it("the export purposes: added and changed at the version read, as the administrator's own entry; a stale version and a legacy purpose are refused, with nothing written", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const eta = actors.platformAdmin;
+      const purpose = {
+        code: "SYN_8B_PURPOSE",
+        nameEn: "Synthetic purpose",
+        nameAr: "غرض اصطناعي",
+        requiresJustification: true,
+        isActive: false,
+        sortOrder: "95",
+        reason: REASON_8B,
+      };
+      const ctx = () => ctxFor("platformAdmin");
+      expect(outcome(await admin.addExportPurpose(ctx(), eta, purpose))).toBe("ok");
+      const read = async (code: string) =>
+        (await admin.exportPolicy(ctx(), eta))!.purposes.find((p) => p.code === code)!;
+      expect(await read("SYN_8B_PURPOSE")).toMatchObject({
+        nameEn: "Synthetic purpose",
+        isActive: false,
+        sortOrder: 95,
+        sourceStatus: "APPROVED",
+        rowVersion: 1,
+        maySet: true,
+      });
+      expect(
+        outcome(
+          await admin.editExportPurpose(ctx(), eta, {
+            ...purpose,
+            nameEn: "Synthetic purpose, renamed",
+            expectedVersion: "1",
+          }),
+        ),
+      ).toBe("ok");
+      const rows = await count(s, "exchange.export_purpose");
+      // A change made since the page was read, and a new purpose under a code already in the catalogue (F13).
+      expect(
+        outcome(
+          await admin.editExportPurpose(ctx(), eta, { ...purpose, nameEn: "Stale", expectedVersion: "1" }),
+        ),
+      ).toBe("CONFLICT:STALE_VERSION");
+      expect(outcome(await admin.addExportPurpose(ctx(), eta, { ...purpose, nameEn: "Again" }))).toBe(
+        "CONFLICT:STALE_VERSION",
+      );
+      // A legacy purpose is never changed, at its own version too.
+      const legacy = await read("AUDIT");
+      expect([legacy.isLegacy, legacy.maySet]).toEqual([true, false]);
+      expect(
+        outcome(
+          await admin.editExportPurpose(ctx(), eta, {
+            ...purpose,
+            code: "AUDIT",
+            expectedVersion: String(legacy.rowVersion),
+          }),
+        ),
+      ).toBe("CONFLICT:LEGACY_PURPOSE");
+      expect(await count(s, "exchange.export_purpose")).toBe(rows);
+      expect(await read("SYN_8B_PURPOSE")).toMatchObject({
+        nameEn: "Synthetic purpose, renamed",
+        rowVersion: 2,
+      });
+      expect(await read("AUDIT")).toEqual(legacy);
+      // No path sets a purpose's source status: the command takes none, and records the administrator's own entry.
+      await s.asOwner();
+      const signatures = await s.tx<{ args: string }[]>`
+        select pg_get_function_identity_arguments(p.oid) as args from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'api' and p.proname = 'set_export_purpose'`;
+      expect(signatures).toHaveLength(1);
+      expect(signatures[0]!.args).not.toMatch(/status/);
+    });
+  });
+
+  it("the corrective-action policy: a version from a later date with every value, provisional, never looser than a version in force or scheduled", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const deputy = actors.grcDeputy;
+      const ctx = () => ctxFor("grcDeputy");
+      const today = (await admin.correctiveActionPolicy(ctx(), deputy))!.today;
+      const version = {
+        actionType: "GOVERNANCE_REMEDIATION",
+        defaultDueDays: "60",
+        reminderDaysBefore: "7",
+        reminderRepeatDays: "2",
+        overdueAfterDays: "1",
+        escalateAfterDays: "10",
+        completionEvidence: "REFERENCE_REQUIRED",
+        allowedEvidenceTypes: ["DOCUMENT", "REVISED_PROCEDURE"],
+        escalationSteps: [
+          { afterDaysOverdue: "3", recipientKind: "ROLE", roleCode: "CASE_MANAGER" },
+          { afterDaysOverdue: "5", recipientKind: "CASE_MANAGERS", roleCode: "" },
+        ],
+        effectiveFrom: plusDays(today, 30),
+        reason: REASON_8B,
+      };
+      const set = (input: Record<string, unknown>) => admin.setCorrectiveActionPolicy(ctx(), deputy, input);
+      const rows = await count(s, "decision.corrective_action_policy");
+      // The seeded version needs a reference: a version that does not is looser.
+      expect(
+        outcome(await set({ ...version, completionEvidence: "NOTE_ONLY", allowedEvidenceTypes: [] })),
+      ).toBe("CONFLICT:LOOSER_COMPLETION_EVIDENCE");
+      expect(await count(s, "decision.corrective_action_policy")).toBe(rows);
+      expect(outcome(await set(version))).toBe("ok");
+      const page = (await admin.correctiveActionPolicy(ctx(), deputy))!;
+      expect(
+        page.policies
+          .filter((p) => p.actionType === "GOVERNANCE_REMEDIATION")
+          .map((p) => [
+            p.state,
+            p.sourceStatus,
+            p.completionEvidence,
+            p.allowedEvidenceTypes,
+            p.defaultDueDays,
+          ]),
+      ).toEqual([
+        ["IN_FORCE", "SOURCE_REQUIRED", "REFERENCE_REQUIRED", null, null],
+        ["SCHEDULED", "SOURCE_REQUIRED", "REFERENCE_REQUIRED", ["DOCUMENT", "REVISED_PROCEDURE"], 60],
+      ]);
+      const scheduled = page.policies.find(
+        (p) => p.actionType === "GOVERNANCE_REMEDIATION" && p.state === "SCHEDULED",
+      )!;
+      expect([
+        scheduled.reminderDaysBefore,
+        scheduled.reminderRepeatDays,
+        scheduled.overdueAfterDays,
+        scheduled.escalateAfterDays,
+      ]).toEqual([7, 2, 1, 10]);
+      expect(scheduled.steps.map((x) => [x.afterDaysOverdue, x.recipientKind, x.roleCode])).toEqual([
+        [3, "ROLE", "CASE_MANAGER"],
+        [5, "CASE_MANAGERS", null],
+      ]);
+      const later = plusDays(today, 60);
+      const after = await count(s, "decision.corrective_action_policy");
+      // The scheduled version lists the kinds it accepts: a later one may list only kinds among them.
+      for (const allowedEvidenceTypes of [["DOCUMENT", "TRAINING_EVIDENCE"], []])
+        expect(outcome(await set({ ...version, allowedEvidenceTypes, effectiveFrom: later }))).toBe(
+          "CONFLICT:LOOSER_EVIDENCE_TYPES",
+        );
+      // Stricter but before the scheduled version: the command's own refusal.
+      expect(
+        outcome(
+          await set({ ...version, allowedEvidenceTypes: ["DOCUMENT"], effectiveFrom: plusDays(today, 20) }),
+        ),
+      ).toBe("CONFLICT:LATER_POLICY_EXISTS");
+      expect(await count(s, "decision.corrective_action_policy")).toBe(after);
+      expect(
+        outcome(await set({ ...version, allowedEvidenceTypes: ["DOCUMENT"], effectiveFrom: later })),
+      ).toBe("ok");
+      // The guard reads the versions under the command's own lock.
+      await s.asOwner();
+      const [def] = await s.tx<{ src: string }[]>`
+        select pg_get_functiondef(p.oid) as src from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'api' and p.proname = 'set_corrective_action_policy' and p.pronargs = 12`;
+      expect(def!.src).toContain(
+        "pg_advisory_xact_lock(hashtext('decision.corrective_action_policy:' || p_action_type))",
+      );
+    });
+  });
+
+  it("never looser is the completion command's own comparison: each version accepts exactly the completions the rule says", async () => {
+    const [{ ic }, caseB] = await Promise.all([committeeIds(), caseId("0002")]);
+    await ownerScenario(async (s) => {
+      // An approved corrective item on case 0002 (the sanction withdrawn, so no legal review is needed).
+      const f = await draftPackage(s, ic, caseB);
+      await s.as("committeeSecretary");
+      await s.tx`select api.withdraw_recommendation_item(${f.sanction}, ${REASON_8B})`;
+      await voteOnPackage(s, f);
+      await s.as("committeeSecretary");
+      await s.tx`select api.submit_to_authority(${f.pkg})`;
+      await s.tx`select api.record_authority_decision(${f.pkg}, 'CEO', 'APPROVE_AS_RECOMMENDED', now(),
+        'Chief Executive (synthetic)', 'MEMO-DEMO-0127', null, ${REASON_8B})`;
+      await s.as("platformAdmin");
+      await s.tx`select api.grant_role(${USERS.financeEmployee}, 'IMPLEMENTATION_OWNER', 'Synthetic: implementation owner for the test')`;
+
+      const LISTED = "DOCUMENT";
+      const UNLISTED = "TRAINING_EVIDENCE";
+      const completions: { reference: string | null; kind: string | null }[] = [
+        { reference: null, kind: null },
+        { reference: "SOP-DEMO-0127 rev 1", kind: null },
+        { reference: "SOP-DEMO-0127 rev 1", kind: LISTED },
+        { reference: "SOP-DEMO-0127 rev 1", kind: UNLISTED },
+      ];
+      /** The rule the pages apply: a reference unless NOTE_ONLY; a listed kind where the version lists kinds. */
+      const accepts = (v: CompletionRule, c: (typeof completions)[number]) =>
+        c.reference === null
+          ? !needsEvidenceReference(v.completionEvidence)
+          : v.allowedEvidenceTypes === null ||
+            (c.kind !== null && acceptsEvidenceKind(v.allowedEvidenceTypes, c.kind));
+      const versions: CompletionRule[] = [
+        { completionEvidence: "REFERENCE_REQUIRED", allowedEvidenceTypes: null },
+        { completionEvidence: "REFERENCE_REQUIRED", allowedEvidenceTypes: [LISTED, "REVISED_PROCEDURE"] },
+        { completionEvidence: "NOTE_ONLY", allowedEvidenceTypes: null },
+        { completionEvidence: "NOTE_ONLY", allowedEvidenceTypes: [LISTED] },
+      ];
+      for (const v of versions) {
+        const label = JSON.stringify(v);
+        const seen: [boolean, boolean][] = [];
+        expect(
+          await triedThenUndone(s, async () => {
+            // The version in force from now, and an action opened under it.
+            await s.as("grcDirector");
+            await s.tx`select api.set_corrective_action_policy('CORRECTIVE_ACTION', 30, null::int, null::int,
+              ${v.completionEvidence}, now(), 'SOURCE_REQUIRED', ${REASON_8B}, null::int, null::int,
+              ${v.allowedEvidenceTypes === null ? null : [...v.allowedEvidenceTypes]}::text[], null::jsonb)`;
+            await s.as("caseManager");
+            const [a] = await s.tx<{ id: string }[]>`
+              select api.open_corrective_action(${f.corrective}, 'Synthetic: strengthen approval controls',
+                'Synthetic: add a second approver.', ${USERS.financeEmployee},
+                (now() at time zone 'Asia/Riyadh')::date + 30) as id`;
+            for (const c of completions) {
+              const result = await triedThenUndone(s, async () => {
+                await s.as("financeEmployee");
+                await s.tx`select api.submit_corrective_action_completion(${a!.id}, 'Synthetic: the control is in place.',
+                  ${c.reference}, ${c.kind})`;
+              });
+              if (result !== true)
+                expect(result, `${label} ${JSON.stringify(c)}`).toMatch(/^CDF_INVALID:evidence_/);
+              seen.push([result === true, accepts(v, c)]);
+            }
+          }),
+          label,
+        ).toBe(true);
+        expect(seen, label).toHaveLength(completions.length);
+        for (const [i, [actual, expected]] of seen.entries())
+          expect(actual, `${label} ${JSON.stringify(completions[i])}`).toBe(expected);
+      }
+    });
+  });
+
+  it("the committee rules: a new version from a later date with only the options changed, provisional; an option that follows a decision is never changed, and a safeguard never loosened", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const cm = actors.complianceManager;
+      const ctx = () => ctxFor("complianceManager");
+      const before = (await admin.committees(ctx(), cm))!;
+      const today = before.today;
+      const ic = before.committees.find((c) => c.code === "IC")!.committeeId;
+      const gc = before.committees.find((c) => c.code === "GC")!.committeeId;
+      const revise = (input: Record<string, unknown>) => admin.reviseCommitteeRuleSet(ctx(), cm, input);
+      const base = {
+        committeeId: ic,
+        committeeKind: "INVESTIGATION",
+        effectiveFrom: plusDays(today, 30),
+        reason: REASON_8B,
+      };
+      expect(outcome(await revise({ ...base, minimumNoticeDays: "5", ballotSecrecy: "SECRET_BALLOT" }))).toBe(
+        "ok",
+      );
+      const rows = await count(s, "committee.rule_set");
+      expect(
+        outcome(await revise({ ...base, minimumNoticeDays: "6", effectiveFrom: plusDays(today, 20) })),
+      ).toBe("CONFLICT:RULE_SET_SCHEDULED");
+      // Coordinator ruling of 2026-10-18 23:20: an option that follows a decision is refused before the command,
+      // whatever else the revision changes, so nothing is written (each value is one the command would take).
+      const later = { ...base, minimumNoticeDays: "7", effectiveFrom: plusDays(today, 60) };
+      for (const [key, value] of Object.entries({
+        quorumType: "MAJORITY_ELIGIBLE",
+        quorumValue: null,
+        castingVoteEnabled: "off",
+        minutesReviewBusinessDays: "5",
+        deemedApprovalEnabled: "off",
+        noSubstantiveVoteOutcome: "TIED",
+        conflictDecider: "SECRETARY",
+        actingChairCastingVote: "on",
+      }))
+        expect(outcome(await revise({ ...later, [key]: value })), key).toBe("CONFLICT:DECIDED_OPTION");
+      for (const [key, value] of Object.entries({
+        grievanceWindowDays: "45",
+        admissibilityDecider: "CHAIR",
+        grievanceWindowStartBasis: "ISSUE",
+        nonAdmissionDecider: "CHAIR",
+      }))
+        expect(
+          outcome(await revise({ ...later, committeeId: gc, committeeKind: "GRIEVANCE", [key]: value })),
+          key,
+        ).toBe("CONFLICT:DECIDED_OPTION");
+      expect(outcome(await revise({ ...base, effectiveFrom: plusDays(today, 60) }))).toBe("INVALID:changes");
+      expect(
+        outcome(await revise({ ...base, grievanceCompletionDays: "45", effectiveFrom: plusDays(today, 60) })),
+      ).toBe("fieldErrors");
+      // Coordinator rulings of 2026-10-18 23:50 and 2026-10-19 02:10: a safeguard is never loosened below a version in
+      // force or scheduled, alone or beside a change the page may make, on either committee; refused before the
+      // command, so nothing is written. The investigation committee's floor is now the version from day 30: five days'
+      // notice, a secret ballot, dissent notes allowed, both guards on; the grievance committee's is the version in
+      // force: dissent notes allowed, both guards on.
+      for (const [committee, loosen] of [
+        [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { sanctionRequiresDefenceNotice: "off" }],
+        [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { minutesObjectionBlocksDeemed: "off" }],
+        [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { ballotSecrecy: "COMMITTEE_AFTER_CLOSE" }],
+        [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { minimumNoticeDays: "4" }],
+        [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { minimumNoticeDays: null }],
+        [{ committeeId: ic, committeeKind: "INVESTIGATION" }, { dissentNoteAllowed: "off" }],
+        [{ committeeId: gc, committeeKind: "GRIEVANCE" }, { sanctionRequiresDefenceNotice: "off" }],
+        [{ committeeId: gc, committeeKind: "GRIEVANCE" }, { minutesObjectionBlocksDeemed: "off" }],
+        [{ committeeId: gc, committeeKind: "GRIEVANCE" }, { dissentNoteAllowed: "off" }],
+      ] as const)
+        for (const extra of [{}, { voteRevisionAllowed: "off" }])
+          expect(
+            outcome(
+              await revise({
+                ...base,
+                ...committee,
+                ...extra,
+                ...loosen,
+                effectiveFrom: plusDays(today, 60),
+              }),
+            ),
+            `${committee.committeeKind} ${JSON.stringify({ ...extra, ...loosen })}`,
+          ).toBe("CONFLICT:LOOSER_RULE_OPTION");
+      expect(await count(s, "committee.rule_set")).toBe(rows);
+      // As strict (sent or carried) or stricter is recorded.
+      expect(
+        outcome(
+          await revise({
+            ...base,
+            minimumNoticeDays: "7",
+            ballotSecrecy: "SECRET_BALLOT",
+            dissentNoteAllowed: "on",
+            effectiveFrom: plusDays(today, 60),
+          }),
+        ),
+      ).toBe("ok");
+      expect(
+        outcome(
+          await revise({
+            committeeId: gc,
+            committeeKind: "GRIEVANCE",
+            grievanceCompletionDays: "20",
+            voteRevisionAllowed: "off",
+            effectiveFrom: plusDays(today, 30),
+            reason: REASON_8B,
+          }),
+        ),
+      ).toBe("ok");
+
+      const after = (await admin.committees(ctx(), cm))!;
+      const versions = (committeeId: string) =>
+        after.ruleSets.filter((r) => r.committeeId === committeeId && r.state !== "ENDED");
+      const of = (committeeId: string) =>
+        versions(committeeId).map((r) => [
+          r.state,
+          r.sourceStatus,
+          r.minimumNoticeDays,
+          r.ballotSecrecy,
+          r.voteRevisionAllowed,
+          r.dissentNoteAllowed,
+          r.grievanceCompletionDays,
+          r.minutesObjectionBlocksDeemed,
+          r.sanctionRequiresDefenceNotice,
+        ]);
+      // Every new version carries dissent notes and both guards as the version in force has them; vote revision is
+      // free (AMB-081).
+      expect(of(ic)).toEqual([
+        ["IN_FORCE", "OWNER_DEFAULT", null, "COMMITTEE_AFTER_CLOSE", true, true, null, true, true],
+        ["SCHEDULED", "SOURCE_REQUIRED", 5, "SECRET_BALLOT", true, true, null, true, true],
+        ["SCHEDULED", "SOURCE_REQUIRED", 7, "SECRET_BALLOT", true, true, null, true, true],
+      ]);
+      expect(of(gc)).toEqual([
+        ["IN_FORCE", "OWNER_DEFAULT", null, "COMMITTEE_AFTER_CLOSE", true, true, null, true, true],
+        ["SCHEDULED", "SOURCE_REQUIRED", null, "COMMITTEE_AFTER_CLOSE", false, true, 20, true, true],
+      ]);
+      // Each new version keeps every option that follows a decision as the version in force has it.
+      const decided = (r: (typeof after.ruleSets)[number]) => [
+        r.quorumType,
+        r.quorumValue,
+        r.castingVoteEnabled,
+        r.minutesReviewBusinessDays,
+        r.deemedApprovalEnabled,
+        r.noSubstantiveVoteOutcome,
+        r.conflictDecider,
+        r.actingChairCastingVote,
+        r.grievanceWindowDays,
+        r.admissibilityDecider,
+        r.grievanceWindowStartBasis,
+        r.nonAdmissionDecider,
+      ];
+      for (const id of [ic, gc]) {
+        const [inForce, ...scheduled] = versions(id);
+        expect(scheduled.length).toBeGreaterThan(0);
+        for (const later of scheduled) expect(decided(later)).toEqual(decided(inForce!));
+      }
+      expect(decided(versions(gc)[0]!)).toEqual([
+        "MAJORITY_ELIGIBLE",
+        null,
+        true,
+        3,
+        true,
+        "NO_DECISION",
+        "CHAIR",
+        false,
+        30,
+        "SECRETARY",
+        "DELIVERY",
+        "COMMITTEE",
+      ]);
+      // The ledger records the options sent, by the command's names (dissent notes sent as kept are recorded as sent),
+      // and nothing typed in the reason.
+      await s.asOwner();
+      const events = await s.tx<{ changes: Record<string, unknown>; metadata: Record<string, unknown> }[]>`
+        select metadata->'changes' as changes, metadata from audit.audit_event
+        where action = 'COMMITTEE_RULE_SET_CHANGED' and metadata->>'committee_id' in (${ic}, ${gc}) order by seq`;
+      expect(events.map((e) => e.changes)).toEqual([
+        { minimum_notice_days: 5, ballot_secrecy: "SECRET_BALLOT" },
+        { minimum_notice_days: 7, ballot_secrecy: "SECRET_BALLOT", dissent_note_allowed: true },
+        { grievance_completion_days: 20, vote_revision_allowed: false },
+      ]);
+      expect(JSON.stringify(events.map((e) => e.metadata))).not.toContain(REASON_8B);
+    });
+  });
+
+  it("the seats and positions: ended once, now or from a date; an end before now only with its decree or source reference, else refused with nothing written (2128, F7 = B)", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const eta = actors.platformAdmin;
+      const { gc } = await committeeIds();
+      const DECREE = "DEMO-DECREE-8B";
+      let committees = (await admin.committees(ctxFor("platformAdmin"), eta))!;
+      let sectors = (await admin.sectors(ctxFor("platformAdmin"), eta))!;
+      // Flag == command for their administrator: every row not yet ended may be ended, and no other.
+      expect(committees.seats.map((x) => [x.membershipId, x.mayEnd])).toEqual(
+        committees.seats.map((x) => [x.membershipId, x.endedAt === null]),
+      );
+      expect(sectors.positions.map((x) => [x.membershipId, x.mayEnd])).toEqual(
+        sectors.positions.map((x) => [x.membershipId, x.endedAt === null]),
+      );
+      const today = committees.today;
+      // The start of today in Riyadh: a date's end, before now, so it needs its reference.
+      const startOfToday = Date.parse(`${today}T00:00:00+03:00`);
+      const ledger = (action: string) => count(s, `audit.audit_event where action = '${action}'`);
+
+      // ---- A seat: the Grievance Committee's demo chair (with a date) and secretary (now), from 2026-01-01.
+      const seat = (code: string) => committees.seats.find((x) => x.committeeId === gc && x.seat === code)!;
+      const [chair, secretary] = [seat("CHAIR"), seat("SECRETARY")];
+      expect([chair.mayEnd, secretary.mayEnd]).toEqual([true, true]);
+      const endSeat = (input: Record<string, unknown>) =>
+        admin.endCommitteeMembership(ctxFor("platformAdmin"), eta, { reason: REASON_8B, ...input });
+      const seatsEnded = await ledger("COMMITTEE_MEMBERSHIP_ENDED");
+      // Dated before now with no reference: refused, fail closed. Before the seat's start: refused, reference or not.
+      expect(outcome(await endSeat({ membershipId: chair.membershipId, effectiveTo: today }))).toBe(
+        "INVALID:end_reference",
+      );
+      expect(
+        outcome(
+          await endSeat({
+            membershipId: chair.membershipId,
+            effectiveTo: "2025-12-31",
+            endReference: DECREE,
+          }),
+        ),
+      ).toBe("INVALID:effective_to");
+      expect(await ledger("COMMITTEE_MEMBERSHIP_ENDED")).toBe(seatsEnded);
+      committees = (await admin.committees(ctxFor("platformAdmin"), eta))!;
+      expect(committees.seats.find((x) => x.membershipId === chair.membershipId)).toMatchObject({
+        endedAt: null,
+        endReference: null,
+        mayEnd: true,
+      });
+      // With its reference (trimmed): ended from the start of the date. Now: no reference needed. Then never again.
+      expect(
+        outcome(
+          await endSeat({
+            membershipId: chair.membershipId,
+            effectiveTo: today,
+            endReference: ` ${DECREE} `,
+          }),
+        ),
+      ).toBe("ok");
+      expect(outcome(await endSeat({ membershipId: secretary.membershipId }))).toBe("ok");
+      expect(outcome(await endSeat({ membershipId: chair.membershipId, endReference: DECREE }))).toBe(
+        "CONFLICT:MEMBERSHIP_ENDED",
+      );
+      committees = (await admin.committees(ctxFor("platformAdmin"), eta))!;
+      const endedSeat = (id: string) => committees.seats.find((x) => x.membershipId === id)!;
+      expect(endedSeat(chair.membershipId)).toMatchObject({
+        endReference: DECREE,
+        endReason: REASON_8B,
+        endedBy: USERS.platformAdmin,
+        mayEnd: false,
+      });
+      expect(Date.parse(endedSeat(chair.membershipId).effectiveTo!)).toBe(startOfToday);
+      expect(endedSeat(secretary.membershipId)).toMatchObject({ endReference: null, mayEnd: false });
+      expect(Date.parse(endedSeat(secretary.membershipId).effectiveTo!)).toBeGreaterThan(startOfToday);
+
+      // ---- A position: Operations' head (with a date) and Employee Phi's membership (now), from 2026-01-01.
+      const ops = sectors.sectors.find((x) => x.code === "OPS")!;
+      const position = (user: UserKey) =>
+        sectors.positions.find((x) => x.sectorId === ops.sectorId && x.userId === USERS[user] && x.mayEnd)!;
+      const [head, member] = [position("sectorHead"), position("employeeB")];
+      expect([head.position, member.position]).toEqual(["HEAD", "MEMBER"]);
+      const endPosition = (input: Record<string, unknown>) =>
+        admin.endSectorMembership(ctxFor("platformAdmin"), eta, { reason: REASON_8B, ...input });
+      const positionsEnded = await ledger("SECTOR_MEMBERSHIP_ENDED");
+      expect(outcome(await endPosition({ membershipId: head.membershipId, effectiveTo: today }))).toBe(
+        "INVALID:end_reference",
+      );
+      expect(
+        outcome(
+          await endPosition({
+            membershipId: head.membershipId,
+            effectiveTo: "2025-12-31",
+            endReference: DECREE,
+          }),
+        ),
+      ).toBe("INVALID:effective_to");
+      expect(await ledger("SECTOR_MEMBERSHIP_ENDED")).toBe(positionsEnded);
+      expect(
+        outcome(
+          await endPosition({ membershipId: head.membershipId, effectiveTo: today, endReference: DECREE }),
+        ),
+      ).toBe("ok");
+      expect(outcome(await endPosition({ membershipId: member.membershipId }))).toBe("ok");
+      expect(outcome(await endPosition({ membershipId: head.membershipId }))).toBe(
+        "CONFLICT:MEMBERSHIP_ALREADY_ENDED",
+      );
+      sectors = (await admin.sectors(ctxFor("platformAdmin"), eta))!;
+      const endedPosition = (id: string) => sectors.positions.find((x) => x.membershipId === id)!;
+      expect(endedPosition(head.membershipId)).toMatchObject({
+        endReference: DECREE,
+        endReason: REASON_8B,
+        mayEnd: false,
+      });
+      expect(Date.parse(endedPosition(head.membershipId).effectiveTo!)).toBe(startOfToday);
+      expect(endedPosition(member.membershipId)).toMatchObject({ endReference: null, mayEnd: false });
+
+      // One ledger event per end, with ids, the seat or position and the end only: never the reason or the reference.
+      await s.asOwner();
+      const events = await s.tx<{ action: string; object_id: string; metadata: Record<string, string> }[]>`
+        select action, object_id, metadata from audit.audit_event
+         where action in ('COMMITTEE_MEMBERSHIP_ENDED', 'SECTOR_MEMBERSHIP_ENDED')
+           and object_id in (${chair.membershipId}, ${secretary.membershipId}, ${head.membershipId},
+                             ${member.membershipId})
+         order by seq`;
+      expect(events.map((e) => [e.action, e.object_id, Object.keys(e.metadata).sort()])).toEqual([
+        [
+          "COMMITTEE_MEMBERSHIP_ENDED",
+          chair.membershipId,
+          ["committee_id", "effective_to", "seat", "user_id"],
+        ],
+        [
+          "COMMITTEE_MEMBERSHIP_ENDED",
+          secretary.membershipId,
+          ["committee_id", "effective_to", "seat", "user_id"],
+        ],
+        ["SECTOR_MEMBERSHIP_ENDED", head.membershipId, ["effective_to", "position", "sector_id", "user_id"]],
+        [
+          "SECTOR_MEMBERSHIP_ENDED",
+          member.membershipId,
+          ["effective_to", "position", "sector_id", "user_id"],
+        ],
+      ]);
+      for (const e of events) {
+        expect(JSON.stringify(e.metadata)).not.toContain(DECREE);
+        expect(JSON.stringify(e.metadata)).not.toContain(REASON_8B);
+      }
+    });
+  });
+
+  it("every form is refused by the database to a caller the application pre-check would let through, recorded with the command and outcome only", async () => {
+    await ownerScenario(async (s) => {
+      const admin = adminIn(s);
+      const forged: Actor = {
+        ...actors.investigatorA,
+        permissions: [
+          ...actors.investigatorA.permissions,
+          "COMMITTEE_ADMIN",
+          "SECTOR_ADMIN",
+          "NOTIFICATION_ADMIN",
+          "EXPORT_POLICY_ADMIN",
+          "CORRECTIVE_ACTION_POLICY_ADMIN",
+          "BUSINESS_CALENDAR_ADMIN",
+        ],
+      };
+      const { ic } = await committeeIds();
+      const from = plusDays(new Date().toISOString().slice(0, 10), 30);
+      // A seat and a position not yet ended: the caller check comes first, whatever the row.
+      await s.asOwner();
+      const [openSeat] = await s.tx<{ id: string }[]>`
+        select id from committee.membership where ended_at is null order by id limit 1`;
+      const [openPosition] = await s.tx<{ id: string }[]>`
+        select id from iam.sector_membership where ended_at is null order by id limit 1`;
+      const forms: [string, string, (c: ReturnType<typeof ctxFor>) => Promise<{ ok: boolean }>][] = [
+        [
+          "withdraw_business_calendar_day",
+          "FORBIDDEN",
+          (c) => admin.withdrawCalendarDay(c, forged, { dayId: randomUUID(), reason: REASON_8B }),
+        ],
+        [
+          "create_sector",
+          "FORBIDDEN",
+          (c) => admin.createSector(c, forged, { code: "SYN8BX", nameEn: "Forged", nameAr: "مزوّر" }),
+        ],
+        // A delegation the caller neither made nor holds is not found to them.
+        [
+          "revoke_referral_delegation",
+          "NOT_FOUND",
+          (c) => admin.revokeDelegation(c, forged, { delegationId: randomUUID(), reason: REASON_8B }),
+        ],
+        [
+          "set_notification_rule",
+          "FORBIDDEN",
+          (c) =>
+            admin.setNotificationRule(c, forged, {
+              layer: "EVENT_RULE",
+              templateCode: "GRIEVANCE_RECEIVED",
+              channel: "EMAIL",
+              enabled: "on",
+              effectiveFrom: from,
+              reason: REASON_8B,
+            }),
+        ],
+        [
+          "set_export_rule",
+          "FORBIDDEN",
+          (c) =>
+            admin.addExportRule(c, forged, {
+              code: "SYN_8B_FORGED",
+              audience: "ANY",
+              restrictedOnly: true,
+              action: "REFUSE",
+              effectiveFrom: from,
+              reason: REASON_8B,
+            }),
+        ],
+        [
+          "set_export_purpose",
+          "FORBIDDEN",
+          (c) =>
+            admin.addExportPurpose(c, forged, {
+              code: "SYN_8B_FORGED",
+              nameEn: "Forged",
+              nameAr: "مزوّر",
+              requiresJustification: false,
+              isActive: false,
+              sortOrder: "99",
+              reason: REASON_8B,
+            }),
+        ],
+        [
+          "set_corrective_action_policy",
+          "FORBIDDEN",
+          (c) =>
+            admin.setCorrectiveActionPolicy(c, forged, {
+              actionType: "CORRECTIVE_ACTION",
+              completionEvidence: "REFERENCE_REQUIRED",
+              effectiveFrom: from,
+              reason: REASON_8B,
+            }),
+        ],
+        [
+          "revise_committee_rule_set",
+          "FORBIDDEN",
+          (c) =>
+            admin.reviseCommitteeRuleSet(c, forged, {
+              committeeId: ic,
+              committeeKind: "INVESTIGATION",
+              minimumNoticeDays: "4",
+              effectiveFrom: from,
+              reason: REASON_8B,
+            }),
+        ],
+        [
+          "end_committee_membership",
+          "FORBIDDEN",
+          (c) => admin.endCommitteeMembership(c, forged, { membershipId: openSeat!.id, reason: REASON_8B }),
+        ],
+        [
+          "end_sector_membership",
+          "FORBIDDEN",
+          (c) => admin.endSectorMembership(c, forged, { membershipId: openPosition!.id, reason: REASON_8B }),
+        ],
+      ];
+      const ledger = await count(s, "audit.audit_event where category <> 'SECURITY'");
+      for (const [command, refusal, run] of forms) {
+        const c = ctxFor("investigatorA");
+        expect(outcome(await run(c)), command).toBe(refusal);
+        expect(await eventsOf(s, c.requestId), command).toEqual([
+          {
+            action: "COMMAND_DENIED",
+            object_type: "command",
+            object_id: null,
+            metadata: { command, outcome: refusal },
+          },
+        ]);
+      }
+      expect(await count(s, "audit.audit_event where category <> 'SECURITY'")).toBe(ledger);
     });
   });
 });

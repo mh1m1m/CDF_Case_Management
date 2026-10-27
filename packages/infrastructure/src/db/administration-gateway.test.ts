@@ -46,12 +46,14 @@ describe("the start of a date in Riyadh", () => {
 });
 
 // Static guard (§21; the P12-8 domain map: no case content and no count derived from cases). The registers read
-// configuration and registry tables only; reading any other table has to change this list on purpose.
+// configuration and registry tables only, the caller's list of pages (2127) and the role catalogue an escalation step
+// names (P12-8b); reading any other table has to change this list on purpose.
 describe("what the registers read", () => {
   it("reads only the registers' own tables and reads, never a case table", () => {
     const read = new Set([...SOURCE.matchAll(/\b(?:from|join)\s+([a-z_]+\.[a-z_]+)\b/g)].map((m) => m[1]));
     expect([...read].sort()).toEqual([
       "api.authority_rule_coverage",
+      "api.my_admin_views",
       "committee.committee",
       "committee.committee_status_change",
       "committee.conflict_authority",
@@ -70,6 +72,7 @@ describe("what the registers read", () => {
       "exchange.approved_external_domain",
       "exchange.export_approver_pool",
       "exchange.export_purpose",
+      "iam.role",
       "iam.sector",
       "iam.sector_delegation",
       "iam.sector_membership",
@@ -78,9 +81,87 @@ describe("what the registers read", () => {
     ]);
   });
 
+  it("calls only the pages' reads and the commands their forms run (P12-8b)", () => {
+    const called = [...new Set([...SOURCE.matchAll(/\bapi\.([a-z_]+)\(/g)].map((m) => m[1]))].sort();
+    // The caller's pages and each page's capabilities (2127), and two configuration reads (2030, 2040).
+    const reads = [
+      "my_admin_views",
+      "admin_calendar_capabilities",
+      "admin_committee_capabilities",
+      "admin_corrective_action_policy_capabilities",
+      "admin_export_policy_capabilities",
+      "admin_notification_rule_capabilities",
+      "admin_sector_capabilities",
+      "authority_rule_coverage",
+      "export_approval_config_warnings",
+    ];
+    // One command per form.
+    const commands = [
+      "create_sector",
+      "end_committee_membership",
+      "end_sector_membership",
+      "revise_committee_rule_set",
+      "revoke_referral_delegation",
+      "set_business_calendar_day",
+      "set_business_week_pattern",
+      "set_corrective_action_policy",
+      "set_export_purpose",
+      "set_export_rule",
+      "set_notification_rule",
+      "withdraw_business_calendar_day",
+    ];
+    expect(called).toEqual([...reads, ...commands].sort());
+  });
+
   it("never reads the number of proceedings a seat correction recorded, a count derived from cases (2090)", () => {
     expect(SOURCE).not.toMatch(/affected_proceedings/);
     // Every register is read column by column, never as a whole row.
     expect(SOURCE).not.toMatch(/select\s+\*|\b[a-z]\.\*/);
+  });
+
+  // The page rules checked against the register (coordinator rulings on F4, 2026-10-18 21:17, and of 23:50) read it
+  // under a lock, in the command's own transaction, before the command: nothing can change between the check and it.
+  it("checks the register under a lock before the command, in one transaction", () => {
+    const steps: [string, string[]][] = [
+      [
+        "addExportRule",
+        [
+          "pg_advisory_xact_lock(hashtext('exchange.approval_rule:'",
+          "from exchange.approval_rule r",
+          "CDF_CONFLICT:RULE_CODE_EXISTS",
+          "api.set_export_rule(",
+        ],
+      ],
+      [
+        "setCorrectiveActionPolicy",
+        [
+          "pg_advisory_xact_lock(hashtext('decision.corrective_action_policy:'",
+          "from decision.corrective_action_policy p",
+          "guard(",
+          "api.set_corrective_action_policy(",
+        ],
+      ],
+      [
+        "reviseCommitteeRuleSet",
+        [
+          "pg_advisory_xact_lock(hashtext('committee.rule_set_revision:'",
+          "from committee.rule_set r",
+          "guard(",
+          "api.revise_committee_rule_set(",
+        ],
+      ],
+    ];
+    for (const [method, order] of steps) {
+      const start = SOURCE.indexOf(`\n  ${method}(`);
+      const body = SOURCE.slice(start, SOURCE.indexOf("\n  }\n", start));
+      expect(start, method).toBeGreaterThan(0);
+      expect(body.match(/this\.run\(/g), method).toHaveLength(1);
+      const at = order.map((step) => body.indexOf(step));
+      expect(
+        at.every((i) => i > 0),
+        `${method}: ${JSON.stringify(at)}`,
+      ).toBe(true);
+      expect(at, method).toEqual([...at].sort((a, b) => a - b));
+    }
   });
 });
