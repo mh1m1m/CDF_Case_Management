@@ -209,15 +209,18 @@ jobs:
           # 38058158699 lacked the records and legal actors of CDF-69/CDF-73, and the 86 tests acting as them
           # failed. So the users of the database the drift check has just built from Git that DEV lacks are
           # inserted here, with their role assignments. Nothing on DEV is updated or deleted, and the drift check
-          # has just shown both tables identical, column order included.
+          # has just shown both tables identical, column order included. An assignment is copied with every column
+          # but id (DEV gives it its own), as the database built from Git lists them, so a column that a later
+          # migration adds is carried too and the export always matches the table it is loaded into (drift
+          # record 4.11).
+          cols=$(psql "$REFERENCE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 -c "select string_agg(quote_ident(attname), ', ' order by attnum) from pg_attribute where attrelid = 'iam.user_role_assignment'::regclass and attnum > 0 and not attisdropped and attgenerated = '' and attname <> 'id'")
           psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select * from iam.user_profile) to 'seed-users.csv' csv"
-          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select user_id, role_code, status, effective_from, effective_to, justification, source_reference, granted_by, granted_at, revoked_by, revoked_at, revocation_reason from iam.user_role_assignment) to 'seed-roles.csv' csv"
-          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 <<'SQL'
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select $cols from iam.user_role_assignment) to 'seed-roles.csv' csv"
+          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 -v cols="$cols" <<'SQL'
           begin;
           create temp table seed_user (like iam.user_profile) on commit drop;
           \copy seed_user from 'seed-users.csv' csv
-          create temp table seed_role (like iam.user_role_assignment) on commit drop;
-          alter table seed_role drop column id;
+          create temp table seed_role on commit drop as select :cols from iam.user_role_assignment with no data;
           \copy seed_role from 'seed-roles.csv' csv
           create temp table added (id uuid primary key) on commit drop;
           with ins as (
@@ -226,8 +229,7 @@ jobs:
             returning id
           )
           insert into added select id from ins;
-          insert into iam.user_role_assignment (user_id, role_code, status, effective_from, effective_to, justification,
-            source_reference, granted_by, granted_at, revoked_by, revoked_at, revocation_reason)
+          insert into iam.user_role_assignment (:cols)
           select * from seed_role where user_id in (select id from added);
           select count(*) || ' ' || coalesce(string_agg(u.email, ', ' order by u.email), '') from added a join iam.user_profile u using (id);
           commit;
@@ -250,15 +252,18 @@ jobs:
           # sectors existed, so the direct-referral tests acting as the Operations preparer and head would fail
           # (drift record 4.8). So the sectors of the database the drift check has just built from Git that DEV
           # lacks are inserted here, with their positions. Nothing on DEV is updated or deleted; a sector whose code
-          # DEV already uses under another id stops the step, so a difference is never skipped silently.
+          # DEV already uses under another id stops the step, so a difference is never skipped silently. A position
+          # is copied with every column but id, as the database built from Git lists them: run 40324135511 stopped
+          # here when 2128 added end_reference to iam.sector_membership and the column list written in this step
+          # lacked it (drift record 4.11), and a column that a later migration adds is now carried too.
+          cols=$(psql "$REFERENCE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 -c "select string_agg(quote_ident(attname), ', ' order by attnum) from pg_attribute where attrelid = 'iam.sector_membership'::regclass and attnum > 0 and not attisdropped and attgenerated = '' and attname <> 'id'")
           psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select * from iam.sector) to 'seed-sectors.csv' csv"
-          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select sector_id, user_id, position, effective_from, effective_to, appointment_reference, appointed_by, appointed_at, ended_by, ended_at, end_reason from iam.sector_membership) to 'seed-positions.csv' csv"
-          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 <<'SQL'
+          psql "$REFERENCE_URL" --no-psqlrc -qtAX -c "\copy (select $cols from iam.sector_membership) to 'seed-positions.csv' csv"
+          added=$(psql "$CDF_ADMIN_DATABASE_URL" --no-psqlrc -qtAX -v ON_ERROR_STOP=1 -v cols="$cols" <<'SQL'
           begin;
           create temp table seed_sector (like iam.sector) on commit drop;
           \copy seed_sector from 'seed-sectors.csv' csv
-          create temp table seed_position (like iam.sector_membership) on commit drop;
-          alter table seed_position drop column id;
+          create temp table seed_position on commit drop as select :cols from iam.sector_membership with no data;
           \copy seed_position from 'seed-positions.csv' csv
           create temp table added (id uuid primary key) on commit drop;
           with ins as (
@@ -267,8 +272,7 @@ jobs:
             returning id
           )
           insert into added select id from ins;
-          insert into iam.sector_membership (sector_id, user_id, position, effective_from, effective_to, appointment_reference,
-            appointed_by, appointed_at, ended_by, ended_at, end_reason)
+          insert into iam.sector_membership (:cols)
           select * from seed_position where sector_id in (select id from added);
           select (select count(*) from added) || ' ' || (select count(*) from seed_position where sector_id in (select id from added))
             || ' ' || coalesce((select string_agg(x.code, ', ' order by x.code) from iam.sector x join added a using (id)), '');
