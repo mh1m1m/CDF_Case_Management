@@ -20,7 +20,7 @@
     "@cdf/ui": "workspace:*",
     "@cdf/validation": "workspace:*",
     "@cdf/workflow": "workspace:*",
-    "@sentry/nextjs": "10.75.3",
+    "@sentry/nextjs": "11.9.0",
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
