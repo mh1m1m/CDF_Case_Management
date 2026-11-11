@@ -1512,6 +1512,8 @@ export * from "./corrective-actions";
 export * from "./export-requests";
 /** The Administration registers and the business calendar's forms (UX redesign P12-8a; ADR-051). */
 export * from "./administration";
+/** The two-person lift of a case's restricted status (migration 2130, ADR-049; DEC-AMB-012 C). */
+export * from "./restriction-lift";
 
 // ---- Recommendations, legal review and authority decisions (migration 1900; ADR-021 to ADR-023) ------------
 export const RECOMMENDATION_ITEM_TYPES = [
@@ -1665,13 +1667,16 @@ export const NOTIFICATION_TEMPLATES = [
   "COMMITTEE_RECORD_ATTESTATION_REQUESTED",
   "COMMITTEE_RECORD_RETURNED",
   "COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED",
+  // The two-person lift of a case's restricted status (migration 2130, ADR-049): ids only
+  "RESTRICTION_LIFT_APPROVAL_REQUESTED",
+  "RESTRICTION_LIFT_DECIDED",
 ] as const;
 export type NotificationTemplate = (typeof NOTIFICATION_TEMPLATES)[number];
 export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 export const NOTIFICATION_RULE_LAYERS = ["SYSTEM_MANDATORY", "COMMITTEE_DEFAULT", "EVENT_RULE"] as const;
 export type NotificationRuleLayer = (typeof NOTIFICATION_RULE_LAYERS)[number];
-/** What a notification points at (notify.outbox.object_type after migration 2050). */
+/** What a notification points at (notify.outbox.object_type after migration 2130). */
 export const NOTIFICATION_OBJECT_TYPES = [
   "COMMITTEE",
   "MEETING",
@@ -1687,6 +1692,7 @@ export const NOTIFICATION_OBJECT_TYPES = [
   "CASE",
   "DEFENCE_PACKET",
   "SANCTION_EXTRACT_APPROVAL",
+  "RESTRICTION_LIFT",
 ] as const;
 export type NotificationObjectType = (typeof NOTIFICATION_OBJECT_TYPES)[number];
 

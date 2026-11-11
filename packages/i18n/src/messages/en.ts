@@ -994,6 +994,31 @@ export const en = {
     CLOSURE_APPROVAL_REQUIRED: "Closing this case needs the closure authority's approval.",
     CASE_CLOSURE_APPROVAL_RULE_REQUIRED:
       "The closure rule names no authority in force, so the case cannot close. Ask the rule administrator.",
+    // The two-person lift of a case's restricted status (migration 2130, ADR-049; DEC-AMB-012).
+    RESTRICTION_LIFT_NOT_DECIDED:
+      "A restricted case is no longer restricted only through the two-person lift: the case's authority requests it and an independent approver approves it.",
+    LIFT_APPROVER_NOT_CONFIGURED:
+      "No second approver for lifting a restriction is set in the Delegation of Authority, so no lift can be requested.",
+    LIFT_WINDOW_MISCONFIGURED:
+      "The time allowed for a lift request is not set correctly, so no lift can be requested or approved. Ask the platform administrator.",
+    RESTRICTED_APPROVALS_PENDING:
+      "An export awaits your consent or a defence packet awaits your approval on this case. Decide it before the restriction is lifted.",
+    LIFT_ALREADY_REQUESTED: "A request to lift this restriction is already open.",
+    NO_ELIGIBLE_APPROVER:
+      "Nobody can give the second approval: everyone who holds the approver's role is on this case's team, lacks the clearance or has a conflict.",
+    REQUESTER_CANNOT_APPROVE: "You made this request, so you cannot give its second approval.",
+    RCA_CANNOT_APPROVE: "You are this case's authority, so you cannot give the second approval.",
+    ALREADY_DECIDED: "This request has already been decided.",
+    REQUEST_CLOSED: "This request is closed.",
+    REQUEST_LAPSED: "This request was not decided in time and has lapsed.",
+    PREVIEW_CHANGED:
+      "Who would gain access has changed since the preview. Preview again; a new request or approval is needed.",
+    APPROVAL_CONSUMED: "This approval has already been used.",
+    NOT_APPROVED: "This request has not been approved.",
+    APPROVAL_LAPSED: "The approval was not used in time and has lapsed. Request the lift again.",
+    APPROVER_NOT_ELIGIBLE:
+      "The approver can no longer give the second approval (they joined the case's team, lost the role or clearance, or have a conflict). Request the lift again.",
+    NOT_LAPSED: "This request has not lapsed yet.",
     participant: "Only an invited witness can be excluded.",
   },
   validation: {
@@ -2482,6 +2507,8 @@ export const en = {
     COMMITTEE_RECORD_ATTESTATION_REQUESTED: "Committee record requires your confirmation",
     COMMITTEE_RECORD_RETURNED: "Committee record returned",
     COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED: "Acting chair activated for a committee record",
+    RESTRICTION_LIFT_APPROVAL_REQUESTED: "Restriction lift to approve",
+    RESTRICTION_LIFT_DECIDED: "Restriction lift decided",
   },
   oversight: {
     title: "Oversight",
@@ -2880,6 +2907,8 @@ export const en = {
     COMMITTEE_RECORD_RETURNED: "A committee record you submitted was returned for correction.",
     COMMITTEE_RECORD_ACTING_CHAIR_ACTIVATED:
       "A deputy chair was activated as acting chair for a committee record of your committee. You can end the activation before it approves.",
+    RESTRICTION_LIFT_APPROVAL_REQUESTED: "A request to lift a case's restricted status awaits your decision.",
+    RESTRICTION_LIFT_DECIDED: "A decision was recorded on your request to lift the case's restricted status.",
   },
   bcpTemplate: {
     readme: {

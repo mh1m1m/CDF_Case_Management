@@ -437,6 +437,8 @@ export const decideConflictSchema = z.object({
 export * from "./bcp";
 // The official record of a committee workbook (migration 2115, ADR-061).
 export * from "./committee-record";
+// The two-person lift of a case's restricted status (migration 2130, ADR-049).
+export * from "./restriction-lift";
 
 // ---- In-app notifications (ADR-025, migration 1920; UX redesign S4) --------------------------------
 export * from "./notifications";
