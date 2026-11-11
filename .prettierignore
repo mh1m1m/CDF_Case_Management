@@ -8,3 +8,7 @@ baseline/extracted
 infrastructure/supabase/policies/POLICY_SNAPSHOT.md
 *.sql
 infrastructure/supabase/policies/policy-snapshot.md
+
+# vendored upstream skills, kept byte-identical (see .claude/skills/SUPABASE_SKILLS.md)
+.claude/skills/supabase/
+.claude/skills/supabase-postgres-best-practices/
